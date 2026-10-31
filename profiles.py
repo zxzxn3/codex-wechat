@@ -11,7 +11,7 @@ from prompts import (
 # An empty codex definition uses CodexBackend's existing default command.
 DEFAULT_BACKENDS = {"codex": {}, "deepseek": {"command": ["codex-deepseek", "app-server"]}}
 BACKEND_LABELS = {"codex": "Codex", "deepseek": "DeepSeek"}
-SESSION_KEYS = ("thread", "sessionOptions", "sessionChoices", "sessionCursor", "sessionSearch")
+SESSION_KEYS = ("thread", "sessionChoices", "sessionCursor", "sessionSearch")
 
 
 def definitions(config):
@@ -30,7 +30,8 @@ def snapshot(state):
 def restore(state, saved):
     for key in SESSION_KEYS:
         state.pop(key, None)
-    state.update(deepcopy(saved))
+    state.update({key: deepcopy(saved[key]) for key in SESSION_KEYS if key in saved})
+    state.pop("sessionOptions", None)
     state.setdefault("thread", None)
 
 
@@ -55,7 +56,6 @@ async def switch(bridge, name):
              deepcopy(bridge.state.get("backendSessions", {}).get(name, {})))
     candidate = bridge.make_backend(name)
     thread_id = saved.get("thread")
-    active = False
     try:
         await candidate.start()
         if thread_id:
@@ -63,9 +63,7 @@ async def switch(bridge, name):
             status = thread.get("status", {}).get("type")
             if status == "systemError" or (status == "active" and not candidate.shared):
                 raise UserFacingError(BACKEND_SESSION_BUSY)
-            active = status == "active"
-        options = {} if active else saved.get("sessionOptions", {}).get(thread_id, {})
-        selected = await candidate.thread(thread_id, options)
+        selected = await candidate.thread(thread_id)
     except BaseException:
         await candidate.close()
         raise
@@ -73,8 +71,6 @@ async def switch(bridge, name):
     previous = bridge.backend
     bridge.state.setdefault("backendSessions", {})[bridge.backend_name] = snapshot(bridge.state)
     restore(bridge.state, saved)
-    if active:
-        bridge.state.setdefault("sessionOptions", {}).pop(thread_id, None)
     bridge.state["thread"] = selected
     bridge.backend_name = name
     bridge.state["backendName"] = name

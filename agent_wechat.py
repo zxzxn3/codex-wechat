@@ -48,8 +48,6 @@ from prompts import (
 ROOT = Path(__file__).resolve().parent
 
 
-
-
 class Bridge:
     def __init__(self, store, account, config, backend_factory=CodexBackend, channel=None, config_path=None):
         self.store, self.account, self.config = store, account, config

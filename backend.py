@@ -240,6 +240,18 @@ class CodexBackend:
                 if source in settings:
                     self.info[target] = settings[source]
             return
+        if method == "thread/settings/updated":
+            # Native settings are authoritative; no replay of previously observed defaults.
+            self.runtime_generation += 1
+            settings = params.get("threadSettings", {})
+            for source, target in (("model", "model"), ("effort", "effort"), ("cwd", "cwd"),
+                    ("modelProvider", "provider"), ("approvalPolicy", "approval"),
+                    ("approvalsReviewer", "reviewer"), ("sandboxPolicy", "sandbox"),
+                    ("activePermissionProfile", "profile"), ("collaborationMode", "collaboration")):
+                if source in settings:
+                    self.info[target] = settings[source]
+            self.on_activity()
+            return
         if method == "thread/name/updated":
             self.info["name"] = params.get("threadName")
             return
@@ -572,8 +584,7 @@ class CodexBackend:
                                   current["cwd"], "interrupted")
             current["starting"] = True
             response = await self.rpc("turn/start", {"threadId": thread_id,
-                **{key: self.info[key] for key in ("model", "effort", "cwd")
-                   if self.info.get(key) is not None}, "input": inputs,
+                "input": inputs,
                 **({"clientUserMessageId": client_id} if client_id else {})})
             current["turn"] = response["turn"]["id"]
             if dispatch:

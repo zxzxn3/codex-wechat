@@ -9,6 +9,7 @@ from errors import UserFacingError, attachment_reason, backend_reason
 from media import MediaError
 from records import InputPhase
 from latency import provider_latency
+
 from prompts import (
     ACK_USAGE,
     ACK_VIEW,
@@ -40,9 +41,6 @@ from prompts import (
     session_summary,
     setting_summary,
     settings_summary,
-)
-
-from prompts import (
     APPROVAL_ACCEPTED,
     APPROVAL_DECLINED,
     APPROVAL_EXPIRED,
@@ -62,7 +60,7 @@ from prompts import (
     UNKNOWN_COMMAND,
     status_from_fields,
 )
-from command_specs import HELP, REGISTRY
+from command_specs import HELP, REGISTRY, COMMANDS
 from configuration import processing_template, completion_template
 
 
@@ -83,9 +81,8 @@ def info(bridge, action="当前会话", *, include_backend=False):
 
 
 async def activate(bridge, thread_id=None, overrides=None):
-    # Persist overrides by thread, never let one session's settings leak to another.
-    saved = dict(bridge.state.get("sessionOptions", {}).get(thread_id, {}))
-    saved.update(overrides or {})
+    # Only this explicit command may override native settings. Never replay a mobile cache.
+    saved = dict(overrides or {})
     desktop = False
     if thread_id:
         thread = await bridge.backend.read_thread(thread_id)
@@ -103,10 +100,7 @@ async def activate(bridge, thread_id=None, overrides=None):
     bridge.loaded = False
     selected = await bridge.backend.thread(thread_id, saved)
     bridge.state["thread"] = selected
-    if saved:
-        bridge.state.setdefault("sessionOptions", {})[selected] = saved
-    elif thread_id:
-        bridge.state.setdefault("sessionOptions", {}).pop(selected, None)
+    bridge.state.pop("sessionOptions", None)  # Retire legacy override replay after successful adoption.
     bridge.loaded = True
     bridge.save()
     return desktop
@@ -463,7 +457,7 @@ async def command_approval(bridge, command, argument, received=None):
 
 
 HANDLERS = {spec.name: globals()["command_" + (spec.handler or spec.name.removeprefix("/"))]
-            for spec in REGISTRY.values() if spec.route != "input"}
+            for spec in COMMANDS if spec.route != "input"}
 
 
 def parse_control(text):

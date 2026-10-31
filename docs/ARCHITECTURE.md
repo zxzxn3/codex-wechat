@@ -3,7 +3,7 @@
 ## 职责
 
 - `codex_transport.py`：启动器、共享 daemon 接入、WebSocket/stdio、RPC 配对与连接关闭。
-- `backend.py`：会话、原生事件、轮次与审批；通过 transport 访问 Codex。Codex 是会话设置和轮次状态的权威；限额属于账户缓存，模型目录属于连接缓存，不随切换会话丢失。
+- `backend.py`：会话、原生事件、轮次与审批；通过 transport 访问 Codex。恢复已有会话与普通 turn/start 不重放缓存的 model/effort/cwd，只有显式设置命令传覆盖；设置事件更新显示缓存。Codex 保存的设置和轮次状态是权威；限额属于账户缓存，模型目录属于连接缓存，不随切换会话丢失。
 - `agent_wechat.py`：组合根、微信接收、控制调度与共享运行上下文。
 - `input_delivery.py`：输入准备/提交状态转换、恢复、steer 和 queue 协调。
 - `output_delivery.py`：输出组、附件快照、重试与顺序发送。连接、准备任务、模型轮次和发送状态不能简化为同一个忙闲值。
@@ -45,7 +45,7 @@ TurnResult 固定携带 backend、connection ID、selection epoch、thread、tur
 
 连接锁防止重复连接；会话锁保护后端/会话切换；任务标记防止处理中修改设置。后台连接维护与收发并行，失败后重试，不因此清空输入。`/status` 只读缓存，不等待账户查询；账户限额由后台尽力刷新，模型任务运行中也刷新。Token 更新按 thread 暂存最多 20 项，恢复响应到达前的更新不会因尚未选中目标而丢失；重连清除此连接的计数缓存。缺少事件时从原生 Thread.path 的当前会话 JSONL 有界尾部提取 token_count 元数据；回退读取按路径、inode、mtime 和大小缓存（最多 20 项）；实时事件优先，切换/断线后丢弃迟到读取结果，不推算未知用量。
 
-close 只结束自己的 proxy/独立子进程，不中断共享 daemon。原有 expectedTurnId、runtime generation、turn/start 早到事件缓冲和输入预检停止检查继续保留。原生 settings/update、队列迁移、退订旧 thread、输入接受状态历史核对、模型测速均须另行确认协议行为，不在本轮引入。
+close 只结束自己的 proxy/独立子进程，不中断共享 daemon。原有 expectedTurnId、runtime generation、turn/start 早到事件缓冲和输入预检停止检查继续保留。原生 settings/update、队列迁移、退订旧 thread 和输入接受状态历史核对仍未引入：官方已读页面没有充分建立这些接口在当前版本的持久化/跨客户端保证。保留本地交付契约，不因 schema 存在而替换。
 
 控制回复的标题/动作在代码块外，数据在块内，操作语法在块外用行内代码；参数保留 `{}`，字段使用英文冒号。审批中的待执行命令是数据，批准/拒绝指令是块外操作。
 

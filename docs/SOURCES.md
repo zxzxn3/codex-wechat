@@ -1,6 +1,6 @@
 # 协议依据与兼容点
 
-更新：2026-11-01。依据不等于功能验证；运行结果见专用测试报告。
+更新：2026-11-01。本轮重新查阅官方 App Server 页面，能够访问；在线页面没有列出 settings/update、thread/queue/* 或 clientUserMessageId 的持久幂等保证。依据不等于功能验证；运行结果见专用测试报告。
 
 | 范围 | 依据与版本 |
 | --- | --- |
@@ -40,3 +40,9 @@ create_time_ms 是源消息时间戳，未证实等于手机点击发送时间�
 上下文压缩提示依据：官方 App Server Items 的 contextCompaction 与 item/started、item/completed 生命周期，以及本机 0.166.0 的 ItemStartedNotification/ItemCompletedNotification。旧 thread/compacted 已弃用，本桥接不同时监听旧事件，避免重复通知；item 仅提供 id/type，不能据此区分自动与手动压缩。
 
 用量历史回退：本机当前会话 JSONL 的 event_msg/token_count.info 实际含 total_token_usage、last_token_usage、model_context_window。此为本机记录格式核对，不是稳定公共 API 保证；只从原生 Thread.path 读取当前 thread 文件的有界尾部，失败返回不可用，实时事件优先。
+
+本轮原生能力取舍（2026-11-01）：
+- 官方 “Start (or resume) a thread / Turns” 支持不带覆盖的 resume 和 turn/start；因此恢复只读取原生设置，普通输入不再把显示缓存作为 turn 覆盖发回，旧 sessionOptions 不再重放。显式 /model、/effort、/cwd 继续沿用已有 resume 覆盖流程，不引入未经核实的新请求。
+- thread/settings/updated 的 threadSettings 字段映射依据本机 0.166.0 schema，仅用于观察当前选中会话，不触发写入；其实际到达与持久化行为待在线验证。
+- 原生 queue 不迁移：当前本地队列还承载附件准备、停止和交付恢复，官方页面没有建立等价的取消/持久契约。保留稳定客户端 ID，但不声称服务端持久去重，也不自动重发 uncertain 输入。
+- 不增加 loaded/unsubscribe/sample 或全量历史补取。认证、daemon、会话列表/恢复、模型目录、compact、限额和原生事件继续复用 Codex。
