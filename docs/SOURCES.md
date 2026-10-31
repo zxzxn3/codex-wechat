@@ -34,3 +34,5 @@ CDN 连接诊断：现场观察到网关到 CDN 的 IPv6 TCP 连接处于 SYN-SE
 后台自动启动依据（2026-11-01）：[systemd-run 262](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html) 的独立 transient service、--setenv=NAME（从调用环境复制值）、--collect、--expand-environment=no；[systemd.service 262](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) 的 Type=exec 与 ExitType=cgroup（派生进程仍存活时保持服务）。因此不用网关自身的子进程 cgroup 承载公共后台，不设置 PartOf=agent-wechat.service，不调用 daemon restart。启动就绪以实际 proxy initialize 成功为准，不以 systemd-run 退出成功为准。仅核对文档及源码，未启动或重启任何服务。
 
 独立静态审阅指出的相关修正：在 input_items 预检前建立可停止的本地轮次状态；明确拒绝 steer 时改为 queue，超时不重发；所有出站消息限定重试并保留有限失败记录；自动附件仅限工作目录/媒体目录，任意其他路径须显式 /send；控制命令错误显式回报，后端切换后的旧连接清理错误不再假称切换失败。新增离线用例仅编写，未执行。
+
+测速依据：Python 3.14 官方 time.perf_counter 为单调的本机耗时计量，time.time 仅用于标注跨时钟估算；微信 create_time_ms/sendmessage 字段依照已查阅的腾讯协议。Agent 首条文字按已查阅的 App Server item/agentMessage/delta 或完整 agentMessage 事件记录，完成按 turn/completed；不计桌面中途接入轮次，不把这些测量称为手机 RTT 或服务商 TTFT。只增加实际发送的本机计时，没有执行网络或模型探针。

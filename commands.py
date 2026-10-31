@@ -4,6 +4,7 @@ from profiles import switch
 
 DEFAULT_NOTICE = {"enabled": True, "text": "::"}
 HELP = ("直接发文字与 Codex 对话；工作中默认即时补充（steer）。\n"
+        "/ping 微信通道延迟（不调用模型）\n/settings 查看当前设置\n"
         "/backend 查看后端；/backend codex 或 deepseek 切换\n"
         "/status 状态及会话信息\n/sessions [关键词] 会话列表\n"
         "/sessions next 下一页\n/switch 编号或ID 切换会话\n/new 新建会话\n"
@@ -13,7 +14,7 @@ HELP = ("直接发文字与 Codex 对话；工作中默认即时补充（steer�
         "/send 路径 发附件（自动识别图片）\n/sendfile 路径 发文件\n/sendimage 路径 发图片\n"
         "/stop 停止并清空待办\n/restart 重启消息桥服务（空闲时）\n"
         "/approve 编号 或 /deny 编号 审批\n/help 帮助")
-MANAGED = {"/backend", "/sessions", "/switch", "/new", "/model", "/models", "/effort", "/cwd", "/ack"}
+MANAGED = {"/settings", "/backend", "/sessions", "/switch", "/new", "/model", "/models", "/effort", "/cwd", "/ack"}
 
 
 def notice(bridge):
@@ -23,6 +24,18 @@ def notice(bridge):
 
 def info(bridge, heading="当前会话", *, detailed=False):
     details = bridge.backend.info
+    if not detailed:
+        thread = bridge.state.get("thread")
+        identity = f"{thread[:8]}…{thread[-4:]}" if thread else "尚未创建"
+        lines = [f"{heading} · {bridge.backend_name}",
+                 f"{details.get('name') or '未命名'}（{identity}）",
+                 f"模型：{details.get('model') or '未获取'} · 强度：{details.get('effort') or '默认'}",
+                 f"目录：{details.get('cwd') or bridge.backend.cwd}"]
+        if bridge.backend.blocked:
+            lines.append("当前有桌面待处理事项，请先在桌面处理。")
+        elif bridge.active_turn() and not bridge.active_turn().get("owned"):
+            lines.append("已连接桌面活动轮次；补充消息和 /stop 会作用于同一任务。")
+        return "\n".join(lines)
     return (f"{heading}\n后端：{bridge.backend_name}\n名称：{details.get('name') or '未命名'}\n"
             f"会话：{bridge.state.get('thread') or '尚未创建'}\n"
             f"模型：{details.get('model') or '由 Codex 默认选择'}\n"
@@ -74,6 +87,17 @@ def effort_choices(model):
 
 
 async def handle(bridge, command, argument):
+    if command == "/settings":
+        if argument:
+            bridge.reply("/settings 查看当前值；用 /backend、/model、/effort、/cwd、/ack 修改相应设置。")
+            return
+        settings = notice(bridge)
+        bridge.reply(info(bridge) +
+                     f"\n工作中收信：{bridge.input_mode}"
+                     f"\n处理提示：{'开' if settings['enabled'] else '关'} · {settings['text']}"
+                     f"\n附件上限：{bridge.media.limit // (1024 * 1024)} MiB"
+                     "\n通过已有对应指令修改；收信模式和附件上限目前在本地配置。")
+        return
     if command == "/backend" and not argument:
         bridge.reply(f"当前后端：{bridge.backend_name}\n可选：" +
                      ", ".join(bridge.backend_configs) + "\n/backend 名称 切换（空闲时）")

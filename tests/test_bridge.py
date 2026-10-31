@@ -8,6 +8,7 @@ import unittest
 from agent_wechat import Bridge
 from backend import CodexBackend, CodexRpcError
 from media import MediaError
+from latency import Latency
 from storage import Store
 from wechat import trusted_url
 
@@ -75,8 +76,32 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 trusted_url(value)
         self.assertEqual(trusted_url("https://ilinkai.weixin.qq.com/"), "https://ilinkai.weixin.qq.com")
 
+    async def test_ping_enqueues_echo_without_starting_backend(self):
+        self.bridge.state["context"] = "context"
+        await self.bridge.control("/ping")
+        entry = self.store.load("bridge")["outbox"][-1]
+        self.assertEqual(entry["text"], "pong")
+        self.assertIn("ping", entry)
+        self.assertFalse(self.bridge.backend_started)
 
+    async def test_settings_remain_available_without_backend(self):
+        self.bridge.state["context"] = "context"
+        await self.bridge.control("/settings")
+        self.assertIn("附件上限", self.store.load("bridge")["outbox"][-1]["text"])
+        self.assertFalse(self.bridge.backend_started)
 
+    async def test_latency_separates_queue_api_and_agent(self):
+        stats = Latency()
+        stats.sends.append(50)
+        stats.record_agent(300, 1500, backend="codex", model="example-model")
+        probe = {"run": stats.run_id, "received": 100.0, "queued": 100.1}
+        report = stats.report(probe, send_started=100.2, send_ms=50)
+        self.assertIn("确认：250 ms", report)
+        self.assertIn("等待/重试 100 ms", report)
+        self.assertIn("发送 API 50 ms", report)
+        self.assertIn("[codex/example-model]", report)
+        self.assertIn("非完整手机 RTT", report)
+        self.assertIn("计时已失效", stats.report({"run": "previous-process"}, 1, 1))
 
     async def test_stop_during_input_preflight_never_starts_turn(self):
         backend = CodexBackend({"sharedDaemon": False}, self.temp.name, lambda _: None)

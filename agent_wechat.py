@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import signal
 import sys
+import time
 import uuid
 
 from backend import CodexBackend, DeferTurn
@@ -17,6 +18,7 @@ from commands import HELP, MANAGED, ensure_session, handle, info, notice
 from profiles import definitions, snapshot
 import service_control
 from media import Media, MediaError, MAX_ATTACHMENTS, split_answer
+from latency import Latency
 
 ROOT = Path(__file__).resolve().parent
 SEND_ATTEMPTS = 3
@@ -34,6 +36,7 @@ class Bridge:
         self.backend_name = self.state.get("backendName", "codex")
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
+        self.latency = Latency()
         self.backend = self.make_backend(self.backend_name)
         self.backend_started = False
         self.wake = asyncio.Event()
@@ -71,6 +74,8 @@ class Bridge:
         backend = self.backend_factory(self.backend_configs[name],
             str(Path(self.config.get("cwd", ROOT / "workspace")).expanduser().resolve()), self.reply)
         backend.on_activity = self.backend_activity
+        backend.on_timing = lambda first, total: self.latency.record_agent(
+            first, total, backend=name, model=backend.info.get("model"))
         backend.on_external_result = lambda thread, text, cwd: self.external_results.put_nowait(
             {"thread": thread, "text": text, "cwd": cwd})
         return backend
@@ -177,7 +182,7 @@ class Bridge:
             if len(attachments) > MAX_ATTACHMENTS:
                 self.reply(f"每条消息最多 {MAX_ATTACHMENTS} 个附件。")
             elif text.startswith("/") and not attachments:
-                controls.append(text)
+                controls.append((text, self.latency.received(msg.get("create_time_ms"))))
             elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
                     self.reply("待办已达 20 条，请等待完成或使用 /stop。")
@@ -191,23 +196,32 @@ class Bridge:
             self.state["cursor"] = batch["get_updates_buf"]
         # Persist cursor and incoming work together, before starting any agent work.
         self.save()
-        for command in controls:
-            await self.control(command)
+        for command, received in controls:
+            await self.control(command, received=received)
         self.wake.set()
         self.steer_wake.set()
 
-    async def control(self, text):
+    async def control(self, text, *, received=None):
         command, _, argument = text.partition(" ")
         argument = argument.strip()
         if command in MANAGED:
             try:
-                if command not in ("/backend", "/ack"):
+                if command not in ("/backend", "/ack", "/settings"):
                     await self.ensure_backend()
                 await handle(self, command, argument)
             except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
                 self.reply(f"操作未完成：{error}")
         elif command == "/help":
             self.reply(HELP)
+        elif command == "/ping":
+            if argument:
+                self.reply("用法：/ping。测试微信通道，不额外调用模型。")
+            else:
+                before = len(self.state["outbox"])
+                self.reply("pong", persist=False)
+                if len(self.state["outbox"]) > before:
+                    self.state["outbox"][-1]["ping"] = self.latency.probe(received)
+                    self.save()
         elif command in ("/send", "/sendfile", "/sendimage"):
             try:
                 if not argument:
@@ -425,7 +439,9 @@ class Bridge:
                 if "asset" in entry and "item" not in entry:
                     entry["item"] = await self.media.upload(entry)
                     self.save()
+                send_started = time.perf_counter()
                 await self.channel.send(entry)
+                send_ms = (time.perf_counter() - send_started) * 1000
             except Exception as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1
                 if entry["attempts"] >= SEND_ATTEMPTS:
@@ -444,7 +460,11 @@ class Bridge:
                 await asyncio.sleep(5)
                 continue
             self.state["outbox"].pop(0)
-            self.save()
+            self.latency.sends.append(send_ms)
+            if "ping" in entry:
+                self.reply(self.latency.report(entry["ping"], send_started, send_ms))
+            else:
+                self.save()
             if not self.state["outbox"]:
                 self.outbox_drained.set()
 
