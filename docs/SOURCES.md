@@ -21,6 +21,8 @@
 - daemon start 复用已有后台。桥接通过独立 systemd transient user service、ExitType=cgroup、UMask=0077 承载后台，环境复制只传变量名，不把密钥值放 argv；不启用 remote-control 或网络监听。
 - thread/settings/update、thread/queue/*、thread/sample、thread/unsubscribe 的字段可在本机 schema 查到，但跨客户端影响、持久性或工具隔离未完全核实，因此未用它们替换既有流程。
 
+图片输入沿用官方 Turns 的 `localImage`（本机 0.166.0 UserInput schema 同样支持）；正常图片不再附加重复路径说明。该 schema 未提供通用本地文件输入类型，普通文件及非视觉模型的图片保留精简 JSON 路径引用，不把文件冒充 skill/mention。
+
 ## 微信和附件
 
 认证 token 仅发送到可信 HTTPS API 域；拒绝重定向。CDN 不携带 API 认证。应用声明 AgentWechat/0.1.0，不冒充腾讯插件版本。
