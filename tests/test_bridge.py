@@ -85,7 +85,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts, ["answer"])
 
     async def test_output_hint_is_concise_origin_marker(self):
-        self.assertEqual(OUTPUT_HINT, "User is from WeChat.")
+        self.assertEqual(OUTPUT_HINT, "\n\n[User is from WeChat.]")
 
     async def test_stdio_backend_final_only_and_resume(self):
         backend = CodexBackend({"command": [sys.executable,
@@ -162,7 +162,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="cwd"),
                          "目录: ~/project")
         self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE, attachment_mib=20),
-                         "```\n处理提示: {发送延迟}/{接收延迟}ms\n附件上限: 20 MiB\n```")
+                         "```\n处理提示: {发送延迟}/{接收延迟}ms\n完成提示: 关闭\n附件上限: 20 MiB\n```")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",
@@ -264,7 +264,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await handle(self.bridge, "/backend", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
         self.assertIn("可用: codex | deepseek", text)
-        self.assertIn("/backend 名称", text)
+        self.assertIn("```\n`/backend {名称}`", text)
         self.assertNotIn("切换：`/backend DeepSeek`", text)
 
     async def test_stop_during_input_preflight_never_starts_turn(self):

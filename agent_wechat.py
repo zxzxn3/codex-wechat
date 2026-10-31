@@ -292,7 +292,7 @@ class Bridge:
             if queued:
                 text = argument
             if queued and not text and not attachments:
-                self.reply("用法: /queue 提示词")
+                self.reply(f"用法: `{REGISTRY['/queue'].usage}`")
             elif len(attachments) > MAX_ATTACHMENTS:
                 self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}))
             elif text.startswith("/") and not attachments and not queued:
@@ -474,9 +474,9 @@ class Bridge:
                 else:
                     await self.control(text, received=received)
             except asyncio.TimeoutError:
-                self.reply("控制请求未确认，请查看 /status；不会自动重发。")
+                self.reply("控制请求未确认，请查看 `/status`；不会自动重发。")
             except Exception as error:
-                self.reply("指令未完成，请查看 /status 后重试。")
+                self.reply("指令未完成，请查看 `/status` 后重试。")
                 print(f"控制失败：{type(error).__name__}", file=sys.stderr, flush=True)
             finally:
                 queue.task_done()
@@ -575,7 +575,7 @@ class Bridge:
                                fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
                                if isinstance(error, MediaError) else TASK_FAILED)
                 else:
-                    self.reply("后端尚未就绪，未提交的消息已保留；可用 /stop 清空。")
+                    self.reply("后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。")
                 print(f"Agent backend error: {type(error).__name__}", file=sys.stderr, flush=True)
             finally:
                 if self.stopping and self.state.get("currentInput") is job:

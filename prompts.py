@@ -7,18 +7,18 @@ import re
 MAX_NOTICE_BYTES = 1000
 COMPLETION_NOTICE = ""
 
-BACKEND_SUMMARY = "```\n后端: {当前}\n可用: {可用}\n/backend {{名称}}\n```"
+BACKEND_SUMMARY = "```\n后端: {当前}\n可用: {可用}\n```\n`/backend {{名称}}`"
 EFFORT_SUMMARY = "```\n强度: {当前}\n可选: {可选}\n```\n`/effort {{档位}}`"
-ACK_VIEW = "```\n处理提示: {模板}\n/ack text {{模板}}\n/ack text  (关闭)\n```"
-ACK_USAGE = "/ack text {模板}\n/ack text  (关闭)"
+ACK_VIEW = "```\n处理提示: {模板}\n```\n`/ack text {{模板}}`\n`/ack text` 关闭"
+ACK_USAGE = "`/ack text {模板}`\n`/ack text` 关闭"
 ACK_TOO_LONG = "未更新处理提示: 最多 {字节} 字节"
 WORKING_DIRECTORY = "目录: {目录}"
-MEDIA_USAGE = "/send 路径\n/sendfile 路径\n/sendimage 路径"
+MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`"
 
 DESKTOP_NOTE = "补充消息会进入这个任务；`/stop` 也会停止它。"
 BLOCKED_NOTE = "等待桌面处理"
 
-BUSY_CHANGE = "未切换: 任务未结束。等待完成或 /stop。"
+BUSY_CHANGE = "未切换: 任务未结束。等待完成或 `/stop`。"
 BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
 RESTART_STARTED = "正在重启消息桥..."
 RESTART_READY = "消息桥已重启。"
@@ -36,7 +36,7 @@ SESSION_RESTORE_FAILED = (
     "会话恢复失败: {原因}\n"
     "使用 `/backend` 切换后端，或稍后重试。"
 )
-TASK_FAILED = "消息未提交: 后端处理失败。查看 /status。"
+TASK_FAILED = "消息未提交: 后端处理失败。查看 `/status`。"
 TURN_FAILED = "任务未完成: Agent 执行失败。"
 TURN_INTERRUPTED = "任务已中断。"
 TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
@@ -49,8 +49,8 @@ INTERRUPTED_TASK = (
 UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
 QUEUED_STEER = "已排队，当前任务结束后处理。"
 PING_REPLY = "pong. {发送延迟}/{接收延迟}ms"
-PING_USAGE = "用法: /ping"
-UNKNOWN_COMMAND = "未知指令，查看 /help"
+PING_USAGE = "用法: `/ping`"
+UNKNOWN_COMMAND = "未知指令，查看 `/help`"
 TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {数量} 个。\n请分开发送。"
 QUEUE_FULL = "拒绝接收: 排队消息已达 {数量} 条。\n请等待完成或使用 `/stop`。"
 UNSUPPORTED_MESSAGE = (
@@ -357,8 +357,12 @@ def status_summary(*, status, queued, pending, failed, name, model, effort,
         f"限额: {rate_limit_label(rate_limits)}")
 
 
-def settings_summary(*, notice, attachment_mib):
-    return panel(f"处理提示: {notice or '关闭'}", f"附件上限: {attachment_mib} MiB")
+def settings_summary(*, notice, attachment_mib, slicing=None):
+    lines = [f"处理提示: {notice or '关闭'}", f"完成提示: {COMPLETION_NOTICE or '关闭'}",
+             f"附件上限: {attachment_mib} MiB"]
+    if slicing is not None:
+        lines.extend([f"切片: {slicing.mode}", f"目标长度: {slicing.target_chars} 字符"])
+    return panel(*lines)
 
 
 def session_age(timestamp, *, now=None):
@@ -383,11 +387,13 @@ def session_age(timestamp, *, now=None):
 
 def command_approval(*, command, cwd, reason, token):
     return "审批: 执行命令\n" + panel(f"命令: {command}", f"目录: {display_path(cwd)}",
-                 f"原因: {reason}" if reason else None,
-                 f"/approve {token}  同意", f"/deny {token}  拒绝")
+                 f"原因: {reason}" if reason else None) + approval_actions(token)
 
 
 def file_approval(*, scope, reason, token):
     return "审批: 修改文件\n" + panel(f"范围: {scope}",
-                 f"原因: {reason}" if reason else None,
-                 f"/approve {token}  同意", f"/deny {token}  拒绝")
+                 f"原因: {reason}" if reason else None) + approval_actions(token)
+
+
+def approval_actions(token):
+    return f"\n`/approve {token}` 同意\n`/deny {token}` 拒绝"

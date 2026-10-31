@@ -42,6 +42,8 @@ TurnResult 固定携带 backend、connection ID、selection epoch、thread、tur
 
 close 只结束自己的 proxy/独立子进程，不中断共享 daemon。原有 expectedTurnId、runtime generation、turn/start 早到事件缓冲和输入预检停止检查继续保留。原生 settings/update、队列迁移、退订旧 thread、输入接受状态历史核对、模型测速均须另行确认协议行为，不在本轮引入。
 
+控制回复的标题/动作在代码块外，数据在块内，操作语法在块外用行内代码；参数保留 `{}`，字段使用英文冒号。审批中的待执行命令是数据，批准/拒绝指令是块外操作。
+
 ## 离线验证
 
 测试只在临时目录创建状态，使用模拟 RPC、通道、异步事件及本地 fake_server.py；不启动真实 Codex、微信或 systemd，不读真实状态/配置/会话内容。执行角色遵循用户指定的专用测试会话。

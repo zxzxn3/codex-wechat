@@ -117,6 +117,7 @@ async def handle(bridge, command, argument):
         bridge.reply(settings_summary(
             notice=notice(bridge),
             attachment_mib=bridge.media.limit // (1024 * 1024),
+            slicing=bridge.slicing,
         ))
         return
     if command == "/backend" and not argument:
@@ -149,7 +150,7 @@ async def handle(bridge, command, argument):
         return
     if command == "/sessions":
         if argument == "next":
-            raise UserFacingError("用法: /sessions {页码}")
+            raise UserFacingError(f"用法: `{REGISTRY['/sessions'].usage}`")
         page = int(argument) if argument.isdecimal() else 1
         search = bridge.state.get("sessionSearch") if argument.isdecimal() else argument or None
         if page < 1:
