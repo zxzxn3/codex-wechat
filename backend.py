@@ -1,7 +1,8 @@
 """Codex App Server adapter. Command/env are injectable for future launchers.
 
 Interface used by Bridge: start(), thread(id), run(id, text, attachments=None), stop(),
-answer_approval(token, decision), close(); pending contains UI approval data.
+steer(id, turn_id, text, attachments=None), answer_approval(token, decision), close();
+pending contains UI approval data.
 """
 import asyncio
 import json
@@ -10,6 +11,11 @@ import secrets
 from media import OUTPUT_HINT
 
 
+
+
+class CodexRpcError(RuntimeError):
+    def __init__(self, code):
+        super().__init__(f"Codex RPC 错误 {code}")
 
 
 class CodexBackend:
@@ -63,8 +69,7 @@ class CodexBackend:
                     future = self.requests.get(msg["id"])
                     if future and not future.done():
                         if "error" in msg:
-                            future.set_exception(RuntimeError(
-                                f"Codex RPC 错误 {msg['error'].get('code', 'unknown')}"))
+                            future.set_exception(CodexRpcError(msg['error'].get('code', 'unknown')))
                         else:
                             future.set_result(msg.get("result", {}))
                 elif "id" in msg:
@@ -189,6 +194,26 @@ class CodexBackend:
                         "当前模型未声明图片输入支持，本轮只提供图片路径；如无法读取，请说明并建议切换视觉模型。"})
         return inputs
 
+    async def steer(self, thread_id, turn_id, text, attachments=None):
+        current = self.active
+        if (not current or current["thread"] != thread_id or current["turn"] != turn_id
+                or current["done"].done() or self.stop_requested):
+            return False
+        inputs = await self.input_items(text, attachments)
+        if (self.active is not current or current["done"].done() or self.stop_requested):
+            return False
+        try:
+            await self.rpc("turn/steer", {"threadId": thread_id,
+                "expectedTurnId": turn_id, "input": inputs})
+        except CodexRpcError:
+            # A rejected RPC can race with completion; transport timeouts must never replay.
+            if self.active is not current or current["done"].done():
+                return False
+            thread = await self.read_thread(thread_id)
+            if thread.get("status", {}).get("type") in ("idle", "notLoaded"):
+                return False
+            raise
+        return True
 
     async def run(self, thread_id, text, attachments=None):
         if self.active:

@@ -3,7 +3,7 @@ from pathlib import Path
 from profiles import switch
 
 DEFAULT_NOTICE = {"enabled": True, "text": "::"}
-HELP = ("直接发文字与 Codex 对话；忙时排队。\n"
+HELP = ("直接发文字与 Codex 对话；工作中默认即时补充（steer）。\n"
         "/backend 查看后端；/backend codex 或 deepseek 切换\n"
         "/status 状态及会话信息\n/sessions [关键词] 会话列表\n"
         "/sessions next 下一页\n/switch 编号或ID 切换会话\n/new 新建会话\n"
@@ -121,7 +121,7 @@ async def handle(bridge, command, argument):
         bridge.reply(info(bridge))
         return
     # All state-changing session controls use one lock; incoming work waits until done.
-    if bridge.running or bridge.state["inbox"] or bridge.session_lock.locked():
+    if bridge.running or bridge.steering or bridge.state["inbox"] or bridge.session_lock.locked():
         raise ValueError("当前有任务或待办；请先 /stop，等待结束后再切换设置。")
     async with bridge.session_lock:
         if command == "/backend":

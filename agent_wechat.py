@@ -36,9 +36,14 @@ class Bridge:
         self.backend = self.make_backend(self.backend_name)
         self.backend_started = False
         self.wake = asyncio.Event()
+        self.steer_wake = asyncio.Event()
         self.send_wake = asyncio.Event()
         self.loaded = False
         self.running = False
+        self.steering = False
+        self.input_mode = config.get("inputMode", "steer")
+        if self.input_mode not in ("steer", "queue"):
+            raise ValueError("inputMode 必须是 steer 或 queue")
         self.stopping = False
         self.session_lock = asyncio.Lock()
         self.model_choices = []
@@ -160,7 +165,7 @@ class Bridge:
                     self.reply("待办已达 20 条，请等待完成或使用 /stop。")
                 else:
                     self.state["inbox"].append({"id": identity, "text": text or "请查看我发送的附件。",
-                                               "attachments": attachments})
+                                               "attachments": attachments, "mode": self.input_mode})
             else:
                 self.reply("支持文字、图片和文件；文字每条最多 20000 字符。")
         self.state["seen"] = self.state["seen"][-2000:]
@@ -171,6 +176,7 @@ class Bridge:
         for command in controls:
             await self.control(command)
         self.wake.set()
+        self.steer_wake.set()
 
     async def control(self, text):
         command, _, argument = text.partition(" ")
@@ -202,10 +208,11 @@ class Bridge:
             except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
                 self.reply(f"未重启：{error}")
         elif command == "/status":
-            status = "工作中" if self.running else "空闲"
+            status = "工作中" if self.running or self.steering else "空闲"
             self.reply(f"Codex：{status}；待办 {len(self.state['inbox'])} 条；"
                        f"待审批 {len(self.backend.pending)} 条。\n"
                        f"阶段：{self.phase}\n"
+                       f"收信模式：{self.input_mode}；正在追加：{'是' if self.steering else '否'}\n"
                        + info(self))
         elif command == "/stop":
             self.stopping = True
@@ -222,7 +229,7 @@ class Bridge:
             self.reply("未知命令。\n" + HELP)
 
     async def restart_service(self):
-        if self.running or self.state["inbox"] or self.session_lock.locked():
+        if self.running or self.steering or self.state["inbox"] or self.session_lock.locked():
             raise ValueError("当前有任务或待办，请先 /stop 并等待任务结束，再发 /restart。")
         async with self.session_lock:
             await service_control.require_service_owner()
@@ -246,7 +253,7 @@ class Bridge:
 
     async def worker(self):
         while True:
-            if self.restarting or self.session_lock.locked():
+            if self.restarting or self.steering or self.session_lock.locked():
                 await asyncio.sleep(0.1)
                 continue
             if not self.state["inbox"]:
@@ -276,6 +283,7 @@ class Bridge:
                     self.save()
                     continue
                 self.set_phase("Agent 处理（含模型能力查询）")
+                self.steer_wake.set()
                 answer = await self.backend.run(self.state["thread"], job["text"], attachments=attachments)
                 self.set_phase("准备回传结果")
                 await self.deliver_answer(answer)
@@ -297,8 +305,63 @@ class Bridge:
                 self.loaded = False
             finally:
                 self.running = False
-                self.set_phase("空闲")
+                self.set_phase("处理补充消息" if self.steering else "空闲")
 
+    async def steering_worker(self):
+        while True:
+            await self.steer_wake.wait()
+            self.steer_wake.clear()
+            while self.running and self.state["inbox"] and not self.stopping:
+                job = self.state["inbox"][0]
+                if job.get("mode", self.input_mode) == "queue":
+                    break
+                backend = self.backend
+                active = backend.active
+                # Preparation has no turn id yet; approvals must be handled before steering.
+                if (not active or not active["turn"] or active["done"].done() or backend.pending):
+                    await asyncio.sleep(0.1)
+                    continue
+                turn_id, thread_id = active["turn"], active["thread"]
+                self.steering = True
+                try:
+                    if "preparedAttachments" not in job:
+                        job["preparedAttachments"] = await self.media.incoming(job.get("attachments", []))
+                        self.save()
+                    if self.stopping or not any(item is job for item in self.state["inbox"]):
+                        break
+                    if backend.pending:
+                        continue
+                    # Persist the uncertain-delivery boundary before asking the backend.
+                    job["dispatching"] = True
+                    self.save()
+                    accepted = await backend.steer(thread_id, turn_id, job["text"],
+                                                    attachments=job["preparedAttachments"])
+                    if accepted:
+                        self.state["inbox"] = [item for item in self.state["inbox"] if item is not job]
+                        self.save()
+                        settings = notice(self)
+                        if settings["enabled"] and settings["text"]:
+                            self.reply(settings["text"])
+                    else:
+                        job.pop("dispatching", None)
+                        job["mode"] = "queue"
+                        self.save()
+                        break
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    self.state["inbox"] = [item for item in self.state["inbox"] if item is not job]
+                    self.save()
+                    if isinstance(error, MediaError):
+                        self.reply(f"补充消息的附件处理失败，未投递给 Agent：{error}")
+                    else:
+                        self.reply("补充消息未能确认投递，未自动重发。请先用 /status 确认进度。")
+                    print(f"追加消息失败：{type(error).__name__}", file=sys.stderr, flush=True)
+                finally:
+                    self.steering = False
+                    if not self.running:
+                        self.set_phase("空闲")
+                    self.wake.set()
 
     async def sender(self):
         while True:
@@ -345,6 +408,10 @@ class Bridge:
         try:
             if self.state.pop("restartRequested", False):
                 self.reply("消息桥进程已重新启动。")
+            uncertain = [job for job in self.state["inbox"] if job.get("dispatching")]
+            if uncertain:
+                self.state["inbox"] = [job for job in self.state["inbox"] if not job.get("dispatching")]
+                self.reply("上次有补充消息的投递结果未确认，未自动重放。请检查当前进度。")
             if self.state["running"]:
                 self.state["running"] = False
                 self.state["inbox"].clear()
@@ -357,7 +424,7 @@ class Bridge:
                 print(f"后端启动或恢复失败（{type(error).__name__}）；微信控制仍可用。", file=sys.stderr)
                 self.reply("后端启动或恢复失败，可用 /backend 切换后端，或处理后重新发消息。")
             tasks = [asyncio.create_task(fn()) for fn in
-                     (self.poller, self.worker, self.sender)]
+                     (self.poller, self.worker, self.steering_worker, self.sender)]
             print("微信消息桥已启动；Ctrl+C 停止。", flush=True)
             await asyncio.gather(*tasks)
         finally:

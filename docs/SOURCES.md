@@ -24,3 +24,5 @@ DeepSeek 接入依据：本机 `codex-deepseek/README.md` 与 launcher.py 的 ap
 加解密依据 cryptography 50.x 官方 [Cipher/AES128/ECB](https://cryptography.io/en/50.0.0/hazmat/primitives/symmetric-encryption/) 及 [PKCS7](https://cryptography.io/en/50.0.0/hazmat/primitives/padding/)，本机包版本 50.0.2；附件输入依据已查阅的 Codex App Server 官方文档及本机 TurnStartParams schema 的 localImage/path。静态检查不代表 CDN、模型图片输入或附件收发已联调通过。
 
 CDN 连接诊断：现场观察到网关到 CDN 的 IPv6 TCP 连接处于 SYN-SENT，DNS 返回多个 IPv6 地址排在 IPv4 前。Python 3.14 socket.create_connection 顺序尝试解析地址，原 60 秒超时可在多个地址上累计。修复改用本机 curl 8.23 的默认 Happy Eyeballs；[curl 手册](https://curl.se/docs/manpage.html) 核对 --connect-timeout、--max-time、--config、--max-filesize（8.4+ 可限制传输中大小）。未用真实附件做操作测试。
+
+默认追加消息依据：已查阅的 OpenAI App Server 文档 Steer an active turn 段落和本机 TurnSteerParams schema。turn/steer 必须携带 expectedTurnId，接受与 turn/start 相同的 UserInput 数组，不允许模型/目录等 turn-level overrides。当前轮次已结束时拒绝追加；不把超时当成确定未投递。仅静态检查，未对运行中的会话做 steering 操作测试。
