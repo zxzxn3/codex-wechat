@@ -144,7 +144,7 @@ async def command_settings(bridge, command, argument, received=None):
 
 
 async def command_backend_view(bridge, command, argument, received=None):
-    current = backend_label(bridge.backend_name)
+    current = backend_argument(bridge.backend_name)
     names = list(bridge.backend_configs)
     available = " | ".join(backend_argument(name) for name in names)
     bridge.reply(fill(BACKEND_SUMMARY, {

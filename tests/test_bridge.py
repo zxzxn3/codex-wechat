@@ -263,6 +263,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.state["context"] = "context"
         await handle(self.bridge, "/backend", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
+        self.assertIn("后端: codex", text)
         self.assertIn("可用: codex | deepseek", text)
         self.assertIn("```\n`/backend {名称}`", text)
         self.assertNotIn("切换：`/backend DeepSeek`", text)
