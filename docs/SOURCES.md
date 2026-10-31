@@ -1,0 +1,20 @@
+# 文档依据
+
+查阅日期：2026-10-31。先查文档后实现，未用试错推定协议。
+
+- [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server)：stdio JSON-RPC、initialize/initialized、thread/start、thread/resume、turn/start、turn/interrupt、item/completed、turn/completed 与审批请求。当前在线文档未按本机 CLI 0.166.0 固定；本次已生成并查阅本机该版本的协议 JSON Schema，核对 thread/list、thread/read、model/list、thread/resume、turn/start 的参数与响应。这是接口文档核对，不是运行测试。模型及权限参数默认不覆盖。
+- [腾讯微信插件 README](https://github.com/Tencent/openclaw-weixin/blob/main/README.zh_CN.md)：扫码登录及长轮询接收机制。
+- [腾讯微信后端协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)：二维码 bot_type=3、请求头、getupdates、sendmessage、context_token、消息类型、-14 错误。
+- [腾讯 api.ts](https://github.com/Tencent/openclaw-weixin/blob/main/src/api/api.ts)、[types.ts](https://github.com/Tencent/openclaw-weixin/blob/main/src/api/types.ts)、[login-qr.ts](https://github.com/Tencent/openclaw-weixin/blob/main/src/auth/login-qr.ts)：与协议文档对照阅读。查阅时 package.json 的版本为 2.4.10。没有直接导入 OpenClaw 插件，也没有声称插件的服务端接口构成稳定、完整契约。
+
+本桥接自行声明 AgentWechat/0.1.0，不冒充腾讯插件版本。独立客户端的接入资格及微信客户端适用条件尚需扫码联调确认；若服务端拒绝该客户端，必须报告差异，不改成伪装官方客户端来绕过。
+
+API 地址重定向仅允许 HTTPS 的 ilinkai.weixin.qq.com 及其子域；若真实返回其他微信域名，应先核对官方代码和域名用途再调整。禁用 HTTP 自动跳转，避免 token 跟随到任意地址。
+
+新增会话管理依据：thread/list 明确指定 cli/vscode/appServer 来源，排除子代理；model/list 提供支持的 reasoningEffort；thread/start 和 thread/resume 响应返回实际 model、reasoningEffort、cwd。thread/resume 通过 config.model_reasoning_effort 应用强度覆盖，turn/start 显式传递选中会话的 model/effort/cwd。恢复旧会话时不再强制覆盖为桥接初始 cwd。
+
+服务安装依据：本机 `~/.local/share/ime-cursor/{README.md,install.sh,ime-cursor.service}`，systemd 262 的 systemd.unit/systemd.service 手册及 [systemd.special](https://www.freedesktop.org/software/systemd/man/latest/systemd.special.html) 的 graphical-session.target。使用用户服务随图形登录启停，`Restart=on-failure`，不启用 linger。
+
+DeepSeek 接入依据：本机 `codex-deepseek/README.md` 与 launcher.py 的 app-server 转发逻辑。启动器自行设置独立 CODEX_HOME 并从桌面密钥环检查密钥；桥接仅按命令启动，不读取密钥。
+
+微信重启指令依据：[systemctl 262](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html) 的 show/MainPID 与 --no-block：后者仅验证并排入作业，不等待作业完成。使用异步 restart 避免服务等待自身退出。仅做静态检查，未执行真实重启。

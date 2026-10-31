@@ -1,0 +1,10 @@
+{
+  "processingNotice": {
+    "enabled": true,
+    "text": "::"
+  },
+  "backends": {
+    "codex": {"env": {}, "threadOptions": {}},
+    "deepseek": {"env": {}, "threadOptions": {}}
+  }
+}

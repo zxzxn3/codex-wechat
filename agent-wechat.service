@@ -1,0 +1,16 @@
+[Unit]
+Description=WeChat gateway for local Codex backends
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionPathExists=%h/.local/share/agent-wechat/.state/account.json
+
+[Service]
+Type=exec
+ExecStart=%h/.local/share/agent-wechat/agent-wechat start
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target
