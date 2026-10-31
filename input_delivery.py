@@ -78,7 +78,7 @@ class InputDelivery:
             backend = bridge.backend
             try:
                 try:
-                    await ensure_session(self)
+                    await ensure_session(bridge)
                 except Exception:
                     # Preparation has not submitted anything. Leave the exact job
                     # available for the connection supervisor, rather than dropping it.

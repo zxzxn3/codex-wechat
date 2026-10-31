@@ -229,18 +229,6 @@ class CodexBackend:
                     self.notify(COMPACT_INTERRUPTED if turn.get("status") != "completed"
                                 else "上下文压缩结果未确认。")
         if method == "thread/settings/updated":
-            settings = params.get("threadSettings", {})
-            for source, target in (
-                ("model", "model"), ("effort", "effort"), ("cwd", "cwd"),
-                ("modelProvider", "provider"), ("approvalPolicy", "approval"),
-                ("approvalsReviewer", "reviewer"), ("sandboxPolicy", "sandbox"),
-                ("activePermissionProfile", "profile"),
-                ("collaborationMode", "collaboration"),
-            ):
-                if source in settings:
-                    self.info[target] = settings[source]
-            return
-        if method == "thread/settings/updated":
             # Native settings are authoritative; no replay of previously observed defaults.
             self.runtime_generation += 1
             settings = params.get("threadSettings", {})
