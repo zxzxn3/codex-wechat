@@ -36,37 +36,63 @@ class WeChat:
         self.opener = urllib.request.build_opener(NoRedirect)
 
     async def request(self, endpoint, body=None, *, auth=True, timeout=40):
-        def perform():
-            headers = {"iLink-App-Id": "bot", "iLink-App-ClientVersion": "256"}
-            if body is not None:
-                headers.update({"Content-Type": "application/json",
-                                "AuthorizationType": "ilink_bot_token",
-                                "X-WECHAT-UIN": base64.b64encode(
-                                    str(secrets.randbits(32)).encode()).decode()})
+        # A thread blocked in urllib survives task cancellation and delays
+        # asyncio.run shutdown. A curl child can be terminated immediately.
+        headers = {"iLink-App-Id": "bot", "iLink-App-ClientVersion": "256"}
+        if body is not None:
+            headers.update({"Content-Type": "application/json",
+                            "AuthorizationType": "ilink_bot_token",
+                            "X-WECHAT-UIN": base64.b64encode(
+                                str(secrets.randbits(32)).encode()).decode()})
+        if auth:
+            headers["Authorization"] = "Bearer " + self.account["token"]
+        config = ["url = " + json.dumps(self.base + "/" + endpoint)]
+        config.extend("header = " + json.dumps(key + ": " + value)
+                      for key, value in headers.items())
+        if body is not None:
+            payload = dict(body)
             if auth:
-                headers["Authorization"] = "Bearer " + self.account["token"]
-            payload = None
-            if body is not None:
-                payload = dict(body)
-                if auth:
-                    payload["base_info"] = {"channel_version": VERSION,
-                                            "bot_agent": "AgentWechat/" + VERSION}
-                payload = json.dumps(payload).encode()
-            req = urllib.request.Request(self.base + "/" + endpoint,
-                                         data=payload, headers=headers)
-            try:
-                with self.opener.open(req, timeout=timeout) as response:
-                    result = json.load(response)
-            except urllib.error.HTTPError as error:
-                raise RuntimeError(f"微信 HTTP {error.code}") from None
-            except (OSError, ValueError):
-                raise RuntimeError("微信网络请求失败或响应无法解析") from None
-            if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
-                code = result.get("errcode") or result.get("ret")
-                raise RuntimeError(f"微信 API 错误 {code}" +
-                                   ("，请重新 login" if code == -14 else ""))
-            return result
-        return await asyncio.to_thread(perform)
+                payload["base_info"] = {"channel_version": VERSION,
+                                        "bot_agent": "AgentWechat/" + VERSION}
+            config.append("data = " + json.dumps(json.dumps(payload)))
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "--disable", "--silent", "--show-error", "--proto", "=https",
+            "--connect-timeout", str(min(timeout, 10)), "--max-time", str(timeout),
+            "--max-filesize", str(16 * 1024 * 1024),
+            "--write-out", "\n%{http_code}", "--config", "-",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+        try:
+            output, _ = await asyncio.wait_for(
+                proc.communicate(("\n".join(config) + "\n").encode()), timeout + 2)
+        finally:
+            if proc.returncode is None:
+                try:
+                    proc.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(proc.wait(), 2)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+        if proc.returncode:
+            raise RuntimeError("微信网络请求失败")
+        try:
+            raw, status = output.rsplit(b"\n", 1)
+            status = int(status)
+            if not 200 <= status < 300:
+                raise RuntimeError(f"微信 HTTP {status}")
+            result = json.loads(raw)
+            if not isinstance(result, dict):
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise RuntimeError("微信响应无法解析") from None
+        if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
+            code = result.get("errcode") or result.get("ret")
+            raise RuntimeError(f"微信 API 错误 {code}" +
+                               ("，请重新 login" if code == -14 else ""))
+        return result
 
     async def poll(self, cursor):
         return await self.request("ilink/bot/getupdates", {"get_updates_buf": cursor})
