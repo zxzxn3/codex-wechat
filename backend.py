@@ -7,6 +7,7 @@ pending contains UI approval data.
 import asyncio
 import json
 import os
+from pathlib import Path
 import re
 import secrets
 import shutil
@@ -23,6 +24,8 @@ from prompts import (
     command_approval,
     file_approval,
 )
+
+SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
 
 
 class CodexRpcError(RuntimeError):
@@ -181,6 +184,9 @@ class CodexBackend:
             "name": "agent_wechat", "title": "Agent WeChat", "version": "0.1.0"},
             "capabilities": {"experimentalApi": True}})
         await self.write({"method": "initialized", "params": {}})
+        # Keep project-owned skills local to this app-server connection instead
+        # of installing links into each backend's CODEX_HOME.
+        await self.rpc("skills/extraRoots/set", {"extraRoots": [str(SKILLS_ROOT)]})
 
     async def write(self, message):
         if not self.proc or self.proc.returncode is not None:

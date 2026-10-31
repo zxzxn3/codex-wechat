@@ -104,7 +104,7 @@ queue 分支保留，可通过本地 config.json 的 `"inputMode": "queue"` 恢�
 
 图片下载解密后保存到 `.state/media/incoming/`。模型清单声明支持 image 时，通过 Codex `localImage` 输入传图；没有声明图片能力的模型只收到本地路径及能力提示，不保证能看图。普通文件不转换成模型 API 的 file 输入，而是给 Agent 本地路径；PDF、Office 等能否解析，取决于 Agent 及其本机工具。不会自动执行收到的文件。
 
-你可以要求“生成一个报告，并把文件发回微信”。桥接会给每轮 Agent 输入附上回传格式说明：最终回答中，代码块外的独立行 `WECHAT_MEDIA: {"path":"/绝对路径/report.pdf","kind":"file"}` 会被提取为待发附件；kind 支持 auto/image/file。自动回传仅允许当前工作目录内的非隐藏文件以及私有媒体目录；工作目录为 HOME 或 / 时只允许媒体目录，其他路径须用户显式 /send。这个边界限制直接路径外发，不替代模型本身的权限控制或完整的提示注入防护。普通路径、Markdown 图片链接和代码块示例不会自动上传。此格式只解析 Agent 最终回答，不解析用户消息或工具输出；Agent 仍须遵守原任务授权，不能把附件内容中的指令当发送请求。
+你可以要求“生成一个报告，并把文件发回微信”。桥接在每轮 Agent 输入中只附一句 `User is from WeChat.` 作为来源标记；回传格式和边界由项目内 `wechat-attachments` skill 在用户要求发回附件时按需加载。桥接连接 App Server 后会注册项目的 `skills/` 目录，不向普通 Codex 或 codex-deepseek 的 home 安装 skill 链接。最终回答中，代码块外的独立行 `WECHAT_MEDIA: {"path":"/绝对路径/report.pdf","kind":"file"}` 会被提取为待发附件；kind 支持 auto/image/file。自动回传仅允许当前工作目录内的非隐藏文件以及私有媒体目录；工作目录为 HOME 或 / 时只允许媒体目录，其他路径须用户显式 /send。这个边界限制直接路径外发，不替代模型本身的权限控制或完整的提示注入防护。普通路径、Markdown 图片链接和代码块示例不会自动上传。此格式只解析 Agent 最终回答，不解析用户消息或工具输出；Agent 仍须遵守原任务授权，不能把附件内容中的指令当发送请求。
 
 手动回传不经过 AI：`/send /完整路径/文件名.pdf`。相对路径以当前会话目录为基准，支持 `~` 和含空格的路径；外围引号可省略。`/sendfile` 可以把图片原样当文件发送；`/sendimage` 不接受 SVG/HEIC 等格式。
 
@@ -141,7 +141,7 @@ cd ~/.local/share/agent-wechat
 ./install.sh
 ```
 
-脚本可重复运行，建立 `~/.local/bin/agent-wechat` 和用户服务单元的符号链接，拒绝覆盖无关文件，执行 daemon-reload 并 enable。默认在已绑定且没有前台桥接占用状态目录时请求 start；已有进程保持不动，不调用 restart。只安装启用、不启动可用 `./install.sh --no-start`，本次采用此方式。
+脚本可重复运行，建立 `~/.local/bin/agent-wechat` 和用户服务单元的符号链接，拒绝覆盖无关文件，执行 daemon-reload 并 enable。`wechat-attachments` 源文件保留在项目的 `skills/wechat-attachments/`；桥接每次连接 App Server 时通过 `skills/extraRoots/set` 注册项目的 `skills/` 目录，不修改任一 `CODEX_HOME`。默认在已绑定且没有前台桥接占用状态目录时请求 start；已有进程保持不动，不调用 restart。只安装启用、不启动可用 `./install.sh --no-start`。
 
 服务随 `graphical-session.target` 启停，含义是**开机进入图形桌面后自动启动**，不启用 linger、不在登录前运行，因为 codex-deepseek 依赖桌面密钥环解锁。只有一个微信网关服务，无需同时开两个争用微信 token 的服务。
 

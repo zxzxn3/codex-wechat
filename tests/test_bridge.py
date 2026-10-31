@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from agent_wechat import Bridge, parse_control
 from backend import CodexBackend, CodexRpcError
-from media import MAX_ATTACHMENTS, OUTPUT_HINT, MediaError
+from media import OUTPUT_HINT, MediaError
 from latency import Latency
 from commands import handle
 from prompts import (
@@ -87,13 +87,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         texts = [entry.get("text") for entry in self.store.load("bridge")["outbox"]]
         self.assertEqual(texts, ["answer"])
 
-    async def test_output_hint_is_short_english(self):
-        self.assertTrue(OUTPUT_HINT.isascii())
-        self.assertIn("[WeChat attachments]", OUTPUT_HINT)
-        self.assertIn('WECHAT_MEDIA: {"path":"/absolute/path","kind":"auto"}',
-                      OUTPUT_HINT)
-        self.assertIn(f"max {MAX_ATTACHMENTS} per reply", OUTPUT_HINT)
-        self.assertIn("Do not claim delivery.", OUTPUT_HINT)
+    async def test_output_hint_is_concise_origin_marker(self):
+        self.assertEqual(OUTPUT_HINT, "User is from WeChat.")
 
     async def test_stdio_backend_final_only_and_resume(self):
         backend = CodexBackend({"command": [sys.executable,

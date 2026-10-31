@@ -17,6 +17,8 @@ API 地址重定向仅允许 HTTPS 的 ilinkai.weixin.qq.com 及其子域；若�
 
 DeepSeek 接入依据：本机 `codex-deepseek/README.md` 与 launcher.py 的 app-server 转发逻辑。启动器自行设置独立 CODEX_HOME 并从桌面密钥环检查密钥；桥接仅按命令启动，不读取密钥。
 
+附件 skill 接入依据（2026-11-01）：本机 Codex CLI 0.166.0 导出的 `SkillsExtraRootsSetParams`、`SkillsListParams` 与 `skills/extraRoots/set` 请求 schema。参数只接受绝对路径数组；在隔离的 App Server 中把项目的 `skills/` 设为额外根后，从 `/tmp` 作为会话目录执行 `skills/list` 也能发现 `wechat-attachments`。因此 skill 源和运行注册都留在 agent-wechat 项目内，不向普通 Codex 或 codex-deepseek 的 `CODEX_HOME` 安装链接。该接口新增了运行时状态，清理请求时传空数组可移除额外根。
+
 微信重启指令依据：[systemctl 262](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html) 的 show/MainPID 与 --no-block：后者仅验证并排入作业，不等待作业完成。使用异步 restart 避免服务等待自身退出。仅做静态检查，未执行真实重启。
 
 媒体实现依据：腾讯协议的 getUploadUrl/CDN 媒体流程，以及 src/cdn/upload.ts、src/cdn/cdn-url.ts、src/messaging/send.ts。入站兼容原始 16 字节 key 的 base64 和十六进制字符串的 base64，图片优先 image_item.aeskey；出站按上游把十六进制 key 字符串作 base64。CDN 上传 POST 密文，读取 x-encrypted-param，再单独发送媒体消息。
