@@ -1,5 +1,6 @@
 """Synthetic native events only; never request a real compaction."""
 import unittest
+from unittest.mock import AsyncMock
 
 from backend import CodexBackend
 from prompts import COMPACT_STARTED, COMPACT_FINISHED, COMPACT_INTERRUPTED
@@ -27,6 +28,16 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
         self.event("item/started")
         self.event("item/completed")
         self.assertEqual(self.notices, [])
+
+    async def test_manual_compaction_reports_result_with_automatic_notices_off(self):
+        self.backend.compaction_notice = False
+        self.backend.rpc = AsyncMock(return_value={})
+        self.backend.refresh_runtime = AsyncMock()
+        await self.backend.compact("selected")
+        self.backend.rpc.assert_awaited_once_with("thread/compact/start", {"threadId": "selected"})
+        self.event("item/started")
+        self.event("item/completed")
+        self.assertEqual(self.notices, [COMPACT_FINISHED])
 
     async def test_other_thread_and_legacy_event_are_ignored(self):
         self.event("item/started", thread="other")

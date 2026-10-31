@@ -232,6 +232,8 @@ async def handle(bridge, command, argument):
         bridge.reply(fill(WORKING_DIRECTORY, {
             "目录": display_path(bridge.backend.info.get("cwd") or bridge.backend.cwd)}))
         return
+    if command == "/compact" and argument:
+        raise UserFacingError("用法: `/compact`")
     if command == "/new" and argument:
         raise UserFacingError(NEW_USAGE)
     if command == "/switch" and not argument:
@@ -261,6 +263,12 @@ async def handle(bridge, command, argument):
             bridge.reply(info(bridge, "已连接桌面会话" if desktop else "已切换会话"))
             return
         await ensure_session(bridge)
+        if command == "/compact":
+            if bridge.backend.blocked:
+                raise UserFacingError("暂不能压缩: 当前会话等待处理。")
+            await bridge.backend.compact(bridge.state["thread"])
+            bridge.reply("已请求压缩上下文。")
+            return
         overrides = {}
         if command in ("/model", "/effort"):
             models = (bridge.model_choices if argument.isdecimal() and bridge.model_choices

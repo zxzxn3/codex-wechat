@@ -89,6 +89,7 @@ COMMAND_FAILURE_LABELS = {
     "/sessions": "读取会话失败",
     "/switch": "未切换会话",
     "/new": "未新建会话",
+    "/compact": "压缩请求未确认，请先查看 `/status`，勿重复提交",
     "/model": "未切换模型",
     "/models": "未切换模型",
     "/effort": "未切换强度",

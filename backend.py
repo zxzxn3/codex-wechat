@@ -79,6 +79,7 @@ class CodexBackend:
         self.usage_by_thread = {}
         self.live_usage_threads = set()
         self.compactions = {}
+        self.manual_compactions = set()
         self.compaction_notice = False
         self.on_limits = lambda payload: None
         self.selected_thread = None
@@ -181,6 +182,7 @@ class CodexBackend:
         self.usage_by_thread.clear()
         self.live_usage_threads.clear()
         self.compactions.clear()
+        self.manual_compactions.clear()
         self.model_catalog = None
         self.account_limits = None
         self.rate_limits_checked_at = 0
@@ -375,7 +377,8 @@ class CodexBackend:
             phase = "started" if method == "item/started" else "completed"
             if previous not in ("completed", "interrupted") and previous != phase:
                 self.compactions[key] = phase
-                if self.compaction_notice:
+                manual = (self.selection_epoch, self.selected_thread) in self.manual_compactions
+                if self.compaction_notice or (manual and phase == "completed"):
                     self.notify(COMPACT_STARTED if phase == "started" else COMPACT_FINISHED)
                 while len(self.compactions) > 64:
                     self.compactions.pop(next(iter(self.compactions)))
@@ -388,7 +391,7 @@ class CodexBackend:
             if unfinished:
                 for key in unfinished:
                     self.compactions[key] = "interrupted"
-                if self.compaction_notice:
+                if self.compaction_notice or (self.selection_epoch, self.selected_thread) in self.manual_compactions:
                     self.notify(COMPACT_INTERRUPTED if turn.get("status") != "completed"
                                 else "上下文压缩结果未确认。")
         if method == "thread/settings/updated":
@@ -455,8 +458,12 @@ class CodexBackend:
                                 text or TURN_COMPLETED_EMPTY, current["cwd"], status)
             current["done"].set_result(result)
             self.pending.clear()
+            compact_turn = any(key[:3] == (self.selection_epoch, self.selected_thread, turn["id"])
+                               for key in self.compactions)
+            self.manual_compactions.discard((self.selection_epoch, self.selected_thread))
             if not current.get("owned"):
-                self.on_external_result(result)
+                if text or not compact_turn:
+                    self.on_external_result(result)
                 if self.active is current:
                     self.active = None
             self.on_activity()
@@ -568,6 +575,16 @@ class CodexBackend:
         await self.refresh_runtime()
         await self.refresh_usage()
         return result["thread"]["id"]
+
+    async def compact(self, thread_id):
+        source = (self.selection_epoch, thread_id)
+        self.manual_compactions.add(source)
+        try:
+            await self.rpc("thread/compact/start", {"threadId": thread_id})
+            await self.refresh_runtime()
+        except BaseException:
+            self.manual_compactions.discard(source)
+            raise
 
     async def refresh_usage(self):
         thread = self.selected_thread
