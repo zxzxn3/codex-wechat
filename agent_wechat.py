@@ -13,6 +13,7 @@ import time
 import uuid
 
 from backend import CodexBackend, CodexRpcError, DeferTurn
+from output_delivery import OutputDelivery
 from storage import Store
 from wechat import WeChat, login
 from commands import ensure_session, dispatch, notice, parse_control
@@ -107,6 +108,7 @@ class Bridge:
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:
             self.outbox_drained.set()
+        self.output = OutputDelivery(self)
 
     @property
     def slicing(self):
@@ -233,37 +235,24 @@ class Bridge:
             self.wake.set()
 
     def text_entries(self, text, *, group, context, semantic=False, source=None, role="body"):
-        return [{"id": str(uuid.uuid4()), "group": group, "role": role,
-                 "user": self.account["user"], "context": context, "text": chunk,
-                 **({"source": asdict(source)} if source else {})}
-                for chunk in split_text(text, self.slicing, semantic=semantic)]
+        return self.output.text_entries(text, group=group, context=context, semantic=semantic, source=source, role=role)
+
 
     def enqueue(self, entries, *, persist=True):
-        for index, entry in enumerate(entries, 1):
-            entry.update(part=index, parts=len(entries))
-        self.state["outbox"].extend(entries)
-        if entries:
-            self.outbox_drained.clear()
-        if persist:
-            self.save()
-        self.send_wake.set()
+        return self.output.enqueue(entries, persist=persist)
+
 
     def reply(self, text, *, persist=True):
-        context = self.state.get("context")
-        if context:
-            self.enqueue(self.text_entries(text, group=str(uuid.uuid4()), context=context),
-                         persist=persist)
+        return self.output.reply(text, persist=persist)
+
 
     def asset_entry(self, asset, *, group=None, context=None, source=None):
-        return {"id": str(uuid.uuid4()), "group": group or str(uuid.uuid4()), "role": "asset",
-                "user": self.account["user"], "context": context or self.state["context"],
-                "asset": asset, **({"source": asdict(source)} if source else {})}
+        return self.output.asset_entry(asset, group=group, context=context, source=source)
+
 
     async def queue_file(self, path, kind="auto", *, origin=None):
-        origin = origin or self.media_origin()
-        cwd, context, source = origin["cwd"], origin["context"], origin["source"]
-        asset = await asyncio.to_thread(self.media.snapshot, path, cwd, kind)
-        self.enqueue([self.asset_entry(asset, context=context, source=source)])
+        return await self.output.queue_file(path, kind, origin=origin)
+
 
     def media_origin(self):
         return {"cwd": self.backend.info.get("cwd") or self.backend.cwd,
@@ -274,47 +263,8 @@ class Bridge:
 
     async def deliver_answer(self, answer, *, finish_running=True, cwd=None,
                              notify_completion=False, source=None, require_current=False):
-        self.reload_config()
-        if isinstance(answer, TurnResult):
-            source, cwd, notify_completion = answer.source, answer.cwd, answer.completed
-            answer = answer.text
-        text, specs = split_answer(answer)
-        context = self.state.get("context")
-        if not context:
-            return
-        group = str(uuid.uuid4())
-        assets, errors = [], []
-        if len(specs) > MAX_ATTACHMENTS:
-            errors.append(fill(AUTO_ATTACHMENT_LIMIT, {"数量": MAX_ATTACHMENTS}))
-        for spec in specs[:MAX_ATTACHMENTS]:
-            try:
-                asset = await asyncio.to_thread(self.media.snapshot, spec["path"],
-                    cwd or self.backend.info.get("cwd") or self.backend.cwd,
-                    spec.get("kind", "auto"), automatic=True)
-                assets.append(self.asset_entry(asset, group=group, context=context, source=source))
-            except (MediaError, ValueError, OSError) as error:
-                reason = attachment_reason(error)
-                errors.append(fill(AUTO_ATTACHMENT_FAILED, {
-                    "原因": reason,
-                    "建议": (AUTO_ATTACHMENT_PATH_HINT
-                             if reason == "只能自动发送当前会话目录内的文件" else ""),
-                }))
-        # Snapshot work may await disk I/O across a session/backend switch.
-        if require_current and not self.current_source(source):
-            return
-        entries = self.text_entries(text, group=group, context=context, semantic=True, source=source)
-        if errors:
-            entries.extend(self.text_entries("\n".join(errors), group=group, context=context, source=source))
-        entries.extend(assets)
-        completion_notice = completion_template(self.reload_config(), self.state)
-        if notify_completion and not errors and completion_notice:
-            completion = render_ack(completion_notice, self.prompt_fields(finishing=finish_running))
-            entries.extend(self.text_entries(completion, group=group, context=context,
-                                             source=source, role="completion"))
-        if finish_running:
-            self.state.pop("currentInput", None)
-        # The input is retired in the same snapshot as its frozen output group.
-        self.enqueue(entries)
+        return await self.output.deliver_answer(answer, finish_running=finish_running, cwd=cwd, notify_completion=notify_completion, source=source, require_current=require_current)
+
 
     def dispatch_input(self, job, phase, turn_id, backend):
         if phase == InputPhase.DISPATCHING and (self.stopping or backend is not self.backend):
@@ -616,73 +566,16 @@ class Bridge:
                     self.wake.set()
 
     async def external_result_worker(self):
-        while True:
-            result = await self.external_results.get()
-            try:
-                if self.current_source(result.source):
-                    await self.deliver_answer(result, finish_running=False, require_current=True)
-            except Exception as error:
-                self.reply("结果准备失败，请在桌面查看该轮回答。")
-                print(f"外部结果失败：{type(error).__name__}", file=sys.stderr, flush=True)
-            finally:
-                self.external_results.task_done()
+        return await self.output.external_result_worker()
+
 
     def fail_output(self, entry):
-        """Freeze a partial group; never present a suffix as a complete answer."""
-        self.state["outbox"].pop(0)
-        group = entry.get("group")
-        skipped = []
-        if group:
-            body_failed = entry.get("role", "body") == "body"
-            kept = []
-            for queued in self.state["outbox"]:
-                if queued.get("group") == group and (body_failed or queued.get("role") == "completion"):
-                    skipped.append(queued)
-                else:
-                    kept.append(queued)
-            self.state["outbox"] = kept
-        failed = {**entry, "status": "partial", "skipped": skipped}
-        self.state["failedOutbox"] = (self.state.get("failedOutbox", []) + [failed])[-20:]
-        # Never recursively report a failed failure notice.
-        if not entry.get("failureNotice"):
-            text = (fill(ATTACHMENT_SEND_FAILED, {"名称": entry["asset"]["name"], "次数": SEND_ATTEMPTS})
-                    if "asset" in entry else "这条回复未能完整发送，已停止其余部分。请在桌面查看。")
-            notes = self.text_entries(text, group=str(uuid.uuid4()), context=entry["context"])
-            for note in notes:
-                note["failureNotice"] = True
-            self.state["outbox"][0:0] = notes
-        self.save()
-        if not self.state["outbox"]:
-            self.outbox_drained.set()
+        return self.output.fail_output(entry)
+
 
     async def sender(self):
-        while True:
-            if not self.state["outbox"]:
-                self.send_wake.clear()
-                await self.send_wake.wait()
-                continue
-            entry = self.state["outbox"][0]
-            try:
-                if "asset" in entry and "item" not in entry:
-                    entry["item"] = await self.media.upload(entry)
-                    self.save()
-                send_started = time.perf_counter()
-                await self.channel.send(entry)
-                send_ms = (time.perf_counter() - send_started) * 1000
-            except Exception as error:
-                entry["attempts"] = entry.get("attempts", 0) + 1
-                if entry["attempts"] >= SEND_ATTEMPTS:
-                    self.fail_output(entry)
-                    continue
-                self.save()
-                print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
-                await asyncio.sleep(5)
-                continue
-            self.state["outbox"].pop(0)
-            self.latency.sends.append(send_ms)
-            self.save()
-            if not self.state["outbox"]:
-                self.outbox_drained.set()
+        return await self.output.sender()
+
 
     async def poller(self):
         delay = 2
