@@ -1,6 +1,9 @@
 """Local settings and legacy migrations, independent of presentation."""
 from dataclasses import dataclass
 
+DEFAULT_SOURCE_HINT = "[User from WeChat.]"
+HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
+                   "compactionNotice", "quotaWarningThresholds")
 DEFAULT_COMPLETION_TEMPLATE = ""
 DEFAULT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
 TEXT_LIMIT_BYTES = 3000
@@ -40,6 +43,23 @@ class Slicing:
         if type(target) is not int or not 80 <= target <= 20000:
             raise ValueError("slicing.targetChars 必须是 80–20000 的整数")
         return cls(mode, target)
+
+
+@dataclass(frozen=True)
+class HotSettings:
+    slicing: Slicing
+    notifications: Notifications
+    source_hint: str
+
+    @classmethod
+    def from_config(cls, config):
+        if ("processingNotice" in config and not isinstance(config["processingNotice"], (str, dict))
+                or "completionNotice" in config and not isinstance(config["completionNotice"], str)):
+            raise ValueError("提示模板类型无效")
+        hint = config.get("sourceHint", DEFAULT_SOURCE_HINT)
+        if not isinstance(hint, str) or len(hint.encode()) > 4000:
+            raise ValueError("sourceHint 必须是最多 4000 字节的文本")
+        return cls(Slicing.from_config(config.get("slicing")), Notifications.from_config(config), hint)
 
 
 def processing_template(config, state):

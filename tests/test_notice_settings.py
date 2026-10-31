@@ -35,3 +35,35 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(bridge.backend_started)
             finally:
                 store.lock.close()
+
+    async def test_shared_hot_reload_is_validated_before_applying(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "config.json"
+            initial = {"processingNotice": "old", "cwd": root}
+            path.write_text(json.dumps(initial))
+            store = Store(Path(root) / "state")
+            try:
+                bridge = Bridge(store, {"user": "owner"}, initial, config_path=path)
+                bridge.state["processingNotice"] = "chat override"
+                fresh = dict(initial, sourceHint="custom hint", slicing={"targetChars": 900},
+                             compactionNotice=True, quotaWarningThresholds=[25], cwd="/new")
+                path.write_text(json.dumps(fresh))
+                self.assertEqual(bridge.current_input_hint(), "\n\ncustom hint")
+                self.assertEqual(bridge.slicing.target_chars, 900)
+                self.assertTrue(bridge.backend.compaction_notice)
+                self.assertEqual(bridge.notifications.quota_thresholds, (25,))
+                self.assertEqual(notice(bridge), "chat override")
+                self.assertEqual(bridge.config["cwd"], root)
+                fresh.update(sourceHint="bad candidate", compactionNotice="invalid")
+                path.write_text(json.dumps(fresh))
+                self.assertEqual(bridge.current_input_hint(), "\n\ncustom hint")
+                self.assertEqual(bridge.config["sourceHint"], "custom hint")
+                fresh.update(sourceHint="", compactionNotice=False)
+                path.write_text(json.dumps(fresh))
+                self.assertEqual(bridge.current_input_hint(), "")
+                path.unlink()
+                self.assertEqual(bridge.current_input_hint(), "")
+                self.assertEqual(bridge.slicing.target_chars, 900)
+                self.assertFalse(bridge.backend_started)
+            finally:
+                store.lock.close()

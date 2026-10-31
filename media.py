@@ -11,10 +11,12 @@ import tempfile
 import urllib.parse
 import uuid
 
+from configuration import DEFAULT_SOURCE_HINT
+
 CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_MAX_MIB = 20
 MAX_ATTACHMENTS = 10
-OUTPUT_HINT = "\n\n[User from WeChat.]"
+OUTPUT_HINT = "\n\n" + DEFAULT_SOURCE_HINT
 
 
 class MediaError(ValueError):

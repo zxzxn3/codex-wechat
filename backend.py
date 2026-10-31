@@ -81,6 +81,8 @@ class CodexBackend:
         self.compactions = {}
         self.manual_compactions = set()
         self.compaction_notice = False
+        self.refresh_config = lambda: None
+        self.input_hint = lambda: OUTPUT_HINT
         self.on_limits = lambda payload: None
         self.selected_thread = None
         self.blocked = False
@@ -372,6 +374,7 @@ class CodexBackend:
             return
         item = params.get("item", {})
         if method in ("item/started", "item/completed") and item.get("type") == "contextCompaction":
+            self.refresh_config()
             key = (self.selection_epoch, self.selected_thread, params.get("turnId"), item.get("id"))
             previous = self.compactions.get(key)
             phase = "started" if method == "item/started" else "completed"
@@ -673,7 +676,9 @@ class CodexBackend:
                 else:
                     inputs.append({"type": "text", "text":
                         "当前模型未声明图片输入支持，本轮只提供图片路径；如无法读取，请说明并建议切换视觉模型。"})
-        inputs.append({"type": "text", "text": OUTPUT_HINT})
+        hint = self.input_hint()
+        if hint:
+            inputs.append({"type": "text", "text": hint})
         return inputs
 
     async def steer(self, thread_id, turn_id, text, attachments=None, *,

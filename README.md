@@ -52,7 +52,7 @@ journalctl --user -u agent-wechat -f
 
 微信收发、本地指令与后端启动独立。后端连接失败会后台重试，未提交输入保留，可用 `/stop` 清空。慢速会话查询不会挡住 `/help`、`/ping`、`/status` 和停止入口；但所有回复仍共用顺序发件箱，附件上传会延后实际发出时间。
 
-接收提示和结束提示可在微信即时修改并保存，无需重启；已入发件箱的文字不追溯修改。也可直接编辑 config.json 的 processingNotice/completionNotice，下次使用提示或查看 /settings 时热加载；文件中实际变更的提示键会替换此前微信覆盖，未变更的键继续保留微信设置。无效 JSON 保留原设置。
+接收提示和结束提示可在微信即时修改并保存，无需重启；已入发件箱的文字不追溯修改。也可直接编辑 config.json，相关设置在接收消息、生成回复或处理通知时按需热加载；文件中实际变更的提示键会替换此前微信覆盖，未变更的键继续保留微信设置。无效 JSON 或热配置值会保留整组原设置；文件暂时缺失也不清空设置。
 
 接收提示可复用状态字段，`/ack fields` 查看实际支持的变量。例如：
 
@@ -76,7 +76,7 @@ journalctl --user -u agent-wechat -f
 
 ## 配置与切片
 
-`config.json` 可参考 `config.example.json`；它不入库。接收/结束提示支持热加载，其余配置修改后重启桥接生效。默认值和校验集中在代码，不另建远程通用配置接口。
+`config.json` 可参考 `config.example.json`；它不入库。接收/结束提示、来源说明（hint）、切片、压缩通知和限额阈值支持热加载；无需拆分配置文件。修改后在下一次使用时生效，已提交的模型输入和已入队输出保持原样。后端启动参数、环境、初始目录和附件上限等其余配置修改后重启桥接生效。默认值和校验集中在代码，不另建远程通用配置接口。
 
 | 配置 | 含义 |
 | --- | --- |
@@ -85,6 +85,7 @@ journalctl --user -u agent-wechat -f
 | `compactionNotice` | 压缩开始/结束提示，默认 `false` |
 | `quotaWarningThresholds` | 剩余限额警告阈值列表，默认 `[50, 25, 5]`；`[]` 关闭 |
 | `processingNotice` | 接收提示模板；`/ack text {模板}` 即时修改，`/ack text` 关闭 |
+| `sourceHint` | 模型输入末尾的来源说明，默认 `[User from WeChat.]`；空字符串关闭，按原文使用，不展开变量 |
 | `completionNotice` | 结束提示模板，默认关闭；`/finish text {模板}` 即时修改，`/finish text` 关闭 |
 | `media.maxMiB` | 单附件本地大小上限，默认 20 MiB |
 | `slicing.mode` | `smart`（默认）按结构分条；`length` 只在超传输上限时拆 |

@@ -17,7 +17,7 @@ from storage import Store
 from wechat import WeChat, login
 from commands import ensure_session, handle, notice
 from command_specs import HELP, REGISTRY, command_lane
-from configuration import Slicing, Notifications, completion_template
+from configuration import HotSettings, HOT_CONFIG_KEYS, completion_template
 from quota import quota_warnings
 from records import InputPhase, TurnResult
 from slicing import split_text
@@ -83,7 +83,7 @@ class Bridge:
     def __init__(self, store, account, config, backend_factory=CodexBackend, channel=None, config_path=None):
         self.store, self.account, self.config = store, account, config
         self.config_path = Path(config_path) if config_path else None
-        self.notice_signature = self.notice_file_signature()
+        self.config_signature = self.config_file_signature()
         self.state = store.load("bridge", {"cursor": "", "thread": None,
             "inbox": [], "outbox": [], "seen": [], "running": False})
         self.channel = channel or WeChat(account)
@@ -93,8 +93,8 @@ class Bridge:
         self.backend_name = self.state.get("backendName", "codex")
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
-        self.slicing = Slicing.from_config(config.get("slicing"))
-        self.notifications = Notifications.from_config(config)
+        hot = HotSettings.from_config(config)
+        self.slicing, self.notifications, self.source_hint = hot.slicing, hot.notifications, hot.source_hint
         self.controls = {lane: asyncio.Queue(maxsize=20) for lane in ("local", "urgent", "backend", "probe")}
         self.connection_lock = asyncio.Lock()
         self.input_paused = False
@@ -117,38 +117,38 @@ class Bridge:
         if not self.state["outbox"]:
             self.outbox_drained.set()
 
-    def notice_file_signature(self):
+    def config_file_signature(self):
         try:
             stat = self.config_path.stat() if self.config_path else None
             return (stat.st_mtime_ns, stat.st_size) if stat else None
         except OSError:
             return None
 
-    def notice_config(self):
-        signature = self.notice_file_signature()
-        if self.config_path and signature != self.notice_signature:
-            self.notice_signature = signature
+    def reload_config(self):
+        signature = self.config_file_signature()
+        if self.config_path and signature != self.config_signature:
+            self.config_signature = signature
             try:
-                fresh = json.loads(self.config_path.read_text()) if signature else {}
+                fresh = json.loads(self.config_path.read_text())
                 if not isinstance(fresh, dict):
                     raise ValueError()
-                keys = ("processingNotice", "completionNotice")
-                if ("processingNotice" in fresh and not isinstance(fresh["processingNotice"], (str, dict))
-                        or "completionNotice" in fresh and not isinstance(fresh["completionNotice"], str)):
-                    raise ValueError()
+                hot = HotSettings.from_config(fresh)
                 changed = False
-                for key in keys:
+                for key in HOT_CONFIG_KEYS:
                     if fresh.get(key) != self.config.get(key):
-                        self.state.pop(key, None)
+                        if key in ("processingNotice", "completionNotice"):
+                            self.state.pop(key, None)
+                            changed = True
                         if key in fresh:
                             self.config[key] = fresh[key]
                         else:
                             self.config.pop(key, None)
-                        changed = True
+                self.slicing, self.notifications, self.source_hint = hot.slicing, hot.notifications, hot.source_hint
+                self.backend.compaction_notice = self.notifications.compaction
                 if changed:
                     self.save()
             except (OSError, ValueError):
-                print("提示配置未加载，保留原设置，请检查 JSON 和模板类型。", file=sys.stderr)
+                print("热配置未加载，保留原设置，请检查 JSON 和配置值。", file=sys.stderr)
         return self.config
 
     def save(self):
@@ -162,14 +162,21 @@ class Bridge:
             lambda text: self.reply(text) if getattr(self, "backend", None) is backend else None)
         backend.on_activity = self.backend_activity
         backend.source_name = name
+        backend.refresh_config = self.reload_config
+        backend.input_hint = self.current_input_hint
         backend.compaction_notice = self.notifications.compaction
         backend.on_limits = lambda payload: self.check_quota(backend, payload)
         backend.on_external_result = self.external_results.put_nowait
         return backend
 
+    def current_input_hint(self):
+        self.reload_config()
+        return "\n\n" + self.source_hint if self.source_hint else ""
+
     def check_quota(self, backend, payload):
         if backend is not self.backend or not self.state.get("context"):
             return
+        self.reload_config()
         records = self.state.setdefault("quotaWarnings", {})
         scope = (self.backend_name, backend.info.get("provider"))
         before = json.dumps(records, sort_keys=True)
@@ -287,6 +294,7 @@ class Bridge:
 
     async def deliver_answer(self, answer, *, finish_running=True, cwd=None,
                              notify_completion=False, source=None, require_current=False):
+        self.reload_config()
         if isinstance(answer, TurnResult):
             source, cwd, notify_completion = answer.source, answer.cwd, answer.completed
             answer = answer.text
@@ -318,7 +326,7 @@ class Bridge:
         if errors:
             entries.extend(self.text_entries("\n".join(errors), group=group, context=context, source=source))
         entries.extend(assets)
-        completion_notice = completion_template(self.notice_config(), self.state)
+        completion_notice = completion_template(self.reload_config(), self.state)
         if notify_completion and not errors and completion_notice:
             completion = render_ack(completion_notice, self.prompt_fields())
             entries.extend(self.text_entries(completion, group=group, context=context,
@@ -360,6 +368,7 @@ class Bridge:
         self.save()
 
     async def receive(self, batch):
+        self.reload_config()
         controls = []
         for msg in batch.get("msgs", []):
             if (msg.get("from_user_id") != self.account["user"] or msg.get("group_id")

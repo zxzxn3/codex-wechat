@@ -1,4 +1,5 @@
 {
+  "sourceHint": "[User from WeChat.]",
   "processingNotice": "{发送延迟}/{接收延迟}ms",
   "backends": {
     "codex": {

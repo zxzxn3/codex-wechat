@@ -386,11 +386,13 @@ def status_summary(**kwargs):
     return status_from_fields(status_fields(**kwargs))
 
 
-def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None, completion_notice=""):
+def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None, completion_notice="", source_hint=None):
     lines = [f"接收提示: {notice or '关闭'}", f"结束提示: {completion_notice or '关闭'}",
              f"附件上限: {attachment_mib} MiB"]
     if slicing is not None:
         lines.extend([f"切片: {slicing.mode}", f"目标长度: {slicing.target_chars} 字符"])
+    if source_hint is not None:
+        lines.append(f"来源说明: {source_hint or '关闭'}")
     if notifications is not None:
         thresholds = "/".join(f"{value}%" for value in notifications.quota_thresholds) or "关闭"
         lines.extend([f"压缩提示: {'开启' if notifications.compaction else '关闭'}",

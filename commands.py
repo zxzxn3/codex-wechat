@@ -42,7 +42,7 @@ from configuration import processing_template, completion_template
 
 
 def notice(bridge):
-    return processing_template(bridge.notice_config(), bridge.state)
+    return processing_template(bridge.reload_config(), bridge.state)
 
 
 def info(bridge, action="当前会话", *, include_backend=False):
@@ -116,7 +116,8 @@ async def handle(bridge, command, argument):
             return
         bridge.reply(settings_summary(
             notice=notice(bridge),
-            completion_notice=completion_template(bridge.notice_config(), bridge.state),
+            completion_notice=completion_template(bridge.reload_config(), bridge.state),
+            source_hint=bridge.source_hint,
             attachment_mib=bridge.media.limit // (1024 * 1024),
             slicing=bridge.slicing,
             notifications=bridge.notifications,
@@ -139,7 +140,7 @@ async def handle(bridge, command, argument):
             bridge.reply(panel(*(f"{{{name}}}" for name in bridge.prompt_fields())))
             return
         template = (notice(bridge) if command == "/ack" else
-                    completion_template(bridge.notice_config(), bridge.state))
+                    completion_template(bridge.reload_config(), bridge.state))
         if not argument:
             bridge.reply(fill(ACK_VIEW.replace("/ack", command).replace("接收提示", label),
                               {"模板": template or "关闭"}))
