@@ -2,6 +2,7 @@
 from pathlib import Path
 
 from profiles import backend_argument, backend_label, switch
+from errors import UserFacingError
 from prompts import (
     ACK_USAGE,
     ACK_VIEW,
@@ -14,7 +15,6 @@ from prompts import (
     DIRECTORY_NOT_FOLDER,
     EFFORT_INVALID,
     EFFORT_SUMMARY,
-    HELP,
     MAX_NOTICE_BYTES,
     MODEL_INVALID,
     MODEL_NOT_IN_CATALOG,
@@ -28,11 +28,9 @@ from prompts import (
     SESSION_USAGE,
     SESSIONS_TABLE_HEADER,
     SETTINGS_USAGE,
-    UserFacingError,
     WORKING_DIRECTORY,
     effort_label,
     fill,
-    processing_template,
     session_age,
     session_name,
     session_summary,
@@ -40,8 +38,7 @@ from prompts import (
     settings_summary,
 )
 
-MANAGED = {"/settings", "/backend", "/sessions", "/switch", "/new", "/model", "/models",
-           "/effort", "/cwd", "/ack"}
+from configuration import processing_template
 
 
 def notice(bridge):
@@ -89,6 +86,7 @@ async def activate(bridge, thread_id=None, overrides=None):
                 raise UserFacingError(BUSY_CHANGE)
             # Adopt the desktop's current settings instead of applying stale mobile overrides.
             saved = {}
+    bridge.loaded = False
     selected = await bridge.backend.thread(thread_id, saved)
     bridge.state["thread"] = selected
     if saved:
@@ -112,7 +110,6 @@ async def ensure_session(bridge):
         else:
             action = "已新建会话"
         bridge.reply(info(bridge, action))
-        bridge.resuming = True
 
 
 async def model_entries(bridge):
@@ -204,7 +201,7 @@ async def handle(bridge, command, argument):
             lines.append("下一页：`/sessions next`")
         bridge.reply("\n".join(lines))
         return
-    if command in ("/model", "/models") and not argument:
+    if command == "/model" and not argument:
         models = await model_entries(bridge)
         bridge.model_choices = models
         lines = [MODEL_TABLE_HEADER]
@@ -235,7 +232,6 @@ async def handle(bridge, command, argument):
             return
         if command == "/new":
             await activate(bridge)
-            bridge.resuming = True
             bridge.reply(info(bridge, "已新建会话"))
             return
         if command == "/switch":
@@ -251,7 +247,7 @@ async def handle(bridge, command, argument):
             return
         await ensure_session(bridge)
         overrides = {}
-        if command in ("/model", "/models", "/effort"):
+        if command in ("/model", "/effort"):
             models = (bridge.model_choices if argument.isdecimal() and bridge.model_choices
                       and command != "/effort" else await model_entries(bridge))
             if command == "/effort":

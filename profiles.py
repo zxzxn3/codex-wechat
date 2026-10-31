@@ -1,10 +1,10 @@
 """Backend definitions and per-backend session state, separate from WeChat state."""
 from copy import deepcopy
+from errors import UserFacingError
 from prompts import (
     BACKEND_CLEANUP_FAILED,
     BACKEND_INVALID,
     BACKEND_SESSION_BUSY,
-    UserFacingError,
     fill,
 )
 
@@ -49,7 +49,7 @@ async def switch(bridge, name):
         available = " | ".join(backend_argument(key) for key in bridge.backend_configs)
         raise UserFacingError(fill(BACKEND_INVALID, {"可用": available}))
     name = resolved
-    if name == bridge.backend_name and bridge.backend_started and bridge.loaded:
+    if name == bridge.backend_name and bridge.backend_started and bridge.loaded and bridge.backend.connected:
         return
     saved = (snapshot(bridge.state) if name == bridge.backend_name else
              deepcopy(bridge.state.get("backendSessions", {}).get(name, {})))
@@ -81,7 +81,7 @@ async def switch(bridge, name):
     bridge.backend = candidate
     bridge.backend_started = True
     bridge.loaded = True
-    bridge.resuming = True
+    bridge.input_paused = False
     bridge.model_choices = []
     bridge.save()
     try:

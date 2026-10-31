@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local WeChat ↔ Codex bridge. Media transport uses cryptography."""
 import argparse
+from dataclasses import asdict
 import asyncio
 import hashlib
 import json
@@ -11,14 +12,19 @@ import sys
 import time
 import uuid
 
-from backend import CodexBackend, DeferTurn
+from backend import CodexBackend, CodexRpcError, DeferTurn
 from storage import Store
 from wechat import WeChat, login
-from commands import HELP, MANAGED, ensure_session, handle, notice
+from commands import ensure_session, handle, notice
+from command_specs import HELP, REGISTRY, command_lane
+from configuration import Slicing
+from records import InputPhase, TurnResult
+from slicing import split_text
 from profiles import definitions, snapshot
 import service_control
 from media import Media, MediaError, MAX_ATTACHMENTS, split_answer
 from latency import Latency
+from errors import UserFacingError, attachment_reason, backend_reason
 from prompts import (
     APPROVAL_ACCEPTED,
     APPROVAL_DECLINED,
@@ -35,7 +41,6 @@ from prompts import (
     COMMAND_FAILURE,
     COMMAND_FAILURE_LABELS,
     COMPLETION_NOTICE,
-    INTERRUPTED_TASK,
     MEDIA_USAGE,
     PING_REPLY,
     PING_USAGE,
@@ -47,7 +52,6 @@ from prompts import (
     RESTART_READY,
     RESTART_STARTED,
     RESTART_USAGE,
-    SESSION_RESTORE_FAILED,
     STOP_DEFERRED,
     STOP_IDLE,
     STOP_REQUESTED,
@@ -57,9 +61,6 @@ from prompts import (
     UNCERTAIN_STEER,
     UNKNOWN_COMMAND,
     UNSUPPORTED_MESSAGE,
-    UserFacingError,
-    attachment_reason,
-    backend_reason,
     fill,
     render_ack,
     status_summary,
@@ -89,12 +90,16 @@ class Bridge:
         self.backend_name = self.state.get("backendName", "codex")
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
+        self.slicing = Slicing.from_config(config.get("slicing"))
+        self.controls = {lane: asyncio.Queue(maxsize=20) for lane in ("local", "urgent", "backend")}
+        self.connection_lock = asyncio.Lock()
+        self.input_paused = False
         self.latency = Latency()
+        self.external_results = asyncio.Queue()
         self.backend = self.make_backend(self.backend_name)
         self.backend_started = False
         self.wake = asyncio.Event()
         self.steer_wake = asyncio.Event()
-        self.external_results = asyncio.Queue()
         self.send_wake = asyncio.Event()
         self.loaded = False
         self.running = False
@@ -105,8 +110,6 @@ class Bridge:
         self.stopping = False
         self.session_lock = asyncio.Lock()
         self.model_choices = []
-        self.resuming = bool(self.state["thread"])
-        self.phase = "空闲"
         self.restarting = False
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:
@@ -117,20 +120,13 @@ class Bridge:
         self.state.setdefault("backendSessions", {})[self.backend_name] = snapshot(self.state)
         self.store.save("bridge", self.state)
 
-    def set_phase(self, phase):
-        self.phase = phase
-        self.state["phase"] = phase
-        self.save()
-        print(f"任务阶段：{phase}", file=sys.stderr, flush=True)
-
     def make_backend(self, name):
         backend = self.backend_factory(self.backend_configs[name],
-            str(Path(self.config.get("cwd", ROOT / "workspace")).expanduser().resolve()), self.reply)
+            str(Path(self.config.get("cwd", ROOT / "workspace")).expanduser().resolve()),
+            lambda text: self.reply(text) if getattr(self, "backend", None) is backend else None)
         backend.on_activity = self.backend_activity
-        backend.on_timing = lambda first, total: self.latency.record_agent(
-            first, total, backend=name, model=backend.info.get("model"))
-        backend.on_external_result = lambda thread, text, cwd, completed: self.external_results.put_nowait(
-            {"thread": thread, "text": text, "cwd": cwd, "completed": completed})
+        backend.source_name = name
+        backend.on_external_result = self.external_results.put_nowait
         return backend
 
     def backend_activity(self):
@@ -149,54 +145,68 @@ class Bridge:
             self.reply(render_ack(template, self.latency.values(job.get("ingress_ms"))))
 
     async def ensure_backend(self):
-        if not self.backend_started:
+        async with self.connection_lock:
+            if self.backend_started and self.backend.connected:
+                return
+            self.backend_started = False
+            self.loaded = False
+            await self.backend.close()
             try:
                 await self.backend.start()
             except BaseException:
                 await self.backend.close()
                 raise
             self.backend_started = True
+            self.input_paused = False
+            self.wake.set()
 
-    def reply(self, text, *, persist=True):
-        context = self.state.get("context")
-        if not context:
-            return
-        # Chunk on Unicode codepoints without splitting UTF-8 sequences.
-        chunks, part, size = [], "", 0
-        for char in text:
-            width = len(char.encode())
-            if size + width > 3000:
-                chunks.append(part)
-                part, size = "", 0
-            part += char
-            size += width
-        if part:
-            chunks.append(part)
-        for chunk in chunks:
-            self.state["outbox"].append({"id": str(uuid.uuid4()), "user": self.account["user"],
-                                        "context": context, "text": chunk})
-        if chunks:
+    def text_entries(self, text, *, group, context, semantic=False, source=None, role="body"):
+        return [{"id": str(uuid.uuid4()), "group": group, "role": role,
+                 "user": self.account["user"], "context": context, "text": chunk,
+                 **({"source": asdict(source)} if source else {})}
+                for chunk in split_text(text, self.slicing, semantic=semantic)]
+
+    def enqueue(self, entries, *, persist=True):
+        for index, entry in enumerate(entries, 1):
+            entry.update(part=index, parts=len(entries))
+        self.state["outbox"].extend(entries)
+        if entries:
             self.outbox_drained.clear()
         if persist:
             self.save()
         self.send_wake.set()
 
-    def asset_entry(self, asset):
-        return {"id": str(uuid.uuid4()), "user": self.account["user"],
-                "context": self.state["context"], "asset": asset}
+    def reply(self, text, *, persist=True):
+        context = self.state.get("context")
+        if context:
+            self.enqueue(self.text_entries(text, group=str(uuid.uuid4()), context=context),
+                         persist=persist)
+
+    def asset_entry(self, asset, *, group=None, context=None, source=None):
+        return {"id": str(uuid.uuid4()), "group": group or str(uuid.uuid4()), "role": "asset",
+                "user": self.account["user"], "context": context or self.state["context"],
+                "asset": asset, **({"source": asdict(source)} if source else {})}
 
     async def queue_file(self, path, kind="auto"):
         cwd = self.backend.info.get("cwd") or self.backend.cwd
+        context, source = self.state["context"], self.backend.source(self.state["thread"])
         asset = await asyncio.to_thread(self.media.snapshot, path, cwd, kind)
-        self.state["outbox"].append(self.asset_entry(asset))
-        self.outbox_drained.clear()
-        self.save()
-        self.send_wake.set()
+        self.enqueue([self.asset_entry(asset, context=context, source=source)])
+
+    def current_source(self, source):
+        return source == self.backend.source(self.state["thread"])
 
     async def deliver_answer(self, answer, *, finish_running=True, cwd=None,
-                             notify_completion=False):
+                             notify_completion=False, source=None, require_current=False):
+        if isinstance(answer, TurnResult):
+            source, cwd, notify_completion = answer.source, answer.cwd, answer.completed
+            answer = answer.text
         text, specs = split_answer(answer)
-        entries, errors = [], []
+        context = self.state.get("context")
+        if not context:
+            return
+        group = str(uuid.uuid4())
+        assets, errors = [], []
         if len(specs) > MAX_ATTACHMENTS:
             errors.append(fill(AUTO_ATTACHMENT_LIMIT, {"数量": MAX_ATTACHMENTS}))
         for spec in specs[:MAX_ATTACHMENTS]:
@@ -204,26 +214,59 @@ class Bridge:
                 asset = await asyncio.to_thread(self.media.snapshot, spec["path"],
                     cwd or self.backend.info.get("cwd") or self.backend.cwd,
                     spec.get("kind", "auto"), automatic=True)
-                entries.append(self.asset_entry(asset))
-            except (MediaError, ValueError) as error:
+                assets.append(self.asset_entry(asset, group=group, context=context, source=source))
+            except (MediaError, ValueError, OSError) as error:
                 reason = attachment_reason(error)
                 errors.append(fill(AUTO_ATTACHMENT_FAILED, {
                     "原因": reason,
                     "建议": (AUTO_ATTACHMENT_PATH_HINT
                              if reason == "只能自动发送当前会话目录内的文件" else ""),
                 }))
-        # Commit the final text, frozen files and completion marker in one snapshot.
+        # Snapshot work may await disk I/O across a session/backend switch.
+        if require_current and not self.current_source(source):
+            return
+        entries = self.text_entries(text, group=group, context=context, semantic=True, source=source)
+        if errors:
+            entries.extend(self.text_entries("\n".join(errors), group=group, context=context, source=source))
+        entries.extend(assets)
+        if notify_completion and not errors and COMPLETION_NOTICE:
+            entries.extend(self.text_entries(COMPLETION_NOTICE, group=group, context=context,
+                                             source=source, role="completion"))
         if finish_running:
-            self.state["running"] = False
-        if text or errors:
-            self.reply("\n\n".join(part for part in (text, "\n".join(errors)) if part), persist=False)
-        self.state["outbox"].extend(entries)
-        if entries:
-            self.outbox_drained.clear()
-        if notify_completion and COMPLETION_NOTICE:
-            self.reply(COMPLETION_NOTICE, persist=False)
+            self.state.pop("currentInput", None)
+        # The input is retired in the same snapshot as its frozen output group.
+        self.enqueue(entries)
+
+    def dispatch_input(self, job, phase, turn_id, backend):
+        if phase == InputPhase.DISPATCHING and (self.stopping or backend is not self.backend):
+            return False
+        job.update(phase=phase, turn=turn_id, source=asdict(backend.source(self.state["thread"])))
         self.save()
-        self.send_wake.set()
+        return True
+
+    def record_input(self, job, phase):
+        job["phase"] = phase
+        self.state["inputRecords"] = (self.state.get("inputRecords", []) + [dict(job)])[-20:]
+
+    def recover_inputs(self):
+        legacy_running = self.state.pop("running", False)
+        self.state.pop("phase", None)
+        current = self.state.pop("currentInput", None)
+        jobs = ([current] if current else []) + self.state["inbox"]
+        self.state["inbox"] = []
+        uncertain = False
+        for job in jobs:
+            phase = job.get("phase", InputPhase.PREPARING)
+            if job.get("dispatching") or phase in (InputPhase.DISPATCHING, InputPhase.ACCEPTED):
+                self.record_input(job, InputPhase.ACCEPTED if phase == InputPhase.ACCEPTED else InputPhase.UNCERTAIN)
+                uncertain = True
+            else:
+                job["phase"] = InputPhase.PREPARING
+                job.setdefault("clientId", str(uuid.uuid4()))
+                self.state["inbox"].append(job)
+        if uncertain or legacy_running:
+            self.reply("上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。")
+        self.save()
 
     async def receive(self, batch):
         controls = []
@@ -255,6 +298,7 @@ class Bridge:
                 else:
                     self.state["inbox"].append({"id": identity, "text": text or "请查看我发送的附件。",
                                                "attachments": attachments, "mode": self.input_mode,
+                                               "clientId": str(uuid.uuid4()), "phase": InputPhase.PREPARING,
                                                "ingress_ms": self.latency.received(msg.get("create_time_ms")).get("ingress_ms")})
             else:
                 self.reply(fill(UNSUPPORTED_MESSAGE, {"数量": 20000}))
@@ -264,15 +308,23 @@ class Bridge:
         # Persist cursor and incoming work together, before starting any agent work.
         self.save()
         for command, received in controls:
-            await self.control(command, received=received)
+            name, argument = parse_control(command)
+            queue = self.controls[command_lane(name, argument)]
+            try:
+                queue.put_nowait((command, received))
+            except asyncio.QueueFull:
+                self.reply("指令等待过多，请稍后重试。")
         self.wake.set()
         self.steer_wake.set()
 
     async def control(self, text, *, received=None):
         command, argument = parse_control(text)
-        if command in MANAGED:
+        spec = REGISTRY.get(command)
+        if spec:
+            command = spec.name
+        if spec and spec.route == "managed":
             try:
-                if command not in ("/backend", "/ack", "/settings"):
+                if spec.needs_backend and not (command == "/cwd" and not argument):
                     await self.ensure_backend()
                 await handle(self, command, argument)
             except UserFacingError as error:
@@ -324,13 +376,9 @@ class Bridge:
             else:
                 status = "空闲"
             details = self.backend.info
-            rate_limits = details.get("rate_limits")
-            load_rate_limits = getattr(self.backend, "rate_limits", None)
-            if self.backend_started and load_rate_limits:
-                try:
-                    rate_limits = await load_rate_limits()
-                except Exception:
-                    pass
+            rate_limits = self.backend.account_limits
+            if not self.backend_started or not self.backend.connected:
+                status = "后端连接未就绪"
             self.reply(status_summary(
                 status=status,
                 queued=len(self.state["inbox"]),
@@ -353,6 +401,10 @@ class Bridge:
             ))
         elif command == "/stop":
             self.stopping = True
+            for job in self.state["inbox"]:
+                if job.get("phase") in (InputPhase.DISPATCHING, InputPhase.ACCEPTED):
+                    self.record_input(job, InputPhase.UNCERTAIN if job["phase"] == InputPhase.DISPATCHING
+                                      else InputPhase.ACCEPTED)
             self.state["inbox"].clear()
             self.save()
             try:
@@ -372,7 +424,7 @@ class Bridge:
                     argument, "accept" if accept else "decline")
                 self.reply(APPROVAL_ACCEPTED if ok and accept else
                            APPROVAL_DECLINED if ok else APPROVAL_EXPIRED)
-            except (RuntimeError, OSError):
+            except (RuntimeError, OSError, asyncio.TimeoutError):
                 self.reply(APPROVAL_FAILED)
         else:
             self.reply(UNKNOWN_COMMAND)
@@ -403,78 +455,124 @@ class Bridge:
                     self.restarting = False
                     self.save()
 
+    async def control_worker(self, lane):
+        queue = self.controls[lane]
+        while True:
+            text, received = await queue.get()
+            try:
+                if lane == "urgent":
+                    await asyncio.wait_for(self.control(text, received=received), 5)
+                else:
+                    await self.control(text, received=received)
+            except asyncio.TimeoutError:
+                self.reply("控制请求未确认，请查看 /status；不会自动重发。")
+            except Exception as error:
+                self.reply("指令未完成，请查看 /status 后重试。")
+                print(f"控制失败：{type(error).__name__}", file=sys.stderr, flush=True)
+            finally:
+                queue.task_done()
+                self.wake.set()
+
+    async def maintain_backend(self):
+        reported = False
+        while True:
+            if not self.running and not self.steering and not self.session_lock.locked():
+                try:
+                    async with self.session_lock:
+                        await self.ensure_backend()
+                        if self.state["thread"]:
+                            await ensure_session(self)
+                    self.input_paused = False
+                    self.wake.set()
+                    reported = False
+                    await self.backend.rate_limits()
+                except Exception as error:
+                    self.backend_started = self.backend.connected
+                    self.input_paused = True
+                    if not reported:
+                        self.reply(fill(BACKEND_CONNECT_FAILED, {"原因": backend_reason(error)}))
+                        reported = True
+                    print(f"后端恢复失败：{type(error).__name__}", file=sys.stderr, flush=True)
+            await asyncio.sleep(10)
+
     async def worker(self):
         while True:
-            if self.restarting or self.steering or self.session_lock.locked():
+            if (self.restarting or self.steering or self.session_lock.locked() or self.input_paused):
                 await asyncio.sleep(0.1)
                 continue
-            if self.active_turn() or self.backend.blocked:
+            if self.active_turn() or self.backend.blocked or not self.state["inbox"]:
                 self.wake.clear()
                 self.steer_wake.set()
-                await self.wake.wait()
-                continue
-            if not self.state["inbox"]:
-                self.wake.clear()
                 await self.wake.wait()
                 continue
             self.running = True
             self.stopping = False
             job = self.state["inbox"].pop(0)
-            self.state["running"] = True
+            job["phase"] = InputPhase.PREPARING
+            self.state["currentInput"] = job
             self.save()
+            backend = self.backend
             try:
-                self.set_phase("准备会话")
-                await ensure_session(self)
-                if self.stopping:
-                    self.state["running"] = False
+                try:
+                    await ensure_session(self)
+                except Exception:
+                    # Preparation has not submitted anything. Leave the exact job
+                    # available for the connection supervisor, rather than dropping it.
+                    if not self.stopping:
+                        self.state["inbox"].insert(0, job)
+                    self.state.pop("currentInput", None)
+                    self.input_paused = True
                     self.save()
+                    raise
+                if self.stopping:
                     continue
                 self.acknowledge(job)
-                self.set_phase("下载和解密附件" if job.get("attachments") else "准备模型输入")
-                attachments = (job["preparedAttachments"] if "preparedAttachments" in job else
-                               await self.media.incoming(job.get("attachments", [])))
-                if self.stopping:
-                    self.state["running"] = False
+                if "preparedAttachments" not in job:
+                    job["preparedAttachments"] = await self.media.incoming(job.get("attachments", []))
                     self.save()
+                if self.stopping:
                     continue
-                self.set_phase("Agent 处理（含模型能力查询）")
                 self.steer_wake.set()
-                answer = await self.backend.run(self.state["thread"], job["text"], attachments=attachments)
+                answer = await backend.run(self.state["thread"], job["text"],
+                    attachments=job["preparedAttachments"], client_id=job["clientId"],
+                    dispatch=lambda phase, turn: self.dispatch_input(job, phase, turn, backend))
                 if answer is not None:
-                    self.set_phase("准备回传结果")
-                    await self.deliver_answer(
-                        answer,
-                        notify_completion=getattr(self.backend, "last_turn_completed", False),
-                    )
+                    await self.deliver_answer(answer)
                 else:
-                    self.state["running"] = False
+                    self.state.pop("currentInput", None)
                     self.save()
             except asyncio.CancelledError:
                 raise
             except DeferTurn:
-                job["mode"] = "queue"
-                job["preparedAttachments"] = attachments
-                self.state["inbox"].insert(0, job)
-                self.state["running"] = False
+                if not self.stopping:
+                    job.update(mode="queue", phase=InputPhase.PREPARING)
+                    self.state["inbox"].insert(0, job)
+                    self.reply(QUEUED_STEER)
+                self.state.pop("currentInput", None)
                 self.save()
-                self.reply(QUEUED_STEER)
-            except MediaError as error:
-                self.state["running"] = False
-                self.reply(fill(ATTACHMENT_INCOMING_FAILED,
-                                {"原因": attachment_reason(error)}))
             except Exception as error:
-                self.state["running"] = False
-                self.state["inbox"].clear()
-                self.reply(TASK_FAILED)
+                if self.state.get("currentInput") is job:
+                    phase = job["phase"]
+                    uncertain = phase == InputPhase.DISPATCHING and not (
+                        isinstance(error, CodexRpcError) and error.definite_rejection)
+                    self.record_input(job, InputPhase.UNCERTAIN if uncertain else
+                                      InputPhase.ACCEPTED if phase == InputPhase.ACCEPTED else InputPhase.FAILED)
+                    self.state.pop("currentInput", None)
+                    self.reply("消息提交结果未确认，未自动重发。" if uncertain else
+                               "任务已提交，但结果接收中断，未重新执行。" if phase == InputPhase.ACCEPTED else
+                               fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
+                               if isinstance(error, MediaError) else TASK_FAILED)
+                else:
+                    self.reply("后端尚未就绪，未提交的消息已保留；可用 /stop 清空。")
                 print(f"Agent backend error: {type(error).__name__}", file=sys.stderr, flush=True)
-                # Keep the WeChat controls available so the user can select a healthy backend.
-                await self.backend.close()
-                self.backend = self.make_backend(self.backend_name)
-                self.backend_started = False
-                self.loaded = False
             finally:
+                if self.stopping and self.state.get("currentInput") is job:
+                    self.record_input(job, InputPhase.CANCELLED if job["phase"] == InputPhase.PREPARING
+                                      else job["phase"])
+                    self.state.pop("currentInput", None)
+                    self.save()
                 self.running = False
-                self.set_phase("处理补充消息" if self.steering else "空闲")
+                self.wake.set()
 
     async def steering_worker(self):
         while True:
@@ -486,7 +584,6 @@ class Bridge:
                     break
                 backend = self.backend
                 active = backend.active
-                # Preparation has no turn id yet; approvals must be handled before steering.
                 if (not active or not active["turn"] or active["done"].done()
                         or backend.pending or backend.blocked):
                     await asyncio.sleep(0.1)
@@ -501,50 +598,72 @@ class Bridge:
                         break
                     if backend.pending or backend.blocked:
                         continue
-                    # Persist the uncertain-delivery boundary before asking the backend.
-                    job["dispatching"] = True
-                    self.save()
                     accepted = await backend.steer(thread_id, turn_id, job["text"],
-                                                    attachments=job["preparedAttachments"])
+                        attachments=job["preparedAttachments"], client_id=job["clientId"],
+                        dispatch=lambda phase, turn: self.dispatch_input(job, phase, turn, backend))
                     if accepted:
                         self.state["inbox"] = [item for item in self.state["inbox"] if item is not job]
                         self.save()
                         self.acknowledge(job)
-                    else:
-                        job.pop("dispatching", None)
-                        job["mode"] = "queue"
+                    elif not self.stopping:
+                        job.update(mode="queue", phase=InputPhase.PREPARING)
                         self.save()
                         self.reply(QUEUED_STEER)
                         break
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
+                    uncertain = job.get("phase") == InputPhase.DISPATCHING
+                    self.record_input(job, InputPhase.UNCERTAIN if uncertain else InputPhase.FAILED)
                     self.state["inbox"] = [item for item in self.state["inbox"] if item is not job]
                     self.save()
-                    if isinstance(error, MediaError):
-                        self.reply(fill(ATTACHMENT_INCOMING_FAILED,
-                                        {"原因": attachment_reason(error)}))
-                    else:
-                        self.reply(UNCERTAIN_STEER)
+                    self.reply(UNCERTAIN_STEER if uncertain else
+                               fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
+                               if isinstance(error, MediaError) else TASK_FAILED)
                     print(f"追加消息失败：{type(error).__name__}", file=sys.stderr, flush=True)
                 finally:
                     self.steering = False
-                    if not self.running:
-                        self.set_phase("空闲")
                     self.wake.set()
 
     async def external_result_worker(self):
         while True:
             result = await self.external_results.get()
             try:
-                if result["thread"] != self.state["thread"]:
-                    self.reply("其他会话的后续结果：")
-                await self.deliver_answer(
-                    result["text"], finish_running=False, cwd=result["cwd"],
-                    notify_completion=result["completed"],
-                )
+                if self.current_source(result.source):
+                    await self.deliver_answer(result, finish_running=False, require_current=True)
+            except Exception as error:
+                self.reply("结果准备失败，请在桌面查看该轮回答。")
+                print(f"外部结果失败：{type(error).__name__}", file=sys.stderr, flush=True)
             finally:
                 self.external_results.task_done()
+
+    def fail_output(self, entry):
+        """Freeze a partial group; never present a suffix as a complete answer."""
+        self.state["outbox"].pop(0)
+        group = entry.get("group")
+        skipped = []
+        if group:
+            body_failed = entry.get("role", "body") == "body"
+            kept = []
+            for queued in self.state["outbox"]:
+                if queued.get("group") == group and (body_failed or queued.get("role") == "completion"):
+                    skipped.append(queued)
+                else:
+                    kept.append(queued)
+            self.state["outbox"] = kept
+        failed = {**entry, "status": "partial", "skipped": skipped}
+        self.state["failedOutbox"] = (self.state.get("failedOutbox", []) + [failed])[-20:]
+        # Never recursively report a failed failure notice.
+        if not entry.get("failureNotice"):
+            text = (fill(ATTACHMENT_SEND_FAILED, {"名称": entry["asset"]["name"], "次数": SEND_ATTEMPTS})
+                    if "asset" in entry else "这条回复未能完整发送，已停止其余部分。请在桌面查看。")
+            notes = self.text_entries(text, group=str(uuid.uuid4()), context=entry["context"])
+            for note in notes:
+                note["failureNotice"] = True
+            self.state["outbox"][0:0] = notes
+        self.save()
+        if not self.state["outbox"]:
+            self.outbox_drained.set()
 
     async def sender(self):
         while True:
@@ -563,17 +682,7 @@ class Bridge:
             except Exception as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1
                 if entry["attempts"] >= SEND_ATTEMPTS:
-                    self.state["outbox"].pop(0)
-                    self.state["failedOutbox"] = (self.state.get("failedOutbox", []) + [entry])[-20:]
-                    self.save()
-                    if "asset" in entry:
-                        self.reply(fill(ATTACHMENT_SEND_FAILED,
-                                        {"名称": entry["asset"]["name"],
-                                         "次数": SEND_ATTEMPTS}))
-                    else:
-                        print("文字发送重试耗尽，已保存失败记录并继续后续回复。", file=sys.stderr, flush=True)
-                    if not self.state["outbox"]:
-                        self.outbox_drained.set()
+                    self.fail_output(entry)
                     continue
                 self.save()
                 print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
@@ -602,28 +711,11 @@ class Bridge:
         try:
             if self.state.pop("restartRequested", False):
                 self.reply(RESTART_READY)
-            uncertain = [job for job in self.state["inbox"] if job.get("dispatching")]
-            if uncertain:
-                self.state["inbox"] = [job for job in self.state["inbox"] if not job.get("dispatching")]
-                self.reply(UNCERTAIN_STEER)
-            if self.state["running"]:
-                self.state["running"] = False
-                self.state["inbox"].clear()
-                self.reply(INTERRUPTED_TASK)
-            stage = "启动后端连接"
-            try:
-                await self.ensure_backend()
-                if self.state["thread"]:
-                    stage = "恢复会话"
-                    await ensure_session(self)
-            except (RuntimeError, ValueError, OSError, asyncio.TimeoutError) as error:
-                detail = backend_reason(error)
-                print(f"{stage}失败：{error}；微信控制仍可用。", file=sys.stderr)
-                template = (BACKEND_CONNECT_FAILED if stage == "启动后端连接"
-                            else SESSION_RESTORE_FAILED)
-                self.reply(fill(template, {"原因": detail}))
+            self.recover_inputs()
             tasks = [asyncio.create_task(fn()) for fn in
-                     (self.poller, self.worker, self.steering_worker, self.external_result_worker, self.sender)]
+                     (self.poller, self.worker, self.steering_worker,
+                      self.external_result_worker, self.sender, self.maintain_backend)]
+            tasks.extend(asyncio.create_task(self.control_worker(lane)) for lane in self.controls)
             print("微信消息桥已启动；Ctrl+C 停止。", flush=True)
             await asyncio.gather(*tasks)
         finally:
@@ -647,7 +739,7 @@ async def main():
         state = store.load("bridge", {})
         print(json.dumps({"bound": bool(store.load("account")), "thread": state.get("thread"),
                           "backend": state.get("backendName", "codex"),
-                          "unfinished_at_last_save": state.get("running", False),
+                          "unfinished_at_last_save": bool(state.get("currentInput") or state.get("running", False)),
                           "queued": len(state.get("inbox", [])),
                           "unsent": len(state.get("outbox", []))}, ensure_ascii=False, indent=2))
     else:

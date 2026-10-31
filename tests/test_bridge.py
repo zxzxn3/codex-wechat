@@ -1,3 +1,4 @@
+from errors import UserFacingError, attachment_reason, backend_reason
 import asyncio
 import os
 from pathlib import Path
@@ -10,16 +11,12 @@ from agent_wechat import Bridge, parse_control
 from backend import CodexBackend, CodexRpcError
 from media import OUTPUT_HINT, MediaError
 from latency import Latency
+from command_specs import HELP
 from commands import handle
+from configuration import DEFAULT_ACK_TEMPLATE, processing_template
 from prompts import (
-    DEFAULT_ACK_TEMPLATE,
-    HELP,
     PING_REPLY,
     RESTART_NOT_SERVICE,
-    UserFacingError,
-    attachment_reason,
-    backend_reason,
-    processing_template,
     render_ack,
     session_summary,
     setting_summary,
@@ -98,7 +95,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             thread = await backend.thread()
             self.assertEqual(await backend.thread(thread), thread)
             answer = await asyncio.wait_for(backend.run(thread, "hello"), 3)
-            self.assertEqual(answer, "hello")
+            self.assertEqual(answer.text, "hello")
+            self.assertTrue(answer.completed)
         finally:
             await backend.close()
 
@@ -128,7 +126,6 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_latency_shows_only_wechat_channel(self):
         stats = Latency()
         stats.sends.append(50)
-        stats.record_agent(300, 1500, backend="codex", model="example-model")
         values = stats.values(120)
         self.assertEqual(values, {"发送延迟": "120", "接收延迟": "50"})
         self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, values), "120/50ms")
@@ -284,14 +281,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await preparing.wait()
         self.assertTrue(await backend.stop())
         release.set()
-        self.assertIn("未启动", await task)
+        self.assertIn("未启动", (await task).text)
         self.assertEqual(calls, [])
 
     async def test_desktop_events_deliver_once_without_owning_turn(self):
         backend = self.bridge.backend
         backend.selected_thread = "desktop-thread"
         results = []
-        backend.on_external_result = lambda *args: results.append(args)
+        backend.on_external_result = results.append
         backend.event({"method": "turn/started", "params": {"threadId": "desktop-thread",
                        "turn": {"id": "desktop-turn"}}})
         self.assertFalse(backend.active["owned"])
@@ -303,8 +300,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         backend.event(done)
         backend.event(done)
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0][1], "desktop result")
-        self.assertTrue(results[0][3])
+        self.assertEqual(results[0].text, "desktop result")
+        self.assertTrue(results[0].completed)
         self.assertIsNone(backend.active)
 
     async def test_sparse_rate_limit_updates_merge_without_thread(self):
@@ -315,7 +312,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         backend.event({"method": "account/rateLimits/updated", "params": {
             "rateLimits": {"secondary": {"usedPercent": 40, "windowDurationMins": 10080}}
         }})
-        snapshot = backend.info["rate_limits"]["rateLimits"]
+        snapshot = backend.account_limits["rateLimits"]
         self.assertEqual(snapshot["primary"]["usedPercent"], 20)
         self.assertEqual(snapshot["secondary"]["usedPercent"], 40)
 

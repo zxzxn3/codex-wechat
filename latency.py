@@ -7,7 +7,6 @@ import time
 class Latency:
     def __init__(self):
         self.sends = deque(maxlen=20)
-        self.agent = deque(maxlen=20)
 
     @staticmethod
     def received(source_ms=None):
@@ -17,9 +16,6 @@ class Latency:
             if 0 <= estimate < 24 * 60 * 60 * 1000:
                 result["ingress_ms"] = estimate
         return result
-
-    def record_agent(self, first_ms, total_ms, *, backend=None, model=None):
-        self.agent.append({"first": first_ms, "total": total_ms, "backend": backend, "model": model})
 
     @staticmethod
     def _display(value):

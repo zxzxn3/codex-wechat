@@ -3,27 +3,9 @@ from datetime import datetime
 import os
 
 
-DEFAULT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
-LEGACY_BOUNDED_ACK_TEMPLATE = "::{发送延迟}/{接收延迟}ms::"
-LEGACY_ACK_TEMPLATE = "{latency}"
+
 MAX_NOTICE_BYTES = 1000
 COMPLETION_NOTICE = ""
-
-HELP = "\n".join((
-    "`/status` 当前状态",
-    "`/settings` 当前设置",
-    "`/sessions` 会话",
-    "`/new` 新建",
-    "`/stop` 停止",
-    "`/ping` 消息通道延迟",
-    "`/switch {编号或ID}`",
-    "`/backend {名称}`",
-    "`/model {编号或名称}`",
-    "`/effort {档位}`",
-    "`/cwd {路径}`",
-    "`/ack` 处理提示",
-    "`/restart` 重启消息桥",
-))
 
 BACKEND_SUMMARY = (
     "当前后端：{当前}\n"
@@ -229,10 +211,6 @@ DIRECTORY_NOT_FOLDER = "未切换目录：路径不是文件夹\n请选择文件
 RESTART_USAGE = "用法：`/restart`"
 
 
-class UserFacingError(ValueError):
-    """An already complete WeChat-facing error message."""
-
-
 def fill(template, values):
     """Fill named prompt fields without evaluating arbitrary expressions."""
     return template.format_map(values)
@@ -243,19 +221,6 @@ def render_ack(template, values):
     for name, value in values.items():
         template = template.replace("{" + name + "}", str(value))
     return template
-
-
-def processing_template(config, state):
-    """Resolve config/state notice text; an empty text disables the notice."""
-    text = DEFAULT_ACK_TEMPLATE
-    for source in (config.get("processingNotice"), state.get("processingNotice")):
-        if isinstance(source, str):
-            text = source
-        elif isinstance(source, dict) and source.get("text") is not None:
-            text = source["text"]
-    if text in (LEGACY_ACK_TEMPLATE, LEGACY_BOUNDED_ACK_TEMPLATE):
-        return DEFAULT_ACK_TEMPLATE
-    return str(text)
 
 
 def effort_label(value):
@@ -432,55 +397,6 @@ def rate_limit_label(value):
             parts.append(f"可重置 {count} 次")
 
     return "  ".join(parts) or "暂不可用"
-
-
-def backend_reason(error):
-    text = str(error).casefold()
-    if "超时" in text or "timeout" in text:
-        return "连接超时"
-    if any(token in text for token in ("启动器", "no such file", "filenotfound")):
-        return "启动器未就绪"
-    if "systemd" in text or "用户服务" in text:
-        return "用户服务不可用"
-    if any(token in text for token in
-           ("websocket", "共享连接", "连接断开", "连接失败", "后端已退出")):
-        return "后端连接中断"
-    if "rpc" in text:
-        return "后端拒绝了请求"
-    if "依赖" in text or "websockets" in text:
-        return "后端组件不可用"
-    if "command" in text or "配置" in text:
-        return "后端配置无效"
-    return "服务暂不可用"
-
-
-def attachment_reason(error):
-    text = str(error).casefold()
-    if "超过" in text or "大小限制" in text:
-        return "文件超过大小限制"
-    if "图片仅支持" in text:
-        return "图片格式不支持"
-    if "凭据或运行状态" in text:
-        return "不允许发送消息桥私有状态"
-    if "自动回传仅限" in text:
-        return "只能自动发送当前会话目录内的文件"
-    if "不是普通文件" in text:
-        return "附件不是普通文件"
-    if any(token in text for token in
-           ("不存在", "无法读取", "permission denied", "permissionerror")):
-        return "文件不存在或不可读"
-    if any(token in text for token in ("密钥", "密文", "md5", "校验失败")):
-        return "附件校验失败"
-    if any(token in text for token in
-           ("cdn", "curl", "http", "上传", "未返回附件")):
-        return "微信附件服务未响应"
-    if "cryptography" in text or "依赖" in text:
-        return "附件组件不可用"
-    if any(token in text for token in ("未知附件类型", "下载引用", "缺少")):
-        return "附件格式不支持"
-    if "最多" in text:
-        return "附件数量超过限制"
-    return "附件处理失败"
 
 
 def session_name(value):
