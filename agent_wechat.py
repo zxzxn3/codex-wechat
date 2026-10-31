@@ -17,7 +17,7 @@ from storage import Store
 from wechat import WeChat, login
 from commands import ensure_session, handle, notice
 from command_specs import HELP, REGISTRY, CONTROL_LANES, command_lane
-from configuration import HotSettings, HOT_CONFIG_KEYS, completion_template
+from configuration import ConfigLoader, completion_template
 from quota import quota_warnings
 from records import InputPhase, TurnResult
 from slicing import split_text
@@ -82,8 +82,7 @@ def parse_control(text):
 class Bridge:
     def __init__(self, store, account, config, backend_factory=CodexBackend, channel=None, config_path=None):
         self.store, self.account, self.config = store, account, config
-        self.config_path = Path(config_path) if config_path else None
-        self.config_signature = self.config_file_signature()
+        self.settings = ConfigLoader(config, config_path)
         self.state = store.load("bridge", {"cursor": "", "thread": None,
             "inbox": [], "outbox": [], "seen": [], "running": False})
         self.channel = channel or WeChat(account)
@@ -93,8 +92,6 @@ class Bridge:
         self.backend_name = self.state.get("backendName", "codex")
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
-        hot = HotSettings.from_config(config)
-        self.slicing, self.notifications, self.source_hint = hot.slicing, hot.notifications, hot.source_hint
         self.controls = {lane: asyncio.Queue(maxsize=20) for lane in CONTROL_LANES}
         self.connection_lock = asyncio.Lock()
         self.input_paused = False
@@ -117,38 +114,23 @@ class Bridge:
         if not self.state["outbox"]:
             self.outbox_drained.set()
 
-    def config_file_signature(self):
-        try:
-            stat = self.config_path.stat() if self.config_path else None
-            return (stat.st_mtime_ns, stat.st_size) if stat else None
-        except OSError:
-            return None
+    @property
+    def slicing(self):
+        return self.settings.hot.slicing
+
+    @property
+    def notifications(self):
+        return self.settings.hot.notifications
+
+    @property
+    def source_hint(self):
+        return self.settings.hot.source_hint
 
     def reload_config(self):
-        signature = self.config_file_signature()
-        if self.config_path and signature != self.config_signature:
-            self.config_signature = signature
-            try:
-                fresh = json.loads(self.config_path.read_text())
-                if not isinstance(fresh, dict):
-                    raise ValueError()
-                hot = HotSettings.from_config(fresh)
-                changed = False
-                for key in HOT_CONFIG_KEYS:
-                    if fresh.get(key) != self.config.get(key):
-                        if key in ("processingNotice", "completionNotice"):
-                            self.state.pop(key, None)
-                            changed = True
-                        if key in fresh:
-                            self.config[key] = fresh[key]
-                        else:
-                            self.config.pop(key, None)
-                self.slicing, self.notifications, self.source_hint = hot.slicing, hot.notifications, hot.source_hint
-                self.backend.compaction_notice = self.notifications.compaction
-                if changed:
-                    self.save()
-            except (OSError, ValueError):
-                print("热配置未加载，保留原设置，请检查 JSON 和配置值。", file=sys.stderr)
+        changed = self.settings.reload(self.state)
+        self.backend.compaction_notice = self.notifications.compaction
+        if changed:
+            self.save()
         return self.config
 
     def save(self):

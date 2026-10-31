@@ -1,5 +1,8 @@
 """Local settings and legacy migrations, independent of presentation."""
 from dataclasses import dataclass
+from pathlib import Path
+import json
+import sys
 
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
@@ -79,3 +82,50 @@ def completion_template(config, state):
         if isinstance(source, str):
             return source
     return DEFAULT_COMPLETION_TEMPLATE
+
+
+class ConfigLoader:
+    """Own only hot values; launcher configuration remains the startup snapshot."""
+    def __init__(self, config, path=None):
+        self.config = config
+        self.path = Path(path) if path else None
+        self.hot = HotSettings.from_config(config)
+        self.signature = self.file_signature()
+
+    def file_signature(self):
+        try:
+            stat = self.path.stat() if self.path else None
+            return (stat.st_ino, stat.st_mtime_ns, stat.st_size) if stat else None
+        except OSError:
+            return None
+
+    def reload(self, overrides):
+        """Apply a validated batch and report whether persisted overrides changed."""
+        signature = self.file_signature()
+        if not self.path or signature == self.signature:
+            return False
+        self.signature = signature
+        try:
+            fresh = json.loads(self.path.read_text())
+            if not isinstance(fresh, dict):
+                raise ValueError("配置必须是对象")
+            hot = HotSettings.from_config(fresh)
+            # An editor may replace the file while reading; retry on the next use.
+            if self.file_signature() != signature:
+                self.signature = None
+                return False
+        except (OSError, ValueError):
+            print("热配置未加载，保留原设置，请检查 JSON 和配置值。", file=sys.stderr)
+            return False
+        changed = False
+        for key in HOT_CONFIG_KEYS:
+            if fresh.get(key) != self.config.get(key):
+                if key in ("processingNotice", "completionNotice") and key in overrides:
+                    overrides.pop(key)
+                    changed = True
+                if key in fresh:
+                    self.config[key] = fresh[key]
+                else:
+                    self.config.pop(key, None)
+        self.hot = hot
+        return changed
