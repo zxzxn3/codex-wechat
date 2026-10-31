@@ -7,15 +7,28 @@ pending contains UI approval data.
 import asyncio
 import json
 import os
+import re
 import secrets
 from media import OUTPUT_HINT
 
 
-
-
 class CodexRpcError(RuntimeError):
-    def __init__(self, code):
-        super().__init__(f"Codex RPC 错误 {code}")
+    def __init__(self, code, reason="", method=None):
+        self.code = code
+        # Keep useful daemon errors without echoing URLs, credentials or request bodies.
+        reason = str(reason).replace("\n", " ")
+        if re.search(r"\b(prompt|instructions?|input)\b", reason, re.I):
+            reason = "服务端拒绝了请求内容，原文已隐藏。"
+        else:
+            reason = re.sub(r"https?://\S+", "[URL]", reason)
+            reason = re.sub(r"(?i)bearer\s+\S+", "Bearer [已隐藏]", reason)
+            reason = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[已隐藏]", reason)
+            reason = re.sub(r'''(?i)((?:api[_-]?key|token|secret|authorization)["']?\s*[:=]\s*)[^\s,;}]+''',
+                            r"\1[已隐藏]", reason)
+        self.reason = reason[:300]
+        stage = f"（{method}）" if method else ""
+        detail = f"：{self.reason}" if self.reason else ""
+        super().__init__(f"Codex RPC 错误 {code}{stage}{detail}")
 
 
 class CodexBackend:
@@ -58,6 +71,8 @@ class CodexBackend:
         try:
             self.write({"id": key, "method": method, "params": params})
             return await asyncio.wait_for(future, 90)
+        except CodexRpcError as error:
+            raise CodexRpcError(error.code, error.reason, method) from None
         finally:
             self.requests.pop(key, None)
 
@@ -69,7 +84,8 @@ class CodexBackend:
                     future = self.requests.get(msg["id"])
                     if future and not future.done():
                         if "error" in msg:
-                            future.set_exception(CodexRpcError(msg['error'].get('code', 'unknown')))
+                            future.set_exception(CodexRpcError(msg['error'].get('code', 'unknown'),
+                                                               msg['error'].get('message', '')))
                         else:
                             future.set_result(msg.get("result", {}))
                 elif "id" in msg:
