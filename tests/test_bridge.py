@@ -262,6 +262,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("```", text)
         self.assertNotIn("1.", text)
 
+    async def test_backend_arguments_are_lowercase(self):
+        self.bridge.state["context"] = "context"
+        await handle(self.bridge, "/backend", "")
+        text = self.store.load("bridge")["outbox"][-1]["text"]
+        self.assertIn("可用：codex | deepseek", text)
+        self.assertIn("切换：`/backend deepseek`", text)
+        self.assertNotIn("切换：`/backend DeepSeek`", text)
+
     async def test_stop_during_input_preflight_never_starts_turn(self):
         backend = CodexBackend({"sharedDaemon": False}, self.temp.name, lambda _: None)
         preparing, release = asyncio.Event(), asyncio.Event()

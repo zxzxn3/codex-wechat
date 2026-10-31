@@ -1,7 +1,7 @@
 """WeChat conversation controls; lists come from the current backend."""
 from pathlib import Path
 
-from profiles import backend_label, switch
+from profiles import backend_argument, backend_label, switch
 from prompts import (
     ACK_USAGE,
     ACK_VIEW,
@@ -136,13 +136,13 @@ async def handle(bridge, command, argument):
     if command == "/backend" and not argument:
         current = backend_label(bridge.backend_name)
         names = list(bridge.backend_configs)
-        available = " | ".join(backend_label(name) for name in names)
+        available = " | ".join(backend_argument(name) for name in names)
         target = next((name for name in names if name != bridge.backend_name),
                       bridge.backend_name)
         bridge.reply(fill(BACKEND_SUMMARY, {
             "当前": current,
             "可用": available,
-            "目标": backend_label(target),
+            "目标": backend_argument(target),
         }))
         return
     if command == "/ack":

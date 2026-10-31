@@ -38,11 +38,15 @@ def backend_label(name):
     return BACKEND_LABELS.get(name, str(name))
 
 
+def backend_argument(name):
+    return str(name).lower()
+
+
 async def switch(bridge, name):
     resolved = next((key for key in bridge.backend_configs
                      if key.casefold() == str(name).casefold()), None)
     if resolved is None:
-        available = " | ".join(backend_label(key) for key in bridge.backend_configs)
+        available = " | ".join(backend_argument(key) for key in bridge.backend_configs)
         raise UserFacingError(fill(BACKEND_INVALID, {"可用": available}))
     name = resolved
     if name == bridge.backend_name and bridge.backend_started and bridge.loaded:
