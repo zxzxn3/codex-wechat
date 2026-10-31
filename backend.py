@@ -9,6 +9,9 @@ import json
 import os
 import re
 import secrets
+import shutil
+import socket
+import time
 from media import OUTPUT_HINT
 
 
@@ -31,6 +34,10 @@ class CodexRpcError(RuntimeError):
         super().__init__(f"Codex RPC 错误 {code}{stage}{detail}")
 
 
+class DeferTurn(RuntimeError):
+    """The desktop owns an active turn that did not accept this input."""
+
+
 class CodexBackend:
     def __init__(self, config, cwd, notify):
         self.config, self.cwd, self.notify = config, cwd, notify
@@ -40,28 +47,151 @@ class CodexBackend:
         self.serial = 0
         self.active = None
         self.reader = None
+        self.websocket = None
         self.stop_requested = False
         self.info = {}
+        self.selected_thread = None
+        self.blocked = False
+        self.runtime_generation = 0
+        self.on_activity = lambda: None
+        self.on_external_result = lambda *args: None
+        self.on_timing = lambda first_ms, total_ms: None
+        self.command = config.get("command", ["codex", "app-server"])
+        self.shared = config.get("sharedDaemon", self.command[-1:] == ["app-server"]
+                                 or self.command[-2:] == ["app-server", "proxy"])
 
     async def start(self):
         env = dict(os.environ)
         for key in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_HOME"):
             env.pop(key, None)
         env.update(self.config.get("env", {}))
-        self.proc = await asyncio.create_subprocess_exec(
-            *self.config.get("command", ["codex", "app-server"]),
-            cwd=self.cwd, env=env, stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-            limit=16 * 1024 * 1024)
+        command = list(self.command)
+        if self.shared:
+            if command[-1:] == ["app-server"]:
+                command.append("proxy")
+            elif command[-2:] != ["app-server", "proxy"]:
+                raise ValueError("sharedDaemon 模式的 command 须以 app-server 结尾")
+            try:
+                await asyncio.wait_for(self.connect(command, env), 5)
+                return
+            except CodexRpcError:
+                raise  # A protocol rejection is not evidence that the daemon is absent.
+            except (RuntimeError, OSError, asyncio.TimeoutError):
+                await self.close()
+            unit = await self.start_shared_daemon(command[:-1], env)
+            deadline = asyncio.get_running_loop().time() + 30
+            last_error = "连接超时"
+            while asyncio.get_running_loop().time() < deadline:
+                try:
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    await asyncio.wait_for(self.connect(command, env), min(5, remaining))
+                    return
+                except CodexRpcError:
+                    raise
+                except (RuntimeError, OSError, asyncio.TimeoutError) as error:
+                    last_error = str(error) if isinstance(error, RuntimeError) else type(error).__name__
+                    await self.close()
+                    await asyncio.sleep(0.5)
+            raise RuntimeError(f"共享后台自动启动后仍未连接成功：{last_error}（{unit}）；请检查启动器/登录状态后重试 /backend")
+        await self.connect(command, env)
+
+    async def start_shared_daemon(self, command, env):
+        # Let systemd own the daemon's cgroup, independently of the gateway.
+        # Native `daemon start` reuses a running daemon; it never requests a restart.
+        unit = "agent-wechat-codex-" + secrets.token_hex(8) + ".service"
+        executable = shutil.which(command[0], path=env.get("PATH"))
+        if not executable:
+            raise RuntimeError("找不到 Codex 启动器，无法自动启动共享后台")
+        command = [executable, *command[1:]]
+        managed = {"INVOCATION_ID", "JOURNAL_STREAM", "NOTIFY_SOCKET", "MAINPID",
+                   "MANAGERPID", "SYSTEMD_EXEC_PID", "WATCHDOG_PID", "WATCHDOG_USEC"}
+        args = ["systemd-run", "--user", "--quiet", "--collect", "--no-ask-password",
+                "--service-type=exec", "--property=ExitType=cgroup", "--property=UMask=0077",
+                "--expand-environment=no", "--unit=" + unit,
+                "--working-directory=" + self.cwd]
+        # Copy values from the caller's environment, never put secret values in argv.
+        args.extend("--setenv=" + key for key in env
+                    if key not in managed and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key))
+        absent = [key for key in ("CODEX_HOME", "CODEX_THREAD_ID", "CODEX_SESSION_ID")
+                  if key not in env]
+        if absent:
+            args.append("--property=UnsetEnvironment=" + " ".join(absent))
+        proc = await asyncio.create_subprocess_exec(
+            *args, "--", *command, "daemon", "start", env=env,
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL)
+        try:
+            code = await asyncio.wait_for(proc.wait(), 10)
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+        if code:
+            raise RuntimeError("无法自动启动共享后台，请检查用户 systemd 和 systemd-run；微信控制仍可用")
+        return unit
+
+    async def connect(self, command, env):
+        if self.shared:
+            try:
+                from websockets.asyncio.client import unix_connect
+                from websockets.exceptions import WebSocketException
+            except ImportError:
+                raise ValueError("共享后台需要 websockets 15–17，请按 README 安装项目依赖") from None
+            # `app-server proxy` forwards raw bytes, including the HTTP Upgrade and
+            # WebSocket frames. A local socketpair lets the library own this protocol
+            # while the existing launcher selects the daemon/home and credentials.
+            local, remote = socket.socketpair()
+            try:
+                try:
+                    self.proc = await asyncio.create_subprocess_exec(
+                        *command, cwd=self.cwd, env=env, stdin=remote, stdout=remote,
+                        stderr=asyncio.subprocess.DEVNULL)
+                finally:
+                    remote.close()
+                self.websocket = await unix_connect(
+                    sock=local, uri="ws://localhost/", proxy=None,
+                    open_timeout=4, close_timeout=1, compression=None,
+                    max_size=16 * 1024 * 1024)
+            except WebSocketException as error:
+                local.close()
+                raise RuntimeError(f"共享连接 WebSocket 握手失败（{type(error).__name__}）") from None
+            except BaseException:
+                local.close()
+                raise
+        else:
+            self.proc = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=self.cwd, env=env, stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                limit=16 * 1024 * 1024)
         self.reader = asyncio.create_task(self.read())
         await self.rpc("initialize", {"clientInfo": {
-            "name": "agent_wechat", "title": "Agent WeChat", "version": "0.1.0"}})
-        self.write({"method": "initialized", "params": {}})
+            "name": "agent_wechat", "title": "Agent WeChat", "version": "0.1.0"},
+            "capabilities": {"experimentalApi": True}})
+        await self.write({"method": "initialized", "params": {}})
 
-    def write(self, message):
+    async def write(self, message):
         if not self.proc or self.proc.returncode is not None:
             raise RuntimeError("Codex 后端已退出，请重启消息桥")
-        self.proc.stdin.write((json.dumps(message) + "\n").encode())
+        payload = json.dumps(message)
+        if self.websocket is not None:
+            from websockets.exceptions import WebSocketException
+            try:
+                await self.websocket.send(payload)
+            except WebSocketException as error:
+                raise RuntimeError(f"共享连接发送失败（{type(error).__name__}）") from None
+        else:
+            self.proc.stdin.write((payload + "\n").encode())
+            await self.proc.stdin.drain()
+
+    async def receive(self):
+        if self.websocket is not None:
+            from websockets.exceptions import WebSocketException
+            try:
+                return await self.websocket.recv()
+            except WebSocketException as error:
+                raise RuntimeError(f"共享连接接收失败（{type(error).__name__}）") from None
+        return await self.proc.stdout.readline()
 
     async def rpc(self, method, params):
         self.serial += 1
@@ -69,7 +199,7 @@ class CodexBackend:
         future = asyncio.get_running_loop().create_future()
         self.requests[key] = future
         try:
-            self.write({"id": key, "method": method, "params": params})
+            await self.write({"id": key, "method": method, "params": params})
             return await asyncio.wait_for(future, 90)
         except CodexRpcError as error:
             raise CodexRpcError(error.code, error.reason, method) from None
@@ -78,7 +208,7 @@ class CodexBackend:
 
     async def read(self):
         try:
-            while line := await self.proc.stdout.readline():
+            while line := await self.receive():
                 msg = json.loads(line)
                 if "id" in msg and "method" not in msg:
                     future = self.requests.get(msg["id"])
@@ -95,16 +225,28 @@ class CodexBackend:
         except (ValueError, OSError, RuntimeError):
             pass
         finally:
-            error = RuntimeError("Codex 连接断开，请重启消息桥；未自动重放任务")
+            error = RuntimeError("共享 Codex 连接断开，可重试 /backend 自动连接或启动后台；未重放任务"
+                                 if self.shared else "Codex 连接断开，请重启消息桥；未自动重放任务")
             for future in list(self.requests.values()):
                 if not future.done():
                     future.set_exception(error)
             if self.active and not self.active["done"].done():
-                self.active["done"].set_exception(error)
+                if self.active.get("owned"):
+                    self.active["done"].set_exception(error)
+                else:
+                    self.active["done"].cancel()
             self.pending.clear()
+            self.blocked = False
+            self.on_activity()
 
     async def server_request(self, msg):
         params = msg.get("params", {})
+        if self.shared and params.get("threadId") != self.selected_thread:
+            # Other desktop sessions keep their own request owner.
+            return
+        if self.shared and self.active and not self.active.get("owned"):
+            # Observing a desktop turn does not transfer its tool/approval request ownership.
+            return
         if (self.active and params.get("threadId") == self.active["thread"]
                 and msg["method"] in ("item/commandExecution/requestApproval",
                                        "item/fileChange/requestApproval")):
@@ -120,23 +262,51 @@ class CodexBackend:
                             f"同意：/approve {token}\n拒绝：/deny {token}")
                 return
             self.pending.pop(token)
-        self.write({"id": msg["id"], "error": {
+        await self.write({"id": msg["id"], "error": {
             "code": -32601, "message": "This bridge does not support this request"}})
         self.notify("Codex 请求了暂不支持的交互，已拒绝；可在电脑端处理该会话。")
 
     def event(self, msg):
-        current = self.active
         params = msg.get("params", {})
         if msg.get("method") == "serverRequest/resolved":
             for token, request in list(self.pending.items()):
                 if request["id"] == params.get("requestId"):
                     self.pending.pop(token, None)
-        if not current or params.get("threadId") != current["thread"]:
+        if params.get("threadId") != self.selected_thread:
             return
         method = msg.get("method")
+        if method in ("turn/started", "turn/completed"):
+            self.runtime_generation += 1
+        if method == "thread/status/changed":
+            status = params.get("status", {})
+            self.blocked = bool(status.get("activeFlags")) or status.get("type") == "systemError"
+            self.on_activity()
+            return
+        if (self.active and self.active.get("owned") and self.active["turn"] is None
+                and self.active.get("starting")):
+            # The start response identifies OUR turn. Do not bind a concurrent desktop
+            # notification to it merely because that notification arrived first.
+            if method in ("turn/started", "item/completed", "turn/completed"):
+                self.active["earlyEvents"].append(msg)
+            return
         if method == "turn/started":
-            current["turn"] = params["turn"]["id"]
-        elif method == "item/completed":
+            turn_id = params["turn"]["id"]
+            if not self.active or self.active["turn"] != turn_id:
+                self.active = self.new_turn(self.selected_thread, turn_id, owned=False)
+            self.on_activity()
+        current = self.active
+        if not current:
+            return
+        if current["turn"] is None:
+            return
+        if params.get("turnId") and current["turn"] != params["turnId"]:
+            return
+        if ((method == "item/agentMessage/delta" and params.get("delta")) or
+                (method == "item/completed" and params.get("item", {}).get("type") == "agentMessage"
+                 and params.get("item", {}).get("text"))):
+            if current["first_text"] is None:
+                current["first_text"] = time.perf_counter()
+        if method == "item/completed":
             item = params.get("item", {})
             if item.get("type") == "agentMessage":
                 current["messages"].append(item)
@@ -152,6 +322,50 @@ class CodexBackend:
             if status != "completed":
                 text = (text + "\n\n" if text else "") + f"任务状态：{status}。"
             current["done"].set_result(text or "本轮已结束，没有文字回复。")
+            if current.get("owned"):
+                first = current["first_text"]
+                self.on_timing((first - current["began"]) * 1000 if first is not None else None,
+                               (time.perf_counter() - current["began"]) * 1000)
+            self.pending.clear()
+            if not current.get("owned"):
+                self.on_external_result(current["thread"], text or "本轮已结束，没有文字回复。",
+                                        self.info.get("cwd") or self.cwd)
+                if self.active is current:
+                    self.active = None
+            self.on_activity()
+
+    def new_turn(self, thread_id, turn_id=None, *, owned):
+        return {"thread": thread_id, "turn": turn_id, "messages": [], "owned": owned,
+                "starting": False,
+                "earlyEvents": [],
+                "began": time.perf_counter(), "first_text": None,
+                "done": asyncio.get_running_loop().create_future()}
+
+    async def refresh_runtime(self):
+        if not self.shared or not self.selected_thread:
+            return
+        generation = self.runtime_generation
+        thread = await self.read_thread(self.selected_thread)
+        if generation != self.runtime_generation:
+            return
+        for source, target in (("model", "model"), ("reasoningEffort", "effort"), ("cwd", "cwd")):
+            if thread.get(source) is not None:
+                self.info[target] = thread[source]
+        status = thread.get("status", {})
+        self.blocked = bool(status.get("activeFlags")) or status.get("type") == "systemError"
+        if status.get("type") == "active":
+            turns = await self.rpc("thread/turns/list", {"threadId": self.selected_thread,
+                "limit": 10, "itemsView": "notLoaded"})
+            if generation != self.runtime_generation:
+                return
+            turn = next((t for t in turns["data"] if t["status"] == "inProgress"), None)
+            if turn and (not self.active or self.active["turn"] != turn["id"]):
+                self.active = self.new_turn(self.selected_thread, turn["id"], owned=False)
+        elif self.active and not self.active.get("owned"):
+            if not self.active["done"].done():
+                self.active["done"].cancel()
+            self.active = None
+        self.on_activity()
 
     async def thread(self, thread_id=None, overrides=None):
         # Existing sessions keep their own settings; new sessions use configured defaults.
@@ -171,6 +385,11 @@ class CodexBackend:
                      "model": result.get("model", thread.get("model")),
                      "effort": result.get("reasoningEffort", thread.get("reasoningEffort")),
                      "cwd": result.get("cwd", thread.get("cwd", self.cwd))}
+        if self.selected_thread != thread["id"]:
+            self.active = None
+            self.pending.clear()
+        self.selected_thread = thread["id"]
+        await self.refresh_runtime()
         return result["thread"]["id"]
 
     async def list_threads(self, cursor=None, search=None):
@@ -222,33 +441,56 @@ class CodexBackend:
             await self.rpc("turn/steer", {"threadId": thread_id,
                 "expectedTurnId": turn_id, "input": inputs})
         except CodexRpcError:
-            # A rejected RPC can race with completion; transport timeouts must never replay.
-            if self.active is not current or current["done"].done():
-                return False
-            thread = await self.read_thread(thread_id)
-            if thread.get("status", {}).get("type") in ("idle", "notLoaded"):
-                return False
-            raise
+            # A server rejection is definite non-delivery (including unsteerable reviews).
+            # Queue for after completion; transport errors/timeouts still propagate.
+            return False
         return True
 
     async def run(self, thread_id, text, attachments=None):
-        if self.active:
-            raise RuntimeError("后端正在工作")
-        inputs = await self.input_items(text, attachments)
-        self.active = {"thread": thread_id, "turn": None, "messages": [],
-                       "done": asyncio.get_running_loop().create_future()}
+        # Claim the preparation phase so /stop is remembered even during model preflight.
+        if self.active and not self.active["done"].done():
+            accepted = await self.steer(thread_id, self.active["turn"], text, attachments)
+            if accepted:
+                return None  # The observed desktop turn delivers its result separately.
+            if self.active and not self.active["done"].done():
+                raise DeferTurn("活动轮次暂不接受补充")
+        current = self.new_turn(thread_id, owned=True)
+        self.active = current
+        self.stop_requested = False
         try:
+            await self.refresh_runtime()
+            inputs = await self.input_items(text, attachments)
+            if self.stop_requested:
+                return "已停止，未启动模型轮次。"
+            if self.active is not current:
+                # A desktop turn started while inputs were being prepared.
+                if self.active and await self.steer(thread_id, self.active["turn"], text, attachments):
+                    return None
+                raise DeferTurn("桌面会话状态已改变")
+            current["starting"] = True
             result = await self.rpc("turn/start", {"threadId": thread_id,
                 **{key: self.info[key] for key in ("model", "effort", "cwd")
                    if self.info.get(key) is not None},
                 "input": inputs})
-            self.active["turn"] = result["turn"]["id"]
-            if self.stop_requested and not self.active["done"].done():
+            current["turn"] = result["turn"]["id"]
+            for event in current["earlyEvents"]:
+                params = event.get("params", {})
+                event_turn = params.get("turnId") or params.get("turn", {}).get("id")
+                if event_turn == current["turn"]:
+                    self.event(event)
+            current["earlyEvents"].clear()
+            if self.stop_requested and not current["done"].done():
                 await self.stop()
-            return await self.active["done"]
+            return await current["done"]
+        except CodexRpcError:
+            await self.refresh_runtime()
+            if self.active and self.active is not current and not self.active["done"].done():
+                raise DeferTurn("桌面抢先启动了轮次，稍后重试本条消息") from None
+            raise
         finally:
-            self.active = None
-            self.pending.clear()
+            if self.active is current:
+                self.active = None
+                self.pending.clear()
             self.stop_requested = False
 
     async def stop(self):
@@ -261,14 +503,17 @@ class CodexBackend:
                                            "turnId": self.active["turn"]})
         return True
 
-    def answer_approval(self, token, decision):
+    async def answer_approval(self, token, decision):
         request = self.pending.pop(token, None)
         if not request:
             return False
-        self.write({"id": request["id"], "result": {"decision": decision}})
+        await self.write({"id": request["id"], "result": {"decision": decision}})
         return True
 
     async def close(self):
+        if self.websocket is not None:
+            await self.websocket.close()
+            self.websocket = None
         if self.proc and self.proc.returncode is None:
             self.proc.terminate()
             try:

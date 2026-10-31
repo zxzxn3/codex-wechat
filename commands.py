@@ -21,13 +21,16 @@ def notice(bridge):
             **bridge.state.get("processingNotice", {})}
 
 
-def info(bridge, heading="当前会话"):
+def info(bridge, heading="当前会话", *, detailed=False):
     details = bridge.backend.info
     return (f"{heading}\n后端：{bridge.backend_name}\n名称：{details.get('name') or '未命名'}\n"
             f"会话：{bridge.state.get('thread') or '尚未创建'}\n"
             f"模型：{details.get('model') or '由 Codex 默认选择'}\n"
             f"思考强度：{details.get('effort') or 'Codex 默认（未返回具体档位）'}\n"
-            f"工作目录：{details.get('cwd') or bridge.backend.cwd}")
+            f"工作目录：{details.get('cwd') or bridge.backend.cwd}\n"
+            f"连接：{'共享后台' if bridge.backend.shared else '独立后台'}\n"
+            f"桌面待处理：{'是' if bridge.backend.blocked else '否'}\n"
+            f"活动轮次：{bridge.active_turn()['turn'] if bridge.active_turn() else '无'}")
 
 
 async def activate(bridge, thread_id=None, overrides=None):
@@ -37,12 +40,19 @@ async def activate(bridge, thread_id=None, overrides=None):
     if thread_id:
         thread = await bridge.backend.read_thread(thread_id)
         status = thread.get("status", {}).get("type")
-        if status in ("active", "systemError"):
+        if status == "systemError":
             raise ValueError("目标会话正在工作或等待处理，请先在原客户端处理后再切换。")
+        if status == "active":
+            if not bridge.backend.shared or overrides:
+                raise ValueError("活动会话只支持通过共享后台连接，且不能在工作中覆盖模型或目录。")
+            # Adopt the desktop's current settings instead of applying stale mobile overrides.
+            saved = {}
     selected = await bridge.backend.thread(thread_id, saved)
     bridge.state["thread"] = selected
     if saved:
         bridge.state.setdefault("sessionOptions", {})[selected] = saved
+    elif thread_id:
+        bridge.state.setdefault("sessionOptions", {}).pop(selected, None)
     bridge.loaded = True
     bridge.save()
 
@@ -118,10 +128,10 @@ async def handle(bridge, command, argument):
             for index, model in enumerate(models, 1)) + "\n/model 编号或完整模型名")
         return
     if command == "/cwd" and not argument:
-        bridge.reply(info(bridge))
+        bridge.reply("工作目录：" + (bridge.backend.info.get("cwd") or bridge.backend.cwd))
         return
     # All state-changing session controls use one lock; incoming work waits until done.
-    if bridge.running or bridge.steering or bridge.state["inbox"] or bridge.session_lock.locked():
+    if bridge.running or bridge.steering or bridge.active_turn() or bridge.state["inbox"] or bridge.session_lock.locked():
         raise ValueError("当前有任务或待办；请先 /stop，等待结束后再切换设置。")
     async with bridge.session_lock:
         if command == "/backend":

@@ -16,10 +16,24 @@ esac
 [ "$#" -le 1 ] || die '参数过多'
 [ "$PROJECT_DIR" = "$EXPECTED_DIR" ] || die "项目须放在 $EXPECTED_DIR"
 command -v python3 >/dev/null || die '缺少 python3'
+PYTHON=python3
+if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_DIR/.venv/bin/python"
+fi
+"$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || die '需要 Python 3.11+'
 command -v curl >/dev/null || die '附件传输需要 curl'
-python3 -c 'from cryptography.hazmat.primitives.ciphers import algorithms; algorithms.AES128' 2>/dev/null ||
+"$PYTHON" -c 'from cryptography.hazmat.primitives.ciphers import algorithms; algorithms.AES128' 2>/dev/null ||
     die '附件功能需要 Python cryptography 38+（本机可用系统包 python-cryptography）'
+"$PYTHON" -c 'from websockets.asyncio.client import unix_connect' 2>/dev/null ||
+    die '共享后台需要 websockets 15–17，请按 README 安装项目依赖'
 command -v systemctl >/dev/null || die '缺少 systemctl'
+command -v systemd-run >/dev/null || die '共享后台自动启动需要 systemd-run'
+SYSTEMD_VERSION=$(systemd-run --version)
+SYSTEMD_VERSION=${SYSTEMD_VERSION%%$'\n'*}
+SYSTEMD_VERSION=${SYSTEMD_VERSION#systemd }
+SYSTEMD_VERSION=${SYSTEMD_VERSION%% *}
+[[ "$SYSTEMD_VERSION" =~ ^[0-9]+$ ]] && [ "$SYSTEMD_VERSION" -ge 254 ] ||
+    die '共享后台自动启动需要 systemd 254+'
 [ -x "$PROJECT_DIR/agent-wechat" ] || die 'agent-wechat 入口不可执行'
 [ -f "$PROJECT_DIR/$UNIT" ] || die "缺少 $UNIT"
 
@@ -50,7 +64,7 @@ elif [ ! -f "$PROJECT_DIR/.state/account.json" ]; then
     echo '尚未绑定微信，请先执行 agent-wechat login，然后 systemctl --user start agent-wechat。'
 else
     # A foreground bridge keeps its connection; don't start a competing systemd instance.
-    if python3 - "$PROJECT_DIR/.state/lock" <<'PY'
+    if "$PYTHON" - "$PROJECT_DIR/.state/lock" <<'PY'
 import fcntl
 from pathlib import Path
 import sys

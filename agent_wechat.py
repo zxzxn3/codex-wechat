@@ -10,7 +10,7 @@ import signal
 import sys
 import uuid
 
-from backend import CodexBackend
+from backend import CodexBackend, DeferTurn
 from storage import Store
 from wechat import WeChat, login
 from commands import HELP, MANAGED, ensure_session, handle, info, notice
@@ -19,6 +19,7 @@ import service_control
 from media import Media, MediaError, MAX_ATTACHMENTS, split_answer
 
 ROOT = Path(__file__).resolve().parent
+SEND_ATTEMPTS = 3
 
 
 class Bridge:
@@ -37,6 +38,7 @@ class Bridge:
         self.backend_started = False
         self.wake = asyncio.Event()
         self.steer_wake = asyncio.Event()
+        self.external_results = asyncio.Queue()
         self.send_wake = asyncio.Event()
         self.loaded = False
         self.running = False
@@ -66,8 +68,22 @@ class Bridge:
         print(f"任务阶段：{phase}", file=sys.stderr, flush=True)
 
     def make_backend(self, name):
-        return self.backend_factory(self.backend_configs[name],
+        backend = self.backend_factory(self.backend_configs[name],
             str(Path(self.config.get("cwd", ROOT / "workspace")).expanduser().resolve()), self.reply)
+        backend.on_activity = self.backend_activity
+        backend.on_external_result = lambda thread, text, cwd: self.external_results.put_nowait(
+            {"thread": thread, "text": text, "cwd": cwd})
+        return backend
+
+    def backend_activity(self):
+        # Notifications never start work or change the selected session.
+        if hasattr(self, "wake"):
+            self.wake.set()
+            self.steer_wake.set()
+
+    def active_turn(self):
+        active = self.backend.active
+        return active if active and not active["done"].done() else None
 
     async def ensure_backend(self):
         if not self.backend_started:
@@ -114,7 +130,7 @@ class Bridge:
         self.save()
         self.send_wake.set()
 
-    async def deliver_answer(self, answer):
+    async def deliver_answer(self, answer, *, finish_running=True, cwd=None):
         text, specs = split_answer(answer)
         entries, errors = [], []
         if len(specs) > MAX_ATTACHMENTS:
@@ -122,12 +138,14 @@ class Bridge:
         for spec in specs[:MAX_ATTACHMENTS]:
             try:
                 asset = await asyncio.to_thread(self.media.snapshot, spec["path"],
-                    self.backend.info.get("cwd") or self.backend.cwd, spec.get("kind", "auto"))
+                    cwd or self.backend.info.get("cwd") or self.backend.cwd,
+                    spec.get("kind", "auto"), automatic=True)
                 entries.append(self.asset_entry(asset))
             except (MediaError, ValueError) as error:
                 errors.append(f"附件未加入发送队列：{error}")
         # Commit the final text, frozen files and completion marker in one snapshot.
-        self.state["running"] = False
+        if finish_running:
+            self.state["running"] = False
         if text or errors:
             self.reply("\n\n".join(part for part in (text, "\n".join(errors)) if part), persist=False)
         self.state["outbox"].extend(entries)
@@ -208,28 +226,35 @@ class Bridge:
             except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
                 self.reply(f"未重启：{error}")
         elif command == "/status":
-            status = "工作中" if self.running or self.steering else "空闲"
+            status = "工作中" if self.running or self.steering or self.active_turn() else "空闲"
             self.reply(f"Codex：{status}；待办 {len(self.state['inbox'])} 条；"
                        f"待审批 {len(self.backend.pending)} 条。\n"
+                       f"失败发送记录：{len(self.state.get('failedOutbox', []))} 条\n"
                        f"阶段：{self.phase}\n"
                        f"收信模式：{self.input_mode}；正在追加：{'是' if self.steering else '否'}\n"
-                       + info(self))
+                       + info(self, detailed=True))
         elif command == "/stop":
             self.stopping = True
             self.state["inbox"].clear()
             self.save()
-            stopped = await self.backend.stop()
-            self.reply("已请求停止，并清空待办。" if stopped else
-                       ("已标记停止并清空待办；当前准备或附件处理结束后将停止。" if self.running else
-                        "已清空待办；当前没有可中断的任务。"))
+            try:
+                stopped = await self.backend.stop()
+                self.reply("已请求停止，并清空待办。" if stopped else
+                           ("已标记停止并清空待办；当前准备或附件处理结束后将停止。" if self.running else
+                            "已清空待办；当前没有可中断的任务。"))
+            except (RuntimeError, OSError, asyncio.TimeoutError):
+                self.reply("待办已清空，但停止当前轮次失败或未确认；请在桌面检查，勿当作已停止。")
         elif command in ("/approve", "/deny"):
-            ok = self.backend.answer_approval(argument, "accept" if command == "/approve" else "decline")
-            self.reply("已提交本次决定。" if ok else "审批编号无效或已过期。")
+            try:
+                ok = await self.backend.answer_approval(argument, "accept" if command == "/approve" else "decline")
+                self.reply("已提交本次决定。" if ok else "审批编号无效或已过期。")
+            except (RuntimeError, OSError):
+                self.reply("审批决定发送失败；请在桌面处理或刷新状态。")
         else:
             self.reply("未知命令。\n" + HELP)
 
     async def restart_service(self):
-        if self.running or self.steering or self.state["inbox"] or self.session_lock.locked():
+        if self.running or self.steering or self.active_turn() or self.state["inbox"] or self.session_lock.locked():
             raise ValueError("当前有任务或待办，请先 /stop 并等待任务结束，再发 /restart。")
         async with self.session_lock:
             await service_control.require_service_owner()
@@ -255,6 +280,11 @@ class Bridge:
         while True:
             if self.restarting or self.steering or self.session_lock.locked():
                 await asyncio.sleep(0.1)
+                continue
+            if self.active_turn() or self.backend.blocked:
+                self.wake.clear()
+                self.steer_wake.set()
+                await self.wake.wait()
                 continue
             if not self.state["inbox"]:
                 self.wake.clear()
@@ -285,10 +315,20 @@ class Bridge:
                 self.set_phase("Agent 处理（含模型能力查询）")
                 self.steer_wake.set()
                 answer = await self.backend.run(self.state["thread"], job["text"], attachments=attachments)
-                self.set_phase("准备回传结果")
-                await self.deliver_answer(answer)
+                if answer is not None:
+                    self.set_phase("准备回传结果")
+                    await self.deliver_answer(answer)
+                else:
+                    self.state["running"] = False
+                    self.save()
             except asyncio.CancelledError:
                 raise
+            except DeferTurn:
+                job["mode"] = "queue"
+                job["preparedAttachments"] = attachments
+                self.state["inbox"].insert(0, job)
+                self.state["running"] = False
+                self.save()
             except MediaError as error:
                 self.state["running"] = False
                 self.reply(f"附件处理失败，本条未交给 Agent：{error}")
@@ -311,14 +351,15 @@ class Bridge:
         while True:
             await self.steer_wake.wait()
             self.steer_wake.clear()
-            while self.running and self.state["inbox"] and not self.stopping:
+            while (self.running or self.active_turn()) and self.state["inbox"] and not self.stopping:
                 job = self.state["inbox"][0]
                 if job.get("mode", self.input_mode) == "queue":
                     break
                 backend = self.backend
                 active = backend.active
                 # Preparation has no turn id yet; approvals must be handled before steering.
-                if (not active or not active["turn"] or active["done"].done() or backend.pending):
+                if (not active or not active["turn"] or active["done"].done()
+                        or backend.pending or backend.blocked):
                     await asyncio.sleep(0.1)
                     continue
                 turn_id, thread_id = active["turn"], active["thread"]
@@ -329,7 +370,7 @@ class Bridge:
                         self.save()
                     if self.stopping or not any(item is job for item in self.state["inbox"]):
                         break
-                    if backend.pending:
+                    if backend.pending or backend.blocked:
                         continue
                     # Persist the uncertain-delivery boundary before asking the backend.
                     job["dispatching"] = True
@@ -363,6 +404,16 @@ class Bridge:
                         self.set_phase("空闲")
                     self.wake.set()
 
+    async def external_result_worker(self):
+        while True:
+            result = await self.external_results.get()
+            try:
+                if result["thread"] != self.state["thread"]:
+                    self.reply(f"会话 {result['thread']} 的后续结果：")
+                await self.deliver_answer(result["text"], finish_running=False, cwd=result["cwd"])
+            finally:
+                self.external_results.task_done()
+
     async def sender(self):
         while True:
             if not self.state["outbox"]:
@@ -376,13 +427,19 @@ class Bridge:
                     self.save()
                 await self.channel.send(entry)
             except Exception as error:
-                if "asset" in entry:
-                    entry["attempts"] = entry.get("attempts", 0) + 1
-                    if entry["attempts"] >= 3:
-                        self.state["outbox"].pop(0)
-                        self.reply(f"附件发送失败：{entry['asset']['name']}。已尝试 3 次，请稍后用 /send 重试。")
-                        continue
+                entry["attempts"] = entry.get("attempts", 0) + 1
+                if entry["attempts"] >= SEND_ATTEMPTS:
+                    self.state["outbox"].pop(0)
+                    self.state["failedOutbox"] = (self.state.get("failedOutbox", []) + [entry])[-20:]
                     self.save()
+                    if "asset" in entry:
+                        self.reply(f"附件发送失败：{entry['asset']['name']}。已尝试 3 次，请稍后用 /send 重试。")
+                    else:
+                        print("文字发送重试耗尽，已保存失败记录并继续后续回复。", file=sys.stderr, flush=True)
+                    if not self.state["outbox"]:
+                        self.outbox_drained.set()
+                    continue
+                self.save()
                 print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
                 await asyncio.sleep(5)
                 continue
@@ -415,16 +472,19 @@ class Bridge:
             if self.state["running"]:
                 self.state["running"] = False
                 self.state["inbox"].clear()
-                self.reply("上次运行在任务完成前中断。未自动重放该任务；请检查会话后重新交代。")
+                self.reply("上次消息桥在等待结果时退出，未自动重放；共享后台可能仍在执行，请查看当前状态。")
+            stage = "启动后端连接"
             try:
                 await self.ensure_backend()
                 if self.state["thread"]:
+                    stage = "恢复会话"
                     await ensure_session(self)
             except (RuntimeError, ValueError, OSError, asyncio.TimeoutError) as error:
-                print(f"后端启动或恢复失败（{type(error).__name__}）；微信控制仍可用。", file=sys.stderr)
-                self.reply("后端启动或恢复失败，可用 /backend 切换后端，或处理后重新发消息。")
+                detail = str(error) if isinstance(error, (RuntimeError, ValueError)) else type(error).__name__
+                print(f"{stage}失败：{detail}；微信控制仍可用。", file=sys.stderr)
+                self.reply(f"{stage}失败：{detail}\n可用 /backend 重试或切换后端。")
             tasks = [asyncio.create_task(fn()) for fn in
-                     (self.poller, self.worker, self.steering_worker, self.sender)]
+                     (self.poller, self.worker, self.steering_worker, self.external_result_worker, self.sender)]
             print("微信消息桥已启动；Ctrl+C 停止。", flush=True)
             await asyncio.gather(*tasks)
         finally:

@@ -26,3 +26,11 @@ DeepSeek 接入依据：本机 `codex-deepseek/README.md` 与 launcher.py 的 ap
 CDN 连接诊断：现场观察到网关到 CDN 的 IPv6 TCP 连接处于 SYN-SENT，DNS 返回多个 IPv6 地址排在 IPv4 前。Python 3.14 socket.create_connection 顺序尝试解析地址，原 60 秒超时可在多个地址上累计。修复改用本机 curl 8.23 的默认 Happy Eyeballs；[curl 手册](https://curl.se/docs/manpage.html) 核对 --connect-timeout、--max-time、--config、--max-filesize（8.4+ 可限制传输中大小）。未用真实附件做操作测试。
 
 默认追加消息依据：已查阅的 OpenAI App Server 文档 Steer an active turn 段落和本机 TurnSteerParams schema。turn/steer 必须携带 expectedTurnId，接受与 turn/start 相同的 UserInput 数组，不允许模型/目录等 turn-level overrides。当前轮次已结束时拒绝追加；不把超时当成确定未投递。仅静态检查，未对运行中的会话做 steering 操作测试。
+
+桌面共享接入依据：本机 Codex CLI 0.166.0 的 `app-server proxy --help`（通过 stdio 原样转发已有控制 socket 的字节）和 `app-server daemon start --help`（后台未运行时启动，已运行时复用；只查帮助，未执行）；官方 App Server 的 thread/resume、thread/status/changed、turn/started、turn/completed、thread/turns/list(itemsView=notLoaded)，以及本机对应 schema。网关自动连接或启动共享 daemon，不停止或重启它；接入使用现有用户/home 的原认证和权限，不复制凭据，不强行解锁或杀桌面进程。尚未执行真实会话接管测试。
+
+2026-11-01 用户 /restart 失败后修正：日志显示 native daemon 返回 alreadyRunning，但网关 35 秒后连接失败。重新核对 [App Server Protocol](https://learn.chatgpt.com/docs/app-server#protocol)：Unix 控制 socket 使用 HTTP Upgrade 后的 WebSocket，每条 JSON-RPC 为一条文本消息；proxy 转发原始字节，不能直接使用 JSONL。改为 socketpair 接启动器的 stdin/stdout，通过 [websockets asyncio client](https://websockets.readthedocs.io/en/stable/reference/asyncio/client.html) 的 unix_connect(sock=...)、send/recv/close 实现协议，禁用外部代理和压缩，限制 16 MiB。依赖安装到项目 .venv，不改系统 Python。安装得到 17.4；该版本在线文档页未能访问，已读稳定文档并对照本机 17.4 的 unix_connect 实现与 Python 3.14 create_unix_connection 文档确认 socket 接口。未执行连接、会话或消息操作测试。
+
+后台自动启动依据（2026-11-01）：[systemd-run 262](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html) 的独立 transient service、--setenv=NAME（从调用环境复制值）、--collect、--expand-environment=no；[systemd.service 262](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) 的 Type=exec 与 ExitType=cgroup（派生进程仍存活时保持服务）。因此不用网关自身的子进程 cgroup 承载公共后台，不设置 PartOf=agent-wechat.service，不调用 daemon restart。启动就绪以实际 proxy initialize 成功为准，不以 systemd-run 退出成功为准。仅核对文档及源码，未启动或重启任何服务。
+
+独立静态审阅指出的相关修正：在 input_items 预检前建立可停止的本地轮次状态；明确拒绝 steer 时改为 queue，超时不重发；所有出站消息限定重试并保留有限失败记录；自动附件仅限工作目录/媒体目录，任意其他路径须显式 /send；控制命令错误显式回报，后端切换后的旧连接清理错误不再假称切换失败。新增离线用例仅编写，未执行。

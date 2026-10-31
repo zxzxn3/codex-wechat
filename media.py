@@ -215,7 +215,7 @@ class Media:
             result.append({"path": str(path), "kind": kind})
         return result
 
-    def snapshot(self, value, cwd, kind="auto"):
+    def snapshot(self, value, cwd, kind="auto", *, automatic=False):
         if kind not in ("auto", "image", "file"):
             raise MediaError("未知附件类型。")
         path = Path(value).expanduser()
@@ -227,6 +227,11 @@ class Media:
             state_root = self.root.parent
             if path.is_relative_to(state_root) and not path.is_relative_to(self.root):
                 raise MediaError("不能发送消息桥的登录凭据或运行状态。")
+            if automatic and not path.is_relative_to(self.root):
+                workspace = Path(cwd).expanduser().resolve()
+                if (workspace in (Path.home(), Path("/")) or not path.is_relative_to(workspace)
+                        or any(part.startswith(".") for part in path.relative_to(workspace).parts)):
+                    raise MediaError("自动回传仅限当前工作目录内的非隐藏文件或媒体目录；其他路径请明确使用 /send。")
             if not path.is_file():
                 raise MediaError("附件路径不是普通文件。")
             with path.open("rb") as stream:

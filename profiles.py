@@ -35,13 +35,16 @@ async def switch(bridge, name):
              deepcopy(bridge.state.get("backendSessions", {}).get(name, {})))
     candidate = bridge.make_backend(name)
     thread_id = saved.get("thread")
+    active = False
     try:
         await candidate.start()
         if thread_id:
             thread = await candidate.read_thread(thread_id)
-            if thread.get("status", {}).get("type") in ("active", "systemError"):
+            status = thread.get("status", {}).get("type")
+            if status == "systemError" or (status == "active" and not candidate.shared):
                 raise ValueError("目标后端的上次会话正在工作或等待处理，请先在原客户端处理。")
-        options = saved.get("sessionOptions", {}).get(thread_id, {})
+            active = status == "active"
+        options = {} if active else saved.get("sessionOptions", {}).get(thread_id, {})
         selected = await candidate.thread(thread_id, options)
     except BaseException:
         await candidate.close()
@@ -50,6 +53,8 @@ async def switch(bridge, name):
     previous = bridge.backend
     bridge.state.setdefault("backendSessions", {})[bridge.backend_name] = snapshot(bridge.state)
     restore(bridge.state, saved)
+    if active:
+        bridge.state.setdefault("sessionOptions", {}).pop(thread_id, None)
     bridge.state["thread"] = selected
     bridge.backend_name = name
     bridge.state["backendName"] = name
@@ -59,4 +64,7 @@ async def switch(bridge, name):
     bridge.resuming = True
     bridge.model_choices = []
     bridge.save()
-    await previous.close()
+    try:
+        await previous.close()
+    except Exception:
+        bridge.reply("已切换后端；旧连接清理未完成，请在电脑端检查，当前选择已保存。")

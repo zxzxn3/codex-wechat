@@ -3,4 +3,8 @@
 set -euo pipefail
 PROJECT_DIR="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 export PATH="$HOME/.local/bin:$PATH"
-exec python3 -u "$PROJECT_DIR/agent_wechat.py" "$@"
+PYTHON=python3
+if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_DIR/.venv/bin/python"
+fi
+exec "$PYTHON" -u "$PROJECT_DIR/agent_wechat.py" "$@"

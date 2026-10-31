@@ -6,7 +6,8 @@ import tempfile
 import unittest
 
 from agent_wechat import Bridge
-from backend import CodexBackend
+from backend import CodexBackend, CodexRpcError
+from media import MediaError
 from storage import Store
 from wechat import trusted_url
 
@@ -73,3 +74,72 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 trusted_url(value)
         self.assertEqual(trusted_url("https://ilinkai.weixin.qq.com/"), "https://ilinkai.weixin.qq.com")
+
+
+
+
+    async def test_stop_during_input_preflight_never_starts_turn(self):
+        backend = CodexBackend({"sharedDaemon": False}, self.temp.name, lambda _: None)
+        preparing, release = asyncio.Event(), asyncio.Event()
+        calls = []
+
+        async def inputs(*args):
+            preparing.set()
+            await release.wait()
+            return []
+
+        async def rpc(method, params):
+            calls.append(method)
+            raise AssertionError("No RPC should run after stopping preflight")
+
+        backend.input_items, backend.rpc = inputs, rpc
+        task = asyncio.create_task(backend.run("thread", "image task"))
+        await preparing.wait()
+        self.assertTrue(await backend.stop())
+        release.set()
+        self.assertIn("未启动", await task)
+        self.assertEqual(calls, [])
+
+    async def test_desktop_events_deliver_once_without_owning_turn(self):
+        backend = self.bridge.backend
+        backend.selected_thread = "desktop-thread"
+        results = []
+        backend.on_external_result = lambda *args: results.append(args)
+        backend.event({"method": "turn/started", "params": {"threadId": "desktop-thread",
+                       "turn": {"id": "desktop-turn"}}})
+        self.assertFalse(backend.active["owned"])
+        backend.event({"method": "item/completed", "params": {"threadId": "desktop-thread",
+            "turnId": "desktop-turn", "item": {"type": "agentMessage", "phase": "final_answer",
+                                                  "text": "desktop result"}}})
+        done = {"method": "turn/completed", "params": {"threadId": "desktop-thread",
+                "turn": {"id": "desktop-turn", "status": "completed"}}}
+        backend.event(done)
+        backend.event(done)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][1], "desktop result")
+        self.assertIsNone(backend.active)
+
+    async def test_definite_steer_rejection_preserves_active_turn(self):
+        backend = self.bridge.backend
+        current = backend.new_turn("thread", "review-turn", owned=False)
+        backend.active = current
+
+        async def reject(*args):
+            raise CodexRpcError(-32600, "active turn is not steerable")
+
+        backend.rpc = reject
+        self.assertFalse(await backend.steer("thread", "review-turn", "follow-up"))
+        self.assertIs(backend.active, current)
+        self.assertFalse(current["done"].done())
+
+    async def test_automatic_media_cannot_read_outside_workspace(self):
+        workspace = Path(self.temp.name) / "workspace"
+        workspace.mkdir()
+        with tempfile.TemporaryDirectory() as sibling:
+            outside = Path(sibling) / "private.txt"
+            outside.write_text("private")
+            with self.assertRaises(MediaError):
+                self.bridge.media.snapshot(str(outside), workspace, automatic=True)
+            # An explicit user /send remains a separate, intentional operation.
+            asset = self.bridge.media.snapshot(str(outside), workspace)
+            self.assertEqual(Path(asset["path"]).read_text(), "private")
