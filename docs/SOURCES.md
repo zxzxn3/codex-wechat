@@ -18,3 +18,9 @@ API 地址重定向仅允许 HTTPS 的 ilinkai.weixin.qq.com 及其子域；若�
 DeepSeek 接入依据：本机 `codex-deepseek/README.md` 与 launcher.py 的 app-server 转发逻辑。启动器自行设置独立 CODEX_HOME 并从桌面密钥环检查密钥；桥接仅按命令启动，不读取密钥。
 
 微信重启指令依据：[systemctl 262](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html) 的 show/MainPID 与 --no-block：后者仅验证并排入作业，不等待作业完成。使用异步 restart 避免服务等待自身退出。仅做静态检查，未执行真实重启。
+
+媒体实现依据：腾讯协议的 getUploadUrl/CDN 媒体流程，以及 src/cdn/upload.ts、src/cdn/cdn-url.ts、src/messaging/send.ts。入站兼容原始 16 字节 key 的 base64 和十六进制字符串的 base64，图片优先 image_item.aeskey；出站按上游把十六进制 key 字符串作 base64。CDN 上传 POST 密文，读取 x-encrypted-param，再单独发送媒体消息。
+
+加解密依据 cryptography 50.x 官方 [Cipher/AES128/ECB](https://cryptography.io/en/50.0.0/hazmat/primitives/symmetric-encryption/) 及 [PKCS7](https://cryptography.io/en/50.0.0/hazmat/primitives/padding/)，本机包版本 50.0.2；附件输入依据已查阅的 Codex App Server 官方文档及本机 TurnStartParams schema 的 localImage/path。静态检查不代表 CDN、模型图片输入或附件收发已联调通过。
+
+CDN 连接诊断：现场观察到网关到 CDN 的 IPv6 TCP 连接处于 SYN-SENT，DNS 返回多个 IPv6 地址排在 IPv4 前。Python 3.14 socket.create_connection 顺序尝试解析地址，原 60 秒超时可在多个地址上累计。修复改用本机 curl 8.23 的默认 Happy Eyeballs；[curl 手册](https://curl.se/docs/manpage.html) 核对 --connect-timeout、--max-time、--config、--max-filesize（8.4+ 可限制传输中大小）。未用真实附件做操作测试。

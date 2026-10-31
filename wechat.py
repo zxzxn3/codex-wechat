@@ -1,4 +1,4 @@
-"""Text-only iLink adapter; see docs/SOURCES.md for protocol provenance."""
+"""iLink message adapter; see docs/SOURCES.md for protocol provenance."""
 import asyncio
 import base64
 import json
@@ -76,7 +76,8 @@ class WeChat:
             "from_user_id": "", "to_user_id": entry["user"],
             "client_id": entry["id"], "message_type": 2, "message_state": 2,
             "context_token": entry["context"],
-            "item_list": [{"type": 1, "text_item": {"text": entry["text"]}}]}})
+            "item_list": [entry["item"]] if "item" in entry else
+                         [{"type": 1, "text_item": {"text": entry["text"]}}]}})
 
 
 async def login(store):

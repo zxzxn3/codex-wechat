@@ -10,6 +10,7 @@ HELP = ("直接发文字与 Codex 对话；忙时排队。\n"
         "/model 列出模型；/model 编号或名称 切换\n"
         "/effort 列出强度；/effort 档位 切换\n/cwd [路径] 查看或切换目录\n"
         "/ack 查看处理提示设置\n/ack on 或 off 开关\n/ack text 文字 自定义提示\n"
+        "/send 路径 发附件（自动识别图片）\n/sendfile 路径 发文件\n/sendimage 路径 发图片\n"
         "/stop 停止并清空待办\n/restart 重启消息桥服务（空闲时）\n"
         "/approve 编号 或 /deny 编号 审批\n/help 帮助")
 MANAGED = {"/backend", "/sessions", "/switch", "/new", "/model", "/models", "/effort", "/cwd", "/ack"}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local WeChat ↔ Codex bridge. No third-party Python dependencies."""
+"""Local WeChat ↔ Codex bridge. Media transport uses cryptography."""
 import argparse
 import asyncio
 import hashlib
@@ -16,6 +16,7 @@ from wechat import WeChat, login
 from commands import HELP, MANAGED, ensure_session, handle, info, notice
 from profiles import definitions, snapshot
 import service_control
+from media import Media, MediaError, MAX_ATTACHMENTS, split_answer
 
 ROOT = Path(__file__).resolve().parent
 
@@ -26,6 +27,7 @@ class Bridge:
         self.state = store.load("bridge", {"cursor": "", "thread": None,
             "inbox": [], "outbox": [], "seen": [], "running": False})
         self.channel = channel or WeChat(account)
+        self.media = Media(store, self.channel, config.get("media"))
         self.backend_factory = backend_factory
         self.backend_configs = definitions(config)
         self.backend_name = self.state.get("backendName", "codex")
@@ -41,6 +43,7 @@ class Bridge:
         self.session_lock = asyncio.Lock()
         self.model_choices = []
         self.resuming = bool(self.state["thread"])
+        self.phase = "空闲"
         self.restarting = False
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:
@@ -50,6 +53,12 @@ class Bridge:
         self.state["backendName"] = self.backend_name
         self.state.setdefault("backendSessions", {})[self.backend_name] = snapshot(self.state)
         self.store.save("bridge", self.state)
+
+    def set_phase(self, phase):
+        self.phase = phase
+        self.state["phase"] = phase
+        self.save()
+        print(f"任务阶段：{phase}", file=sys.stderr, flush=True)
 
     def make_backend(self, name):
         return self.backend_factory(self.backend_configs[name],
@@ -64,7 +73,7 @@ class Bridge:
                 raise
             self.backend_started = True
 
-    def reply(self, text):
+    def reply(self, text, *, persist=True):
         context = self.state.get("context")
         if not context:
             return
@@ -83,6 +92,41 @@ class Bridge:
             self.state["outbox"].append({"id": str(uuid.uuid4()), "user": self.account["user"],
                                         "context": context, "text": chunk})
         if chunks:
+            self.outbox_drained.clear()
+        if persist:
+            self.save()
+        self.send_wake.set()
+
+    def asset_entry(self, asset):
+        return {"id": str(uuid.uuid4()), "user": self.account["user"],
+                "context": self.state["context"], "asset": asset}
+
+    async def queue_file(self, path, kind="auto"):
+        cwd = self.backend.info.get("cwd") or self.backend.cwd
+        asset = await asyncio.to_thread(self.media.snapshot, path, cwd, kind)
+        self.state["outbox"].append(self.asset_entry(asset))
+        self.outbox_drained.clear()
+        self.save()
+        self.send_wake.set()
+
+    async def deliver_answer(self, answer):
+        text, specs = split_answer(answer)
+        entries, errors = [], []
+        if len(specs) > MAX_ATTACHMENTS:
+            errors.append(f"最多回传 {MAX_ATTACHMENTS} 个附件，超出的已跳过。")
+        for spec in specs[:MAX_ATTACHMENTS]:
+            try:
+                asset = await asyncio.to_thread(self.media.snapshot, spec["path"],
+                    self.backend.info.get("cwd") or self.backend.cwd, spec.get("kind", "auto"))
+                entries.append(self.asset_entry(asset))
+            except (MediaError, ValueError) as error:
+                errors.append(f"附件未加入发送队列：{error}")
+        # Commit the final text, frozen files and completion marker in one snapshot.
+        self.state["running"] = False
+        if text or errors:
+            self.reply("\n\n".join(part for part in (text, "\n".join(errors)) if part), persist=False)
+        self.state["outbox"].extend(entries)
+        if entries:
             self.outbox_drained.clear()
         self.save()
         self.send_wake.set()
@@ -106,15 +150,19 @@ class Bridge:
             self.state["seen"].append(identity)
             text = "\n".join(item.get("text_item", {}).get("text", "")
                              for item in msg.get("item_list", []) if item.get("type") == 1).strip()
-            if text.startswith("/"):
+            attachments = [item for item in msg.get("item_list", []) if item.get("type") in (2, 4)]
+            if len(attachments) > MAX_ATTACHMENTS:
+                self.reply(f"每条消息最多 {MAX_ATTACHMENTS} 个附件。")
+            elif text.startswith("/") and not attachments:
                 controls.append(text)
-            elif text and len(text) <= 20000:
+            elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
                     self.reply("待办已达 20 条，请等待完成或使用 /stop。")
                 else:
-                    self.state["inbox"].append({"id": identity, "text": text})
+                    self.state["inbox"].append({"id": identity, "text": text or "请查看我发送的附件。",
+                                               "attachments": attachments})
             else:
-                self.reply("第一版仅支持文字消息，每条最多 20000 字符。")
+                self.reply("支持文字、图片和文件；文字每条最多 20000 字符。")
         self.state["seen"] = self.state["seen"][-2000:]
         if batch.get("get_updates_buf"):
             self.state["cursor"] = batch["get_updates_buf"]
@@ -136,6 +184,16 @@ class Bridge:
                 self.reply(f"操作未完成：{error}")
         elif command == "/help":
             self.reply(HELP)
+        elif command in ("/send", "/sendfile", "/sendimage"):
+            try:
+                if not argument:
+                    raise MediaError("用法：/send 路径；/sendfile 强制文件；/sendimage 强制图片。")
+                if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
+                    argument = argument[1:-1]
+                await self.queue_file(argument, {"/sendfile": "file", "/sendimage": "image"}.get(command, "auto"))
+                self.reply("已加入附件发送队列。")
+            except (MediaError, ValueError, OSError) as error:
+                self.reply(f"附件未发送：{error}")
         elif command == "/restart":
             try:
                 if argument:
@@ -147,13 +205,16 @@ class Bridge:
             status = "工作中" if self.running else "空闲"
             self.reply(f"Codex：{status}；待办 {len(self.state['inbox'])} 条；"
                        f"待审批 {len(self.backend.pending)} 条。\n"
+                       f"阶段：{self.phase}\n"
                        + info(self))
         elif command == "/stop":
             self.stopping = True
             self.state["inbox"].clear()
             self.save()
             stopped = await self.backend.stop()
-            self.reply("已请求停止，并清空待办。" if stopped else "已清空待办；当前没有可中断的任务。")
+            self.reply("已请求停止，并清空待办。" if stopped else
+                       ("已标记停止并清空待办；当前准备或附件处理结束后将停止。" if self.running else
+                        "已清空待办；当前没有可中断的任务。"))
         elif command in ("/approve", "/deny"):
             ok = self.backend.answer_approval(argument, "accept" if command == "/approve" else "decline")
             self.reply("已提交本次决定。" if ok else "审批编号无效或已过期。")
@@ -198,6 +259,7 @@ class Bridge:
             self.state["running"] = True
             self.save()
             try:
+                self.set_phase("准备会话")
                 await ensure_session(self)
                 if self.stopping:
                     self.state["running"] = False
@@ -206,12 +268,22 @@ class Bridge:
                 settings = notice(self)
                 if settings["enabled"] and settings["text"]:
                     self.reply(settings["text"])
-                answer = await self.backend.run(self.state["thread"], job["text"])
-                # Persist result outbox and clear running marker in the same snapshot.
-                self.state["running"] = False
-                self.reply(answer)
+                self.set_phase("下载和解密附件" if job.get("attachments") else "准备模型输入")
+                attachments = (job["preparedAttachments"] if "preparedAttachments" in job else
+                               await self.media.incoming(job.get("attachments", [])))
+                if self.stopping:
+                    self.state["running"] = False
+                    self.save()
+                    continue
+                self.set_phase("Agent 处理（含模型能力查询）")
+                answer = await self.backend.run(self.state["thread"], job["text"], attachments=attachments)
+                self.set_phase("准备回传结果")
+                await self.deliver_answer(answer)
             except asyncio.CancelledError:
                 raise
+            except MediaError as error:
+                self.state["running"] = False
+                self.reply(f"附件处理失败，本条未交给 Agent：{error}")
             except Exception as error:
                 self.state["running"] = False
                 self.state["inbox"].clear()
@@ -225,6 +297,8 @@ class Bridge:
                 self.loaded = False
             finally:
                 self.running = False
+                self.set_phase("空闲")
+
 
     async def sender(self):
         while True:
@@ -234,8 +308,18 @@ class Bridge:
                 continue
             entry = self.state["outbox"][0]
             try:
+                if "asset" in entry and "item" not in entry:
+                    entry["item"] = await self.media.upload(entry)
+                    self.save()
                 await self.channel.send(entry)
             except Exception as error:
+                if "asset" in entry:
+                    entry["attempts"] = entry.get("attempts", 0) + 1
+                    if entry["attempts"] >= 3:
+                        self.state["outbox"].pop(0)
+                        self.reply(f"附件发送失败：{entry['asset']['name']}。已尝试 3 次，请稍后用 /send 重试。")
+                        continue
+                    self.save()
                 print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
                 await asyncio.sleep(5)
                 continue
@@ -272,7 +356,8 @@ class Bridge:
             except (RuntimeError, ValueError, OSError, asyncio.TimeoutError) as error:
                 print(f"后端启动或恢复失败（{type(error).__name__}）；微信控制仍可用。", file=sys.stderr)
                 self.reply("后端启动或恢复失败，可用 /backend 切换后端，或处理后重新发消息。")
-            tasks = [asyncio.create_task(fn()) for fn in (self.poller, self.worker, self.sender)]
+            tasks = [asyncio.create_task(fn()) for fn in
+                     (self.poller, self.worker, self.sender)]
             print("微信消息桥已启动；Ctrl+C 停止。", flush=True)
             await asyncio.gather(*tasks)
         finally:

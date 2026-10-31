@@ -1,0 +1,2 @@
+# Text-only operation does not import this dependency; media transport does.
+cryptography>=38

@@ -16,6 +16,9 @@ esac
 [ "$#" -le 1 ] || die '参数过多'
 [ "$PROJECT_DIR" = "$EXPECTED_DIR" ] || die "项目须放在 $EXPECTED_DIR"
 command -v python3 >/dev/null || die '缺少 python3'
+command -v curl >/dev/null || die '附件传输需要 curl'
+python3 -c 'from cryptography.hazmat.primitives.ciphers import algorithms; algorithms.AES128' 2>/dev/null ||
+    die '附件功能需要 Python cryptography 38+（本机可用系统包 python-cryptography）'
 command -v systemctl >/dev/null || die '缺少 systemctl'
 [ -x "$PROJECT_DIR/agent-wechat" ] || die 'agent-wechat 入口不可执行'
 [ -f "$PROJECT_DIR/$UNIT" ] || die "缺少 $UNIT"
