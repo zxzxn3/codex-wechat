@@ -118,6 +118,7 @@ async def handle(bridge, command, argument):
             notice=notice(bridge),
             attachment_mib=bridge.media.limit // (1024 * 1024),
             slicing=bridge.slicing,
+            notifications=bridge.notifications,
         ))
         return
     if command == "/backend" and not argument:
@@ -149,7 +150,7 @@ async def handle(bridge, command, argument):
             raise UserFacingError(fill(ACK_TOO_LONG, {"字节": MAX_NOTICE_BYTES}))
         bridge.state["processingNotice"] = value
         bridge.save()
-        bridge.reply(panel("处理提示: " + (value or "关闭")))
+        bridge.reply(panel("接收提示: " + (value or "关闭")))
         return
     if command == "/sessions":
         if argument == "next":

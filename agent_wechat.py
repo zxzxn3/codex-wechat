@@ -17,7 +17,8 @@ from storage import Store
 from wechat import WeChat, login
 from commands import ensure_session, handle, notice
 from command_specs import HELP, REGISTRY, command_lane
-from configuration import Slicing
+from configuration import Slicing, Notifications
+from quota import quota_warnings
 from records import InputPhase, TurnResult
 from slicing import split_text
 from profiles import backend_label, definitions, snapshot
@@ -92,6 +93,7 @@ class Bridge:
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
         self.slicing = Slicing.from_config(config.get("slicing"))
+        self.notifications = Notifications.from_config(config)
         self.controls = {lane: asyncio.Queue(maxsize=20) for lane in ("local", "urgent", "backend", "probe")}
         self.connection_lock = asyncio.Lock()
         self.input_paused = False
@@ -125,8 +127,22 @@ class Bridge:
             lambda text: self.reply(text) if getattr(self, "backend", None) is backend else None)
         backend.on_activity = self.backend_activity
         backend.source_name = name
+        backend.compaction_notice = self.notifications.compaction
+        backend.on_limits = lambda payload: self.check_quota(backend, payload)
         backend.on_external_result = self.external_results.put_nowait
         return backend
+
+    def check_quota(self, backend, payload):
+        if backend is not self.backend or not self.state.get("context"):
+            return
+        records = self.state.setdefault("quotaWarnings", {})
+        scope = (self.backend_name, backend.info.get("provider"))
+        before = json.dumps(records, sort_keys=True)
+        messages = quota_warnings(records, payload, scope, self.notifications.quota_thresholds)
+        for message in messages:
+            self.reply(f"限额提醒: {backend_label(self.backend_name)}\n{message}", persist=False)
+        if messages or before != json.dumps(records, sort_keys=True):
+            self.save()
 
     def backend_activity(self):
         # Notifications never start work or change the selected session.
@@ -521,6 +537,7 @@ class Bridge:
                     print(f"后端恢复失败：{type(error).__name__}", file=sys.stderr, flush=True)
             # Account reads are independent of the active model turn.
             if self.backend_started and self.backend.connected:
+                await self.backend.refresh_usage()
                 await self.backend.rate_limits()
             await asyncio.sleep(10)
 

@@ -28,7 +28,7 @@ COMMANDS = (
             needs_backend=True, aliases=("/models",), section="设置"),
     Command("/effort", "/effort {档位}", "查看或切换强度", "managed", needs_backend=True, section="设置"),
     Command("/cwd", "/cwd {路径}", "查看或切换目录", "managed", needs_backend=True, section="设置"),
-    Command("/ack", "/ack [text {模板}|fields]", "处理提示；空模板关闭", "managed", "local", section="设置"),
+    Command("/ack", "/ack [text {模板}|fields]", "接收提示；空模板关闭", "managed", "local", section="设置"),
     Command("/approve", "/approve {编号}", "同意审批", lane="urgent", section="审批"),
     Command("/deny", "/deny {编号}", "拒绝审批", lane="urgent", section="审批"),
     Command("/send", "/send {路径}", "回传文件或图片", section="附件"),

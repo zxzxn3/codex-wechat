@@ -13,5 +13,11 @@
   "slicing": {
     "mode": "smart",
     "targetChars": 600
-  }
+  },
+  "compactionNotice": false,
+  "quotaWarningThresholds": [
+    50,
+    25,
+    5
+  ]
 }

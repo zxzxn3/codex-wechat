@@ -6,6 +6,23 @@ TEXT_LIMIT_BYTES = 3000
 
 
 @dataclass(frozen=True)
+class Notifications:
+    compaction: bool = False
+    quota_thresholds: tuple[int, ...] = (50, 25, 5)
+
+    @classmethod
+    def from_config(cls, config):
+        compact = config.get("compactionNotice", cls.compaction)
+        thresholds = config.get("quotaWarningThresholds", list(cls.quota_thresholds))
+        if type(compact) is not bool:
+            raise ValueError("compactionNotice 必须是布尔值")
+        if (not isinstance(thresholds, list) or
+                any(type(value) is not int or not 0 <= value <= 100 for value in thresholds)):
+            raise ValueError("quotaWarningThresholds 必须是 0–100 整数列表")
+        return cls(compact, tuple(sorted(set(thresholds), reverse=True)))
+
+
+@dataclass(frozen=True)
 class Slicing:
     mode: str = "smart"
     target_chars: int = 600

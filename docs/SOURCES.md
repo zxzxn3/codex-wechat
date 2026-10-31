@@ -36,3 +36,7 @@ create_time_ms 是源消息时间戳，未证实等于手机点击发送时间�
 旧 processingNotice 对象和旧延迟模板迁移集中在 configuration.py。保留旧 backend 配置、sharedDaemon=false、已有 JSON 状态及旧发件箱条目；无法由旧 running 标记还原的当前输入不猜测重放。
 
 网络测速依据：CLI 0.166.0 的 ConfigReadParams/GetAccountParams schema 与官方 config/read、account/read；curl --write-out 的 time_appconnect 是起始至 TLS 握手完成，time_connect 是起始至 TCP（可能为代理）连接完成。HEAD 不携带模型认证，不跟随重定向；只取上述阶段，不使用包含服务端处理的 time_starttransfer/time_total。
+
+上下文压缩提示依据：官方 App Server Items 的 contextCompaction 与 item/started、item/completed 生命周期，以及本机 0.166.0 的 ItemStartedNotification/ItemCompletedNotification。旧 thread/compacted 已弃用，本桥接不同时监听旧事件，避免重复通知；item 仅提供 id/type，不能据此区分自动与手动压缩。
+
+用量历史回退：本机当前会话 JSONL 的 event_msg/token_count.info 实际含 total_token_usage、last_token_usage、model_context_window。此为本机记录格式核对，不是稳定公共 API 保证；只从原生 Thread.path 读取当前 thread 文件的有界尾部，失败返回不可用，实时事件优先。

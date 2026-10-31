@@ -162,7 +162,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="cwd"),
                          "目录: ~/project")
         self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE, attachment_mib=20),
-                         "```\n处理提示: {发送延迟}/{接收延迟}ms\n完成提示: 关闭\n附件上限: 20 MiB\n```")
+                         "```\n接收提示: {发送延迟}/{接收延迟}ms\n结束提示: 关闭\n附件上限: 20 MiB\n```")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",

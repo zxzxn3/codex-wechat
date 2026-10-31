@@ -17,8 +17,12 @@ import uuid
 
 from records import Source, TurnResult
 from media import OUTPUT_HINT
+from usage import stored_usage
 from prompts import (
     APPROVAL_TOO_LONG,
+    COMPACT_STARTED,
+    COMPACT_FINISHED,
+    COMPACT_INTERRUPTED,
     TURN_COMPLETED_EMPTY,
     TURN_ENDED_UNEXPECTEDLY,
     TURN_FAILED,
@@ -73,6 +77,10 @@ class CodexBackend:
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
+        self.live_usage_threads = set()
+        self.compactions = {}
+        self.compaction_notice = False
+        self.on_limits = lambda payload: None
         self.selected_thread = None
         self.blocked = False
         self.runtime_generation = 0
@@ -171,6 +179,8 @@ class CodexBackend:
     async def connect(self, command, env):
         self.connection_id = uuid.uuid4().hex
         self.usage_by_thread.clear()
+        self.live_usage_threads.clear()
+        self.compactions.clear()
         self.model_catalog = None
         self.account_limits = None
         self.rate_limits_checked_at = 0
@@ -341,12 +351,14 @@ class CodexBackend:
                 current["rateLimits"] = self.merge_available(
                     current.get("rateLimits"), update)
                 self.account_limits = current
+                self.on_limits(current)
             return
         if method == "thread/tokenUsage/updated":
             thread_id, usage = params.get("threadId"), params.get("tokenUsage")
             if isinstance(thread_id, str) and isinstance(usage, dict):
                 # Resume can publish usage before its response selects the thread.
                 # Cache counters by thread rather than discarding that early event.
+                self.live_usage_threads.add(thread_id)
                 self.usage_by_thread.pop(thread_id, None)
                 self.usage_by_thread[thread_id] = usage
                 while len(self.usage_by_thread) > 20:
@@ -356,6 +368,29 @@ class CodexBackend:
             return
         if params.get("threadId") != self.selected_thread:
             return
+        item = params.get("item", {})
+        if method in ("item/started", "item/completed") and item.get("type") == "contextCompaction":
+            key = (self.selection_epoch, self.selected_thread, params.get("turnId"), item.get("id"))
+            previous = self.compactions.get(key)
+            phase = "started" if method == "item/started" else "completed"
+            if previous not in ("completed", "interrupted") and previous != phase:
+                self.compactions[key] = phase
+                if self.compaction_notice:
+                    self.notify(COMPACT_STARTED if phase == "started" else COMPACT_FINISHED)
+                while len(self.compactions) > 64:
+                    self.compactions.pop(next(iter(self.compactions)))
+            return
+        if method == "turn/completed":
+            turn = params.get("turn", {})
+            unfinished = [key for key, phase in self.compactions.items()
+                          if phase == "started" and key[:3] ==
+                          (self.selection_epoch, self.selected_thread, turn.get("id"))]
+            if unfinished:
+                for key in unfinished:
+                    self.compactions[key] = "interrupted"
+                if self.compaction_notice:
+                    self.notify(COMPACT_INTERRUPTED if turn.get("status") != "completed"
+                                else "上下文压缩结果未确认。")
         if method == "thread/settings/updated":
             settings = params.get("threadSettings", {})
             for source, target in (
@@ -443,7 +478,7 @@ class CodexBackend:
             return
         for source, target in (
             ("model", "model"), ("reasoningEffort", "effort"), ("cwd", "cwd"),
-            ("modelProvider", "provider"), ("name", "name"),
+            ("modelProvider", "provider"), ("name", "name"), ("path", "path"),
         ):
             if thread.get(source) is not None:
                 self.info[target] = thread[source]
@@ -494,6 +529,7 @@ class CodexBackend:
             return cached
         if isinstance(result, dict) and isinstance(result.get("rateLimits"), dict):
             self.account_limits = result
+            self.on_limits(result)
         return self.account_limits
 
     async def thread(self, thread_id=None, overrides=None):
@@ -511,7 +547,7 @@ class CodexBackend:
             result = await self.rpc("thread/start", options)
         thread = result["thread"]
         previous = self.info if self.info.get("id") == thread["id"] else {}
-        self.info = {"id": thread["id"], "name": thread.get("name"),
+        self.info = {"id": thread["id"], "name": thread.get("name"), "path": thread.get("path"),
                      "model": result.get("model", thread.get("model")),
                      "provider": result.get("modelProvider",
                                            thread.get("modelProvider")),
@@ -530,7 +566,18 @@ class CodexBackend:
             self.pending.clear()
         self.selected_thread = thread["id"]
         await self.refresh_runtime()
+        await self.refresh_usage()
         return result["thread"]["id"]
+
+    async def refresh_usage(self):
+        thread = self.selected_thread
+        if not thread or thread in self.live_usage_threads:
+            return
+        source = self.source(thread)
+        usage = await asyncio.to_thread(stored_usage, self.info.get("path"), thread)
+        if usage and source == self.source() and thread not in self.live_usage_threads:
+            self.usage_by_thread[thread] = usage
+            self.info["usage"] = usage
 
     async def probe_target(self):
         """Resolve endpoint using native effective config; never read auth secrets."""

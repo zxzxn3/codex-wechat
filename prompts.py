@@ -6,12 +6,15 @@ import re
 
 MAX_NOTICE_BYTES = 1000
 COMPLETION_NOTICE = ""
+COMPACT_STARTED = "正在压缩上下文..."
+COMPACT_FINISHED = "上下文压缩已结束。"
+COMPACT_INTERRUPTED = "上下文压缩已中断。"
 
 BACKEND_SUMMARY = "```\n后端: {当前}\n可用: {可用}\n```\n`/backend {{名称}}`"
 EFFORT_SUMMARY = "```\n强度: {当前}\n可选: {可选}\n```\n`/effort {{档位}}`"
-ACK_VIEW = "```\n处理提示: {模板}\n```\n`/ack text {{模板}}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
+ACK_VIEW = "```\n接收提示: {模板}\n```\n`/ack text {{模板}}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
 ACK_USAGE = "`/ack text {模板}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
-ACK_TOO_LONG = "未更新处理提示: 最多 {字节} 字节"
+ACK_TOO_LONG = "未更新接收提示: 最多 {字节} 字节"
 WORKING_DIRECTORY = "目录: {目录}"
 MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`"
 
@@ -91,7 +94,7 @@ COMMAND_FAILURE_LABELS = {
     "/models": "未切换模型",
     "/effort": "未切换强度",
     "/cwd": "未切换目录",
-    "/ack": "未更新处理提示",
+    "/ack": "未更新接收提示",
 }
 COMMAND_FAILURE = "{动作}: {原因}"
 
@@ -382,11 +385,15 @@ def status_summary(**kwargs):
     return status_from_fields(status_fields(**kwargs))
 
 
-def settings_summary(*, notice, attachment_mib, slicing=None):
-    lines = [f"处理提示: {notice or '关闭'}", f"完成提示: {COMPLETION_NOTICE or '关闭'}",
+def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None):
+    lines = [f"接收提示: {notice or '关闭'}", f"结束提示: {COMPLETION_NOTICE or '关闭'}",
              f"附件上限: {attachment_mib} MiB"]
     if slicing is not None:
         lines.extend([f"切片: {slicing.mode}", f"目标长度: {slicing.target_chars} 字符"])
+    if notifications is not None:
+        thresholds = "/".join(f"{value}%" for value in notifications.quota_thresholds) or "关闭"
+        lines.extend([f"压缩提示: {'开启' if notifications.compaction else '关闭'}",
+                      f"限额警告: {thresholds}"])
     return panel(*lines)
 
 
