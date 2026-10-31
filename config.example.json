@@ -1,5 +1,5 @@
 {
-  "processingNotice": "::{发送延迟}/{接收延迟}ms::",
+  "processingNotice": "{发送延迟}/{接收延迟}ms",
   "backends": {
     "codex": {"env": {}, "threadOptions": {}},
     "deepseek": {"env": {}, "threadOptions": {}}

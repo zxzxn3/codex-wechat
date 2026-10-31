@@ -136,7 +136,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         stats.record_agent(300, 1500, backend="codex", model="example-model")
         values = stats.values(120)
         self.assertEqual(values, {"发送延迟": "120", "接收延迟": "50"})
-        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, values), "::120/50ms::")
+        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, values), "120/50ms")
         self.assertEqual(render_ack(PING_REPLY, values), "pong. 120/50ms")
         self.assertEqual(stats.values(), {"发送延迟": "-", "接收延迟": "50"})
 
@@ -154,7 +154,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bridge.state["outbox"]), before)
 
     async def test_legacy_latency_template_uses_split_default(self):
-        for legacy in ("{latency}", "{发送延迟}/{接收延迟}ms"):
+        for legacy in ("{latency}", "::{发送延迟}/{接收延迟}ms::"):
             config = {"processingNotice": {"enabled": False, "text": legacy}}
             self.assertEqual(processing_template(config, {}), DEFAULT_ACK_TEMPLATE)
         self.assertEqual(processing_template({}, {"processingNotice": ""}), "")
@@ -172,7 +172,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             "目录：~/projects/agent-wechat\n```")
         self.assertEqual(settings_summary(
             notice=DEFAULT_ACK_TEMPLATE, attachment_mib=20),
-            "```\n处理提示：::{发送延迟}/{接收延迟}ms::\n"
+            "```\n处理提示：{发送延迟}/{接收延迟}ms\n"
             "附件上限：20 MiB\n```")
         status = status_summary(
             status="运行中，Agent 正在处理", queued=2, pending=1, failed=0,

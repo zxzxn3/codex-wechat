@@ -3,8 +3,8 @@ from datetime import datetime
 import os
 
 
-DEFAULT_ACK_TEMPLATE = "::{发送延迟}/{接收延迟}ms::"
-LEGACY_SPLIT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
+DEFAULT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
+LEGACY_BOUNDED_ACK_TEMPLATE = "::{发送延迟}/{接收延迟}ms::"
 LEGACY_ACK_TEMPLATE = "{latency}"
 MAX_NOTICE_BYTES = 1000
 COMPLETION_NOTICE = ""
@@ -253,7 +253,7 @@ def processing_template(config, state):
             text = source
         elif isinstance(source, dict) and source.get("text") is not None:
             text = source["text"]
-    if text in (LEGACY_ACK_TEMPLATE, LEGACY_SPLIT_ACK_TEMPLATE):
+    if text in (LEGACY_ACK_TEMPLATE, LEGACY_BOUNDED_ACK_TEMPLATE):
         return DEFAULT_ACK_TEMPLATE
     return str(text)
 
