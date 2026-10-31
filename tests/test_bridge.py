@@ -251,8 +251,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await handle(self.bridge, "/sessions", "2")
         text = self.bridge.state["outbox"][-1]["text"]
         self.assertEqual(self.bridge.state["sessionChoices"], [str(i) for i in range(10, 20)])
-        self.assertIn("2/3页\n```", text)
-        self.assertTrue(text.endswith("`/sessions {页码}`"))
+        self.assertNotIn("2/3页", text.split("```")[1])
+        self.assertTrue(text.endswith("`/sessions {页码}` 当前2/3页"))
         self.assertNotIn("下一页", text)
         with self.assertRaises(UserFacingError):
             await handle(self.bridge, "/sessions", "4")

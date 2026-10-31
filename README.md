@@ -36,7 +36,7 @@ journalctl --user -u agent-wechat -f
 - 状态与控制：`/status`、`/settings`、`/ping`、`/stop`、`/restart`。
 - 审批：`/approve`、`/deny`；显式回传本机路径：`/send`、`/sendfile`、`/sendimage`。
 
-`/sessions` 默认第 1 页，`/sessions {页码}` 翻页；每页 10 条，块内末尾显示当前页/总页数。仍可用 `/sessions 关键词` 搜索；数字页码沿用最近搜索，单独 `/sessions` 刷新全部列表。总页数从完整元数据列表计算，翻页缓存最多复用 60 秒；不读取会话正文。不再支持 next。
+`/sessions` 默认第 1 页，`/sessions {页码}` 翻页；每页 10 条，块外显示 `/sessions {页码}` 当前1/3页。仍可用 `/sessions 关键词` 搜索；数字页码沿用最近搜索，单独 `/sessions` 刷新全部列表。总页数从完整元数据列表计算，翻页缓存最多复用 60 秒；不读取会话正文。不再支持 next。
 
 编号对应最近一次显示的列表；后端名称不区分大小写。模型和强度清单来自当前后端，目录必须已存在。切换后端、会话或设置需要空闲且无待办。
 

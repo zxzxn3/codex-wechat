@@ -202,8 +202,8 @@ async def handle(bridge, command, argument):
             lines.append(f"{index}. {title}" + (f"  [{state}]" if state else ""))
         if not threads:
             lines.append("\n没有匹配的会话。")
-        lines.append(f"{page}/{total}页")
-        hints = [f"`{REGISTRY['/switch'].usage}`", f"`{REGISTRY['/sessions'].usage}`"]
+        hints = [f"`{REGISTRY['/switch'].usage}`",
+                 f"`{REGISTRY['/sessions'].usage}` 当前{page}/{total}页"]
         bridge.reply(panel(*lines) + "\n" + "\n".join(hints))
         return
     if command == "/model" and not argument:

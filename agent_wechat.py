@@ -364,7 +364,7 @@ class Bridge:
                 await self.queue_file(argument, {"/sendfile": "file", "/sendimage": "image"}.get(command, "auto"))
                 self.reply(ATTACHMENT_QUEUED)
             except (MediaError, ValueError, OSError) as error:
-                self.reply(f"附件未发送：{attachment_reason(error)}\n请检查路径后重试。")
+                self.reply(f"附件未发送: {attachment_reason(error)}\n请检查路径后重试。")
         elif command == "/restart":
             if argument:
                 self.reply(RESTART_USAGE)
@@ -372,7 +372,7 @@ class Bridge:
             try:
                 await self.restart_service()
             except UserFacingError as error:
-                self.reply("拒绝重启：" + str(error))
+                self.reply("拒绝重启: " + str(error))
             except (RuntimeError, OSError, asyncio.TimeoutError) as error:
                 self.reply(fill(RESTART_FAILED, {"原因": backend_reason(error)}))
         elif command == "/status":

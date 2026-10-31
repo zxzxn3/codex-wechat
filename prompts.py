@@ -20,7 +20,7 @@ BLOCKED_NOTE = "等待桌面处理"
 
 BUSY_CHANGE = "未切换: 任务未结束。等待完成或 /stop。"
 BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
-RESTART_STARTED = "正在重启消息桥。"
+RESTART_STARTED = "正在重启消息桥..."
 RESTART_READY = "消息桥已重启。"
 RESTART_CONFIRM_UNSENT = "确认消息未能及时发送。"
 RESTART_FAILED = "重启未完成: {原因}"
@@ -33,11 +33,11 @@ STOP_UNCONFIRMED = "停止未确认，任务可能仍在运行。请在桌面确
 
 BACKEND_CONNECT_FAILED = "后端连接失败: {原因}\n正在重连，未提交的待办已保留。"
 SESSION_RESTORE_FAILED = (
-    "会话恢复失败：{原因}\n"
+    "会话恢复失败: {原因}\n"
     "使用 `/backend` 切换后端，或稍后重试。"
 )
 TASK_FAILED = "消息未提交: 后端处理失败。查看 /status。"
-TURN_FAILED = "任务未完成：Agent 执行失败。"
+TURN_FAILED = "任务未完成: Agent 执行失败。"
 TURN_INTERRUPTED = "任务已中断。"
 TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
 TURN_COMPLETED_EMPTY = "任务已完成，但没有文本结果。"
@@ -51,24 +51,24 @@ QUEUED_STEER = "已排队，当前任务结束后处理。"
 PING_REPLY = "pong. {发送延迟}/{接收延迟}ms"
 PING_USAGE = "用法: /ping"
 UNKNOWN_COMMAND = "未知指令，查看 /help"
-TOO_MANY_ATTACHMENTS = "消息未接收：附件超过 {数量} 个。\n请分开发送。"
-QUEUE_FULL = "拒绝接收：排队消息已达 {数量} 条。\n请等待完成或使用 `/stop`。"
+TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {数量} 个。\n请分开发送。"
+QUEUE_FULL = "拒绝接收: 排队消息已达 {数量} 条。\n请等待完成或使用 `/stop`。"
 UNSUPPORTED_MESSAGE = (
-    "消息未接收：仅支持文字、图片和文件。\n"
+    "消息未接收: 仅支持文字、图片和文件。\n"
     "文字每条最多 {数量} 字符。"
 )
 
 ATTACHMENT_INCOMING_FAILED = (
-    "附件处理失败：{原因}\n"
+    "附件处理失败: {原因}\n"
     "这条消息未交给 Agent。"
 )
 ATTACHMENT_QUEUED = "附件已排队"
 ATTACHMENT_SEND_FAILED = (
-    "附件未发出：{名称}\n"
+    "附件未发出: {名称}\n"
     "重试 {次数} 次仍失败，请稍后用 `/send` 重试。"
 )
-AUTO_ATTACHMENT_LIMIT = "附件未发送：自动回传最多 {数量} 个，超出的已跳过。"
-AUTO_ATTACHMENT_FAILED = "附件未发送：{原因}{建议}"
+AUTO_ATTACHMENT_LIMIT = "附件未发送: 自动回传最多 {数量} 个，超出的已跳过。"
+AUTO_ATTACHMENT_FAILED = "附件未发送: {原因}{建议}"
 AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 `/send {路径}`。"
 
 APPROVAL_ACCEPTED = "已同意"
@@ -95,10 +95,10 @@ COMMAND_FAILURE_LABELS = {
 }
 COMMAND_FAILURE = "{动作}: {原因}"
 
-SETTINGS_USAGE = "用法：`/settings`"
-BACKEND_INVALID = "未切换后端：名称无效\n可用：{可用}"
+SETTINGS_USAGE = "用法: `/settings`"
+BACKEND_INVALID = "未切换后端: 名称无效\n可用: {可用}"
 BACKEND_SESSION_BUSY = (
-    "未切换后端：目标后端的上次会话正在工作或等待处理。\n"
+    "未切换后端: 目标后端的上次会话正在工作或等待处理。\n"
     "请先在电脑端处理。"
 )
 BACKEND_CLEANUP_FAILED = (
@@ -106,22 +106,22 @@ BACKEND_CLEANUP_FAILED = (
     "旧连接未清理，请在电脑端检查。"
 )
 SESSION_TARGET_BLOCKED = (
-    "未切换会话：目标会话需要先在电脑端处理。\n"
+    "未切换会话: 目标会话需要先在电脑端处理。\n"
     "请完成后再重试。"
 )
 SESSION_TARGET_ACTIVE = (
-    "未切换会话：工作中的会话只能通过桌面共享连接。\n"
+    "未切换会话: 工作中的会话只能通过桌面共享连接。\n"
     "请切换后端或等待任务结束。"
 )
-SESSION_INDEX_INVALID = "未切换会话：编号无效\n请先发送 `/sessions`。"
-SESSION_USAGE = "用法：`/switch {编号或ID}`"
-NEW_USAGE = "用法：`/new`"
-MODEL_INVALID = "未切换模型：名称无效\n请使用 `/model` 查看可用模型。"
-MODEL_NOT_IN_CATALOG = "未切换强度：当前模型不在模型列表中。"
-EFFORT_INVALID = "未切换强度：可选 {可选}"
-DIRECTORY_INVALID = "未切换目录：目录不存在或无法访问\n请检查路径后重试。"
-DIRECTORY_NOT_FOLDER = "未切换目录：路径不是文件夹\n请选择文件夹。"
-RESTART_USAGE = "用法：`/restart`"
+SESSION_INDEX_INVALID = "未切换会话: 编号无效\n请先发送 `/sessions`。"
+SESSION_USAGE = "用法: `/switch {编号或ID}`"
+NEW_USAGE = "用法: `/new`"
+MODEL_INVALID = "未切换模型: 名称无效\n请使用 `/model` 查看可用模型。"
+MODEL_NOT_IN_CATALOG = "未切换强度: 当前模型不在模型列表中。"
+EFFORT_INVALID = "未切换强度: 可选 {可选}"
+DIRECTORY_INVALID = "未切换目录: 目录不存在或无法访问\n请检查路径后重试。"
+DIRECTORY_NOT_FOLDER = "未切换目录: 路径不是文件夹\n请选择文件夹。"
+RESTART_USAGE = "用法: `/restart`"
 
 
 def fill(template, values):
