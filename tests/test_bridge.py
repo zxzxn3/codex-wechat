@@ -81,6 +81,12 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(len(x["text"].encode()) <= 3000 for x in entries))
         self.assertEqual(os.stat(Path(self.temp.name) / "bridge.json").st_mode & 0o777, 0o600)
 
+    async def test_empty_completion_notice_is_disabled(self):
+        self.bridge.state["context"] = "context"
+        await self.bridge.deliver_answer("answer", notify_completion=True)
+        texts = [entry.get("text") for entry in self.store.load("bridge")["outbox"]]
+        self.assertEqual(texts, ["answer"])
+
     async def test_output_hint_is_short_english(self):
         self.assertTrue(OUTPUT_HINT.isascii())
         self.assertIn("[WeChat attachments]", OUTPUT_HINT)
@@ -130,7 +136,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         stats.record_agent(300, 1500, backend="codex", model="example-model")
         values = stats.values(120)
         self.assertEqual(values, {"发送延迟": "120", "接收延迟": "50"})
-        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, values), "120/50ms")
+        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, values), "::120/50ms::")
         self.assertEqual(render_ack(PING_REPLY, values), "pong. 120/50ms")
         self.assertEqual(stats.values(), {"发送延迟": "-", "接收延迟": "50"})
 
@@ -148,28 +154,26 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bridge.state["outbox"]), before)
 
     async def test_legacy_latency_template_uses_split_default(self):
-        config = {"processingNotice": {"enabled": False, "text": "{latency}"}}
-        self.assertEqual(processing_template(config, {}), DEFAULT_ACK_TEMPLATE)
+        for legacy in ("{latency}", "{发送延迟}/{接收延迟}ms"):
+            config = {"processingNotice": {"enabled": False, "text": legacy}}
+            self.assertEqual(processing_template(config, {}), DEFAULT_ACK_TEMPLATE)
         self.assertEqual(processing_template({}, {"processingNotice": ""}), "")
 
     async def test_user_prompt_formats(self):
         self.assertEqual(session_summary(
             "已切换会话", name="修复微信附件发送", model="GPT-5 Codex",
             effort="medium", cwd="~/projects/agent-wechat"),
-            "已切换会话\n会话：修复微信附件发送\n"
-            "模型：GPT-5 Codex Medium\n目录：~/projects/agent-wechat")
+            "已切换会话\n```\n会话：修复微信附件发送\n"
+            "模型：GPT-5 Codex Medium\n目录：~/projects/agent-wechat\n```")
         self.assertEqual(setting_summary(
             "设置已更新 Codex", model="GPT-5 Codex", effort="high",
             cwd="~/projects/agent-wechat"),
-            "设置已更新 Codex\n模型：GPT-5 Codex High\n"
-            "目录：~/projects/agent-wechat")
+            "设置已更新 Codex\n```\n模型：GPT-5 Codex High\n"
+            "目录：~/projects/agent-wechat\n```")
         self.assertEqual(settings_summary(
-            name="修复微信附件发送", model="GPT-5 Codex", effort="medium",
-            cwd="~/projects/agent-wechat", input_mode="steer",
             notice=DEFAULT_ACK_TEMPLATE, attachment_mib=20),
-            "会话：修复微信附件发送\n模型：GPT-5 Codex Medium\n"
-            "目录：~/projects/agent-wechat\n模式：steer\n"
-            "处理提示：{发送延迟}/{接收延迟}ms\n附件上限：20 MiB")
+            "```\n处理提示：::{发送延迟}/{接收延迟}ms::\n"
+            "附件上限：20 MiB\n```")
         status = status_summary(
             status="运行中，Agent 正在处理", queued=2, pending=1, failed=0,
             name="修复微信附件发送", model="GPT-5 Codex", effort="medium",
@@ -180,18 +184,23 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             usage={"last": {"totalTokens": 12345},
                    "total": {"totalTokens": 34567, "inputTokens": 30000,
                              "outputTokens": 4567},
-                   "modelContextWindow": 200000})
+                   "modelContextWindow": 200000},
+            rate_limits={"rateLimits": {
+                "primary": {"usedPercent": 10, "windowDurationMins": 300},
+                "secondary": {"usedPercent": 25, "windowDurationMins": 10080},
+            }})
         self.assertTrue(status.startswith("```\n运行中，Agent 正在处理\n"))
         self.assertIn(
-                      "排队消息 2 · 待审批 1 · 发送失败 0\n\n"
+                      "排队消息 2  待审批 1  发送失败 0\n\n"
                       "会话：修复微信附件发送\n", status)
         self.assertIn("提供方：OpenAI\n", status)
         self.assertIn("目录：~/projects/agent-wechat\n", status)
-        self.assertIn("权限：工作区可写 · 按需审批\n", status)
+        self.assertIn("权限：工作区可写  按需审批\n", status)
         self.assertIn("协作：默认\n", status)
         self.assertIn("模式：steer\n", status)
-        self.assertIn("上下文：已用 6% · 12.3K / 200K\n", status)
-        self.assertIn("Token：累计 34.6K · 输入 30K · 输出 4.6K\n```", status)
+        self.assertIn("上下文：已用 6%  12.3K / 200K\n", status)
+        self.assertIn("Token：累计 34.6K  输入 30K  输出 4.6K\n", status)
+        self.assertIn("限额：5小时剩余 90%  7天剩余 75%\n```", status)
         self.assertNotIn("Session", status)
         self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")),
                          "后端连接中断")
@@ -230,6 +239,28 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("搜索：`/sessions {关键词}`", text)
         self.assertNotIn("thread-current", text)
         self.assertNotIn("[active]", text)
+
+    async def test_model_list_uses_table_layout(self):
+        self.bridge.state["context"] = "context"
+
+        async def models():
+            return [
+                {"model": "deepseek-flash", "supportedReasoningEfforts": [
+                    {"reasoningEffort": "low"}, {"reasoningEffort": "high"},
+                    {"reasoningEffort": "max"}]},
+                {"model": "deepseek-v4-pro", "supportedReasoningEfforts": [
+                    {"reasoningEffort": "high"}]},
+            ]
+
+        self.bridge.backend.models = models
+        await handle(self.bridge, "/model", "")
+        text = self.store.load("bridge")["outbox"][-1]["text"]
+        self.assertTrue(text.startswith("可用模型\n\n| 编号 | 模型 | 强度 |\n"))
+        self.assertIn("| 1 | deepseek-flash | Low  High  Max |", text)
+        self.assertIn("| 2 | deepseek-v4-pro | High |", text)
+        self.assertIn("切换：`/model {编号或名称}`", text)
+        self.assertNotIn("```", text)
+        self.assertNotIn("1.", text)
 
     async def test_stop_during_input_preflight_never_starts_turn(self):
         backend = CodexBackend({"sharedDaemon": False}, self.temp.name, lambda _: None)
@@ -270,7 +301,20 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         backend.event(done)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0][1], "desktop result")
+        self.assertTrue(results[0][3])
         self.assertIsNone(backend.active)
+
+    async def test_sparse_rate_limit_updates_merge_without_thread(self):
+        backend = self.bridge.backend
+        backend.event({"method": "account/rateLimits/updated", "params": {
+            "rateLimits": {"primary": {"usedPercent": 20, "windowDurationMins": 300}}
+        }})
+        backend.event({"method": "account/rateLimits/updated", "params": {
+            "rateLimits": {"secondary": {"usedPercent": 40, "windowDurationMins": 10080}}
+        }})
+        snapshot = backend.info["rate_limits"]["rateLimits"]
+        self.assertEqual(snapshot["primary"]["usedPercent"], 20)
+        self.assertEqual(snapshot["secondary"]["usedPercent"], 40)
 
     async def test_approval_prompt_is_structured_instead_of_json(self):
         backend = self.bridge.backend

@@ -63,6 +63,8 @@ class CodexBackend:
         self.selected_thread = None
         self.blocked = False
         self.runtime_generation = 0
+        self.last_turn_completed = False
+        self.rate_limits_checked_at = 0
         self.on_activity = lambda: None
         self.on_external_result = lambda *args: None
         self.on_timing = lambda first_ms, total_ms: None
@@ -294,9 +296,19 @@ class CodexBackend:
             for token, request in list(self.pending.items()):
                 if request["id"] == params.get("requestId"):
                     self.pending.pop(token, None)
+        method = msg.get("method")
+        if method == "account/rateLimits/updated":
+            update = params.get("rateLimits")
+            if isinstance(update, dict):
+                current = self.info.get("rate_limits")
+                if not isinstance(current, dict):
+                    current = {}
+                current["rateLimits"] = self.merge_available(
+                    current.get("rateLimits"), update)
+                self.info["rate_limits"] = current
+            return
         if params.get("threadId") != self.selected_thread:
             return
-        method = msg.get("method")
         if method == "thread/settings/updated":
             settings = params.get("threadSettings", {})
             for source, target in (
@@ -361,6 +373,7 @@ class CodexBackend:
             legacy = [m["text"] for m in messages if not m.get("phase")]
             text = "\n\n".join(finals or legacy)
             status = turn["status"]
+            current["completed"] = status == "completed"
             if status != "completed":
                 status_text = {
                     "failed": TURN_FAILED,
@@ -369,6 +382,7 @@ class CodexBackend:
                 text = (text + "\n\n" if text else "") + status_text
             current["done"].set_result(text or TURN_COMPLETED_EMPTY)
             if current.get("owned"):
+                self.last_turn_completed = current["completed"]
                 first = current["first_text"]
                 self.on_timing((first - current["began"]) * 1000 if first is not None else None,
                                (time.perf_counter() - current["began"]) * 1000)
@@ -376,7 +390,8 @@ class CodexBackend:
             if not current.get("owned"):
                 self.on_external_result(current["thread"],
                                         text or TURN_COMPLETED_EMPTY,
-                                        self.info.get("cwd") or self.cwd)
+                                        self.info.get("cwd") or self.cwd,
+                                        current["completed"])
                 if self.active is current:
                     self.active = None
             self.on_activity()
@@ -416,6 +431,39 @@ class CodexBackend:
                 self.active["done"].cancel()
             self.active = None
         self.on_activity()
+
+    @staticmethod
+    def merge_available(current, update):
+        """Merge a sparse update without clearing previously available fields."""
+        merged = dict(current) if isinstance(current, dict) else {}
+        if not isinstance(update, dict):
+            return merged
+        for key, value in update.items():
+            if value is None:
+                continue
+            if isinstance(value, dict):
+                merged[key] = CodexBackend.merge_available(merged.get(key), value)
+            else:
+                merged[key] = value
+        return merged
+
+    async def rate_limits(self, max_age=30):
+        """Best-effort generic account limit snapshot for status display."""
+        now = asyncio.get_running_loop().time()
+        cached = self.info.get("rate_limits")
+        if self.rate_limits_checked_at and now - self.rate_limits_checked_at < max_age:
+            return cached
+        if not self.proc or self.proc.returncode is not None:
+            return cached
+        self.rate_limits_checked_at = now
+        try:
+            result = await asyncio.wait_for(
+                self.rpc("account/rateLimits/read", {}), 3)
+        except Exception:
+            return cached
+        if isinstance(result, dict) and isinstance(result.get("rateLimits"), dict):
+            self.info["rate_limits"] = result
+        return self.info.get("rate_limits")
 
     async def thread(self, thread_id=None, overrides=None):
         # Existing sessions keep their own settings; new sessions use configured defaults.
@@ -517,6 +565,7 @@ class CodexBackend:
         current = self.new_turn(thread_id, owned=True)
         self.active = current
         self.stop_requested = False
+        self.last_turn_completed = False
         try:
             await self.refresh_runtime()
             inputs = await self.input_items(text, attachments)

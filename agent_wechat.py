@@ -34,6 +34,7 @@ from prompts import (
     BUSY_RESTART,
     COMMAND_FAILURE,
     COMMAND_FAILURE_LABELS,
+    COMPLETION_NOTICE,
     INTERRUPTED_TASK,
     MEDIA_USAGE,
     PING_REPLY,
@@ -128,8 +129,8 @@ class Bridge:
         backend.on_activity = self.backend_activity
         backend.on_timing = lambda first, total: self.latency.record_agent(
             first, total, backend=name, model=backend.info.get("model"))
-        backend.on_external_result = lambda thread, text, cwd: self.external_results.put_nowait(
-            {"thread": thread, "text": text, "cwd": cwd})
+        backend.on_external_result = lambda thread, text, cwd, completed: self.external_results.put_nowait(
+            {"thread": thread, "text": text, "cwd": cwd, "completed": completed})
         return backend
 
     def backend_activity(self):
@@ -192,7 +193,8 @@ class Bridge:
         self.save()
         self.send_wake.set()
 
-    async def deliver_answer(self, answer, *, finish_running=True, cwd=None):
+    async def deliver_answer(self, answer, *, finish_running=True, cwd=None,
+                             notify_completion=False):
         text, specs = split_answer(answer)
         entries, errors = [], []
         if len(specs) > MAX_ATTACHMENTS:
@@ -218,6 +220,8 @@ class Bridge:
         self.state["outbox"].extend(entries)
         if entries:
             self.outbox_drained.clear()
+        if notify_completion and COMPLETION_NOTICE:
+            self.reply(COMPLETION_NOTICE, persist=False)
         self.save()
         self.send_wake.set()
 
@@ -320,6 +324,13 @@ class Bridge:
             else:
                 status = "空闲"
             details = self.backend.info
+            rate_limits = details.get("rate_limits")
+            load_rate_limits = getattr(self.backend, "rate_limits", None)
+            if self.backend_started and load_rate_limits:
+                try:
+                    rate_limits = await load_rate_limits()
+                except Exception:
+                    pass
             self.reply(status_summary(
                 status=status,
                 queued=len(self.state["inbox"]),
@@ -336,6 +347,7 @@ class Bridge:
                 profile=details.get("profile"),
                 collaboration=details.get("collaboration"),
                 usage=details.get("usage"),
+                rate_limits=rate_limits,
                 connection="桌面" if self.backend.shared else "独立",
                 input_mode=self.input_mode,
             ))
@@ -430,7 +442,10 @@ class Bridge:
                 answer = await self.backend.run(self.state["thread"], job["text"], attachments=attachments)
                 if answer is not None:
                     self.set_phase("准备回传结果")
-                    await self.deliver_answer(answer)
+                    await self.deliver_answer(
+                        answer,
+                        notify_completion=getattr(self.backend, "last_turn_completed", False),
+                    )
                 else:
                     self.state["running"] = False
                     self.save()
@@ -524,7 +539,10 @@ class Bridge:
             try:
                 if result["thread"] != self.state["thread"]:
                     self.reply("其他会话的后续结果：")
-                await self.deliver_answer(result["text"], finish_running=False, cwd=result["cwd"])
+                await self.deliver_answer(
+                    result["text"], finish_running=False, cwd=result["cwd"],
+                    notify_completion=result["completed"],
+                )
             finally:
                 self.external_results.task_done()
 

@@ -3,9 +3,11 @@ from datetime import datetime
 import os
 
 
-DEFAULT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
+DEFAULT_ACK_TEMPLATE = "::{发送延迟}/{接收延迟}ms::"
+LEGACY_SPLIT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
 LEGACY_ACK_TEMPLATE = "{latency}"
 MAX_NOTICE_BYTES = 1000
+COMPLETION_NOTICE = ""
 
 HELP = "\n".join((
     "`/status` 当前状态",
@@ -28,7 +30,8 @@ BACKEND_SUMMARY = (
     "可用：{可用}\n"
     "切换：`/backend {目标}`"
 )
-MODEL_SUMMARY = "可用模型\n{列表}\n\n切换：`/model {目标}`"
+MODEL_SUMMARY = "可用模型\n\n{列表}\n\n切换：`/model {{编号或名称}}`"
+MODEL_TABLE_HEADER = "| 编号 | 模型 | 强度 |\n|:--:|:--|:--|"
 EFFORT_SUMMARY = (
     "当前强度：{当前}\n"
     "可选：{可选}\n"
@@ -53,19 +56,23 @@ SESSIONS_TABLE_HEADER = "| # | 会话 | 状态 |\n|:--:|:--|:--|"
 
 SESSION_SUMMARY = (
     "{动作}\n"
+    "```\n"
     "会话：{会话}\n"
     "模型：{模型}\n"
-    "目录：{目录}"
+    "目录：{目录}\n"
+    "```"
 )
 SETTING_SUMMARY = (
     "{动作}\n"
+    "```\n"
     "模型：{模型}\n"
-    "目录：{目录}"
+    "目录：{目录}\n"
+    "```"
 )
 STATUS_SUMMARY = (
     "```\n"
     "{状态}\n"
-    "排队消息 {排队} · 待审批 {审批} · 发送失败 {发送}\n\n"
+    "排队消息 {排队}  待审批 {审批}  发送失败 {发送}\n\n"
     "会话：{会话}\n"
     "模型：{模型}\n"
     "提供方：{提供方}\n"
@@ -76,15 +83,14 @@ STATUS_SUMMARY = (
     "模式：{模式}\n\n"
     "上下文：{上下文}\n"
     "Token：{Token}\n"
+    "限额：{限额}\n"
     "```"
 )
 SETTINGS_SUMMARY = (
-    "会话：{会话}\n"
-    "模型：{模型}\n"
-    "目录：{目录}\n"
-    "模式：{模式}\n"
+    "```\n"
     "处理提示：{处理提示}\n"
-    "附件上限：{附件上限} MiB"
+    "附件上限：{附件上限} MiB\n"
+    "```"
 )
 
 DESKTOP_NOTE = "补充消息会进入这个任务；`/stop` 也会停止它。"
@@ -247,7 +253,7 @@ def processing_template(config, state):
             text = source
         elif isinstance(source, dict) and source.get("text") is not None:
             text = source["text"]
-    if text == LEGACY_ACK_TEMPLATE:
+    if text in (LEGACY_ACK_TEMPLATE, LEGACY_SPLIT_ACK_TEMPLATE):
         return DEFAULT_ACK_TEMPLATE
     return str(text)
 
@@ -309,8 +315,8 @@ def permission_label(*, sandbox, approval, reviewer, profile=None):
         "auto_review": "自动审查",
         "guardian_subagent": "Guardian 审查",
     }.get(compact_label(reviewer, fallback=""), "")
-    detail = " · ".join(value for value in (approval_name, reviewer_name) if value)
-    return f"{permission} · {detail}" if detail else permission
+    detail = "  ".join(value for value in (approval_name, reviewer_name) if value)
+    return f"{permission}  {detail}" if detail else permission
 
 
 def collaboration_label(value):
@@ -349,18 +355,83 @@ def context_usage(value):
         percent = round(int(used) * 100 / int(window))
     except (TypeError, ValueError, ZeroDivisionError):
         return f"{used_text} / {window_text}"
-    return f"已用 {percent}% · {used_text} / {window_text}"
+    return f"已用 {percent}%  {used_text} / {window_text}"
 
 
 def token_usage(value):
     total = value.get("total", {}) if isinstance(value, dict) else {}
     if not isinstance(total, dict) or total.get("totalTokens") is None:
         return "暂不可用"
-    return "累计 {累计} · 输入 {输入} · 输出 {输出}".format(
+    return "累计 {累计}  输入 {输入}  输出 {输出}".format(
         累计=token_count(total.get("totalTokens")),
         输入=token_count(total.get("inputTokens")),
         输出=token_count(total.get("outputTokens")),
     )
+
+
+def limit_duration(minutes):
+    try:
+        minutes = int(minutes)
+    except (TypeError, ValueError):
+        return ""
+    if minutes <= 0:
+        return ""
+    if minutes % 1440 == 0:
+        return f"{minutes // 1440}天"
+    if minutes % 60 == 0:
+        return f"{minutes // 60}小时"
+    return f"{minutes}分钟"
+
+
+def limit_window(value, fallback):
+    if not isinstance(value, dict):
+        return ""
+    try:
+        used = min(100, max(0, int(value.get("usedPercent"))))
+    except (TypeError, ValueError):
+        return ""
+    label = limit_duration(value.get("windowDurationMins")) or fallback
+    return f"{label}剩余 {100 - used}%"
+
+
+def rate_limit_label(value):
+    if not isinstance(value, dict):
+        return "暂不可用"
+    snapshot = value.get("rateLimits", value)
+    if not isinstance(snapshot, dict):
+        return "暂不可用"
+
+    parts = []
+    if value.get("ordinaryUsageAllowed") is False:
+        parts.append("当前受限")
+    if snapshot.get("rateLimitReachedType"):
+        parts.append("已达上限")
+    for key, fallback in (("primary", "主限额"), ("secondary", "次限额")):
+        label = limit_window(snapshot.get(key), fallback)
+        if label:
+            parts.append(label)
+
+    credits = snapshot.get("credits")
+    if isinstance(credits, dict):
+        if credits.get("unlimited"):
+            parts.append("余额无限")
+        elif credits.get("balance") is not None:
+            parts.append(f"余额 {compact_label(credits.get('balance'))}")
+        elif credits.get("hasCredits"):
+            parts.append("余额可用")
+        elif credits.get("hasCredits") is False:
+            parts.append("余额 0")
+
+    reset_credits = value.get("rateLimitResetCredits")
+    if isinstance(reset_credits, dict):
+        try:
+            count = int(reset_credits.get("availableCount"))
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            parts.append(f"可重置 {count} 次")
+
+    return "  ".join(parts) or "暂不可用"
 
 
 def backend_reason(error):
@@ -436,7 +507,7 @@ def setting_summary(action, *, model, effort, cwd):
 def status_summary(*, status, queued, pending, failed, name, model, effort,
                    cwd, connection, input_mode, provider=None, approval=None,
                    sandbox=None, reviewer=None, collaboration=None,
-                   profile=None, usage=None):
+                   profile=None, usage=None, rate_limits=None):
     return fill(STATUS_SUMMARY, {
         "状态": status,
         "排队": queued,
@@ -453,15 +524,12 @@ def status_summary(*, status, queued, pending, failed, name, model, effort,
         "模式": input_mode,
         "上下文": context_usage(usage),
         "Token": token_usage(usage),
+        "限额": rate_limit_label(rate_limits),
     })
 
 
-def settings_summary(*, name, model, effort, cwd, input_mode, notice, attachment_mib):
+def settings_summary(*, notice, attachment_mib):
     return fill(SETTINGS_SUMMARY, {
-        "会话": session_name(name),
-        "模型": model_label(model, effort),
-        "目录": cwd,
-        "模式": input_mode,
         "处理提示": notice or "关闭",
         "附件上限": attachment_mib,
     })

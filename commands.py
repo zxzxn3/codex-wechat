@@ -19,6 +19,7 @@ from prompts import (
     MODEL_INVALID,
     MODEL_NOT_IN_CATALOG,
     MODEL_SUMMARY,
+    MODEL_TABLE_HEADER,
     NEW_USAGE,
     NO_NEXT_PAGE,
     SESSION_INDEX_INVALID,
@@ -127,13 +128,7 @@ async def handle(bridge, command, argument):
         if argument:
             bridge.reply(SETTINGS_USAGE)
             return
-        details = bridge.backend.info
         bridge.reply(settings_summary(
-            name=details.get("name"),
-            model=details.get("model"),
-            effort=details.get("effort"),
-            cwd=details.get("cwd") or bridge.backend.cwd,
-            input_mode=bridge.input_mode,
             notice=notice(bridge),
             attachment_mib=bridge.media.limit // (1024 * 1024),
         ))
@@ -200,7 +195,7 @@ async def handle(bridge, command, argument):
                 if age:
                     labels.append(age)
             title = title.replace("|", "\\|")
-            state = " · ".join(labels) or "—"
+            state = "  ".join(labels) or "无"
             lines.append(f"| {index} | {title} | {state} |")
         if not threads:
             lines.append("\n没有匹配的会话。")
@@ -212,14 +207,13 @@ async def handle(bridge, command, argument):
     if command in ("/model", "/models") and not argument:
         models = await model_entries(bridge)
         bridge.model_choices = models
-        lines = []
+        lines = [MODEL_TABLE_HEADER]
         for index, model in enumerate(models, 1):
-            efforts = "、".join(effort_label(value) for value in effort_choices(model))
-            lines.extend((f"{index}. {model['model']}",
-                          f"   强度：{efforts or '无可选强度'}"))
+            efforts = "  ".join(effort_label(value) for value in effort_choices(model))
+            model_name = model["model"].replace("|", "\\|")
+            lines.append(f"| {index} | {model_name} | {efforts or '无可选强度'} |")
         bridge.reply(fill(MODEL_SUMMARY, {
-            "列表": "\n".join(lines) if lines else "当前后端没有返回模型。",
-            "目标": 1 if lines else "编号或名称",
+            "列表": "\n".join(lines) if models else "当前后端没有返回模型。",
         }))
         return
     if command == "/cwd" and not argument:
