@@ -1,5 +1,6 @@
 """Single source for user-visible copy and presentation formats."""
 from datetime import datetime
+import os
 
 
 DEFAULT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
@@ -62,19 +63,26 @@ SETTING_SUMMARY = (
     "目录：{目录}"
 )
 STATUS_SUMMARY = (
+    "```\n"
     "{状态}\n"
-    "排队消息 {排队} | 待审批 {审批} | 发送失败 {发送}\n\n"
+    "排队消息 {排队} · 待审批 {审批} · 发送失败 {发送}\n\n"
     "会话：{会话}\n"
     "模型：{模型}\n"
-    "目录：{目录}\n"
+    "提供方：{提供方}\n"
+    "目录：{目录}\n\n"
+    "权限：{权限}\n"
+    "协作：{协作}\n"
     "连接：{连接}\n"
-    "收信：{收信}"
+    "模式：{模式}\n\n"
+    "上下文：{上下文}\n"
+    "Token：{Token}\n"
+    "```"
 )
 SETTINGS_SUMMARY = (
     "会话：{会话}\n"
     "模型：{模型}\n"
     "目录：{目录}\n"
-    "收信：{收信}\n"
+    "模式：{模式}\n"
     "处理提示：{处理提示}\n"
     "附件上限：{附件上限} MiB"
 )
@@ -253,6 +261,108 @@ def model_label(model, effort):
     return f"{model} {effort_label(effort)}"
 
 
+def display_path(value):
+    path = str(value or "")
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
+def compact_label(value, fallback="暂不可用", limit=100):
+    text = " ".join(str(value or "").split())
+    return text[:limit] or fallback
+
+
+def provider_label(value):
+    labels = {"openai": "OpenAI", "deepseek": "DeepSeek"}
+    text = compact_label(value)
+    return labels.get(text.casefold(), text)
+
+
+def permission_label(*, sandbox, approval, reviewer, profile=None):
+    sandbox_name = compact_label(
+        (sandbox or {}).get("type") if isinstance(sandbox, dict) else sandbox,
+        fallback="",
+    )
+    permission = {
+        "dangerFullAccess": "完全访问",
+        "workspaceWrite": "工作区可写",
+        "readOnly": "只读",
+        "externalSandbox": "外部沙箱",
+    }.get(sandbox_name)
+    if not permission and isinstance(profile, dict):
+        permission = compact_label(profile.get("id"), fallback="")
+    permission = permission or "暂不可用"
+
+    if isinstance(approval, dict):
+        approval_name = "精细审批"
+    else:
+        approval_name = {
+            "untrusted": "首次操作需审批",
+            "on-request": "按需审批",
+            "never": "无需审批",
+        }.get(compact_label(approval, fallback=""), "")
+    reviewer_name = {
+        "auto_review": "自动审查",
+        "guardian_subagent": "Guardian 审查",
+    }.get(compact_label(reviewer, fallback=""), "")
+    detail = " · ".join(value for value in (approval_name, reviewer_name) if value)
+    return f"{permission} · {detail}" if detail else permission
+
+
+def collaboration_label(value):
+    mode = value.get("mode") if isinstance(value, dict) else value
+    return {
+        "default": "默认",
+        "plan": "规划",
+    }.get(compact_label(mode, fallback=""), compact_label(mode))
+
+
+def token_count(value):
+    try:
+        number = max(0, int(value))
+    except (TypeError, ValueError):
+        return "暂不可用"
+    if number >= 1_000_000:
+        text = f"{number / 1_000_000:.1f}M"
+    elif number >= 1_000:
+        text = f"{number / 1_000:.1f}K"
+    else:
+        return str(number)
+    return text.replace(".0M", "M").replace(".0K", "K")
+
+
+def context_usage(value):
+    last = value.get("last", {}) if isinstance(value, dict) else {}
+    used = last.get("totalTokens")
+    window = value.get("modelContextWindow") if isinstance(value, dict) else None
+    used_text = token_count(used)
+    if used_text == "暂不可用":
+        return used_text
+    window_text = token_count(window)
+    if window_text == "暂不可用":
+        return f"{used_text} Token"
+    try:
+        percent = round(int(used) * 100 / int(window))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return f"{used_text} / {window_text}"
+    return f"已用 {percent}% · {used_text} / {window_text}"
+
+
+def token_usage(value):
+    total = value.get("total", {}) if isinstance(value, dict) else {}
+    if not isinstance(total, dict) or total.get("totalTokens") is None:
+        return "暂不可用"
+    return "累计 {累计} · 输入 {输入} · 输出 {输出}".format(
+        累计=token_count(total.get("totalTokens")),
+        输入=token_count(total.get("inputTokens")),
+        输出=token_count(total.get("outputTokens")),
+    )
+
+
 def backend_reason(error):
     text = str(error).casefold()
     if "超时" in text or "timeout" in text:
@@ -324,7 +434,9 @@ def setting_summary(action, *, model, effort, cwd):
 
 
 def status_summary(*, status, queued, pending, failed, name, model, effort,
-                   cwd, connection, input_mode):
+                   cwd, connection, input_mode, provider=None, approval=None,
+                   sandbox=None, reviewer=None, collaboration=None,
+                   profile=None, usage=None):
     return fill(STATUS_SUMMARY, {
         "状态": status,
         "排队": queued,
@@ -332,9 +444,15 @@ def status_summary(*, status, queued, pending, failed, name, model, effort,
         "发送": failed,
         "会话": session_name(name),
         "模型": model_label(model, effort),
-        "目录": cwd,
+        "提供方": provider_label(provider),
+        "目录": display_path(cwd),
+        "权限": permission_label(sandbox=sandbox, approval=approval,
+                                 reviewer=reviewer, profile=profile),
+        "协作": collaboration_label(collaboration),
         "连接": connection,
-        "收信": input_mode,
+        "模式": input_mode,
+        "上下文": context_usage(usage),
+        "Token": token_usage(usage),
     })
 
 
@@ -343,7 +461,7 @@ def settings_summary(*, name, model, effort, cwd, input_mode, notice, attachment
         "会话": session_name(name),
         "模型": model_label(model, effort),
         "目录": cwd,
-        "收信": input_mode,
+        "模式": input_mode,
         "处理提示": notice or "关闭",
         "附件上限": attachment_mib,
     })

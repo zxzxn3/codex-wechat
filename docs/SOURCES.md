@@ -36,3 +36,5 @@ CDN 连接诊断：现场观察到网关到 CDN 的 IPv6 TCP 连接处于 SYN-SE
 独立静态审阅指出的相关修正：在 input_items 预检前建立可停止的本地轮次状态；明确拒绝 steer 时改为 queue，超时不重发；所有出站消息限定重试并保留有限失败记录；自动附件仅限工作目录/媒体目录，任意其他路径须显式 /send；控制命令错误显式回报，后端切换后的旧连接清理错误不再假称切换失败。新增离线用例仅编写，未执行。
 
 测速依据：Python 3.14 官方 time.perf_counter 为单调的本机耗时计量，time.time 仅用于标注跨时钟估算；微信 create_time_ms/sendmessage 字段依照已查阅的腾讯协议。Agent 首条文字按已查阅的 App Server item/agentMessage/delta 或完整 agentMessage 事件记录，完成按 turn/completed；不计桌面中途接入轮次，不把这些测量称为手机 RTT 或服务商 TTFT。只增加实际发送的本机计时，没有执行网络或模型探针。
+
+/status 扩展依据（2026-11-01）：本机 Codex CLI 0.166.0 导出的 `ThreadStartResponse`、`ThreadResumeResponse`、`ThreadReadResponse`、`ThreadSettingsUpdatedNotification`、`ThreadNameUpdatedNotification` 与 `ThreadTokenUsageUpdatedNotification`。thread start/resume 提供 modelProvider、approvalPolicy、approvalsReviewer 和 sandbox；设置更新事件补充 collaborationMode 与 activePermissionProfile；Token 事件提供累计、最近轮次和上下文窗口。Thread 本身没有可直接读取的历史 Token 字段，因此刚接入且本次连接尚未收到 Token 事件时，/status 不推测用量，显示“暂不可用”。未显示 sessionId 等内部标识。

@@ -297,6 +297,26 @@ class CodexBackend:
         if params.get("threadId") != self.selected_thread:
             return
         method = msg.get("method")
+        if method == "thread/settings/updated":
+            settings = params.get("threadSettings", {})
+            for source, target in (
+                ("model", "model"), ("effort", "effort"), ("cwd", "cwd"),
+                ("modelProvider", "provider"), ("approvalPolicy", "approval"),
+                ("approvalsReviewer", "reviewer"), ("sandboxPolicy", "sandbox"),
+                ("activePermissionProfile", "profile"),
+                ("collaborationMode", "collaboration"),
+            ):
+                if source in settings:
+                    self.info[target] = settings[source]
+            return
+        if method == "thread/tokenUsage/updated":
+            token_usage = params.get("tokenUsage")
+            if isinstance(token_usage, dict):
+                self.info["usage"] = token_usage
+            return
+        if method == "thread/name/updated":
+            self.info["name"] = params.get("threadName")
+            return
         if method in ("turn/started", "turn/completed"):
             self.runtime_generation += 1
         if method == "thread/status/changed":
@@ -375,7 +395,10 @@ class CodexBackend:
         thread = await self.read_thread(self.selected_thread)
         if generation != self.runtime_generation:
             return
-        for source, target in (("model", "model"), ("reasoningEffort", "effort"), ("cwd", "cwd")):
+        for source, target in (
+            ("model", "model"), ("reasoningEffort", "effort"), ("cwd", "cwd"),
+            ("modelProvider", "provider"), ("name", "name"),
+        ):
             if thread.get(source) is not None:
                 self.info[target] = thread[source]
         status = thread.get("status", {})
@@ -408,10 +431,20 @@ class CodexBackend:
         else:
             result = await self.rpc("thread/start", options)
         thread = result["thread"]
+        previous = self.info if self.info.get("id") == thread["id"] else {}
         self.info = {"id": thread["id"], "name": thread.get("name"),
                      "model": result.get("model", thread.get("model")),
+                     "provider": result.get("modelProvider",
+                                           thread.get("modelProvider")),
                      "effort": result.get("reasoningEffort", thread.get("reasoningEffort")),
-                     "cwd": result.get("cwd", thread.get("cwd", self.cwd))}
+                     "cwd": result.get("cwd", thread.get("cwd", self.cwd)),
+                     "approval": result.get("approvalPolicy"),
+                     "reviewer": result.get("approvalsReviewer"),
+                     "sandbox": result.get("sandbox"),
+                     "profile": result.get("activePermissionProfile"),
+                     "collaboration": result.get(
+                         "collaborationMode", previous.get("collaboration")),
+                     "usage": previous.get("usage")}
         if self.selected_thread != thread["id"]:
             self.active = None
             self.pending.clear()

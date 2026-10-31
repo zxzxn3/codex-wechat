@@ -168,13 +168,31 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             cwd="~/projects/agent-wechat", input_mode="steer",
             notice=DEFAULT_ACK_TEMPLATE, attachment_mib=20),
             "会话：修复微信附件发送\n模型：GPT-5 Codex Medium\n"
-            "目录：~/projects/agent-wechat\n收信：steer\n"
+            "目录：~/projects/agent-wechat\n模式：steer\n"
             "处理提示：{发送延迟}/{接收延迟}ms\n附件上限：20 MiB")
-        self.assertTrue(status_summary(
+        status = status_summary(
             status="运行中，Agent 正在处理", queued=2, pending=1, failed=0,
             name="修复微信附件发送", model="GPT-5 Codex", effort="medium",
-            cwd="~/projects/agent-wechat", connection="桌面", input_mode="steer")
-            .startswith("运行中，Agent 正在处理\n排队消息 2 | 待审批 1 | 发送失败 0\n"))
+            cwd="/home/zxzx/projects/agent-wechat", connection="桌面",
+            input_mode="steer", provider="openai", approval="on-request",
+            sandbox={"type": "workspaceWrite"}, reviewer="user",
+            collaboration={"mode": "default"},
+            usage={"last": {"totalTokens": 12345},
+                   "total": {"totalTokens": 34567, "inputTokens": 30000,
+                             "outputTokens": 4567},
+                   "modelContextWindow": 200000})
+        self.assertTrue(status.startswith("```\n运行中，Agent 正在处理\n"))
+        self.assertIn(
+                      "排队消息 2 · 待审批 1 · 发送失败 0\n\n"
+                      "会话：修复微信附件发送\n", status)
+        self.assertIn("提供方：OpenAI\n", status)
+        self.assertIn("目录：~/projects/agent-wechat\n", status)
+        self.assertIn("权限：工作区可写 · 按需审批\n", status)
+        self.assertIn("协作：默认\n", status)
+        self.assertIn("模式：steer\n", status)
+        self.assertIn("上下文：已用 6% · 12.3K / 200K\n", status)
+        self.assertIn("Token：累计 34.6K · 输入 30K · 输出 4.6K\n```", status)
+        self.assertNotIn("Session", status)
         self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")),
                          "后端连接中断")
         self.assertEqual(attachment_reason(MediaError("附件超过本地大小限制")),
