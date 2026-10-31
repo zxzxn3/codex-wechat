@@ -17,7 +17,7 @@ from storage import Store
 from wechat import WeChat, login
 from commands import ensure_session, handle, notice
 from command_specs import HELP, REGISTRY, command_lane
-from configuration import Slicing, Notifications
+from configuration import Slicing, Notifications, completion_template
 from quota import quota_warnings
 from records import InputPhase, TurnResult
 from slicing import split_text
@@ -41,7 +41,6 @@ from prompts import (
     BUSY_RESTART,
     COMMAND_FAILURE,
     COMMAND_FAILURE_LABELS,
-    COMPLETION_NOTICE,
     MEDIA_USAGE,
     PING_REPLY,
     PING_USAGE,
@@ -81,8 +80,10 @@ def parse_control(text):
 
 
 class Bridge:
-    def __init__(self, store, account, config, backend_factory=CodexBackend, channel=None):
+    def __init__(self, store, account, config, backend_factory=CodexBackend, channel=None, config_path=None):
         self.store, self.account, self.config = store, account, config
+        self.config_path = Path(config_path) if config_path else None
+        self.notice_signature = self.notice_file_signature()
         self.state = store.load("bridge", {"cursor": "", "thread": None,
             "inbox": [], "outbox": [], "seen": [], "running": False})
         self.channel = channel or WeChat(account)
@@ -115,6 +116,40 @@ class Bridge:
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:
             self.outbox_drained.set()
+
+    def notice_file_signature(self):
+        try:
+            stat = self.config_path.stat() if self.config_path else None
+            return (stat.st_mtime_ns, stat.st_size) if stat else None
+        except OSError:
+            return None
+
+    def notice_config(self):
+        signature = self.notice_file_signature()
+        if self.config_path and signature != self.notice_signature:
+            self.notice_signature = signature
+            try:
+                fresh = json.loads(self.config_path.read_text()) if signature else {}
+                if not isinstance(fresh, dict):
+                    raise ValueError()
+                keys = ("processingNotice", "completionNotice")
+                if ("processingNotice" in fresh and not isinstance(fresh["processingNotice"], (str, dict))
+                        or "completionNotice" in fresh and not isinstance(fresh["completionNotice"], str)):
+                    raise ValueError()
+                changed = False
+                for key in keys:
+                    if fresh.get(key) != self.config.get(key):
+                        self.state.pop(key, None)
+                        if key in fresh:
+                            self.config[key] = fresh[key]
+                        else:
+                            self.config.pop(key, None)
+                        changed = True
+                if changed:
+                    self.save()
+            except (OSError, ValueError):
+                print("提示配置未加载，保留原设置，请检查 JSON 和模板类型。", file=sys.stderr)
+        return self.config
 
     def save(self):
         self.state["backendName"] = self.backend_name
@@ -283,8 +318,9 @@ class Bridge:
         if errors:
             entries.extend(self.text_entries("\n".join(errors), group=group, context=context, source=source))
         entries.extend(assets)
-        if notify_completion and not errors and COMPLETION_NOTICE:
-            completion = render_ack(COMPLETION_NOTICE, self.prompt_fields())
+        completion_notice = completion_template(self.notice_config(), self.state)
+        if notify_completion and not errors and completion_notice:
+            completion = render_ack(completion_notice, self.prompt_fields())
             entries.extend(self.text_entries(completion, group=group, context=context,
                                              source=source, role="completion"))
         if finish_running:
@@ -798,7 +834,7 @@ async def main():
         config = json.loads(args.config.read_text()) if args.config.exists() else {}
         cwd = Path(config.get("cwd", ROOT / "workspace")).expanduser()
         cwd.mkdir(parents=True, exist_ok=True)
-        bridge = Bridge(store, account, config)
+        bridge = Bridge(store, account, config, config_path=args.config)
         loop = asyncio.get_running_loop()
         main_task = asyncio.current_task()
         for signum in (signal.SIGINT, signal.SIGTERM):

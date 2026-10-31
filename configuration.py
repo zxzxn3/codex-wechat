@@ -1,6 +1,7 @@
 """Local settings and legacy migrations, independent of presentation."""
 from dataclasses import dataclass
 
+DEFAULT_COMPLETION_TEMPLATE = ""
 DEFAULT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
 TEXT_LIMIT_BYTES = 3000
 
@@ -51,3 +52,10 @@ def processing_template(config, state):
     if text in ("{latency}", "::{发送延迟}/{接收延迟}ms::"):
         return DEFAULT_ACK_TEMPLATE
     return str(text)
+
+
+def completion_template(config, state):
+    for source in (state.get("completionNotice"), config.get("completionNotice")):
+        if isinstance(source, str):
+            return source
+    return DEFAULT_COMPLETION_TEMPLATE

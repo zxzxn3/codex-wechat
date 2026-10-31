@@ -38,11 +38,11 @@ from prompts import (
 )
 
 from command_specs import REGISTRY
-from configuration import processing_template
+from configuration import processing_template, completion_template
 
 
 def notice(bridge):
-    return processing_template(bridge.config, bridge.state)
+    return processing_template(bridge.notice_config(), bridge.state)
 
 
 def info(bridge, action="当前会话", *, include_backend=False):
@@ -116,6 +116,7 @@ async def handle(bridge, command, argument):
             return
         bridge.reply(settings_summary(
             notice=notice(bridge),
+            completion_notice=completion_template(bridge.notice_config(), bridge.state),
             attachment_mib=bridge.media.limit // (1024 * 1024),
             slicing=bridge.slicing,
             notifications=bridge.notifications,
@@ -130,13 +131,18 @@ async def handle(bridge, command, argument):
             "可用": available,
         }))
         return
-    if command == "/ack":
+    if command in ("/ack", "/finish"):
+        label = "接收提示" if command == "/ack" else "结束提示"
+        key = "processingNotice" if command == "/ack" else "completionNotice"
+        usage = ACK_USAGE.replace("/ack", command)
         if argument == "fields":
             bridge.reply(panel(*(f"{{{name}}}" for name in bridge.prompt_fields())))
             return
-        template = notice(bridge)
+        template = (notice(bridge) if command == "/ack" else
+                    completion_template(bridge.notice_config(), bridge.state))
         if not argument:
-            bridge.reply(fill(ACK_VIEW, {"模板": template or "关闭"}))
+            bridge.reply(fill(ACK_VIEW.replace("/ack", command).replace("接收提示", label),
+                              {"模板": template or "关闭"}))
             return
         if argument == "text":
             value = ""
@@ -145,12 +151,12 @@ async def handle(bridge, command, argument):
             if value in ('""', "''"):
                 value = ""
         else:
-            raise UserFacingError(ACK_USAGE)
+            raise UserFacingError(usage)
         if len(value.encode()) > MAX_NOTICE_BYTES:
-            raise UserFacingError(fill(ACK_TOO_LONG, {"字节": MAX_NOTICE_BYTES}))
-        bridge.state["processingNotice"] = value
+            raise UserFacingError(fill(ACK_TOO_LONG.replace("接收提示", label), {"字节": MAX_NOTICE_BYTES}))
+        bridge.state[key] = value
         bridge.save()
-        bridge.reply(panel("接收提示: " + (value or "关闭")))
+        bridge.reply(panel(label + ": " + (value or "关闭")))
         return
     if command == "/sessions":
         if argument == "next":

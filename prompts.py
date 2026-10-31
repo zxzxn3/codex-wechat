@@ -5,7 +5,6 @@ import re
 
 
 MAX_NOTICE_BYTES = 1000
-COMPLETION_NOTICE = ""
 COMPACT_STARTED = "正在压缩上下文..."
 COMPACT_FINISHED = "上下文压缩已结束。"
 COMPACT_INTERRUPTED = "上下文压缩已中断。"
@@ -95,6 +94,7 @@ COMMAND_FAILURE_LABELS = {
     "/effort": "未切换强度",
     "/cwd": "未切换目录",
     "/ack": "未更新接收提示",
+    "/finish": "未更新结束提示",
 }
 COMMAND_FAILURE = "{动作}: {原因}"
 
@@ -385,8 +385,8 @@ def status_summary(**kwargs):
     return status_from_fields(status_fields(**kwargs))
 
 
-def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None):
-    lines = [f"接收提示: {notice or '关闭'}", f"结束提示: {COMPLETION_NOTICE or '关闭'}",
+def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None, completion_notice=""):
+    lines = [f"接收提示: {notice or '关闭'}", f"结束提示: {completion_notice or '关闭'}",
              f"附件上限: {attachment_mib} MiB"]
     if slicing is not None:
         lines.extend([f"切片: {slicing.mode}", f"目标长度: {slicing.target_chars} 字符"])
