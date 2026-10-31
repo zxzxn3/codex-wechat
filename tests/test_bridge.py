@@ -6,13 +6,14 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from agent_wechat import Bridge
+from agent_wechat import Bridge, parse_control
 from backend import CodexBackend, CodexRpcError
 from media import MAX_ATTACHMENTS, OUTPUT_HINT, MediaError
 from latency import Latency
 from commands import handle
 from prompts import (
     DEFAULT_ACK_TEMPLATE,
+    HELP,
     PING_REPLY,
     RESTART_NOT_SERVICE,
     UserFacingError,
@@ -64,6 +65,13 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await self.bridge.receive({"msgs": [self.message("2")]})
         await self.bridge.control("/stop")
         self.assertFalse(self.store.load("bridge")["inbox"])
+
+    async def test_command_parser_trims_surrounding_whitespace(self):
+        self.assertEqual(parse_control("/restart \t"), ("/restart", ""))
+        self.assertEqual(parse_control("  /switch   2  "), ("/switch", "2"))
+        self.assertEqual(parse_control("/send /tmp/a b.txt"),
+                         ("/send", "/tmp/a b.txt"))
+        self.assertEqual(parse_control("   "), ("", ""))
 
     async def test_private_state_and_utf8_chunks(self):
         self.bridge.state["context"] = "context"
@@ -171,6 +179,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                          "后端连接中断")
         self.assertEqual(attachment_reason(MediaError("附件超过本地大小限制")),
                          "文件超过大小限制")
+        self.assertIn("`/status` 当前状态", HELP)
+        self.assertIn("`/switch {编号或ID}`", HELP)
+        self.assertIn("`/backend {名称}`", HELP)
 
     async def test_restart_refuses_non_service_owner(self):
         owner = AsyncMock(side_effect=ValueError("not service owner"))
@@ -194,8 +205,11 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.list_threads = threads
         await handle(self.bridge, "/sessions", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
-        self.assertIn("1. 当前会话　当前", text)
-        self.assertIn("2. Super-agent 调研　工作中", text)
+        self.assertIn("| # | 会话 | 状态 |", text)
+        self.assertIn("| 1 | 当前会话 | 当前", text)
+        self.assertIn("| 2 | Super-agent 调研 | 工作中 |", text)
+        self.assertIn("切换：`/switch {编号或ID}`", text)
+        self.assertIn("搜索：`/sessions {关键词}`", text)
         self.assertNotIn("thread-current", text)
         self.assertNotIn("[active]", text)
 

@@ -25,6 +25,7 @@ from prompts import (
     SESSION_TARGET_ACTIVE,
     SESSION_TARGET_BLOCKED,
     SESSION_USAGE,
+    SESSIONS_TABLE_HEADER,
     SETTINGS_USAGE,
     UserFacingError,
     WORKING_DIRECTORY,
@@ -182,7 +183,7 @@ async def handle(bridge, command, argument):
         bridge.state["sessionCursor"] = result.get("nextCursor")
         bridge.state["sessionSearch"] = search
         bridge.save()
-        lines = ["会话"]
+        lines = ["会话", "", SESSIONS_TABLE_HEADER]
         for index, thread in enumerate(threads, 1):
             title = session_name(thread.get("name"))
             current = thread["id"] == bridge.state["thread"]
@@ -198,13 +199,14 @@ async def handle(bridge, command, argument):
                 age = session_age(thread.get("updatedAt"))
                 if age:
                     labels.append(age)
-            suffix = f"　{' · '.join(labels)}" if labels else ""
-            lines.append(f"{index}. {title}{suffix}")
+            title = title.replace("|", "\\|")
+            state = " · ".join(labels) or "—"
+            lines.append(f"| {index} | {title} | {state} |")
         if not threads:
             lines.append("\n没有匹配的会话。")
-        lines.extend(["", "切换：/switch 编号或ID", "搜索：/sessions 关键词"])
+        lines.extend(["", "切换：`/switch {编号或ID}`", "搜索：`/sessions {关键词}`"])
         if result.get("nextCursor"):
-            lines.append("下一页：/sessions next")
+            lines.append("下一页：`/sessions next`")
         bridge.reply("\n".join(lines))
         return
     if command in ("/model", "/models") and not argument:

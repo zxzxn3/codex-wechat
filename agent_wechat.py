@@ -68,6 +68,14 @@ ROOT = Path(__file__).resolve().parent
 SEND_ATTEMPTS = 3
 
 
+def parse_control(text):
+    """Split a WeChat command after trimming surrounding whitespace."""
+    parts = str(text or "").strip().split(maxsplit=1)
+    if not parts:
+        return "", ""
+    return parts[0], parts[1].strip() if len(parts) > 1 else ""
+
+
 class Bridge:
     def __init__(self, store, account, config, backend_factory=CodexBackend, channel=None):
         self.store, self.account, self.config = store, account, config
@@ -257,8 +265,7 @@ class Bridge:
         self.steer_wake.set()
 
     async def control(self, text, *, received=None):
-        command, _, argument = text.partition(" ")
-        argument = argument.strip()
+        command, argument = parse_control(text)
         if command in MANAGED:
             try:
                 if command not in ("/backend", "/ack", "/settings"):

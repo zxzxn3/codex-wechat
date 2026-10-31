@@ -7,47 +7,48 @@ LEGACY_ACK_TEMPLATE = "{latency}"
 MAX_NOTICE_BYTES = 1000
 
 HELP = "\n".join((
-    "/status 当前状态",
-    "/settings 当前设置",
-    "/sessions 会话",
-    "/new 新建",
-    "/stop 停止",
-    "/ping 消息通道延迟",
-    "/switch 编号或ID",
-    "/backend 名称",
-    "/model 编号或名称",
-    "/effort 档位",
-    "/cwd 路径",
-    "/ack 处理提示",
-    "/restart 重启消息桥",
+    "`/status` 当前状态",
+    "`/settings` 当前设置",
+    "`/sessions` 会话",
+    "`/new` 新建",
+    "`/stop` 停止",
+    "`/ping` 消息通道延迟",
+    "`/switch {编号或ID}`",
+    "`/backend {名称}`",
+    "`/model {编号或名称}`",
+    "`/effort {档位}`",
+    "`/cwd {路径}`",
+    "`/ack` 处理提示",
+    "`/restart` 重启消息桥",
 ))
 
 BACKEND_SUMMARY = (
     "当前后端：{当前}\n"
     "可用：{可用}\n"
-    "切换：/backend {目标}"
+    "切换：`/backend {目标}`"
 )
-MODEL_SUMMARY = "可用模型\n{列表}\n\n切换：/model {目标}"
+MODEL_SUMMARY = "可用模型\n{列表}\n\n切换：`/model {目标}`"
 EFFORT_SUMMARY = (
     "当前强度：{当前}\n"
     "可选：{可选}\n"
-    "切换：/effort {目标}"
+    "切换：`/effort {目标}`"
 )
 ACK_VIEW = (
     "处理提示：{模板}\n"
-    "修改：/ack text 模板\n"
-    "关闭：/ack text"
+    "修改：`/ack text {{模板}}`\n"
+    "关闭：`/ack text`"
 )
-ACK_USAGE = "用法：/ack text 模板\n关闭：/ack text"
+ACK_USAGE = "用法：`/ack text {模板}`\n关闭：`/ack text`"
 ACK_TOO_LONG = "未更新处理提示：模板最多 {字节} 字节"
-NO_NEXT_PAGE = "没有下一页\n请先发送 /sessions。"
+NO_NEXT_PAGE = "没有下一页\n请先发送 `/sessions`。"
 WORKING_DIRECTORY = "工作目录：{目录}"
 MEDIA_USAGE = (
     "用法：\n\n"
-    "/send 路径\n"
-    "/sendfile 路径\n"
-    "/sendimage 路径"
+    "`/send {路径}`\n"
+    "`/sendfile {路径}`\n"
+    "`/sendimage {路径}`"
 )
+SESSIONS_TABLE_HEADER = "| # | 会话 | 状态 |\n|:--:|:--|:--|"
 
 SESSION_SUMMARY = (
     "{动作}\n"
@@ -78,11 +79,11 @@ SETTINGS_SUMMARY = (
     "附件上限：{附件上限} MiB"
 )
 
-DESKTOP_NOTE = "补充消息会进入这个任务；/stop 也会停止它。"
+DESKTOP_NOTE = "补充消息会进入这个任务；`/stop` 也会停止它。"
 BLOCKED_NOTE = "当前任务正在等待电脑端处理。\n请先在桌面继续。"
 
-BUSY_CHANGE = "拒绝切换：有尚未完成的任务，使用 /stop 终止后重试。"
-BUSY_RESTART = "有尚未完成的任务\n使用 /stop 终止后重试。"
+BUSY_CHANGE = "拒绝切换：有尚未完成的任务，使用 `/stop` 终止后重试。"
+BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
 RESTART_STARTED = "正在重启消息桥。"
 RESTART_READY = "消息桥已重启。"
 RESTART_CONFIRM_UNSENT = "确认消息未能及时发送。"
@@ -96,38 +97,38 @@ STOP_UNCONFIRMED = "停止未确认\n待办已清空，但当前任务可能仍�
 
 BACKEND_CONNECT_FAILED = (
     "后端连接失败：{原因}\n"
-    "使用 /backend 切换后端，或稍后重试。"
+    "使用 `/backend` 切换后端，或稍后重试。"
 )
 SESSION_RESTORE_FAILED = (
     "会话恢复失败：{原因}\n"
-    "使用 /backend 切换后端，或稍后重试。"
+    "使用 `/backend` 切换后端，或稍后重试。"
 )
 TASK_FAILED = (
     "任务未完成：后端处理异常\n"
-    "可用 /status 查看状态，或 /backend 切换后端重试。"
+    "可用 `/status` 查看状态，或 `/backend` 切换后端重试。"
 )
 TURN_FAILED = "任务未完成：Agent 执行失败。"
 TURN_INTERRUPTED = "任务已中断。"
-TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 /status 查看状态。"
+TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
 TURN_COMPLETED_EMPTY = "任务已完成，但没有文本结果。"
 INTERRUPTED_TASK = (
     "上次任务在等待结果时中断。\n"
     "没有自动重放，电脑端可能仍在执行。\n"
-    "请使用 /status 确认。"
+    "请使用 `/status` 确认。"
 )
 UNCERTAIN_STEER = (
     "补充消息可能已送达，但结果未确认。\n"
-    "没有自动重发，请使用 /status 查看进度。"
+    "没有自动重发，请使用 `/status` 查看进度。"
 )
 QUEUED_STEER = (
     "当前任务暂不接受补充消息\n"
     "消息已排队，完成后继续处理。"
 )
 PING_REPLY = "pong. {发送延迟}/{接收延迟}ms"
-PING_USAGE = "用法：/ping\n仅测试微信通道，不调用模型。"
-UNKNOWN_COMMAND = "命令无效\n发送 /help 查看命令。"
+PING_USAGE = "用法：`/ping`\n仅测试微信通道，不调用模型。"
+UNKNOWN_COMMAND = "命令无效\n发送 `/help` 查看命令。"
 TOO_MANY_ATTACHMENTS = "消息未接收：附件超过 {数量} 个。\n请分开发送。"
-QUEUE_FULL = "拒绝接收：排队消息已达 {数量} 条。\n请等待完成或使用 /stop。"
+QUEUE_FULL = "拒绝接收：排队消息已达 {数量} 条。\n请等待完成或使用 `/stop`。"
 UNSUPPORTED_MESSAGE = (
     "消息未接收：仅支持文字、图片和文件。\n"
     "文字每条最多 {数量} 字符。"
@@ -140,26 +141,26 @@ ATTACHMENT_INCOMING_FAILED = (
 ATTACHMENT_QUEUED = "附件已加入发送队列\n失败时会在此提示。"
 ATTACHMENT_SEND_FAILED = (
     "附件未发出：{名称}\n"
-    "重试 {次数} 次仍失败，请稍后用 /send 重试。"
+    "重试 {次数} 次仍失败，请稍后用 `/send` 重试。"
 )
 AUTO_ATTACHMENT_LIMIT = "附件未发送：自动回传最多 {数量} 个，超出的已跳过。"
 AUTO_ATTACHMENT_FAILED = "附件未发送：{原因}{建议}"
-AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 /send 路径。"
+AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 `/send {路径}`。"
 
 COMMAND_APPROVAL = (
     "需要你的决定：执行命令\n"
     "命令：{命令}\n"
     "目录：{目录}\n"
     "原因：{原因}\n\n"
-    "同意：/approve {编号}\n"
-    "拒绝：/deny {编号}"
+    "同意：`/approve {编号}`\n"
+    "拒绝：`/deny {编号}`"
 )
 FILE_APPROVAL = (
     "需要你的决定：修改文件\n"
     "范围：{范围}\n"
     "原因：{原因}\n\n"
-    "同意：/approve {编号}\n"
-    "拒绝：/deny {编号}"
+    "同意：`/approve {编号}`\n"
+    "拒绝：`/deny {编号}`"
 )
 APPROVAL_ACCEPTED = "已同意，等待 Agent 继续。"
 APPROVAL_DECLINED = "已拒绝。"
@@ -185,7 +186,7 @@ COMMAND_FAILURE_LABELS = {
 }
 COMMAND_FAILURE = "{动作}：{原因}\n请稍后重试。"
 
-SETTINGS_USAGE = "用法：/settings"
+SETTINGS_USAGE = "用法：`/settings`"
 BACKEND_INVALID = "未切换后端：名称无效\n可用：{可用}"
 BACKEND_SESSION_BUSY = (
     "未切换后端：目标后端的上次会话正在工作或等待处理。\n"
@@ -203,15 +204,15 @@ SESSION_TARGET_ACTIVE = (
     "未切换会话：工作中的会话只能通过桌面共享连接。\n"
     "请切换后端或等待任务结束。"
 )
-SESSION_INDEX_INVALID = "未切换会话：编号无效\n请先发送 /sessions。"
-SESSION_USAGE = "用法：/switch 编号或ID"
-NEW_USAGE = "用法：/new"
-MODEL_INVALID = "未切换模型：名称无效\n请使用 /model 查看可用模型。"
+SESSION_INDEX_INVALID = "未切换会话：编号无效\n请先发送 `/sessions`。"
+SESSION_USAGE = "用法：`/switch {编号或ID}`"
+NEW_USAGE = "用法：`/new`"
+MODEL_INVALID = "未切换模型：名称无效\n请使用 `/model` 查看可用模型。"
 MODEL_NOT_IN_CATALOG = "未切换强度：当前模型不在模型列表中。"
 EFFORT_INVALID = "未切换强度：可选 {可选}"
 DIRECTORY_INVALID = "未切换目录：目录不存在或无法访问\n请检查路径后重试。"
 DIRECTORY_NOT_FOLDER = "未切换目录：路径不是文件夹\n请选择文件夹。"
-RESTART_USAGE = "用法：/restart"
+RESTART_USAGE = "用法：`/restart`"
 
 
 class UserFacingError(ValueError):
