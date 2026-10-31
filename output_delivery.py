@@ -13,7 +13,14 @@ from records import TurnResult
 from slicing import split_text
 from media import MediaError, MAX_ATTACHMENTS, split_answer
 from errors import attachment_reason
-from prompts import ATTACHMENT_SEND_FAILED, AUTO_ATTACHMENT_FAILED, AUTO_ATTACHMENT_LIMIT, AUTO_ATTACHMENT_PATH_HINT, fill, render_ack
+from prompts import (
+    ATTACHMENT_SEND_FAILED,
+    AUTO_ATTACHMENT_FAILED,
+    AUTO_ATTACHMENT_LIMIT,
+    AUTO_ATTACHMENT_PATH_HINT,
+    fill,
+    render_ack,
+)
 
 SEND_ATTEMPTS = 3
 

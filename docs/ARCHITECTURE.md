@@ -4,12 +4,16 @@
 
 - `codex_transport.py`：启动器、共享 daemon 接入、WebSocket/stdio、RPC 配对与连接关闭。
 - `backend.py`：会话、原生事件、轮次与审批；通过 transport 访问 Codex。Codex 是会话设置和轮次状态的权威；限额属于账户缓存，模型目录属于连接缓存，不随切换会话丢失。
-- `agent_wechat.py`：输入/输出交付与并发协调。连接、准备任务、模型轮次和发送状态不能简化为同一个忙闲值。
+- `agent_wechat.py`：组合根、微信接收、控制调度与共享运行上下文。
+- `input_delivery.py`：输入准备/提交状态转换、恢复、steer 和 queue 协调。
+- `output_delivery.py`：输出组、附件快照、重试与顺序发送。连接、准备任务、模型轮次和发送状态不能简化为同一个忙闲值。
 - `records.py`：跨边界的 `Source`、`TurnResult`、输入阶段；不实现通用状态机。
 - `commands.py`、`command_specs.py`：会话操作和唯一指令目录；目录决定别名、帮助、参数约束、后端需求和执行通道，保持无业务依赖；处理函数由 commands 的单一分发表关联，Bridge 只调用 dispatch。语法拒绝先于后端连接。
 - `prompts.py`、`errors.py`、`configuration.py`：展示、错误分类、配置默认值/迁移；不重复模型或权限清单。
 - `slicing.py`：纯文本切片及预览。`media.py` 先剥离附件标记并校验快照，正文才进入切片。
 - `wechat.py`、`storage.py`、`profiles.py`、`service_control.py`：微信协议、私有原子 JSON、后端选择、用户服务重启。
+
+输入/输出组件引用同一个运行上下文，由 Bridge 统一保存；不复制当前后端或持久队列。保留 Bridge 薄入口以兼容调用与离线用例。
 
 持久化选择的 backend/thread、用户覆盖和微信交付信息。连接对象、连接身份、选择代次、active/pending/loaded 留在内存；不把旧连接的运行状态当恢复事实。
 

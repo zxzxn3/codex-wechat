@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Local WeChat ↔ Codex bridge. Media transport uses cryptography."""
 import argparse
-from dataclasses import asdict
 import asyncio
 import hashlib
 import json
@@ -9,67 +8,44 @@ import os
 from pathlib import Path
 import signal
 import sys
-import time
 import uuid
 
-from backend import CodexBackend, CodexRpcError, DeferTurn
+from backend import CodexBackend
 from output_delivery import OutputDelivery
+from input_delivery import InputDelivery
 from storage import Store
 from wechat import WeChat, login
-from commands import ensure_session, dispatch, notice, parse_control
-from command_specs import HELP, REGISTRY, CONTROL_LANES, command_lane
-from configuration import ConfigLoader, completion_template
+from commands import (
+    ensure_session,
+    dispatch,
+    notice,
+    parse_control,
+)
+from command_specs import REGISTRY, CONTROL_LANES, command_lane
+from configuration import ConfigLoader
 from quota import quota_warnings
-from records import InputPhase, TurnResult
-from slicing import split_text
+from records import InputPhase
 from profiles import backend_label, definitions, snapshot
 import service_control
-from media import Media, MediaError, MAX_ATTACHMENTS, split_answer
-from latency import Latency, provider_latency
-from errors import UserFacingError, attachment_reason, backend_reason
+from media import Media, MAX_ATTACHMENTS
+from latency import Latency
+from errors import UserFacingError, backend_reason
 from prompts import (
-    APPROVAL_ACCEPTED,
-    APPROVAL_DECLINED,
-    APPROVAL_EXPIRED,
-    APPROVAL_FAILED,
-    ATTACHMENT_INCOMING_FAILED,
-    ATTACHMENT_QUEUED,
-    ATTACHMENT_SEND_FAILED,
-    AUTO_ATTACHMENT_FAILED,
-    AUTO_ATTACHMENT_LIMIT,
-    AUTO_ATTACHMENT_PATH_HINT,
     BACKEND_CONNECT_FAILED,
     BUSY_RESTART,
-    COMMAND_FAILURE,
-    COMMAND_FAILURE_LABELS,
-    MEDIA_USAGE,
-    ping_channel,
-    PING_USAGE,
-    QUEUED_STEER,
     QUEUE_FULL,
     RESTART_CONFIRM_UNSENT,
-    RESTART_FAILED,
     RESTART_NOT_SERVICE,
     RESTART_READY,
     RESTART_STARTED,
-    RESTART_USAGE,
-    STOP_DEFERRED,
-    STOP_IDLE,
-    STOP_REQUESTED,
-    STOP_UNCONFIRMED,
-    TASK_FAILED,
     TOO_MANY_ATTACHMENTS,
-    UNCERTAIN_STEER,
-    UNKNOWN_COMMAND,
     UNSUPPORTED_MESSAGE,
     fill,
     render_ack,
     status_fields,
-    status_from_fields,
 )
 
 ROOT = Path(__file__).resolve().parent
-SEND_ATTEMPTS = 3
 
 
 
@@ -109,6 +85,7 @@ class Bridge:
         if not self.state["outbox"]:
             self.outbox_drained.set()
         self.output = OutputDelivery(self)
+        self.inputs = InputDelivery(self)
 
     @property
     def slicing(self):
@@ -237,22 +214,17 @@ class Bridge:
     def text_entries(self, text, *, group, context, semantic=False, source=None, role="body"):
         return self.output.text_entries(text, group=group, context=context, semantic=semantic, source=source, role=role)
 
-
     def enqueue(self, entries, *, persist=True):
         return self.output.enqueue(entries, persist=persist)
-
 
     def reply(self, text, *, persist=True):
         return self.output.reply(text, persist=persist)
 
-
     def asset_entry(self, asset, *, group=None, context=None, source=None):
         return self.output.asset_entry(asset, group=group, context=context, source=source)
 
-
     async def queue_file(self, path, kind="auto", *, origin=None):
         return await self.output.queue_file(path, kind, origin=origin)
-
 
     def media_origin(self):
         return {"cwd": self.backend.info.get("cwd") or self.backend.cwd,
@@ -265,37 +237,14 @@ class Bridge:
                              notify_completion=False, source=None, require_current=False):
         return await self.output.deliver_answer(answer, finish_running=finish_running, cwd=cwd, notify_completion=notify_completion, source=source, require_current=require_current)
 
-
     def dispatch_input(self, job, phase, turn_id, backend):
-        if phase == InputPhase.DISPATCHING and (self.stopping or backend is not self.backend):
-            return False
-        job.update(phase=phase, turn=turn_id, source=asdict(backend.source(self.state["thread"])))
-        self.save()
-        return True
+        return self.inputs.dispatch_input(job, phase, turn_id, backend)
 
     def record_input(self, job, phase):
-        job["phase"] = phase
-        self.state["inputRecords"] = (self.state.get("inputRecords", []) + [dict(job)])[-20:]
+        return self.inputs.record_input(job, phase)
 
     def recover_inputs(self):
-        legacy_running = self.state.pop("running", False)
-        self.state.pop("phase", None)
-        current = self.state.pop("currentInput", None)
-        jobs = ([current] if current else []) + self.state["inbox"]
-        self.state["inbox"] = []
-        uncertain = False
-        for job in jobs:
-            phase = job.get("phase", InputPhase.PREPARING)
-            if job.get("dispatching") or phase in (InputPhase.DISPATCHING, InputPhase.ACCEPTED):
-                self.record_input(job, InputPhase.ACCEPTED if phase == InputPhase.ACCEPTED else InputPhase.UNCERTAIN)
-                uncertain = True
-            else:
-                job["phase"] = InputPhase.PREPARING
-                job.setdefault("clientId", str(uuid.uuid4()))
-                self.state["inbox"].append(job)
-        if uncertain or legacy_running:
-            self.reply("上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。")
-        self.save()
+        return self.inputs.recover_inputs()
 
     async def receive(self, batch):
         self.reload_config()
@@ -433,149 +382,19 @@ class Bridge:
             await asyncio.sleep(10)
 
     async def worker(self):
-        while True:
-            if (self.restarting or self.steering or self.session_lock.locked() or self.input_paused):
-                await asyncio.sleep(0.1)
-                continue
-            if self.active_turn() or self.backend.blocked or not self.state["inbox"]:
-                self.wake.clear()
-                self.steer_wake.set()
-                await self.wake.wait()
-                continue
-            self.running = True
-            self.stopping = False
-            job = self.state["inbox"].pop(0)
-            job["phase"] = InputPhase.PREPARING
-            self.state["currentInput"] = job
-            self.save()
-            backend = self.backend
-            try:
-                try:
-                    await ensure_session(self)
-                except Exception:
-                    # Preparation has not submitted anything. Leave the exact job
-                    # available for the connection supervisor, rather than dropping it.
-                    if not self.stopping:
-                        self.state["inbox"].insert(0, job)
-                    self.state.pop("currentInput", None)
-                    self.input_paused = True
-                    self.save()
-                    raise
-                if self.stopping:
-                    continue
-                self.acknowledge(job)
-                if "preparedAttachments" not in job:
-                    job["preparedAttachments"] = await self.media.incoming(job.get("attachments", []))
-                    self.save()
-                if self.stopping:
-                    continue
-                self.steer_wake.set()
-                answer = await backend.run(self.state["thread"], job["text"],
-                    attachments=job["preparedAttachments"], client_id=job["clientId"],
-                    allow_steer=job.get("mode", "steer") != "queue",
-                    dispatch=lambda phase, turn: self.dispatch_input(job, phase, turn, backend))
-                if answer is not None:
-                    await self.deliver_answer(answer)
-                else:
-                    self.state.pop("currentInput", None)
-                    self.save()
-            except asyncio.CancelledError:
-                raise
-            except DeferTurn:
-                if not self.stopping:
-                    job.update(mode="queue", phase=InputPhase.PREPARING)
-                    self.state["inbox"].insert(0, job)
-                    self.reply(QUEUED_STEER)
-                self.state.pop("currentInput", None)
-                self.save()
-            except Exception as error:
-                if self.state.get("currentInput") is job:
-                    phase = job["phase"]
-                    uncertain = phase == InputPhase.DISPATCHING and not (
-                        isinstance(error, CodexRpcError) and error.definite_rejection)
-                    self.record_input(job, InputPhase.UNCERTAIN if uncertain else
-                                      InputPhase.ACCEPTED if phase == InputPhase.ACCEPTED else InputPhase.FAILED)
-                    self.state.pop("currentInput", None)
-                    self.reply("消息提交结果未确认，未自动重发。" if uncertain else
-                               "任务已提交，但结果接收中断，未重新执行。" if phase == InputPhase.ACCEPTED else
-                               fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
-                               if isinstance(error, MediaError) else TASK_FAILED)
-                else:
-                    self.reply("后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。")
-                print(f"Agent backend error: {type(error).__name__}", file=sys.stderr, flush=True)
-            finally:
-                if self.stopping and self.state.get("currentInput") is job:
-                    self.record_input(job, InputPhase.CANCELLED if job["phase"] == InputPhase.PREPARING
-                                      else job["phase"])
-                    self.state.pop("currentInput", None)
-                    self.save()
-                self.running = False
-                self.wake.set()
+        return await self.inputs.worker()
 
     async def steering_worker(self):
-        while True:
-            await self.steer_wake.wait()
-            self.steer_wake.clear()
-            while (self.running or self.active_turn()) and self.state["inbox"] and not self.stopping:
-                # Explicitly queued work must not block later live corrections.
-                job = next((item for item in self.state["inbox"]
-                            if item.get("mode", "steer") != "queue"), None)
-                if job is None:
-                    break
-                backend = self.backend
-                active = backend.active
-                if (not active or not active["turn"] or active["done"].done()
-                        or backend.pending or backend.blocked):
-                    await asyncio.sleep(0.1)
-                    continue
-                turn_id, thread_id = active["turn"], active["thread"]
-                self.steering = True
-                try:
-                    if "preparedAttachments" not in job:
-                        job["preparedAttachments"] = await self.media.incoming(job.get("attachments", []))
-                        self.save()
-                    if self.stopping or not any(item is job for item in self.state["inbox"]):
-                        break
-                    if backend.pending or backend.blocked:
-                        continue
-                    accepted = await backend.steer(thread_id, turn_id, job["text"],
-                        attachments=job["preparedAttachments"], client_id=job["clientId"],
-                        dispatch=lambda phase, turn: self.dispatch_input(job, phase, turn, backend))
-                    if accepted:
-                        self.state["inbox"] = [item for item in self.state["inbox"] if item is not job]
-                        self.save()
-                        self.acknowledge(job)
-                    elif not self.stopping:
-                        job.update(mode="queue", phase=InputPhase.PREPARING)
-                        self.save()
-                        self.reply(QUEUED_STEER)
-                        break
-                except asyncio.CancelledError:
-                    raise
-                except Exception as error:
-                    uncertain = job.get("phase") == InputPhase.DISPATCHING
-                    self.record_input(job, InputPhase.UNCERTAIN if uncertain else InputPhase.FAILED)
-                    self.state["inbox"] = [item for item in self.state["inbox"] if item is not job]
-                    self.save()
-                    self.reply(UNCERTAIN_STEER if uncertain else
-                               fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
-                               if isinstance(error, MediaError) else TASK_FAILED)
-                    print(f"追加消息失败：{type(error).__name__}", file=sys.stderr, flush=True)
-                finally:
-                    self.steering = False
-                    self.wake.set()
+        return await self.inputs.steering_worker()
 
     async def external_result_worker(self):
         return await self.output.external_result_worker()
 
-
     def fail_output(self, entry):
         return self.output.fail_output(entry)
 
-
     async def sender(self):
         return await self.output.sender()
-
 
     async def poller(self):
         delay = 2
