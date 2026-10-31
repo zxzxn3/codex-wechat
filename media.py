@@ -14,7 +14,7 @@ import uuid
 CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_MAX_MIB = 20
 MAX_ATTACHMENTS = 10
-OUTPUT_HINT = "\n\n[User is from WeChat.]"
+OUTPUT_HINT = "\n\n[User from WeChat.]"
 
 
 class MediaError(ValueError):

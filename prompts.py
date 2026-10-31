@@ -9,8 +9,8 @@ COMPLETION_NOTICE = ""
 
 BACKEND_SUMMARY = "```\n后端: {当前}\n可用: {可用}\n```\n`/backend {{名称}}`"
 EFFORT_SUMMARY = "```\n强度: {当前}\n可选: {可选}\n```\n`/effort {{档位}}`"
-ACK_VIEW = "```\n处理提示: {模板}\n```\n`/ack text {{模板}}`\n`/ack text` 关闭"
-ACK_USAGE = "`/ack text {模板}`\n`/ack text` 关闭"
+ACK_VIEW = "```\n处理提示: {模板}\n```\n`/ack text {{模板}}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
+ACK_USAGE = "`/ack text {模板}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
 ACK_TOO_LONG = "未更新处理提示: 最多 {字节} 字节"
 WORKING_DIRECTORY = "目录: {目录}"
 MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`"
@@ -48,7 +48,7 @@ INTERRUPTED_TASK = (
 )
 UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
 QUEUED_STEER = "已排队，当前任务结束后处理。"
-PING_REPLY = "pong. {发送延迟}/{接收延迟}ms"
+PING_REPLY = "WeChat ─{发送延迟}/{接收延迟}ms"
 PING_USAGE = "用法: `/ping`"
 UNKNOWN_COMMAND = "未知指令，查看 `/help`"
 TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {数量} 个。\n请分开发送。"
@@ -131,9 +131,11 @@ def fill(template, values):
 
 def render_ack(template, values):
     """Render only the documented channel-delay placeholders."""
-    for name, value in values.items():
-        template = template.replace("{" + name + "}", str(value))
-    return template
+    # One pass prevents a field value containing another placeholder from
+    # triggering a second expansion. Unknown fields remain literal text.
+    return re.sub(r"\{([^{}]+)\}",
+                  lambda match: ("-" if values.get(match[1], match[0]) in (None, "暂不可用")
+                                 else str(values.get(match[1], match[0]))), template)
 
 
 def effort_label(value):
@@ -339,22 +341,45 @@ def setting_summary(action=None, *, model, effort, cwd, field=None):
     return panel(f"模型: {model_label(model, effort)}", f"目录: {display_path(cwd)}")
 
 
-def status_summary(*, status, queued, pending, failed, name, model, effort,
+def status_fields(*, status, queued, pending, failed, name, model, effort,
                    cwd, connection, provider=None, approval=None,
                    sandbox=None, reviewer=None, collaboration=None,
                    profile=None, usage=None, rate_limits=None, backend=None):
-    counts = "  ".join(f"{label}: {count}" for label, count in
-                       (("待办", queued), ("审批", pending), ("发送失败", failed)) if count)
-    return panel(f"状态: {status}", counts or None,
-        f"后端: {backend}" if backend else None,
-        f"模型: {model_label(model, effort)}", f"提供方: {provider_label(provider)}",
-        f"目录: {display_path(cwd)}",
-        "权限: " + permission_label(sandbox=sandbox, approval=approval,
-                                  reviewer=reviewer, profile=profile),
-        f"协作: {collaboration_label(collaboration)}", f"会话: {session_name(name)}",
-        f"服务: {connection}", "",
-        f"Token: {token_usage(usage)}", f"上下文: {context_usage(usage)}",
-        f"限额: {rate_limit_label(rate_limits)}")
+    total = (usage or {}).get("total") or {}
+    context = context_usage(usage)
+    remaining = re.match(r"剩余 (\d+%)", context)
+    return {
+        "状态": status, "后端": backend, "会话": session_name(name),
+        "模型": model or "默认模型", "强度": effort_label(effort),
+        "目录": display_path(cwd), "提供方": provider_label(provider),
+        "权限": permission_label(sandbox=sandbox, approval=approval, reviewer=reviewer, profile=profile),
+        "协作": collaboration_label(collaboration), "服务": connection,
+        "待办数": queued, "审批数": pending, "发送失败数": failed,
+        "上下文": context, "上下文剩余": remaining[1] if remaining else "暂不可用",
+        "累计Token": token_count(total.get("totalTokens")),
+        "输入Token": token_count(total.get("inputTokens")),
+        "输出Token": token_count(total.get("outputTokens")),
+        "Token": token_usage(usage), "限额": rate_limit_label(rate_limits),
+    }
+
+
+def status_from_fields(values):
+    counts = "  ".join(f"{label}: {values[key]}" for label, key in
+                       (("待办", "待办数"), ("审批", "审批数"), ("发送失败", "发送失败数"))
+                       if values[key])
+    lines = [f"状态: {values['状态']}", counts or None]
+    if values["后端"]:
+        lines.append(f"后端: {values['后端']}")
+    lines.extend([f"模型: {values['模型']} ({values['强度']})"])
+    lines.extend(f"{label}: {values[label]}" for label in
+                 ("提供方", "目录", "权限", "协作", "会话", "服务"))
+    lines.append("")
+    lines.extend(f"{label}: {values[label]}" for label in ("Token", "上下文", "限额"))
+    return panel(*lines)
+
+
+def status_summary(**kwargs):
+    return status_from_fields(status_fields(**kwargs))
 
 
 def settings_summary(*, notice, attachment_mib, slicing=None):

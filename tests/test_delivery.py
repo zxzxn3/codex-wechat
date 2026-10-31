@@ -192,7 +192,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         b.controls["urgent"].put_nowait(("/stop", None))
         await asyncio.wait_for(b.controls["local"].join(), 1)
         await asyncio.wait_for(b.controls["urgent"].join(), 1)
-        self.assertTrue(any(e.get("text", "").startswith("pong.") for e in b.state["outbox"]))
+        self.assertTrue(any(e.get("text", "").startswith("WeChat ─") for e in b.state["outbox"]))
         self.assertFalse(b.state["inbox"])
 
     async def test_late_results_do_not_cross_selection_or_connection(self):

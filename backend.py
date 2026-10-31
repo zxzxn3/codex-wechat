@@ -532,6 +532,44 @@ class CodexBackend:
         await self.refresh_runtime()
         return result["thread"]["id"]
 
+    async def probe_target(self):
+        """Resolve endpoint using native effective config; never read auth secrets."""
+        if not self.connected:
+            return None
+        result = await self.rpc("config/read", {"includeLayers": False,
+                                "cwd": self.info.get("cwd") or self.cwd})
+        config = result.get("config", {})
+        provider = self.info.get("provider") or config.get("model_provider") or "openai"
+        settings = (config.get("model_providers") or {}).get(provider, {})
+        # The launcher has already applied its environment before exec. Select
+        # network variables only; never copy API keys into the probe process.
+        keys = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "OPENAI_BASE_URL"}
+        keys |= {key.lower() for key in keys}
+        selected = {}
+        if self.proc and self.proc.returncode is None:
+            for entry in Path(f"/proc/{self.proc.pid}/environ").read_bytes().split(b"\0"):
+                key, sep, value = entry.partition(b"=")
+                name = key.decode(errors="replace")
+                if sep and name in keys:
+                    selected[name] = value.decode()
+        endpoint = settings.get("base_url")
+        if not endpoint and provider == "openai":
+            endpoint = selected.get("OPENAI_BASE_URL")
+            if not endpoint:
+                account = await self.rpc("account/read", {"refreshToken": False})
+                kind = (account.get("account") or {}).get("type")
+                if kind == "chatgpt":
+                    endpoint = config.get("chatgpt_base_url") or "https://chatgpt.com"
+                elif kind == "apiKey":
+                    endpoint = "https://api.openai.com"
+        if not isinstance(endpoint, str):
+            return None
+        proxy_keys = keys - {"OPENAI_BASE_URL", "openai_base_url"}
+        env = {k: v for k, v in os.environ.items() if k in
+               {"PATH", "HOME", "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE"}}
+        env.update({k: v for k, v in selected.items() if k in proxy_keys})
+        return endpoint, env
+
     async def list_threads(self, cursor=None, search=None):
         params = {"limit": 10, "sortKey": "updated_at", "cursor": cursor,
                   "sourceKinds": ["cli", "vscode", "appServer"]}

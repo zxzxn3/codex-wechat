@@ -23,7 +23,7 @@ from slicing import split_text
 from profiles import backend_label, definitions, snapshot
 import service_control
 from media import Media, MediaError, MAX_ATTACHMENTS, split_answer
-from latency import Latency
+from latency import Latency, provider_latency
 from errors import UserFacingError, attachment_reason, backend_reason
 from prompts import (
     APPROVAL_ACCEPTED,
@@ -63,7 +63,8 @@ from prompts import (
     UNSUPPORTED_MESSAGE,
     fill,
     render_ack,
-    status_summary,
+    status_fields,
+    status_from_fields,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -91,7 +92,7 @@ class Bridge:
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
         self.slicing = Slicing.from_config(config.get("slicing"))
-        self.controls = {lane: asyncio.Queue(maxsize=20) for lane in ("local", "urgent", "backend")}
+        self.controls = {lane: asyncio.Queue(maxsize=20) for lane in ("local", "urgent", "backend", "probe")}
         self.connection_lock = asyncio.Lock()
         self.input_paused = False
         self.latency = Latency()
@@ -140,7 +141,46 @@ class Bridge:
     def acknowledge(self, job):
         template = notice(self)
         if template:
-            self.reply(render_ack(template, self.latency.values(job.get("ingress_ms"))))
+            self.reply(render_ack(template, self.prompt_fields(job.get("ingress_ms"))))
+
+    def prompt_fields(self, ingress_ms=None):
+        if self.backend.blocked:
+            status = "等待处理"
+        elif self.running or self.steering or self.active_turn():
+            status = "运行中"
+        else:
+            status = "空闲"
+        details = self.backend.info
+        rate_limits = self.backend.account_limits
+        if not self.backend_started or not self.backend.connected:
+            status = "后端连接未就绪"
+        values = status_fields(
+            status=status,
+            backend=backend_label(self.backend_name),
+            queued=len(self.state["inbox"]),
+            pending=len(self.backend.pending),
+            failed=len(self.state.get("failedOutbox", [])),
+            name=details.get("name"),
+            model=details.get("model"),
+            provider=details.get("provider"),
+            effort=details.get("effort"),
+            cwd=details.get("cwd") or self.backend.cwd,
+            approval=details.get("approval"),
+            sandbox=details.get("sandbox"),
+            reviewer=details.get("reviewer"),
+            profile=details.get("profile"),
+            collaboration=details.get("collaboration"),
+            usage=details.get("usage"),
+            rate_limits=rate_limits,
+            connection="本地后台" if self.backend.shared else "独立进程",
+        )
+        values.update(self.latency.values(ingress_ms))
+        sample = self.latency.provider_sample
+        values["供应商延迟"] = (sample[1].removesuffix("ms")
+                              if sample and sample[0] == self.backend.connection_id
+                              and sample[1].endswith("ms") else "-")
+        return values
+
 
     async def ensure_backend(self):
         async with self.connection_lock:
@@ -228,7 +268,8 @@ class Bridge:
             entries.extend(self.text_entries("\n".join(errors), group=group, context=context, source=source))
         entries.extend(assets)
         if notify_completion and not errors and COMPLETION_NOTICE:
-            entries.extend(self.text_entries(COMPLETION_NOTICE, group=group, context=context,
+            completion = render_ack(COMPLETION_NOTICE, self.prompt_fields())
+            entries.extend(self.text_entries(completion, group=group, context=context,
                                              source=source, role="completion"))
         if finish_running:
             self.state.pop("currentInput", None)
@@ -353,7 +394,13 @@ class Bridge:
                 self.reply(PING_USAGE)
             else:
                 ingress = received.get("ingress_ms") if received else None
-                self.reply(render_ack(PING_REPLY, self.latency.values(ingress)))
+                channel = render_ack(PING_REPLY, self.latency.values(ingress))
+                backend = self.backend
+                connection = backend.connection_id
+                provider = await provider_latency(backend)
+                if backend is self.backend and connection == backend.connection_id:
+                    self.latency.provider_sample = (connection, provider)
+                self.reply(channel + "─ Bridge ─" + provider + "─ Provider")
         elif command in ("/send", "/sendfile", "/sendimage"):
             try:
                 if not argument:
@@ -376,36 +423,7 @@ class Bridge:
             except (RuntimeError, OSError, asyncio.TimeoutError) as error:
                 self.reply(fill(RESTART_FAILED, {"原因": backend_reason(error)}))
         elif command == "/status":
-            if self.backend.blocked:
-                status = "等待处理"
-            elif self.running or self.steering or self.active_turn():
-                status = "运行中"
-            else:
-                status = "空闲"
-            details = self.backend.info
-            rate_limits = self.backend.account_limits
-            if not self.backend_started or not self.backend.connected:
-                status = "后端连接未就绪"
-            self.reply(status_summary(
-                status=status,
-                backend=backend_label(self.backend_name),
-                queued=len(self.state["inbox"]),
-                pending=len(self.backend.pending),
-                failed=len(self.state.get("failedOutbox", [])),
-                name=details.get("name"),
-                model=details.get("model"),
-                provider=details.get("provider"),
-                effort=details.get("effort"),
-                cwd=details.get("cwd") or self.backend.cwd,
-                approval=details.get("approval"),
-                sandbox=details.get("sandbox"),
-                reviewer=details.get("reviewer"),
-                profile=details.get("profile"),
-                collaboration=details.get("collaboration"),
-                usage=details.get("usage"),
-                rate_limits=rate_limits,
-                connection="本地后台" if self.backend.shared else "独立进程",
-            ))
+            self.reply(status_from_fields(self.prompt_fields()))
         elif command == "/stop":
             self.stopping = True
             cleared = len(self.state["inbox"])

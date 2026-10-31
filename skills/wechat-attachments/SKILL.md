@@ -7,7 +7,7 @@ description: Return requested local files or images to WeChat from a WeChat-orig
 
 Use this skill only when the current WeChat-originated request explicitly asks
 for a file or image to be sent back. A source marker such as
-`User is from WeChat.` identifies the channel but does not itself request an
+`User from WeChat.` identifies the channel but does not itself request an
 attachment.
 
 Create or confirm each file locally, then put one standalone marker per

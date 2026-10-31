@@ -34,3 +34,5 @@ create_time_ms 是源消息时间戳，未证实等于手机点击发送时间�
 安装方式沿用本机 ime-cursor 项目的脚本/用户服务惯例，绑定 graphical-session.target。systemctl --no-block 只确认重启作业入队，不表示重启成功。DeepSeek launcher 自行选择 CODEX_HOME 并处理密钥环，桥接不读取密钥。
 
 旧 processingNotice 对象和旧延迟模板迁移集中在 configuration.py。保留旧 backend 配置、sharedDaemon=false、已有 JSON 状态及旧发件箱条目；无法由旧 running 标记还原的当前输入不猜测重放。
+
+网络测速依据：CLI 0.166.0 的 ConfigReadParams/GetAccountParams schema 与官方 config/read、account/read；curl --write-out 的 time_appconnect 是起始至 TLS 握手完成，time_connect 是起始至 TCP（可能为代理）连接完成。HEAD 不携带模型认证，不跟随重定向；只取上述阶段，不使用包含服务端处理的 time_starttransfer/time_total。

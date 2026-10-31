@@ -85,7 +85,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts, ["answer"])
 
     async def test_output_hint_is_concise_origin_marker(self):
-        self.assertEqual(OUTPUT_HINT, "\n\n[User is from WeChat.]")
+        self.assertEqual(OUTPUT_HINT, "\n\n[User from WeChat.]")
 
     async def test_stdio_backend_final_only_and_resume(self):
         backend = CodexBackend({"command": [sys.executable,
@@ -112,7 +112,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.latency.sends.append(50)
         await self.bridge.control("/ping", received={"ingress_ms": 120})
         entry = self.store.load("bridge")["outbox"][-1]
-        self.assertEqual(entry["text"], "pong. 120/50ms")
+        self.assertEqual(entry["text"], "WeChat ─120/50ms─ Bridge ─unavailable─ Provider")
         self.assertNotIn("ping", entry)
         self.assertEqual(len(self.store.load("bridge")["outbox"]), 1)
         self.assertFalse(self.bridge.backend_started)
@@ -129,7 +129,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         values = stats.values(120)
         self.assertEqual(values, {"发送延迟": "120", "接收延迟": "50"})
         self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, values), "120/50ms")
-        self.assertEqual(render_ack(PING_REPLY, values), "pong. 120/50ms")
+        self.assertEqual(render_ack(PING_REPLY, values), "WeChat ─120/50ms")
         self.assertEqual(stats.values(), {"发送延迟": "-", "接收延迟": "50"})
 
     async def test_ack_text_controls_notice_without_switch(self):

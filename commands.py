@@ -130,6 +130,9 @@ async def handle(bridge, command, argument):
         }))
         return
     if command == "/ack":
+        if argument == "fields":
+            bridge.reply(panel(*(f"{{{name}}}" for name in bridge.prompt_fields())))
+            return
         template = notice(bridge)
         if not argument:
             bridge.reply(fill(ACK_VIEW, {"模板": template or "关闭"}))
