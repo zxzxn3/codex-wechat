@@ -2,7 +2,8 @@
 
 ## 职责
 
-- `backend.py`：现有启动器与共享 daemon 连接、RPC、原生事件与审批。Codex 是会话设置和轮次状态的权威；限额属于账户缓存，模型目录属于连接缓存，不随切换会话丢失。
+- `codex_transport.py`：启动器、共享 daemon 接入、WebSocket/stdio、RPC 配对与连接关闭。
+- `backend.py`：会话、原生事件、轮次与审批；通过 transport 访问 Codex。Codex 是会话设置和轮次状态的权威；限额属于账户缓存，模型目录属于连接缓存，不随切换会话丢失。
 - `agent_wechat.py`：输入/输出交付与并发协调。连接、准备任务、模型轮次和发送状态不能简化为同一个忙闲值。
 - `records.py`：跨边界的 `Source`、`TurnResult`、输入阶段；不实现通用状态机。
 - `commands.py`、`command_specs.py`：会话操作和唯一指令目录；目录决定别名、帮助、参数约束、后端需求和执行通道，保持无业务依赖；处理函数由 commands 的单一分发表关联，Bridge 只调用 dispatch。语法拒绝先于后端连接。
