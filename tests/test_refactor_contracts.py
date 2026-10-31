@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from backend import CodexBackend
 from command_specs import command_lane
@@ -71,3 +71,14 @@ class CompletionStateTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(bridge.prompt_fields()["状态"], "运行中")
             finally:
                 store.lock.close()
+
+
+class CommandRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_invalid_command_does_not_connect(self):
+        from commands import dispatch, HANDLERS
+        from command_specs import COMMANDS
+        self.assertEqual(set(HANDLERS), {spec.name for spec in COMMANDS if spec.route != "input"})
+        bridge = SimpleNamespace(reply=lambda _: None, ensure_backend=AsyncMock())
+        for command in ("/compact bad", "/new bad", "/switch", "/sessions next", "/sessions 0", "/missing"):
+            await dispatch(bridge, command)
+        bridge.ensure_backend.assert_not_awaited()

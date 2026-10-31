@@ -5,7 +5,7 @@
 - `backend.py`：现有启动器与共享 daemon 连接、RPC、原生事件与审批。Codex 是会话设置和轮次状态的权威；限额属于账户缓存，模型目录属于连接缓存，不随切换会话丢失。
 - `agent_wechat.py`：输入/输出交付与并发协调。连接、准备任务、模型轮次和发送状态不能简化为同一个忙闲值。
 - `records.py`：跨边界的 `Source`、`TurnResult`、输入阶段；不实现通用状态机。
-- `commands.py`、`command_specs.py`：会话操作和唯一指令目录；目录决定别名、帮助、后端需求和执行通道。
+- `commands.py`、`command_specs.py`：会话操作和唯一指令目录；目录决定别名、帮助、参数约束、后端需求和执行通道，保持无业务依赖；处理函数由 commands 的单一分发表关联，Bridge 只调用 dispatch。语法拒绝先于后端连接。
 - `prompts.py`、`errors.py`、`configuration.py`：展示、错误分类、配置默认值/迁移；不重复模型或权限清单。
 - `slicing.py`：纯文本切片及预览。`media.py` 先剥离附件标记并校验快照，正文才进入切片。
 - `wechat.py`、`storage.py`、`profiles.py`、`service_control.py`：微信协议、私有原子 JSON、后端选择、用户服务重启。

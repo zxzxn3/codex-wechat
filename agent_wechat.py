@@ -15,7 +15,7 @@ import uuid
 from backend import CodexBackend, CodexRpcError, DeferTurn
 from storage import Store
 from wechat import WeChat, login
-from commands import ensure_session, handle, notice
+from commands import ensure_session, dispatch, notice, parse_control
 from command_specs import HELP, REGISTRY, CONTROL_LANES, command_lane
 from configuration import ConfigLoader, completion_template
 from quota import quota_warnings
@@ -71,12 +71,6 @@ ROOT = Path(__file__).resolve().parent
 SEND_ATTEMPTS = 3
 
 
-def parse_control(text):
-    """Split a WeChat command after trimming surrounding whitespace."""
-    parts = str(text or "").strip().split(maxsplit=1)
-    if not parts:
-        return "", ""
-    return parts[0], parts[1].strip() if len(parts) > 1 else ""
 
 
 class Bridge:
@@ -416,96 +410,8 @@ class Bridge:
         self.steer_wake.set()
 
     async def control(self, text, *, received=None):
-        command, argument = parse_control(text)
-        spec = REGISTRY.get(command)
-        if spec:
-            command = spec.name
-        if spec and spec.route == "managed":
-            try:
-                if spec.needs_backend and not (command == "/cwd" and not argument):
-                    await self.ensure_backend()
-                await handle(self, command, argument)
-            except UserFacingError as error:
-                self.reply(str(error))
-            except ValueError as error:
-                label = COMMAND_FAILURE_LABELS.get(command, "操作失败")
-                detail = backend_reason(error)
-                self.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": detail}))
-                print(f"{command}失败：{error}", file=sys.stderr, flush=True)
-            except (RuntimeError, OSError, asyncio.TimeoutError) as error:
-                label = COMMAND_FAILURE_LABELS.get(command, "操作失败")
-                detail = backend_reason(error)
-                self.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": detail}))
-                print(f"{command}失败：{error}", file=sys.stderr, flush=True)
-        elif command == "/help":
-            self.reply(HELP)
-        elif command == "/ping":
-            if argument:
-                self.reply(PING_USAGE)
-            else:
-                ingress = received.get("ingress_ms") if received else None
-                channel = ping_channel(self.latency.values(ingress))
-                backend = self.backend
-                connection = backend.connection_id
-                provider = await provider_latency(backend)
-                if backend is self.backend and connection == backend.connection_id:
-                    self.latency.provider_sample = (connection, provider)
-                self.reply(channel + "─ Bridge ─" + provider + "─ Provider")
-        elif command in ("/send", "/sendfile", "/sendimage"):
-            try:
-                if not argument:
-                    self.reply(MEDIA_USAGE)
-                    return
-                if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
-                    argument = argument[1:-1]
-                await self.queue_file(argument, {"/sendfile": "file", "/sendimage": "image"}.get(command, "auto"),
-                                      origin=(received or {}).get("media"))
-                self.reply(ATTACHMENT_QUEUED)
-            except (MediaError, ValueError, OSError) as error:
-                self.reply(f"附件未发送: {attachment_reason(error)}\n请检查路径后重试。")
-        elif command == "/restart":
-            if argument:
-                self.reply(RESTART_USAGE)
-                return
-            try:
-                await self.restart_service()
-            except UserFacingError as error:
-                self.reply("拒绝重启: " + str(error))
-            except (RuntimeError, OSError, asyncio.TimeoutError) as error:
-                self.reply(fill(RESTART_FAILED, {"原因": backend_reason(error)}))
-        elif command == "/status":
-            self.reply(status_from_fields(self.prompt_fields()))
-        elif command == "/stop":
-            self.stopping = True
-            cleared = len(self.state["inbox"])
-            cleared_note = f"\n已清空待办: {cleared}" if cleared else ""
-            for job in self.state["inbox"]:
-                if job.get("phase") in (InputPhase.DISPATCHING, InputPhase.ACCEPTED):
-                    self.record_input(job, InputPhase.UNCERTAIN if job["phase"] == InputPhase.DISPATCHING
-                                      else InputPhase.ACCEPTED)
-            self.state["inbox"].clear()
-            self.save()
-            try:
-                stopped = await self.backend.stop()
-                if stopped:
-                    self.reply(STOP_REQUESTED + cleared_note)
-                elif (self.running and not finishing) or self.active_turn():
-                    self.reply(STOP_DEFERRED + cleared_note)
-                else:
-                    self.reply(STOP_IDLE + cleared_note)
-            except (RuntimeError, OSError, asyncio.TimeoutError):
-                self.reply(STOP_UNCONFIRMED + cleared_note)
-        elif command in ("/approve", "/deny"):
-            try:
-                accept = command == "/approve"
-                ok = await self.backend.answer_approval(
-                    argument, "accept" if accept else "decline")
-                self.reply(APPROVAL_ACCEPTED if ok and accept else
-                           APPROVAL_DECLINED if ok else APPROVAL_EXPIRED)
-            except (RuntimeError, OSError, asyncio.TimeoutError):
-                self.reply(APPROVAL_FAILED)
-        else:
-            self.reply(UNKNOWN_COMMAND)
+        await dispatch(self, text, received=received)
+
 
     async def restart_service(self):
         if self.running or self.steering or self.active_turn() or self.state["inbox"] or self.session_lock.locked():
