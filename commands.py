@@ -18,17 +18,16 @@ from prompts import (
     MAX_NOTICE_BYTES,
     MODEL_INVALID,
     MODEL_NOT_IN_CATALOG,
-    MODEL_SUMMARY,
-    MODEL_TABLE_HEADER,
     NEW_USAGE,
     NO_NEXT_PAGE,
     SESSION_INDEX_INVALID,
     SESSION_TARGET_ACTIVE,
     SESSION_TARGET_BLOCKED,
     SESSION_USAGE,
-    SESSIONS_TABLE_HEADER,
     SETTINGS_USAGE,
     WORKING_DIRECTORY,
+    panel,
+    display_path,
     effort_label,
     fill,
     session_age,
@@ -38,6 +37,7 @@ from prompts import (
     settings_summary,
 )
 
+from command_specs import REGISTRY
 from configuration import processing_template
 
 
@@ -45,26 +45,15 @@ def notice(bridge):
     return processing_template(bridge.config, bridge.state)
 
 
-def info(bridge, action="当前会话", *, include_session=True):
+def info(bridge, action="当前会话", *, include_backend=False):
     details = bridge.backend.info
-    values = {
-        "action": action,
-        "name": details.get("name"),
-        "model": details.get("model"),
-        "effort": details.get("effort"),
-        "cwd": details.get("cwd") or bridge.backend.cwd,
-    }
-    if include_session:
-        text = session_summary(values["action"], name=values["name"],
-                               model=values["model"], effort=values["effort"],
-                               cwd=values["cwd"])
-    else:
-        text = setting_summary(values["action"], model=values["model"],
-                               effort=values["effort"], cwd=values["cwd"])
+    text = session_summary(action, name=details.get("name"), model=details.get("model"),
+                           effort=details.get("effort"), cwd=details.get("cwd") or bridge.backend.cwd,
+                           backend=backend_label(bridge.backend_name) if include_backend else None)
     if bridge.backend.blocked:
-        return text + "\n\n" + BLOCKED_NOTE
+        return text + "\n" + BLOCKED_NOTE
     if bridge.active_turn() and not bridge.active_turn().get("owned"):
-        return text + "\n\n" + DESKTOP_NOTE
+        return text + "\n" + DESKTOP_NOTE
     return text
 
 
@@ -134,12 +123,9 @@ async def handle(bridge, command, argument):
         current = backend_label(bridge.backend_name)
         names = list(bridge.backend_configs)
         available = " | ".join(backend_argument(name) for name in names)
-        target = next((name for name in names if name != bridge.backend_name),
-                      bridge.backend_name)
         bridge.reply(fill(BACKEND_SUMMARY, {
             "当前": current,
             "可用": available,
-            "目标": backend_argument(target),
         }))
         return
     if command == "/ack":
@@ -159,7 +145,7 @@ async def handle(bridge, command, argument):
             raise UserFacingError(fill(ACK_TOO_LONG, {"字节": MAX_NOTICE_BYTES}))
         bridge.state["processingNotice"] = value
         bridge.save()
-        bridge.reply("处理提示：" + (value or "关闭"))
+        bridge.reply(panel("处理提示: " + (value or "关闭")))
         return
     if command == "/sessions":
         cursor, search = None, argument or None
@@ -175,7 +161,7 @@ async def handle(bridge, command, argument):
         bridge.state["sessionCursor"] = result.get("nextCursor")
         bridge.state["sessionSearch"] = search
         bridge.save()
-        lines = ["会话", "", SESSIONS_TABLE_HEADER]
+        lines = []
         for index, thread in enumerate(threads, 1):
             title = session_name(thread.get("name"))
             current = thread["id"] == bridge.state["thread"]
@@ -183,7 +169,7 @@ async def handle(bridge, command, argument):
             labels = []
             if current:
                 labels.append("当前")
-            elif status == "active":
+            if status == "active":
                 labels.append("工作中")
             elif status == "systemError":
                 labels.append("需要处理")
@@ -191,31 +177,29 @@ async def handle(bridge, command, argument):
                 age = session_age(thread.get("updatedAt"))
                 if age:
                     labels.append(age)
-            title = title.replace("|", "\\|")
-            state = "  ".join(labels) or "无"
-            lines.append(f"| {index} | {title} | {state} |")
+            state = "  ".join(labels)
+            lines.append(f"{index}. {title}" + (f"  [{state}]" if state else ""))
         if not threads:
             lines.append("\n没有匹配的会话。")
-        lines.extend(["", "切换：`/switch {编号或ID}`", "搜索：`/sessions {关键词}`"])
+        hints = [f"`{REGISTRY['/switch'].usage}`"]
         if result.get("nextCursor"):
-            lines.append("下一页：`/sessions next`")
-        bridge.reply("\n".join(lines))
+            hints.append("`/sessions next`")
+        bridge.reply("会话\n" + panel(*lines) + "\n" + "\n".join(hints))
         return
     if command == "/model" and not argument:
         models = await model_entries(bridge)
         bridge.model_choices = models
-        lines = [MODEL_TABLE_HEADER]
+        lines = []
         for index, model in enumerate(models, 1):
-            efforts = "  ".join(effort_label(value) for value in effort_choices(model))
-            model_name = model["model"].replace("|", "\\|")
-            lines.append(f"| {index} | {model_name} | {efforts or '无可选强度'} |")
-        bridge.reply(fill(MODEL_SUMMARY, {
-            "列表": "\n".join(lines) if models else "当前后端没有返回模型。",
-        }))
+            model_name = model["model"]
+            lines.append(f"{index}. {model_name}")
+        if not models:
+            lines.append("暂无可用模型")
+        bridge.reply("模型\n" + panel(*lines) + f"\n`{REGISTRY['/model'].usage}`")
         return
     if command == "/cwd" and not argument:
         bridge.reply(fill(WORKING_DIRECTORY, {
-            "目录": bridge.backend.info.get("cwd") or bridge.backend.cwd}))
+            "目录": display_path(bridge.backend.info.get("cwd") or bridge.backend.cwd)}))
         return
     if command == "/new" and argument:
         raise UserFacingError(NEW_USAGE)
@@ -228,7 +212,7 @@ async def handle(bridge, command, argument):
     async with bridge.session_lock:
         if command == "/backend":
             await switch(bridge, argument)
-            bridge.reply(info(bridge, f"已切换后端到 {backend_label(bridge.backend_name)}"))
+            bridge.reply(info(bridge, "已切换后端", include_backend=True))
             return
         if command == "/new":
             await activate(bridge)
@@ -258,12 +242,9 @@ async def handle(bridge, command, argument):
                 choices = effort_choices(current)
                 if not argument:
                     current_effort = bridge.backend.info.get("effort")
-                    target = next((value for value in choices
-                                   if value != current_effort), current_effort)
                     bridge.reply(fill(EFFORT_SUMMARY, {
                         "当前": effort_label(current_effort),
                         "可选": " | ".join(effort_label(value) for value in choices) or "无",
-                        "目标": effort_label(target),
                     }))
                     return
                 selected_effort = next(
@@ -299,5 +280,7 @@ async def handle(bridge, command, argument):
                 raise UserFacingError(DIRECTORY_NOT_FOLDER)
             overrides["cwd"] = str(path)
         await activate(bridge, bridge.state["thread"], overrides)
-        bridge.reply(info(bridge, f"设置已更新 {backend_label(bridge.backend_name)}",
-                          include_session=False))
+        details = bridge.backend.info
+        bridge.reply(setting_summary(model=details.get("model"), effort=details.get("effort"),
+                                     cwd=details.get("cwd") or bridge.backend.cwd,
+                                     field=command.removeprefix("/")))

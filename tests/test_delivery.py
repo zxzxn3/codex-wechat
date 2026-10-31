@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from agent_wechat import Bridge
-from backend import CodexRpcError
+from backend import CodexRpcError, DeferTurn
 from records import InputPhase, TurnResult
 from storage import Store
 
@@ -34,6 +34,56 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
     def job(self, identity, phase=InputPhase.PREPARING):
         return {"id": identity, "clientId": "client-" + identity, "text": identity,
                 "phase": phase, "attachments": []}
+
+    async def test_queue_prefix_is_persisted_as_input_not_a_control(self):
+        b = self.bridge
+        def message(identity, text):
+            return {"message_id": identity, "from_user_id": "owner", "message_type": 1,
+                    "context_token": "context", "item_list": [
+                        {"type": 1, "text_item": {"text": text}}]}
+        await b.receive({"msgs": [message("q", "/queue /stop is literal text"),
+                                  message("s", "correction"), message("empty", "/queue")],
+                         "get_updates_buf": "cursor"})
+        saved = self.store.load("bridge")
+        self.assertEqual([(job["text"], job["mode"]) for job in saved["inbox"]],
+                         [("/stop is literal text", "queue"), ("correction", "steer")])
+        self.assertTrue(all(queue.empty() for queue in b.controls.values()))
+        self.assertEqual(saved["cursor"], "cursor")
+        await b.receive({"msgs": [message("q", "/queue duplicate")]})
+        self.assertEqual(len(b.state["inbox"]), 2)
+
+    async def test_explicit_queue_never_steers_even_during_desktop_race(self):
+        backend = self.bridge.backend
+        backend.shared = False
+        backend.steer = AsyncMock()
+        backend.active = backend.new_turn("t", "desktop", owned=False)
+        with self.assertRaises(DeferTurn):
+            await backend.run("t", "queued", allow_steer=False)
+        backend.steer.assert_not_awaited()
+        backend.active = None
+
+        async def racing_inputs(*args):
+            backend.active = backend.new_turn("t", "racing", owned=False)
+            return []
+
+        backend.input_items = racing_inputs
+        with self.assertRaises(DeferTurn):
+            await backend.run("t", "queued", allow_steer=False)
+        backend.steer.assert_not_awaited()
+
+    async def test_queued_input_does_not_block_later_steering(self):
+        b = self.bridge
+        b.backend.active = b.backend.new_turn("t", "active", owned=False)
+        queued, correction = self.job("q"), self.job("s")
+        queued["mode"], correction["mode"] = "queue", "steer"
+        b.state["inbox"] = [queued, correction]
+        b.media.incoming = AsyncMock(return_value=[])
+        b.backend.steer = AsyncMock(return_value=True)
+        self.start(b.steering_worker())
+        b.steer_wake.set()
+        await asyncio.wait_for(b.wake.wait(), 1)
+        self.assertEqual([job["id"] for job in b.state["inbox"]], ["q"])
+        self.assertEqual(b.backend.steer.call_args.args[2], "s")
 
     async def test_recovery_preserves_preflight_and_quarantines_submitted(self):
         b = self.bridge
@@ -190,3 +240,20 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         backend.rpc = AsyncMock(return_value={"thread": {"id": "new"}})
         await backend.thread("new")
         self.assertEqual(backend.account_limits, limits)
+
+    async def test_usage_before_resume_response_is_kept_per_thread(self):
+        backend = self.bridge.backend
+        backend.shared = False
+        backend.selected_thread = "old"
+        backend.info = {"id": "old", "usage": {"last": {"totalTokens": 99}}}
+        usage = {"last": {"totalTokens": 1000}, "modelContextWindow": 200000}
+
+        async def resume(method, params):
+            backend.event({"method": "thread/tokenUsage/updated", "params": {
+                "threadId": "new", "tokenUsage": usage}})
+            self.assertEqual(backend.info["usage"]["last"]["totalTokens"], 99)
+            return {"thread": {"id": "new"}}
+
+        backend.rpc = resume
+        await backend.thread("new")
+        self.assertEqual(backend.info["usage"], usage)

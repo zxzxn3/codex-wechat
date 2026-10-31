@@ -1,108 +1,43 @@
 """Single source for user-visible copy and presentation formats."""
 from datetime import datetime
 import os
-
+import re
 
 
 MAX_NOTICE_BYTES = 1000
 COMPLETION_NOTICE = ""
 
-BACKEND_SUMMARY = (
-    "当前后端：{当前}\n"
-    "可用：{可用}\n"
-    "切换：`/backend {目标}`"
-)
-MODEL_SUMMARY = "可用模型\n\n{列表}\n\n切换：`/model {{编号或名称}}`"
-MODEL_TABLE_HEADER = "| 编号 | 模型 | 强度 |\n|:--:|:--|:--|"
-EFFORT_SUMMARY = (
-    "当前强度：{当前}\n"
-    "可选：{可选}\n"
-    "切换：`/effort {目标}`"
-)
-ACK_VIEW = (
-    "处理提示：{模板}\n"
-    "修改：`/ack text {{模板}}`\n"
-    "关闭：`/ack text`"
-)
-ACK_USAGE = "用法：`/ack text {模板}`\n关闭：`/ack text`"
-ACK_TOO_LONG = "未更新处理提示：模板最多 {字节} 字节"
-NO_NEXT_PAGE = "没有下一页\n请先发送 `/sessions`。"
-WORKING_DIRECTORY = "工作目录：{目录}"
-MEDIA_USAGE = (
-    "用法：\n\n"
-    "`/send {路径}`\n"
-    "`/sendfile {路径}`\n"
-    "`/sendimage {路径}`"
-)
-SESSIONS_TABLE_HEADER = "| # | 会话 | 状态 |\n|:--:|:--|:--|"
-
-SESSION_SUMMARY = (
-    "{动作}\n"
-    "```\n"
-    "会话：{会话}\n"
-    "模型：{模型}\n"
-    "目录：{目录}\n"
-    "```"
-)
-SETTING_SUMMARY = (
-    "{动作}\n"
-    "```\n"
-    "模型：{模型}\n"
-    "目录：{目录}\n"
-    "```"
-)
-STATUS_SUMMARY = (
-    "```\n"
-    "{状态}\n"
-    "排队消息 {排队}  待审批 {审批}  发送失败 {发送}\n\n"
-    "会话：{会话}\n"
-    "模型：{模型}\n"
-    "提供方：{提供方}\n"
-    "目录：{目录}\n\n"
-    "权限：{权限}\n"
-    "协作：{协作}\n"
-    "连接：{连接}\n"
-    "模式：{模式}\n\n"
-    "上下文：{上下文}\n"
-    "Token：{Token}\n"
-    "限额：{限额}\n"
-    "```"
-)
-SETTINGS_SUMMARY = (
-    "```\n"
-    "处理提示：{处理提示}\n"
-    "附件上限：{附件上限} MiB\n"
-    "```"
-)
+BACKEND_SUMMARY = "```\n后端: {当前}\n可用: {可用}\n/backend {{名称}}\n```"
+EFFORT_SUMMARY = "```\n强度: {当前}\n可选: {可选}\n```\n`/effort {{档位}}`"
+ACK_VIEW = "```\n处理提示: {模板}\n/ack text {{模板}}\n/ack text  (关闭)\n```"
+ACK_USAGE = "/ack text {模板}\n/ack text  (关闭)"
+ACK_TOO_LONG = "未更新处理提示: 最多 {字节} 字节"
+NO_NEXT_PAGE = "没有下一页"
+WORKING_DIRECTORY = "目录: {目录}"
+MEDIA_USAGE = "/send 路径\n/sendfile 路径\n/sendimage 路径"
 
 DESKTOP_NOTE = "补充消息会进入这个任务；`/stop` 也会停止它。"
-BLOCKED_NOTE = "当前任务正在等待电脑端处理。\n请先在桌面继续。"
+BLOCKED_NOTE = "等待桌面处理"
 
-BUSY_CHANGE = "拒绝切换：有尚未完成的任务，使用 `/stop` 终止后重试。"
+BUSY_CHANGE = "未切换: 任务未结束。等待完成或 /stop。"
 BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
 RESTART_STARTED = "正在重启消息桥。"
 RESTART_READY = "消息桥已重启。"
 RESTART_CONFIRM_UNSENT = "确认消息未能及时发送。"
-RESTART_FAILED = "重启未完成：{原因}\n请稍后重试。"
+RESTART_FAILED = "重启未完成: {原因}"
 RESTART_NOT_SERVICE = "当前消息桥不是由用户服务启动。"
 
-STOP_REQUESTED = "已请求停止，待办已清空。"
-STOP_DEFERRED = "已请求停止\n当前准备步骤结束后生效，待办已清空。"
-STOP_IDLE = "当前没有正在执行的任务，待办已清空。"
-STOP_UNCONFIRMED = "停止未确认\n待办已清空，但当前任务可能仍在运行。\n请到电脑端确认。"
+STOP_REQUESTED = "已请求停止"
+STOP_DEFERRED = "已请求停止，准备结束后生效"
+STOP_IDLE = "当前无运行任务"
+STOP_UNCONFIRMED = "停止未确认，任务可能仍在运行。请在桌面确认。"
 
-BACKEND_CONNECT_FAILED = (
-    "后端连接失败：{原因}\n"
-    "使用 `/backend` 切换后端，或稍后重试。"
-)
+BACKEND_CONNECT_FAILED = "后端连接失败: {原因}\n正在重连，未提交的待办已保留。"
 SESSION_RESTORE_FAILED = (
     "会话恢复失败：{原因}\n"
     "使用 `/backend` 切换后端，或稍后重试。"
 )
-TASK_FAILED = (
-    "任务未完成：后端处理异常\n"
-    "可用 `/status` 查看状态，或 `/backend` 切换后端重试。"
-)
+TASK_FAILED = "消息未提交: 后端处理失败。查看 /status。"
 TURN_FAILED = "任务未完成：Agent 执行失败。"
 TURN_INTERRUPTED = "任务已中断。"
 TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
@@ -112,17 +47,11 @@ INTERRUPTED_TASK = (
     "没有自动重放，电脑端可能仍在执行。\n"
     "请使用 `/status` 确认。"
 )
-UNCERTAIN_STEER = (
-    "补充消息可能已送达，但结果未确认。\n"
-    "没有自动重发，请使用 `/status` 查看进度。"
-)
-QUEUED_STEER = (
-    "当前任务暂不接受补充消息\n"
-    "消息已排队，完成后继续处理。"
-)
+UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
+QUEUED_STEER = "已排队，当前任务结束后处理。"
 PING_REPLY = "pong. {发送延迟}/{接收延迟}ms"
-PING_USAGE = "用法：`/ping`\n仅测试微信通道，不调用模型。"
-UNKNOWN_COMMAND = "命令无效\n发送 `/help` 查看命令。"
+PING_USAGE = "用法: /ping"
+UNKNOWN_COMMAND = "未知指令，查看 /help"
 TOO_MANY_ATTACHMENTS = "消息未接收：附件超过 {数量} 个。\n请分开发送。"
 QUEUE_FULL = "拒绝接收：排队消息已达 {数量} 条。\n请等待完成或使用 `/stop`。"
 UNSUPPORTED_MESSAGE = (
@@ -134,7 +63,7 @@ ATTACHMENT_INCOMING_FAILED = (
     "附件处理失败：{原因}\n"
     "这条消息未交给 Agent。"
 )
-ATTACHMENT_QUEUED = "附件已加入发送队列\n失败时会在此提示。"
+ATTACHMENT_QUEUED = "附件已排队"
 ATTACHMENT_SEND_FAILED = (
     "附件未发出：{名称}\n"
     "重试 {次数} 次仍失败，请稍后用 `/send` 重试。"
@@ -143,25 +72,10 @@ AUTO_ATTACHMENT_LIMIT = "附件未发送：自动回传最多 {数量} 个，超
 AUTO_ATTACHMENT_FAILED = "附件未发送：{原因}{建议}"
 AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 `/send {路径}`。"
 
-COMMAND_APPROVAL = (
-    "需要你的决定：执行命令\n"
-    "命令：{命令}\n"
-    "目录：{目录}\n"
-    "原因：{原因}\n\n"
-    "同意：`/approve {编号}`\n"
-    "拒绝：`/deny {编号}`"
-)
-FILE_APPROVAL = (
-    "需要你的决定：修改文件\n"
-    "范围：{范围}\n"
-    "原因：{原因}\n\n"
-    "同意：`/approve {编号}`\n"
-    "拒绝：`/deny {编号}`"
-)
-APPROVAL_ACCEPTED = "已同意，等待 Agent 继续。"
-APPROVAL_DECLINED = "已拒绝。"
-APPROVAL_EXPIRED = "审批已失效\n可能已处理或超时，请在电脑端确认。"
-APPROVAL_FAILED = "审批结果未送达\n请在电脑端处理。"
+APPROVAL_ACCEPTED = "已同意"
+APPROVAL_DECLINED = "已拒绝"
+APPROVAL_EXPIRED = "审批已失效，请在桌面确认。"
+APPROVAL_FAILED = "审批提交未确认，请在桌面处理。"
 APPROVAL_TOO_LONG = (
     "审批内容过长，手机端无法完整显示。\n"
     "本次请求未通过，请到电脑端处理。"
@@ -180,7 +94,7 @@ COMMAND_FAILURE_LABELS = {
     "/cwd": "未切换目录",
     "/ack": "未更新处理提示",
 }
-COMMAND_FAILURE = "{动作}：{原因}\n请稍后重试。"
+COMMAND_FAILURE = "{动作}: {原因}"
 
 SETTINGS_USAGE = "用法：`/settings`"
 BACKEND_INVALID = "未切换后端：名称无效\n可用：{可用}"
@@ -229,7 +143,7 @@ def effort_label(value):
 
 def model_label(model, effort):
     model = model or "默认模型"
-    return f"{model} {effort_label(effort)}"
+    return f"{model} ({effort_label(effort)})"
 
 
 def display_path(value):
@@ -320,14 +234,14 @@ def context_usage(value):
         percent = round(int(used) * 100 / int(window))
     except (TypeError, ValueError, ZeroDivisionError):
         return f"{used_text} / {window_text}"
-    return f"已用 {percent}%  {used_text} / {window_text}"
+    return f"剩余 {max(0, 100 - percent)}% ({used_text} / {window_text})"
 
 
 def token_usage(value):
     total = value.get("total", {}) if isinstance(value, dict) else {}
     if not isinstance(total, dict) or total.get("totalTokens") is None:
         return "暂不可用"
-    return "累计 {累计}  输入 {输入}  输出 {输出}".format(
+    return "{累计} total\n       {输入} input + {输出} output".format(
         累计=token_count(total.get("totalTokens")),
         输入=token_count(total.get("inputTokens")),
         输出=token_count(total.get("outputTokens")),
@@ -403,52 +317,49 @@ def session_name(value):
     return str(value or "未命名").replace("\n", " ").strip()[:100] or "未命名"
 
 
-def session_summary(action, *, name, model, effort, cwd):
-    return fill(SESSION_SUMMARY, {
-        "动作": action,
-        "会话": session_name(name),
-        "模型": model_label(model, effort),
-        "目录": cwd,
-    })
+def panel(*lines):
+    text = "\n".join(line for line in lines if line is not None)
+    fence = "`" * max(3, 1 + max((len(run) for run in re.findall(r"`+", text)), default=0))
+    return f"{fence}\n{text}\n{fence}"
 
 
-def setting_summary(action, *, model, effort, cwd):
-    return fill(SETTING_SUMMARY, {
-        "动作": action,
-        "模型": model_label(model, effort),
-        "目录": cwd,
-    })
+def session_summary(action, *, name, model, effort, cwd, backend=None):
+    return action + "\n" + panel(f"后端: {backend}" if backend else None,
+                 f"会话: {session_name(name)}", f"模型: {model_label(model, effort)}",
+                 f"目录: {display_path(cwd)}")
+
+
+def setting_summary(action=None, *, model, effort, cwd, field=None):
+    # Display only effective values. Never compare with previous state.
+    if field == "effort":
+        return f"强度: {effort_label(effort)}"
+    if field == "cwd":
+        return f"目录: {display_path(cwd)}"
+    if field == "model":
+        return f"模型: {model_label(model, effort)}"
+    return panel(f"模型: {model_label(model, effort)}", f"目录: {display_path(cwd)}")
 
 
 def status_summary(*, status, queued, pending, failed, name, model, effort,
-                   cwd, connection, input_mode, provider=None, approval=None,
+                   cwd, connection, provider=None, approval=None,
                    sandbox=None, reviewer=None, collaboration=None,
-                   profile=None, usage=None, rate_limits=None):
-    return fill(STATUS_SUMMARY, {
-        "状态": status,
-        "排队": queued,
-        "审批": pending,
-        "发送": failed,
-        "会话": session_name(name),
-        "模型": model_label(model, effort),
-        "提供方": provider_label(provider),
-        "目录": display_path(cwd),
-        "权限": permission_label(sandbox=sandbox, approval=approval,
-                                 reviewer=reviewer, profile=profile),
-        "协作": collaboration_label(collaboration),
-        "连接": connection,
-        "模式": input_mode,
-        "上下文": context_usage(usage),
-        "Token": token_usage(usage),
-        "限额": rate_limit_label(rate_limits),
-    })
+                   profile=None, usage=None, rate_limits=None, backend=None):
+    counts = "  ".join(f"{label}: {count}" for label, count in
+                       (("待办", queued), ("审批", pending), ("发送失败", failed)) if count)
+    return panel(f"状态: {status}", counts or None,
+        f"后端: {backend}" if backend else None,
+        f"模型: {model_label(model, effort)}", f"提供方: {provider_label(provider)}",
+        f"目录: {display_path(cwd)}",
+        "权限: " + permission_label(sandbox=sandbox, approval=approval,
+                                  reviewer=reviewer, profile=profile),
+        f"协作: {collaboration_label(collaboration)}", f"会话: {session_name(name)}",
+        f"服务: {connection}", "",
+        f"Token: {token_usage(usage)}", f"上下文: {context_usage(usage)}",
+        f"限额: {rate_limit_label(rate_limits)}")
 
 
 def settings_summary(*, notice, attachment_mib):
-    return fill(SETTINGS_SUMMARY, {
-        "处理提示": notice or "关闭",
-        "附件上限": attachment_mib,
-    })
+    return panel(f"处理提示: {notice or '关闭'}", f"附件上限: {attachment_mib} MiB")
 
 
 def session_age(timestamp, *, now=None):
@@ -472,17 +383,12 @@ def session_age(timestamp, *, now=None):
 
 
 def command_approval(*, command, cwd, reason, token):
-    return fill(COMMAND_APPROVAL, {
-        "命令": command,
-        "目录": cwd,
-        "原因": reason or "未说明",
-        "编号": token,
-    })
+    return "审批: 执行命令\n" + panel(f"命令: {command}", f"目录: {display_path(cwd)}",
+                 f"原因: {reason}" if reason else None,
+                 f"/approve {token}  同意", f"/deny {token}  拒绝")
 
 
 def file_approval(*, scope, reason, token):
-    return fill(FILE_APPROVAL, {
-        "范围": scope,
-        "原因": reason or "未说明",
-        "编号": token,
-    })
+    return "审批: 修改文件\n" + panel(f"范围: {scope}",
+                 f"原因: {reason}" if reason else None,
+                 f"/approve {token}  同意", f"/deny {token}  拒绝")

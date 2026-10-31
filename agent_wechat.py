@@ -20,7 +20,7 @@ from command_specs import HELP, REGISTRY, command_lane
 from configuration import Slicing
 from records import InputPhase, TurnResult
 from slicing import split_text
-from profiles import definitions, snapshot
+from profiles import backend_label, definitions, snapshot
 import service_control
 from media import Media, MediaError, MAX_ATTACHMENTS, split_answer
 from latency import Latency
@@ -104,9 +104,6 @@ class Bridge:
         self.loaded = False
         self.running = False
         self.steering = False
-        self.input_mode = config.get("inputMode", "steer")
-        if self.input_mode not in ("steer", "queue"):
-            raise ValueError("inputMode 必须是 steer 或 queue")
         self.stopping = False
         self.session_lock = asyncio.Lock()
         self.model_choices = []
@@ -288,18 +285,27 @@ class Bridge:
             text = "\n".join(item.get("text_item", {}).get("text", "")
                              for item in msg.get("item_list", []) if item.get("type") == 1).strip()
             attachments = [item for item in msg.get("item_list", []) if item.get("type") in (2, 4)]
-            if len(attachments) > MAX_ATTACHMENTS:
+            command, argument = parse_control(text)
+            spec = REGISTRY.get(command)
+            queued = bool(spec and spec.route == "input")
+            if queued:
+                text = argument
+            if queued and not text and not attachments:
+                self.reply("用法: /queue 提示词")
+            elif len(attachments) > MAX_ATTACHMENTS:
                 self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}))
-            elif text.startswith("/") and not attachments:
+            elif text.startswith("/") and not attachments and not queued:
                 controls.append((text, self.latency.received(msg.get("create_time_ms"))))
             elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
                     self.reply(fill(QUEUE_FULL, {"数量": 20}))
                 else:
                     self.state["inbox"].append({"id": identity, "text": text or "请查看我发送的附件。",
-                                               "attachments": attachments, "mode": self.input_mode,
+                                               "attachments": attachments, "mode": "queue" if queued else "steer",
                                                "clientId": str(uuid.uuid4()), "phase": InputPhase.PREPARING,
                                                "ingress_ms": self.latency.received(msg.get("create_time_ms")).get("ingress_ms")})
+                    if queued:
+                        self.reply("已排队", persist=False)
             else:
                 self.reply(fill(UNSUPPORTED_MESSAGE, {"数量": 20000}))
         self.state["seen"] = self.state["seen"][-2000:]
@@ -370,9 +376,9 @@ class Bridge:
                 self.reply(fill(RESTART_FAILED, {"原因": backend_reason(error)}))
         elif command == "/status":
             if self.backend.blocked:
-                status = "等待处理，任务需要你的决定"
+                status = "等待处理"
             elif self.running or self.steering or self.active_turn():
-                status = "运行中，Agent 正在处理"
+                status = "运行中"
             else:
                 status = "空闲"
             details = self.backend.info
@@ -381,6 +387,7 @@ class Bridge:
                 status = "后端连接未就绪"
             self.reply(status_summary(
                 status=status,
+                backend=backend_label(self.backend_name),
                 queued=len(self.state["inbox"]),
                 pending=len(self.backend.pending),
                 failed=len(self.state.get("failedOutbox", [])),
@@ -396,11 +403,12 @@ class Bridge:
                 collaboration=details.get("collaboration"),
                 usage=details.get("usage"),
                 rate_limits=rate_limits,
-                connection="桌面" if self.backend.shared else "独立",
-                input_mode=self.input_mode,
+                connection="本地后台" if self.backend.shared else "独立进程",
             ))
         elif command == "/stop":
             self.stopping = True
+            cleared = len(self.state["inbox"])
+            cleared_note = f"\n已清空待办: {cleared}" if cleared else ""
             for job in self.state["inbox"]:
                 if job.get("phase") in (InputPhase.DISPATCHING, InputPhase.ACCEPTED):
                     self.record_input(job, InputPhase.UNCERTAIN if job["phase"] == InputPhase.DISPATCHING
@@ -410,13 +418,13 @@ class Bridge:
             try:
                 stopped = await self.backend.stop()
                 if stopped:
-                    self.reply(STOP_REQUESTED)
+                    self.reply(STOP_REQUESTED + cleared_note)
                 elif self.running or self.active_turn():
-                    self.reply(STOP_DEFERRED)
+                    self.reply(STOP_DEFERRED + cleared_note)
                 else:
-                    self.reply(STOP_IDLE)
+                    self.reply(STOP_IDLE + cleared_note)
             except (RuntimeError, OSError, asyncio.TimeoutError):
-                self.reply(STOP_UNCONFIRMED)
+                self.reply(STOP_UNCONFIRMED + cleared_note)
         elif command in ("/approve", "/deny"):
             try:
                 accept = command == "/approve"
@@ -485,7 +493,6 @@ class Bridge:
                     self.input_paused = False
                     self.wake.set()
                     reported = False
-                    await self.backend.rate_limits()
                 except Exception as error:
                     self.backend_started = self.backend.connected
                     self.input_paused = True
@@ -493,6 +500,9 @@ class Bridge:
                         self.reply(fill(BACKEND_CONNECT_FAILED, {"原因": backend_reason(error)}))
                         reported = True
                     print(f"后端恢复失败：{type(error).__name__}", file=sys.stderr, flush=True)
+            # Account reads are independent of the active model turn.
+            if self.backend_started and self.backend.connected:
+                await self.backend.rate_limits()
             await asyncio.sleep(10)
 
     async def worker(self):
@@ -535,6 +545,7 @@ class Bridge:
                 self.steer_wake.set()
                 answer = await backend.run(self.state["thread"], job["text"],
                     attachments=job["preparedAttachments"], client_id=job["clientId"],
+                    allow_steer=job.get("mode", "steer") != "queue",
                     dispatch=lambda phase, turn: self.dispatch_input(job, phase, turn, backend))
                 if answer is not None:
                     await self.deliver_answer(answer)
@@ -579,8 +590,10 @@ class Bridge:
             await self.steer_wake.wait()
             self.steer_wake.clear()
             while (self.running or self.active_turn()) and self.state["inbox"] and not self.stopping:
-                job = self.state["inbox"][0]
-                if job.get("mode", self.input_mode) == "queue":
+                # Explicitly queued work must not block later live corrections.
+                job = next((item for item in self.state["inbox"]
+                            if item.get("mode", "steer") != "queue"), None)
+                if job is None:
                     break
                 backend = self.backend
                 active = backend.active

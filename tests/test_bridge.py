@@ -153,54 +153,38 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_prompt_formats(self):
         self.assertEqual(session_summary(
-            "已切换会话", name="修复微信附件发送", model="GPT-5 Codex",
-            effort="medium", cwd="~/projects/agent-wechat"),
-            "已切换会话\n```\n会话：修复微信附件发送\n"
-            "模型：GPT-5 Codex Medium\n目录：~/projects/agent-wechat\n```")
-        self.assertEqual(setting_summary(
-            "设置已更新 Codex", model="GPT-5 Codex", effort="high",
-            cwd="~/projects/agent-wechat"),
-            "设置已更新 Codex\n```\n模型：GPT-5 Codex High\n"
-            "目录：~/projects/agent-wechat\n```")
-        self.assertEqual(settings_summary(
-            notice=DEFAULT_ACK_TEMPLATE, attachment_mib=20),
-            "```\n处理提示：{发送延迟}/{接收延迟}ms\n"
-            "附件上限：20 MiB\n```")
-        status = status_summary(
-            status="运行中，Agent 正在处理", queued=2, pending=1, failed=0,
-            name="修复微信附件发送", model="GPT-5 Codex", effort="medium",
-            cwd="/home/zxzx/projects/agent-wechat", connection="桌面",
-            input_mode="steer", provider="openai", approval="on-request",
-            sandbox={"type": "workspaceWrite"}, reviewer="user",
+            "已切换会话", name="微信附件", model="example", effort="high", cwd="~/project"),
+            "已切换会话\n```\n会话: 微信附件\n模型: example (High)\n目录: ~/project\n```")
+        self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="model"),
+                         "模型: example (High)")
+        self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="effort"),
+                         "强度: High")
+        self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="cwd"),
+                         "目录: ~/project")
+        self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE, attachment_mib=20),
+                         "```\n处理提示: {发送延迟}/{接收延迟}ms\n附件上限: 20 MiB\n```")
+        status = status_summary(status="运行中", queued=2, pending=0, failed=0,
+            backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
+            connection="本地后台", provider="openai",
+            sandbox={"type": "workspaceWrite"}, approval="on-request", reviewer="user",
             collaboration={"mode": "default"},
             usage={"last": {"totalTokens": 12345},
-                   "total": {"totalTokens": 34567, "inputTokens": 30000,
-                             "outputTokens": 4567},
+                   "total": {"totalTokens": 34567, "inputTokens": 30000, "outputTokens": 4567},
                    "modelContextWindow": 200000},
-            rate_limits={"rateLimits": {
-                "primary": {"usedPercent": 10, "windowDurationMins": 300},
-                "secondary": {"usedPercent": 25, "windowDurationMins": 10080},
-            }})
-        self.assertTrue(status.startswith("```\n运行中，Agent 正在处理\n"))
-        self.assertIn(
-                      "排队消息 2  待审批 1  发送失败 0\n\n"
-                      "会话：修复微信附件发送\n", status)
-        self.assertIn("提供方：OpenAI\n", status)
-        self.assertIn("目录：~/projects/agent-wechat\n", status)
-        self.assertIn("权限：工作区可写  按需审批\n", status)
-        self.assertIn("协作：默认\n", status)
-        self.assertIn("模式：steer\n", status)
-        self.assertIn("上下文：已用 6%  12.3K / 200K\n", status)
-        self.assertIn("Token：累计 34.6K  输入 30K  输出 4.6K\n", status)
-        self.assertIn("限额：5小时剩余 90%  7天剩余 75%\n```", status)
-        self.assertNotIn("Session", status)
-        self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")),
-                         "后端连接中断")
-        self.assertEqual(attachment_reason(MediaError("附件超过本地大小限制")),
-                         "文件超过大小限制")
-        self.assertIn("`/status` 当前状态", HELP)
-        self.assertIn("`/switch {编号或ID}`", HELP)
-        self.assertIn("`/backend {名称}`", HELP)
+            rate_limits={"rateLimits": {"primary": {"usedPercent": 10, "windowDurationMins": 300}}})
+        for expected in ("状态: 运行中", "待办: 2", "后端: Codex", "模型: example (High)",
+                         "权限: 工作区可写", "协作: 默认", "服务: 本地后台",
+                         "Token: 34.6K total\n       30K input + 4.6K output",
+                         "上下文: 剩余 94% (12.3K / 200K)", "限额: 5小时剩余 90%"):
+            self.assertIn(expected, status)
+        for unwanted in ("审批: 0", "发送失败: 0", "Session", "·", "->", "→"):
+            self.assertNotIn(unwanted, status)
+        self.assertTrue(HELP.startswith("`/status` 当前状态"))
+        for command in ("/status", "/switch {编号或ID}", "/backend {名称}", "/approve", "/sendimage"):
+            self.assertIn(command, HELP)
+        self.assertNotIn("```", HELP)
+        self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")), "后端连接中断")
+        self.assertEqual(attachment_reason(MediaError("附件超过本地大小限制")), "文件超过大小限制")
 
     async def test_restart_refuses_non_service_owner(self):
         owner = AsyncMock(side_effect=ValueError("not service owner"))
@@ -224,15 +208,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.list_threads = threads
         await handle(self.bridge, "/sessions", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
-        self.assertIn("| # | 会话 | 状态 |", text)
-        self.assertIn("| 1 | 当前会话 | 当前", text)
-        self.assertIn("| 2 | Super-agent 调研 | 工作中 |", text)
-        self.assertIn("切换：`/switch {编号或ID}`", text)
-        self.assertIn("搜索：`/sessions {关键词}`", text)
+        self.assertTrue(text.startswith("会话\n```\n"))
+        self.assertIn("1. 当前会话  [当前  工作中", text)
+        self.assertIn("2. Super-agent 调研  [工作中]", text)
+        self.assertIn("```\n`/switch {编号或ID}`", text)
         self.assertNotIn("thread-current", text)
         self.assertNotIn("[active]", text)
 
-    async def test_model_list_uses_table_layout(self):
+    async def test_model_list_uses_compact_code_block(self):
         self.bridge.state["context"] = "context"
 
         async def models():
@@ -247,19 +230,20 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.models = models
         await handle(self.bridge, "/model", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
-        self.assertTrue(text.startswith("可用模型\n\n| 编号 | 模型 | 强度 |\n"))
-        self.assertIn("| 1 | deepseek-flash | Low  High  Max |", text)
-        self.assertIn("| 2 | deepseek-v4-pro | High |", text)
-        self.assertIn("切换：`/model {编号或名称}`", text)
-        self.assertNotIn("```", text)
-        self.assertNotIn("1.", text)
+        self.assertTrue(text.startswith("模型\n```\n"))
+        self.assertIn("1. deepseek-flash", text)
+        self.assertIn("2. deepseek-v4-pro", text)
+        self.assertNotIn("Low", text)
+        self.assertNotIn("High", text)
+        self.assertIn("```\n`/model {编号或名称}`", text)
+        self.assertNotIn("| 编号", text)
 
     async def test_backend_arguments_are_lowercase(self):
         self.bridge.state["context"] = "context"
         await handle(self.bridge, "/backend", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
-        self.assertIn("可用：codex | deepseek", text)
-        self.assertIn("切换：`/backend deepseek`", text)
+        self.assertIn("可用: codex | deepseek", text)
+        self.assertIn("/backend 名称", text)
         self.assertNotIn("切换：`/backend DeepSeek`", text)
 
     async def test_stop_during_input_preflight_never_starts_turn(self):
@@ -335,9 +319,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             },
         })
         prompt = notifications[-1]
-        self.assertIn("需要你的决定：执行命令", prompt)
-        self.assertIn("命令：git push origin main", prompt)
-        self.assertIn("同意：/approve ", prompt)
+        self.assertIn("审批: 执行命令", prompt)
+        self.assertIn("命令: git push origin main", prompt)
+        self.assertIn("/approve ", prompt)
         self.assertNotIn('"threadId"', prompt)
 
     async def test_oversized_approval_is_rejected_with_clear_prompt(self):

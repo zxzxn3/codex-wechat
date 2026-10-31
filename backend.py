@@ -72,6 +72,7 @@ class CodexBackend:
         self.websocket = None
         self.stop_requested = False
         self.info = {}
+        self.usage_by_thread = {}
         self.selected_thread = None
         self.blocked = False
         self.runtime_generation = 0
@@ -169,6 +170,7 @@ class CodexBackend:
 
     async def connect(self, command, env):
         self.connection_id = uuid.uuid4().hex
+        self.usage_by_thread.clear()
         self.model_catalog = None
         self.account_limits = None
         self.rate_limits_checked_at = 0
@@ -340,6 +342,18 @@ class CodexBackend:
                     current.get("rateLimits"), update)
                 self.account_limits = current
             return
+        if method == "thread/tokenUsage/updated":
+            thread_id, usage = params.get("threadId"), params.get("tokenUsage")
+            if isinstance(thread_id, str) and isinstance(usage, dict):
+                # Resume can publish usage before its response selects the thread.
+                # Cache counters by thread rather than discarding that early event.
+                self.usage_by_thread.pop(thread_id, None)
+                self.usage_by_thread[thread_id] = usage
+                while len(self.usage_by_thread) > 20:
+                    self.usage_by_thread.pop(next(iter(self.usage_by_thread)))
+                if thread_id == self.selected_thread:
+                    self.info["usage"] = usage
+            return
         if params.get("threadId") != self.selected_thread:
             return
         if method == "thread/settings/updated":
@@ -353,11 +367,6 @@ class CodexBackend:
             ):
                 if source in settings:
                     self.info[target] = settings[source]
-            return
-        if method == "thread/tokenUsage/updated":
-            token_usage = params.get("tokenUsage")
-            if isinstance(token_usage, dict):
-                self.info["usage"] = token_usage
             return
         if method == "thread/name/updated":
             self.info["name"] = params.get("threadName")
@@ -514,7 +523,7 @@ class CodexBackend:
                      "profile": result.get("activePermissionProfile"),
                      "collaboration": result.get(
                          "collaborationMode", previous.get("collaboration")),
-                     "usage": previous.get("usage")}
+                     "usage": self.usage_by_thread.get(thread["id"], previous.get("usage"))}
         if self.selected_thread != thread["id"]:
             self.selection_epoch += 1
             self.active = None
@@ -587,9 +596,12 @@ class CodexBackend:
             dispatch("accepted", turn_id)
         return True
 
-    async def run(self, thread_id, text, attachments=None, *, client_id=None, dispatch=None):
+    async def run(self, thread_id, text, attachments=None, *, client_id=None, dispatch=None,
+                  allow_steer=True):
         # Claim preparation before model lookup; stop is remembered across awaits.
         if self.active and not self.active["done"].done():
+            if not allow_steer:
+                raise DeferTurn("排队消息等待当前轮次结束")
             accepted = await self.steer(thread_id, self.active["turn"], text, attachments,
                                         client_id=client_id, dispatch=dispatch)
             if accepted:
@@ -607,6 +619,8 @@ class CodexBackend:
                 return TurnResult(current["source"], None, "已停止，未启动模型轮次。",
                                   current["cwd"], "interrupted")
             if self.active is not current:
+                if not allow_steer:
+                    raise DeferTurn("排队消息等待桌面轮次结束")
                 if self.active and await self.steer(thread_id, self.active["turn"], text,
                         attachments, client_id=client_id, dispatch=dispatch):
                     return None
