@@ -283,7 +283,7 @@ class Bridge:
                 if len(self.state["inbox"]) >= 20:
                     self.reply(fill(QUEUE_FULL, {"数量": 20}))
                 else:
-                    self.state["inbox"].append({"id": identity, "text": text or "请查看我发送的附件。",
+                    self.state["inbox"].append({"id": identity, "text": text,
                                                "attachments": attachments, "mode": "queue" if queued else "steer",
                                                "clientId": str(uuid.uuid4()), "phase": InputPhase.PREPARING,
                                                "ingress_ms": self.latency.received(msg.get("create_time_ms")).get("ingress_ms")})
