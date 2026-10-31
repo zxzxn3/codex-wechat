@@ -1,7 +1,17 @@
 {
   "processingNotice": "{发送延迟}/{接收延迟}ms",
   "backends": {
-    "codex": {"env": {}, "threadOptions": {}},
-    "deepseek": {"env": {}, "threadOptions": {}}
+    "codex": {
+      "env": {},
+      "threadOptions": {}
+    },
+    "deepseek": {
+      "env": {},
+      "threadOptions": {}
+    }
+  },
+  "slicing": {
+    "mode": "smart",
+    "targetChars": 600
   }
 }
