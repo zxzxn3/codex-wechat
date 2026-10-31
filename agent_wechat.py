@@ -90,6 +90,12 @@ class Bridge:
         active = self.backend.active
         return active if active and not active["done"].done() else None
 
+    def acknowledge(self, job):
+        settings = notice(self)
+        if settings["enabled"] and settings["text"]:
+            text = settings["text"].replace("{latency}", self.latency.notice(job.get("ingress_ms")))
+            self.reply(text)
+
     async def ensure_backend(self):
         if not self.backend_started:
             try:
@@ -188,7 +194,8 @@ class Bridge:
                     self.reply("待办已达 20 条，请等待完成或使用 /stop。")
                 else:
                     self.state["inbox"].append({"id": identity, "text": text or "请查看我发送的附件。",
-                                               "attachments": attachments, "mode": self.input_mode})
+                                               "attachments": attachments, "mode": self.input_mode,
+                                               "ingress_ms": self.latency.received(msg.get("create_time_ms")).get("ingress_ms")})
             else:
                 self.reply("支持文字、图片和文件；文字每条最多 20000 字符。")
         self.state["seen"] = self.state["seen"][-2000:]
@@ -316,9 +323,7 @@ class Bridge:
                     self.state["running"] = False
                     self.save()
                     continue
-                settings = notice(self)
-                if settings["enabled"] and settings["text"]:
-                    self.reply(settings["text"])
+                self.acknowledge(job)
                 self.set_phase("下载和解密附件" if job.get("attachments") else "准备模型输入")
                 attachments = (job["preparedAttachments"] if "preparedAttachments" in job else
                                await self.media.incoming(job.get("attachments", [])))
@@ -394,9 +399,7 @@ class Bridge:
                     if accepted:
                         self.state["inbox"] = [item for item in self.state["inbox"] if item is not job]
                         self.save()
-                        settings = notice(self)
-                        if settings["enabled"] and settings["text"]:
-                            self.reply(settings["text"])
+                        self.acknowledge(job)
                     else:
                         job.pop("dispatching", None)
                         job["mode"] = "queue"
@@ -462,7 +465,7 @@ class Bridge:
             self.state["outbox"].pop(0)
             self.latency.sends.append(send_ms)
             if "ping" in entry:
-                self.reply(self.latency.report(entry["ping"], send_started, send_ms))
+                self.reply(self.latency.report(entry["ping"], send_ms))
             else:
                 self.save()
             if not self.state["outbox"]:

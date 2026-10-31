@@ -1,13 +1,8 @@
 """Small in-memory timing samples; no probes, prompt text or persistent history."""
 from collections import deque
 import math
-import statistics
 import time
 import uuid
-
-
-def duration(milliseconds):
-    return f"{milliseconds:.0f} ms" if milliseconds < 1000 else f"{milliseconds / 1000:.2f} s"
 
 
 class Latency:
@@ -33,23 +28,16 @@ class Latency:
     def record_agent(self, first_ms, total_ms, *, backend=None, model=None):
         self.agent.append({"first": first_ms, "total": total_ms, "backend": backend, "model": model})
 
-    def report(self, probe, send_started, send_ms):
+    @staticmethod
+    def route(ingress, send_ms):
+        incoming = f"{ingress:.0f}" if ingress is not None else "-"
+        outgoing = f"{send_ms:.0f}" if send_ms is not None else "-"
+        return f"{incoming}/{outgoing}ms"
+
+    def notice(self, ingress_ms=None):
+        return self.route(ingress_ms, self.sends[-1] if self.sends else None)
+
+    def report(self, probe, send_ms):
         if probe["run"] != self.run_id:
             return "测速跨越了网关重启，计时已失效，请重新发送 /ping。"
-        total_ms = (send_started - probe["received"]) * 1000 + send_ms
-        queue_ms = max(0, (send_started - probe["queued"]) * 1000)
-        lines = [f"收信→微信接口确认：{duration(total_ms)}",
-                 f"其中等待/重试 {duration(queue_ms)}；发送 API {duration(send_ms)}"]
-        if probe.get("ingress_ms") is not None:
-            lines.append(f"消息时间戳→网关 ≈ {duration(probe['ingress_ms'])}（跨时钟估算）")
-        if self.sends:
-            lines.append(f"最近发送 API 中位数：{duration(statistics.median(self.sends))}（{len(self.sends)}次成功请求）")
-        if self.agent:
-            sample = self.agent[-1]
-            first = duration(sample["first"]) if sample["first"] is not None else "无文字样本"
-            label = "/".join(str(sample[k]) for k in ("backend", "model") if sample.get(k))
-            lines.append(f"最近 Agent{' [' + label + ']' if label else ''}：首条文字 {first}；全程 {duration(sample['total'])}")
-        else:
-            lines.append("Agent 耗时：暂无本进程的完成样本")
-        lines.append("本次未调用模型；不含手机下行显示，非完整手机 RTT。")
-        return "\n".join(lines)
+        return self.route(probe.get("ingress_ms"), send_ms)

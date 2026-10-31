@@ -90,18 +90,17 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("附件上限", self.store.load("bridge")["outbox"][-1]["text"])
         self.assertFalse(self.bridge.backend_started)
 
-    async def test_latency_separates_queue_api_and_agent(self):
+    async def test_latency_shows_only_wechat_channel(self):
         stats = Latency()
         stats.sends.append(50)
         stats.record_agent(300, 1500, backend="codex", model="example-model")
-        probe = {"run": stats.run_id, "received": 100.0, "queued": 100.1}
-        report = stats.report(probe, send_started=100.2, send_ms=50)
-        self.assertIn("确认：250 ms", report)
-        self.assertIn("等待/重试 100 ms", report)
-        self.assertIn("发送 API 50 ms", report)
-        self.assertIn("[codex/example-model]", report)
-        self.assertIn("非完整手机 RTT", report)
-        self.assertIn("计时已失效", stats.report({"run": "previous-process"}, 1, 1))
+        probe = {"run": stats.run_id, "ingress_ms": 120}
+        report = stats.report(probe, send_ms=50)
+        self.assertEqual(report, "120/50ms")
+        self.assertEqual(stats.notice(120), "120/50ms")
+        self.assertEqual(Latency().notice(), "-/-ms")
+        self.assertEqual(stats.report({"run": stats.run_id}, 50), "-/50ms")
+        self.assertIn("计时已失效", stats.report({"run": "previous-process"}, 1))
 
     async def test_stop_during_input_preflight_never_starts_turn(self):
         backend = CodexBackend({"sharedDaemon": False}, self.temp.name, lambda _: None)
