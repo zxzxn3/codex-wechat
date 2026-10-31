@@ -17,7 +17,7 @@ import uuid
 
 from records import Source, TurnResult
 from media import OUTPUT_HINT
-from usage import stored_usage
+from usage import UsageCache
 from prompts import (
     APPROVAL_TOO_LONG,
     COMPACT_STARTED,
@@ -78,6 +78,7 @@ class CodexBackend:
         self.info = {}
         self.usage_by_thread = {}
         self.live_usage_threads = set()
+        self.stored_usage = UsageCache()
         self.compactions = {}
         self.manual_compactions = set()
         self.compaction_notice = False
@@ -183,6 +184,7 @@ class CodexBackend:
         self.connection_id = uuid.uuid4().hex
         self.usage_by_thread.clear()
         self.live_usage_threads.clear()
+        self.stored_usage.clear()
         self.compactions.clear()
         self.manual_compactions.clear()
         self.model_catalog = None
@@ -441,6 +443,9 @@ class CodexBackend:
         if method == "item/completed":
             item = params.get("item", {})
             if item.get("type") == "agentMessage":
+                identity = item.get("id")
+                if identity and any(message.get("id") == identity for message in current["messages"]):
+                    return
                 current["messages"].append(item)
         elif method == "turn/completed" and not current["done"].done():
             turn = params["turn"]
@@ -594,7 +599,7 @@ class CodexBackend:
         if not thread or thread in self.live_usage_threads:
             return
         source = self.source(thread)
-        usage = await asyncio.to_thread(stored_usage, self.info.get("path"), thread)
+        usage = await asyncio.to_thread(self.stored_usage.read, self.info.get("path"), thread)
         if usage and source == self.source() and thread not in self.live_usage_threads:
             self.usage_by_thread[thread] = usage
             self.info["usage"] = usage

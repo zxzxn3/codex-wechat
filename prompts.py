@@ -432,3 +432,12 @@ def file_approval(*, scope, reason, token):
 
 def approval_actions(token):
     return f"\n`/approve {token}` 同意\n`/deny {token}` 拒绝"
+
+
+def ping_channel(fields):
+    """Keep the compact pair; missing samples never acquire a time unit."""
+    inbound, outbound = fields["发送延迟"], fields["接收延迟"]
+    if inbound != "-" and outbound != "-":
+        return render_ack(PING_REPLY, fields)
+    return "WeChat ─" + "/".join(value + "ms" if value != "-" else "-"
+                                    for value in (inbound, outbound))

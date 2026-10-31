@@ -16,7 +16,7 @@ from backend import CodexBackend, CodexRpcError, DeferTurn
 from storage import Store
 from wechat import WeChat, login
 from commands import ensure_session, handle, notice
-from command_specs import HELP, REGISTRY, command_lane
+from command_specs import HELP, REGISTRY, CONTROL_LANES, command_lane
 from configuration import HotSettings, HOT_CONFIG_KEYS, completion_template
 from quota import quota_warnings
 from records import InputPhase, TurnResult
@@ -42,7 +42,7 @@ from prompts import (
     COMMAND_FAILURE,
     COMMAND_FAILURE_LABELS,
     MEDIA_USAGE,
-    PING_REPLY,
+    ping_channel,
     PING_USAGE,
     QUEUED_STEER,
     QUEUE_FULL,
@@ -95,7 +95,7 @@ class Bridge:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
         hot = HotSettings.from_config(config)
         self.slicing, self.notifications, self.source_hint = hot.slicing, hot.notifications, hot.source_hint
-        self.controls = {lane: asyncio.Queue(maxsize=20) for lane in ("local", "urgent", "backend", "probe")}
+        self.controls = {lane: asyncio.Queue(maxsize=20) for lane in CONTROL_LANES}
         self.connection_lock = asyncio.Lock()
         self.input_paused = False
         self.latency = Latency()
@@ -201,10 +201,10 @@ class Bridge:
         if template:
             self.reply(render_ack(template, self.prompt_fields(job.get("ingress_ms"))))
 
-    def prompt_fields(self, ingress_ms=None):
+    def prompt_fields(self, ingress_ms=None, *, finishing=False):
         if self.backend.blocked:
             status = "等待处理"
-        elif self.running or self.steering or self.active_turn():
+        elif (self.running and not finishing) or self.steering or self.active_turn():
             status = "运行中"
         else:
             status = "空闲"
@@ -283,11 +283,15 @@ class Bridge:
                 "user": self.account["user"], "context": context or self.state["context"],
                 "asset": asset, **({"source": asdict(source)} if source else {})}
 
-    async def queue_file(self, path, kind="auto"):
-        cwd = self.backend.info.get("cwd") or self.backend.cwd
-        context, source = self.state["context"], self.backend.source(self.state["thread"])
+    async def queue_file(self, path, kind="auto", *, origin=None):
+        origin = origin or self.media_origin()
+        cwd, context, source = origin["cwd"], origin["context"], origin["source"]
         asset = await asyncio.to_thread(self.media.snapshot, path, cwd, kind)
         self.enqueue([self.asset_entry(asset, context=context, source=source)])
+
+    def media_origin(self):
+        return {"cwd": self.backend.info.get("cwd") or self.backend.cwd,
+                "context": self.state["context"], "source": self.backend.source(self.state["thread"])}
 
     def current_source(self, source):
         return source == self.backend.source(self.state["thread"])
@@ -328,7 +332,7 @@ class Bridge:
         entries.extend(assets)
         completion_notice = completion_template(self.reload_config(), self.state)
         if notify_completion and not errors and completion_notice:
-            completion = render_ack(completion_notice, self.prompt_fields())
+            completion = render_ack(completion_notice, self.prompt_fields(finishing=finish_running))
             entries.extend(self.text_entries(completion, group=group, context=context,
                                              source=source, role="completion"))
         if finish_running:
@@ -398,7 +402,10 @@ class Bridge:
             elif len(attachments) > MAX_ATTACHMENTS:
                 self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}))
             elif text.startswith("/") and not attachments and not queued:
-                controls.append((text, self.latency.received(msg.get("create_time_ms"))))
+                received = self.latency.received(msg.get("create_time_ms"))
+                if spec and spec.lane == "media":
+                    received["media"] = self.media_origin()
+                controls.append((text, received))
             elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
                     self.reply(fill(QUEUE_FULL, {"数量": 20}))
@@ -455,7 +462,7 @@ class Bridge:
                 self.reply(PING_USAGE)
             else:
                 ingress = received.get("ingress_ms") if received else None
-                channel = render_ack(PING_REPLY, self.latency.values(ingress))
+                channel = ping_channel(self.latency.values(ingress))
                 backend = self.backend
                 connection = backend.connection_id
                 provider = await provider_latency(backend)
@@ -469,7 +476,8 @@ class Bridge:
                     return
                 if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
                     argument = argument[1:-1]
-                await self.queue_file(argument, {"/sendfile": "file", "/sendimage": "image"}.get(command, "auto"))
+                await self.queue_file(argument, {"/sendfile": "file", "/sendimage": "image"}.get(command, "auto"),
+                                      origin=(received or {}).get("media"))
                 self.reply(ATTACHMENT_QUEUED)
             except (MediaError, ValueError, OSError) as error:
                 self.reply(f"附件未发送: {attachment_reason(error)}\n请检查路径后重试。")
@@ -499,7 +507,7 @@ class Bridge:
                 stopped = await self.backend.stop()
                 if stopped:
                     self.reply(STOP_REQUESTED + cleared_note)
-                elif self.running or self.active_turn():
+                elif (self.running and not finishing) or self.active_turn():
                     self.reply(STOP_DEFERRED + cleared_note)
                 else:
                     self.reply(STOP_IDLE + cleared_note)

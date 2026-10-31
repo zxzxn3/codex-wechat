@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import re
+from threading import Lock
 
 TOKEN_COUNT = re.compile(rb'"type"\s*:\s*"token_count"')
 MAX_TAIL = 8 * 1024 * 1024
@@ -49,3 +50,40 @@ def stored_usage(path, thread_id):
     except (OSError, ValueError, TypeError):
         return None
     return None
+
+
+class UsageCache:
+    """Cache unchanged native files; stat only, with bounded connection-local entries."""
+    def __init__(self):
+        self.entries = {}
+        self.lock = Lock()
+
+    def clear(self):
+        with self.lock:
+            self.entries.clear()
+
+    @staticmethod
+    def signature(path):
+        stat = Path(path).stat()
+        return stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+    def read(self, path, thread_id):
+        if not path:
+            return None
+        key = str(path), thread_id
+        with self.lock:
+            try:
+                signature = self.signature(path)
+                previous = self.entries.get(key)
+                if previous and previous[0] == signature:
+                    return previous[1]
+                result = stored_usage(path, thread_id)
+                if self.signature(path) == signature:
+                    self.entries.pop(key, None)
+                    self.entries[key] = signature, result
+                    while len(self.entries) > 20:
+                        self.entries.pop(next(iter(self.entries)))
+                return result
+            except OSError:
+                self.entries.pop(key, None)
+                return None
