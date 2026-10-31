@@ -1,63 +1,90 @@
 """WeChat conversation controls; lists come from the current backend."""
 from pathlib import Path
-from profiles import switch
 
-DEFAULT_NOTICE = {"enabled": True, "text": "{latency}"}
-HELP = ("直接发文字与 Codex 对话；工作中默认即时补充（steer）。\n"
-        "/ping 微信通道延迟（不调用模型）\n/settings 查看当前设置\n"
-        "/backend 查看后端；/backend codex 或 deepseek 切换\n"
-        "/status 状态及会话信息\n/sessions [关键词] 会话列表\n"
-        "/sessions next 下一页\n/switch 编号或ID 切换会话\n/new 新建会话\n"
-        "/model 列出模型；/model 编号或名称 切换\n"
-        "/effort 列出强度；/effort 档位 切换\n/cwd [路径] 查看或切换目录\n"
-        "/ack 查看处理提示设置\n/ack on 或 off 开关\n/ack text 文字 自定义提示（{latency} 显示通道延迟）\n"
-        "/send 路径 发附件（自动识别图片）\n/sendfile 路径 发文件\n/sendimage 路径 发图片\n"
-        "/stop 停止并清空待办\n/restart 重启消息桥服务（空闲时）\n"
-        "/approve 编号 或 /deny 编号 审批\n/help 帮助")
-MANAGED = {"/settings", "/backend", "/sessions", "/switch", "/new", "/model", "/models", "/effort", "/cwd", "/ack"}
+from profiles import backend_label, switch
+from prompts import (
+    ACK_USAGE,
+    ACK_VIEW,
+    ACK_TOO_LONG,
+    BACKEND_SUMMARY,
+    BLOCKED_NOTE,
+    BUSY_CHANGE,
+    DESKTOP_NOTE,
+    DIRECTORY_INVALID,
+    DIRECTORY_NOT_FOLDER,
+    EFFORT_INVALID,
+    EFFORT_SUMMARY,
+    HELP,
+    MAX_NOTICE_BYTES,
+    MODEL_INVALID,
+    MODEL_NOT_IN_CATALOG,
+    MODEL_SUMMARY,
+    NEW_USAGE,
+    NO_NEXT_PAGE,
+    SESSION_INDEX_INVALID,
+    SESSION_TARGET_ACTIVE,
+    SESSION_TARGET_BLOCKED,
+    SESSION_USAGE,
+    SETTINGS_USAGE,
+    UserFacingError,
+    WORKING_DIRECTORY,
+    effort_label,
+    fill,
+    processing_template,
+    session_age,
+    session_name,
+    session_summary,
+    setting_summary,
+    settings_summary,
+)
+
+MANAGED = {"/settings", "/backend", "/sessions", "/switch", "/new", "/model", "/models",
+           "/effort", "/cwd", "/ack"}
 
 
 def notice(bridge):
-    return {**DEFAULT_NOTICE, **bridge.config.get("processingNotice", {}),
-            **bridge.state.get("processingNotice", {})}
+    return processing_template(bridge.config, bridge.state)
 
 
-def info(bridge, heading="当前会话", *, detailed=False):
+def info(bridge, action="当前会话", *, include_session=True):
     details = bridge.backend.info
-    if not detailed:
-        thread = bridge.state.get("thread")
-        identity = f"{thread[:8]}…{thread[-4:]}" if thread else "尚未创建"
-        lines = [f"{heading} · {bridge.backend_name}",
-                 f"{details.get('name') or '未命名'}（{identity}）",
-                 f"模型：{details.get('model') or '未获取'} · 强度：{details.get('effort') or '默认'}",
-                 f"目录：{details.get('cwd') or bridge.backend.cwd}"]
-        if bridge.backend.blocked:
-            lines.append("当前有桌面待处理事项，请先在桌面处理。")
-        elif bridge.active_turn() and not bridge.active_turn().get("owned"):
-            lines.append("已连接桌面活动轮次；补充消息和 /stop 会作用于同一任务。")
-        return "\n".join(lines)
-    return (f"{heading}\n后端：{bridge.backend_name}\n名称：{details.get('name') or '未命名'}\n"
-            f"会话：{bridge.state.get('thread') or '尚未创建'}\n"
-            f"模型：{details.get('model') or '由 Codex 默认选择'}\n"
-            f"思考强度：{details.get('effort') or 'Codex 默认（未返回具体档位）'}\n"
-            f"工作目录：{details.get('cwd') or bridge.backend.cwd}\n"
-            f"连接：{'共享后台' if bridge.backend.shared else '独立后台'}\n"
-            f"桌面待处理：{'是' if bridge.backend.blocked else '否'}\n"
-            f"活动轮次：{bridge.active_turn()['turn'] if bridge.active_turn() else '无'}")
+    values = {
+        "action": action,
+        "name": details.get("name"),
+        "model": details.get("model"),
+        "effort": details.get("effort"),
+        "cwd": details.get("cwd") or bridge.backend.cwd,
+    }
+    if include_session:
+        text = session_summary(values["action"], name=values["name"],
+                               model=values["model"], effort=values["effort"],
+                               cwd=values["cwd"])
+    else:
+        text = setting_summary(values["action"], model=values["model"],
+                               effort=values["effort"], cwd=values["cwd"])
+    if bridge.backend.blocked:
+        return text + "\n\n" + BLOCKED_NOTE
+    if bridge.active_turn() and not bridge.active_turn().get("owned"):
+        return text + "\n\n" + DESKTOP_NOTE
+    return text
 
 
 async def activate(bridge, thread_id=None, overrides=None):
     # Persist overrides by thread, never let one session's settings leak to another.
     saved = dict(bridge.state.get("sessionOptions", {}).get(thread_id, {}))
     saved.update(overrides or {})
+    desktop = False
     if thread_id:
         thread = await bridge.backend.read_thread(thread_id)
         status = thread.get("status", {}).get("type")
         if status == "systemError":
-            raise ValueError("目标会话正在工作或等待处理，请先在原客户端处理后再切换。")
+            raise UserFacingError(SESSION_TARGET_BLOCKED)
         if status == "active":
-            if not bridge.backend.shared or overrides:
-                raise ValueError("活动会话只支持通过共享后台连接，且不能在工作中覆盖模型或目录。")
+            desktop = True
+            if not bridge.backend.shared:
+                raise UserFacingError(SESSION_TARGET_ACTIVE)
+            if overrides:
+                raise UserFacingError(BUSY_CHANGE)
             # Adopt the desktop's current settings instead of applying stale mobile overrides.
             saved = {}
     selected = await bridge.backend.thread(thread_id, saved)
@@ -68,13 +95,21 @@ async def activate(bridge, thread_id=None, overrides=None):
         bridge.state.setdefault("sessionOptions", {}).pop(selected, None)
     bridge.loaded = True
     bridge.save()
+    return desktop
 
 
 async def ensure_session(bridge):
     await bridge.ensure_backend()
     if not bridge.loaded:
-        await activate(bridge, bridge.state["thread"])
-        bridge.reply(info(bridge, "已恢复会话" if bridge.resuming else "已启动会话"))
+        had_thread = bool(bridge.state["thread"])
+        desktop = await activate(bridge, bridge.state["thread"])
+        if desktop:
+            action = "已连接桌面会话"
+        elif had_thread:
+            action = "已恢复会话"
+        else:
+            action = "已新建会话"
+        bridge.reply(info(bridge, action))
         bridge.resuming = True
 
 
@@ -89,34 +124,49 @@ def effort_choices(model):
 async def handle(bridge, command, argument):
     if command == "/settings":
         if argument:
-            bridge.reply("/settings 查看当前值；用 /backend、/model、/effort、/cwd、/ack 修改相应设置。")
+            bridge.reply(SETTINGS_USAGE)
             return
-        settings = notice(bridge)
-        bridge.reply(info(bridge) +
-                     f"\n工作中收信：{bridge.input_mode}"
-                     f"\n处理提示：{'开' if settings['enabled'] else '关'} · {settings['text']}"
-                     f"\n附件上限：{bridge.media.limit // (1024 * 1024)} MiB"
-                     "\n通过已有对应指令修改；收信模式和附件上限目前在本地配置。")
+        details = bridge.backend.info
+        bridge.reply(settings_summary(
+            name=details.get("name"),
+            model=details.get("model"),
+            effort=details.get("effort"),
+            cwd=details.get("cwd") or bridge.backend.cwd,
+            input_mode=bridge.input_mode,
+            notice=notice(bridge),
+            attachment_mib=bridge.media.limit // (1024 * 1024),
+        ))
         return
     if command == "/backend" and not argument:
-        bridge.reply(f"当前后端：{bridge.backend_name}\n可选：" +
-                     ", ".join(bridge.backend_configs) + "\n/backend 名称 切换（空闲时）")
+        current = backend_label(bridge.backend_name)
+        names = list(bridge.backend_configs)
+        available = " | ".join(backend_label(name) for name in names)
+        target = next((name for name in names if name != bridge.backend_name),
+                      bridge.backend_name)
+        bridge.reply(fill(BACKEND_SUMMARY, {
+            "当前": current,
+            "可用": available,
+            "目标": backend_label(target),
+        }))
         return
     if command == "/ack":
-        settings = notice(bridge)
-        if argument in ("on", "off"):
-            settings["enabled"] = argument == "on"
+        template = notice(bridge)
+        if not argument:
+            bridge.reply(fill(ACK_VIEW, {"模板": template or "关闭"}))
+            return
+        if argument == "text":
+            value = ""
         elif argument.startswith("text "):
             value = argument[5:].strip()
-            if not value or len(value.encode()) > 1000:
-                raise ValueError("提示文字不能为空，且最多 1000 字节。")
-            settings["text"] = value
-        elif argument:
-            raise ValueError("用法：/ack、/ack on、/ack off、/ack text 自定义文字")
-        if argument:
-            bridge.state["processingNotice"] = settings
-            bridge.save()
-        bridge.reply(f"处理提示：{'开启' if settings['enabled'] else '关闭'}\n文本：{settings['text']}")
+            if value in ('""', "''"):
+                value = ""
+        else:
+            raise UserFacingError(ACK_USAGE)
+        if len(value.encode()) > MAX_NOTICE_BYTES:
+            raise UserFacingError(fill(ACK_TOO_LONG, {"字节": MAX_NOTICE_BYTES}))
+        bridge.state["processingNotice"] = value
+        bridge.save()
+        bridge.reply("处理提示：" + (value or "关闭"))
         return
     if command == "/sessions":
         cursor, search = None, argument or None
@@ -124,7 +174,7 @@ async def handle(bridge, command, argument):
             cursor = bridge.state.get("sessionCursor")
             search = bridge.state.get("sessionSearch")
             if not cursor:
-                bridge.reply("没有下一页。请发 /sessions 重新列出。")
+                bridge.reply(NO_NEXT_PAGE)
                 return
         result = await bridge.backend.list_threads(cursor, search)
         threads = result["data"]
@@ -132,55 +182,76 @@ async def handle(bridge, command, argument):
         bridge.state["sessionCursor"] = result.get("nextCursor")
         bridge.state["sessionSearch"] = search
         bridge.save()
-        lines = ["会话列表（编号以本次列表为准）："]
+        lines = ["会话"]
         for index, thread in enumerate(threads, 1):
-            mark = " *" if thread["id"] == bridge.state["thread"] else ""
-            title = (thread.get("name") or "未命名").replace("\n", " ")[:100]
-            status = thread.get("status", {}).get("type", "unknown")
-            lines.append(f"{index}. {title}{mark} [{status}]\n{thread['id']}")
+            title = session_name(thread.get("name"))
+            current = thread["id"] == bridge.state["thread"]
+            status = thread.get("status", {}).get("type")
+            labels = []
+            if current:
+                labels.append("当前")
+            elif status == "active":
+                labels.append("工作中")
+            elif status == "systemError":
+                labels.append("需要处理")
+            if current or not labels:
+                age = session_age(thread.get("updatedAt"))
+                if age:
+                    labels.append(age)
+            suffix = f"　{' · '.join(labels)}" if labels else ""
+            lines.append(f"{index}. {title}{suffix}")
         if not threads:
-            lines.append("没有匹配的会话。")
-        lines.append("/switch 编号 切换；/sessions next 下一页" if result.get("nextCursor")
-                     else "/switch 编号或ID 切换")
+            lines.append("\n没有匹配的会话。")
+        lines.extend(["", "切换：/switch 编号或ID", "搜索：/sessions 关键词"])
+        if result.get("nextCursor"):
+            lines.append("下一页：/sessions next")
         bridge.reply("\n".join(lines))
         return
     if command in ("/model", "/models") and not argument:
         models = await model_entries(bridge)
         bridge.model_choices = models
-        bridge.reply("可选模型：\n" + "\n".join(
-            f"{index}. {model['model']} [{', '.join(effort_choices(model)) or '无可选强度'}]"
-            for index, model in enumerate(models, 1)) + "\n/model 编号或完整模型名")
+        lines = []
+        for index, model in enumerate(models, 1):
+            efforts = "、".join(effort_label(value) for value in effort_choices(model))
+            lines.extend((f"{index}. {model['model']}",
+                          f"   强度：{efforts or '无可选强度'}"))
+        bridge.reply(fill(MODEL_SUMMARY, {
+            "列表": "\n".join(lines) if lines else "当前后端没有返回模型。",
+            "目标": 1 if lines else "编号或名称",
+        }))
         return
     if command == "/cwd" and not argument:
-        bridge.reply("工作目录：" + (bridge.backend.info.get("cwd") or bridge.backend.cwd))
+        bridge.reply(fill(WORKING_DIRECTORY, {
+            "目录": bridge.backend.info.get("cwd") or bridge.backend.cwd}))
         return
+    if command == "/new" and argument:
+        raise UserFacingError(NEW_USAGE)
+    if command == "/switch" and not argument:
+        raise UserFacingError(SESSION_USAGE)
     # All state-changing session controls use one lock; incoming work waits until done.
-    if bridge.running or bridge.steering or bridge.active_turn() or bridge.state["inbox"] or bridge.session_lock.locked():
-        raise ValueError("当前有任务或待办；请先 /stop，等待结束后再切换设置。")
+    if (bridge.running or bridge.steering or bridge.active_turn()
+            or bridge.state["inbox"] or bridge.session_lock.locked()):
+        raise UserFacingError(BUSY_CHANGE)
     async with bridge.session_lock:
         if command == "/backend":
             await switch(bridge, argument)
-            bridge.reply(info(bridge, "已选择后端"))
+            bridge.reply(info(bridge, f"已切换后端到 {backend_label(bridge.backend_name)}"))
             return
         if command == "/new":
-            if argument:
-                raise ValueError("用法：/new")
             await activate(bridge)
             bridge.resuming = True
             bridge.reply(info(bridge, "已新建会话"))
             return
         if command == "/switch":
-            if not argument:
-                raise ValueError("用法：/switch 列表编号或完整会话ID")
             target = argument
             if argument.isdecimal():
                 choices = bridge.state.get("sessionChoices", [])
                 index = int(argument) - 1
                 if not 0 <= index < len(choices):
-                    raise ValueError("编号无效，请先 /sessions。")
+                    raise UserFacingError(SESSION_INDEX_INVALID)
                 target = choices[index]
-            await activate(bridge, target)
-            bridge.reply(info(bridge, "已切换会话"))
+            desktop = await activate(bridge, target)
+            bridge.reply(info(bridge, "已连接桌面会话" if desktop else "已切换会话"))
             return
         await ensure_session(bridge)
         overrides = {}
@@ -188,17 +259,28 @@ async def handle(bridge, command, argument):
             models = (bridge.model_choices if argument.isdecimal() and bridge.model_choices
                       and command != "/effort" else await model_entries(bridge))
             if command == "/effort":
-                current = next((m for m in models if m["model"] == bridge.backend.info.get("model")), None)
+                current = next((m for m in models
+                                if m["model"] == bridge.backend.info.get("model")), None)
                 if current is None:
-                    raise ValueError("当前模型不在返回的模型清单中，无法核对强度。")
+                    raise UserFacingError(MODEL_NOT_IN_CATALOG)
                 choices = effort_choices(current)
                 if not argument:
-                    bridge.reply(f"当前强度：{bridge.backend.info.get('effort') or '默认'}\n"
-                                 f"可选：{', '.join(choices) or '无'}\n/effort 档位")
+                    current_effort = bridge.backend.info.get("effort")
+                    target = next((value for value in choices
+                                   if value != current_effort), current_effort)
+                    bridge.reply(fill(EFFORT_SUMMARY, {
+                        "当前": effort_label(current_effort),
+                        "可选": " | ".join(effort_label(value) for value in choices) or "无",
+                        "目标": effort_label(target),
+                    }))
                     return
-                if argument not in choices:
-                    raise ValueError("此模型的可选强度：" + ", ".join(choices))
-                overrides["effort"] = argument
+                selected_effort = next(
+                    (value for value in choices
+                     if value.casefold() == argument.casefold()), None)
+                if selected_effort is None:
+                    raise UserFacingError(fill(EFFORT_INVALID, {
+                        "可选": " | ".join(effort_label(value) for value in choices) or "无"}))
+                overrides["effort"] = selected_effort
             else:
                 selected = None
                 if argument.isdecimal():
@@ -208,7 +290,7 @@ async def handle(bridge, command, argument):
                 else:
                     selected = next((m for m in models if m["model"] == argument), None)
                 if selected is None:
-                    raise ValueError("模型不在返回的清单中，请先 /model。")
+                    raise UserFacingError(MODEL_INVALID)
                 overrides["model"] = selected["model"]
                 # Model-specific defaults prevent carrying an unsupported effort to another model.
                 overrides["effort"] = selected.get("defaultReasoningEffort")
@@ -220,9 +302,10 @@ async def handle(bridge, command, argument):
             try:
                 path = path.resolve(strict=True)
             except OSError:
-                raise ValueError("目录不存在或无法访问。") from None
+                raise UserFacingError(DIRECTORY_INVALID) from None
             if not path.is_dir():
-                raise ValueError("路径不是目录。")
+                raise UserFacingError(DIRECTORY_NOT_FOLDER)
             overrides["cwd"] = str(path)
         await activate(bridge, bridge.state["thread"], overrides)
-        bridge.reply(info(bridge, "设置已更新"))
+        bridge.reply(info(bridge, f"设置已更新 {backend_label(bridge.backend_name)}",
+                          include_session=False))

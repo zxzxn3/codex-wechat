@@ -2,19 +2,12 @@
 from collections import deque
 import math
 import time
-import uuid
 
 
 class Latency:
     def __init__(self):
-        self.run_id = uuid.uuid4().hex
         self.sends = deque(maxlen=20)
         self.agent = deque(maxlen=20)
-
-    def probe(self, received=None):
-        received = received or {}
-        return {"run": self.run_id, "received": received.get("received", time.perf_counter()),
-                "queued": time.perf_counter(), "ingress_ms": received.get("ingress_ms")}
 
     @staticmethod
     def received(source_ms=None):
@@ -29,15 +22,12 @@ class Latency:
         self.agent.append({"first": first_ms, "total": total_ms, "backend": backend, "model": model})
 
     @staticmethod
-    def route(ingress, send_ms):
-        incoming = f"{ingress:.0f}" if ingress is not None else "-"
-        outgoing = f"{send_ms:.0f}" if send_ms is not None else "-"
-        return f"{incoming}/{outgoing}ms"
+    def _display(value):
+        return f"{value:.0f}" if value is not None else "-"
 
-    def notice(self, ingress_ms=None):
-        return self.route(ingress_ms, self.sends[-1] if self.sends else None)
+    def values_in(self, ingress_ms, send_ms):
+        return {"发送延迟": self._display(ingress_ms),
+                "接收延迟": self._display(send_ms)}
 
-    def report(self, probe, send_ms):
-        if probe["run"] != self.run_id:
-            return "测速跨越了网关重启，计时已失效，请重新发送 /ping。"
-        return self.route(probe.get("ingress_ms"), send_ms)
+    def values(self, ingress_ms=None):
+        return self.values_in(ingress_ms, self.sends[-1] if self.sends else None)

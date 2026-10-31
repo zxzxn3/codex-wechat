@@ -14,11 +14,55 @@ import uuid
 from backend import CodexBackend, DeferTurn
 from storage import Store
 from wechat import WeChat, login
-from commands import HELP, MANAGED, ensure_session, handle, info, notice
+from commands import HELP, MANAGED, ensure_session, handle, notice
 from profiles import definitions, snapshot
 import service_control
 from media import Media, MediaError, MAX_ATTACHMENTS, split_answer
 from latency import Latency
+from prompts import (
+    APPROVAL_ACCEPTED,
+    APPROVAL_DECLINED,
+    APPROVAL_EXPIRED,
+    APPROVAL_FAILED,
+    ATTACHMENT_INCOMING_FAILED,
+    ATTACHMENT_QUEUED,
+    ATTACHMENT_SEND_FAILED,
+    AUTO_ATTACHMENT_FAILED,
+    AUTO_ATTACHMENT_LIMIT,
+    AUTO_ATTACHMENT_PATH_HINT,
+    BACKEND_CONNECT_FAILED,
+    BUSY_RESTART,
+    COMMAND_FAILURE,
+    COMMAND_FAILURE_LABELS,
+    INTERRUPTED_TASK,
+    MEDIA_USAGE,
+    PING_REPLY,
+    PING_USAGE,
+    QUEUED_STEER,
+    QUEUE_FULL,
+    RESTART_CONFIRM_UNSENT,
+    RESTART_FAILED,
+    RESTART_NOT_SERVICE,
+    RESTART_READY,
+    RESTART_STARTED,
+    RESTART_USAGE,
+    SESSION_RESTORE_FAILED,
+    STOP_DEFERRED,
+    STOP_IDLE,
+    STOP_REQUESTED,
+    STOP_UNCONFIRMED,
+    TASK_FAILED,
+    TOO_MANY_ATTACHMENTS,
+    UNCERTAIN_STEER,
+    UNKNOWN_COMMAND,
+    UNSUPPORTED_MESSAGE,
+    UserFacingError,
+    attachment_reason,
+    backend_reason,
+    fill,
+    render_ack,
+    status_summary,
+)
 
 ROOT = Path(__file__).resolve().parent
 SEND_ATTEMPTS = 3
@@ -91,10 +135,9 @@ class Bridge:
         return active if active and not active["done"].done() else None
 
     def acknowledge(self, job):
-        settings = notice(self)
-        if settings["enabled"] and settings["text"]:
-            text = settings["text"].replace("{latency}", self.latency.notice(job.get("ingress_ms")))
-            self.reply(text)
+        template = notice(self)
+        if template:
+            self.reply(render_ack(template, self.latency.values(job.get("ingress_ms"))))
 
     async def ensure_backend(self):
         if not self.backend_started:
@@ -145,7 +188,7 @@ class Bridge:
         text, specs = split_answer(answer)
         entries, errors = [], []
         if len(specs) > MAX_ATTACHMENTS:
-            errors.append(f"最多回传 {MAX_ATTACHMENTS} 个附件，超出的已跳过。")
+            errors.append(fill(AUTO_ATTACHMENT_LIMIT, {"数量": MAX_ATTACHMENTS}))
         for spec in specs[:MAX_ATTACHMENTS]:
             try:
                 asset = await asyncio.to_thread(self.media.snapshot, spec["path"],
@@ -153,7 +196,12 @@ class Bridge:
                     spec.get("kind", "auto"), automatic=True)
                 entries.append(self.asset_entry(asset))
             except (MediaError, ValueError) as error:
-                errors.append(f"附件未加入发送队列：{error}")
+                reason = attachment_reason(error)
+                errors.append(fill(AUTO_ATTACHMENT_FAILED, {
+                    "原因": reason,
+                    "建议": (AUTO_ATTACHMENT_PATH_HINT
+                             if reason == "只能自动发送当前会话目录内的文件" else ""),
+                }))
         # Commit the final text, frozen files and completion marker in one snapshot.
         if finish_running:
             self.state["running"] = False
@@ -186,18 +234,18 @@ class Bridge:
                              for item in msg.get("item_list", []) if item.get("type") == 1).strip()
             attachments = [item for item in msg.get("item_list", []) if item.get("type") in (2, 4)]
             if len(attachments) > MAX_ATTACHMENTS:
-                self.reply(f"每条消息最多 {MAX_ATTACHMENTS} 个附件。")
+                self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}))
             elif text.startswith("/") and not attachments:
                 controls.append((text, self.latency.received(msg.get("create_time_ms"))))
             elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
-                    self.reply("待办已达 20 条，请等待完成或使用 /stop。")
+                    self.reply(fill(QUEUE_FULL, {"数量": 20}))
                 else:
                     self.state["inbox"].append({"id": identity, "text": text or "请查看我发送的附件。",
                                                "attachments": attachments, "mode": self.input_mode,
                                                "ingress_ms": self.latency.received(msg.get("create_time_ms")).get("ingress_ms")})
             else:
-                self.reply("支持文字、图片和文件；文字每条最多 20000 字符。")
+                self.reply(fill(UNSUPPORTED_MESSAGE, {"数量": 20000}))
         self.state["seen"] = self.state["seen"][-2000:]
         if batch.get("get_updates_buf"):
             self.state["cursor"] = batch["get_updates_buf"]
@@ -216,76 +264,108 @@ class Bridge:
                 if command not in ("/backend", "/ack", "/settings"):
                     await self.ensure_backend()
                 await handle(self, command, argument)
-            except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
-                self.reply(f"操作未完成：{error}")
+            except UserFacingError as error:
+                self.reply(str(error))
+            except ValueError as error:
+                label = COMMAND_FAILURE_LABELS.get(command, "操作失败")
+                detail = backend_reason(error)
+                self.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": detail}))
+                print(f"{command}失败：{error}", file=sys.stderr, flush=True)
+            except (RuntimeError, OSError, asyncio.TimeoutError) as error:
+                label = COMMAND_FAILURE_LABELS.get(command, "操作失败")
+                detail = backend_reason(error)
+                self.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": detail}))
+                print(f"{command}失败：{error}", file=sys.stderr, flush=True)
         elif command == "/help":
             self.reply(HELP)
         elif command == "/ping":
             if argument:
-                self.reply("用法：/ping。测试微信通道，不额外调用模型。")
+                self.reply(PING_USAGE)
             else:
-                before = len(self.state["outbox"])
-                self.reply("pong", persist=False)
-                if len(self.state["outbox"]) > before:
-                    self.state["outbox"][-1]["ping"] = self.latency.probe(received)
-                    self.save()
+                ingress = received.get("ingress_ms") if received else None
+                self.reply(render_ack(PING_REPLY, self.latency.values(ingress)))
         elif command in ("/send", "/sendfile", "/sendimage"):
             try:
                 if not argument:
-                    raise MediaError("用法：/send 路径；/sendfile 强制文件；/sendimage 强制图片。")
+                    self.reply(MEDIA_USAGE)
+                    return
                 if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
                     argument = argument[1:-1]
                 await self.queue_file(argument, {"/sendfile": "file", "/sendimage": "image"}.get(command, "auto"))
-                self.reply("已加入附件发送队列。")
+                self.reply(ATTACHMENT_QUEUED)
             except (MediaError, ValueError, OSError) as error:
-                self.reply(f"附件未发送：{error}")
+                self.reply(f"附件未发送：{attachment_reason(error)}\n请检查路径后重试。")
         elif command == "/restart":
+            if argument:
+                self.reply(RESTART_USAGE)
+                return
             try:
-                if argument:
-                    raise ValueError("用法：/restart")
                 await self.restart_service()
-            except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
-                self.reply(f"未重启：{error}")
+            except UserFacingError as error:
+                self.reply("拒绝重启：" + str(error))
+            except (RuntimeError, OSError, asyncio.TimeoutError) as error:
+                self.reply(fill(RESTART_FAILED, {"原因": backend_reason(error)}))
         elif command == "/status":
-            status = "工作中" if self.running or self.steering or self.active_turn() else "空闲"
-            self.reply(f"Codex：{status}；待办 {len(self.state['inbox'])} 条；"
-                       f"待审批 {len(self.backend.pending)} 条。\n"
-                       f"失败发送记录：{len(self.state.get('failedOutbox', []))} 条\n"
-                       f"阶段：{self.phase}\n"
-                       f"收信模式：{self.input_mode}；正在追加：{'是' if self.steering else '否'}\n"
-                       + info(self, detailed=True))
+            if self.backend.blocked:
+                status = "等待处理，任务需要你的决定"
+            elif self.running or self.steering or self.active_turn():
+                status = "运行中，Agent 正在处理"
+            else:
+                status = "空闲"
+            details = self.backend.info
+            self.reply(status_summary(
+                status=status,
+                queued=len(self.state["inbox"]),
+                pending=len(self.backend.pending),
+                failed=len(self.state.get("failedOutbox", [])),
+                name=details.get("name"),
+                model=details.get("model"),
+                effort=details.get("effort"),
+                cwd=details.get("cwd") or self.backend.cwd,
+                connection="桌面" if self.backend.shared else "独立",
+                input_mode=self.input_mode,
+            ))
         elif command == "/stop":
             self.stopping = True
             self.state["inbox"].clear()
             self.save()
             try:
                 stopped = await self.backend.stop()
-                self.reply("已请求停止，并清空待办。" if stopped else
-                           ("已标记停止并清空待办；当前准备或附件处理结束后将停止。" if self.running else
-                            "已清空待办；当前没有可中断的任务。"))
+                if stopped:
+                    self.reply(STOP_REQUESTED)
+                elif self.running or self.active_turn():
+                    self.reply(STOP_DEFERRED)
+                else:
+                    self.reply(STOP_IDLE)
             except (RuntimeError, OSError, asyncio.TimeoutError):
-                self.reply("待办已清空，但停止当前轮次失败或未确认；请在桌面检查，勿当作已停止。")
+                self.reply(STOP_UNCONFIRMED)
         elif command in ("/approve", "/deny"):
             try:
-                ok = await self.backend.answer_approval(argument, "accept" if command == "/approve" else "decline")
-                self.reply("已提交本次决定。" if ok else "审批编号无效或已过期。")
+                accept = command == "/approve"
+                ok = await self.backend.answer_approval(
+                    argument, "accept" if accept else "decline")
+                self.reply(APPROVAL_ACCEPTED if ok and accept else
+                           APPROVAL_DECLINED if ok else APPROVAL_EXPIRED)
             except (RuntimeError, OSError):
-                self.reply("审批决定发送失败；请在桌面处理或刷新状态。")
+                self.reply(APPROVAL_FAILED)
         else:
-            self.reply("未知命令。\n" + HELP)
+            self.reply(UNKNOWN_COMMAND)
 
     async def restart_service(self):
         if self.running or self.steering or self.active_turn() or self.state["inbox"] or self.session_lock.locked():
-            raise ValueError("当前有任务或待办，请先 /stop 并等待任务结束，再发 /restart。")
+            raise UserFacingError(BUSY_RESTART)
         async with self.session_lock:
-            await service_control.require_service_owner()
+            try:
+                await service_control.require_service_owner()
+            except ValueError:
+                raise UserFacingError(RESTART_NOT_SERVICE) from None
             self.restarting = True
             try:
-                self.reply("准备重启消息桥服务，稍后恢复当前后端和会话。")
+                self.reply(RESTART_STARTED)
                 try:
                     await asyncio.wait_for(self.outbox_drained.wait(), 20)
                 except asyncio.TimeoutError:
-                    raise RuntimeError("确认消息未能及时发送，本次重启已取消。") from None
+                    raise UserFacingError(RESTART_CONFIRM_UNSENT) from None
                 self.state["restartRequested"] = True
                 self.save()
                 await service_control.restart()
@@ -348,14 +428,15 @@ class Bridge:
                 self.state["inbox"].insert(0, job)
                 self.state["running"] = False
                 self.save()
+                self.reply(QUEUED_STEER)
             except MediaError as error:
                 self.state["running"] = False
-                self.reply(f"附件处理失败，本条未交给 Agent：{error}")
+                self.reply(fill(ATTACHMENT_INCOMING_FAILED,
+                                {"原因": attachment_reason(error)}))
             except Exception as error:
                 self.state["running"] = False
                 self.state["inbox"].clear()
-                self.reply(f"任务未完成（{type(error).__name__}）。已暂停待办，未自动重放；"
-                           "可通过 /status 查看会话，或 /backend 切换后端。")
+                self.reply(TASK_FAILED)
                 print(f"Agent backend error: {type(error).__name__}", file=sys.stderr, flush=True)
                 # Keep the WeChat controls available so the user can select a healthy backend.
                 await self.backend.close()
@@ -404,6 +485,7 @@ class Bridge:
                         job.pop("dispatching", None)
                         job["mode"] = "queue"
                         self.save()
+                        self.reply(QUEUED_STEER)
                         break
                 except asyncio.CancelledError:
                     raise
@@ -411,9 +493,10 @@ class Bridge:
                     self.state["inbox"] = [item for item in self.state["inbox"] if item is not job]
                     self.save()
                     if isinstance(error, MediaError):
-                        self.reply(f"补充消息的附件处理失败，未投递给 Agent：{error}")
+                        self.reply(fill(ATTACHMENT_INCOMING_FAILED,
+                                        {"原因": attachment_reason(error)}))
                     else:
-                        self.reply("补充消息未能确认投递，未自动重发。请先用 /status 确认进度。")
+                        self.reply(UNCERTAIN_STEER)
                     print(f"追加消息失败：{type(error).__name__}", file=sys.stderr, flush=True)
                 finally:
                     self.steering = False
@@ -426,7 +509,7 @@ class Bridge:
             result = await self.external_results.get()
             try:
                 if result["thread"] != self.state["thread"]:
-                    self.reply(f"会话 {result['thread']} 的后续结果：")
+                    self.reply("其他会话的后续结果：")
                 await self.deliver_answer(result["text"], finish_running=False, cwd=result["cwd"])
             finally:
                 self.external_results.task_done()
@@ -452,7 +535,9 @@ class Bridge:
                     self.state["failedOutbox"] = (self.state.get("failedOutbox", []) + [entry])[-20:]
                     self.save()
                     if "asset" in entry:
-                        self.reply(f"附件发送失败：{entry['asset']['name']}。已尝试 3 次，请稍后用 /send 重试。")
+                        self.reply(fill(ATTACHMENT_SEND_FAILED,
+                                        {"名称": entry["asset"]["name"],
+                                         "次数": SEND_ATTEMPTS}))
                     else:
                         print("文字发送重试耗尽，已保存失败记录并继续后续回复。", file=sys.stderr, flush=True)
                     if not self.state["outbox"]:
@@ -464,10 +549,7 @@ class Bridge:
                 continue
             self.state["outbox"].pop(0)
             self.latency.sends.append(send_ms)
-            if "ping" in entry:
-                self.reply(self.latency.report(entry["ping"], send_ms))
-            else:
-                self.save()
+            self.save()
             if not self.state["outbox"]:
                 self.outbox_drained.set()
 
@@ -487,15 +569,15 @@ class Bridge:
         tasks = []
         try:
             if self.state.pop("restartRequested", False):
-                self.reply("消息桥进程已重新启动。")
+                self.reply(RESTART_READY)
             uncertain = [job for job in self.state["inbox"] if job.get("dispatching")]
             if uncertain:
                 self.state["inbox"] = [job for job in self.state["inbox"] if not job.get("dispatching")]
-                self.reply("上次有补充消息的投递结果未确认，未自动重放。请检查当前进度。")
+                self.reply(UNCERTAIN_STEER)
             if self.state["running"]:
                 self.state["running"] = False
                 self.state["inbox"].clear()
-                self.reply("上次消息桥在等待结果时退出，未自动重放；共享后台可能仍在执行，请查看当前状态。")
+                self.reply(INTERRUPTED_TASK)
             stage = "启动后端连接"
             try:
                 await self.ensure_backend()
@@ -503,9 +585,11 @@ class Bridge:
                     stage = "恢复会话"
                     await ensure_session(self)
             except (RuntimeError, ValueError, OSError, asyncio.TimeoutError) as error:
-                detail = str(error) if isinstance(error, (RuntimeError, ValueError)) else type(error).__name__
-                print(f"{stage}失败：{detail}；微信控制仍可用。", file=sys.stderr)
-                self.reply(f"{stage}失败：{detail}\n可用 /backend 重试或切换后端。")
+                detail = backend_reason(error)
+                print(f"{stage}失败：{error}；微信控制仍可用。", file=sys.stderr)
+                template = (BACKEND_CONNECT_FAILED if stage == "启动后端连接"
+                            else SESSION_RESTORE_FAILED)
+                self.reply(fill(template, {"原因": detail}))
             tasks = [asyncio.create_task(fn()) for fn in
                      (self.poller, self.worker, self.steering_worker, self.external_result_worker, self.sender)]
             print("微信消息桥已启动；Ctrl+C 停止。", flush=True)

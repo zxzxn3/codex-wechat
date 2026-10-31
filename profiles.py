@@ -1,8 +1,16 @@
 """Backend definitions and per-backend session state, separate from WeChat state."""
 from copy import deepcopy
+from prompts import (
+    BACKEND_CLEANUP_FAILED,
+    BACKEND_INVALID,
+    BACKEND_SESSION_BUSY,
+    UserFacingError,
+    fill,
+)
 
 # An empty codex definition uses CodexBackend's existing default command.
 DEFAULT_BACKENDS = {"codex": {}, "deepseek": {"command": ["codex-deepseek", "app-server"]}}
+BACKEND_LABELS = {"codex": "Codex", "deepseek": "DeepSeek"}
 SESSION_KEYS = ("thread", "sessionOptions", "sessionChoices", "sessionCursor", "sessionSearch")
 
 
@@ -26,9 +34,17 @@ def restore(state, saved):
     state.setdefault("thread", None)
 
 
+def backend_label(name):
+    return BACKEND_LABELS.get(name, str(name))
+
+
 async def switch(bridge, name):
-    if name not in bridge.backend_configs:
-        raise ValueError("未知后端，可选：" + ", ".join(bridge.backend_configs))
+    resolved = next((key for key in bridge.backend_configs
+                     if key.casefold() == str(name).casefold()), None)
+    if resolved is None:
+        available = " | ".join(backend_label(key) for key in bridge.backend_configs)
+        raise UserFacingError(fill(BACKEND_INVALID, {"可用": available}))
+    name = resolved
     if name == bridge.backend_name and bridge.backend_started and bridge.loaded:
         return
     saved = (snapshot(bridge.state) if name == bridge.backend_name else
@@ -42,7 +58,7 @@ async def switch(bridge, name):
             thread = await candidate.read_thread(thread_id)
             status = thread.get("status", {}).get("type")
             if status == "systemError" or (status == "active" and not candidate.shared):
-                raise ValueError("目标后端的上次会话正在工作或等待处理，请先在原客户端处理。")
+                raise UserFacingError(BACKEND_SESSION_BUSY)
             active = status == "active"
         options = {} if active else saved.get("sessionOptions", {}).get(thread_id, {})
         selected = await candidate.thread(thread_id, options)
@@ -67,4 +83,4 @@ async def switch(bridge, name):
     try:
         await previous.close()
     except Exception:
-        bridge.reply("已切换后端；旧连接清理未完成，请在电脑端检查，当前选择已保存。")
+        bridge.reply(BACKEND_CLEANUP_FAILED)

@@ -13,6 +13,16 @@ import shutil
 import socket
 import time
 from media import OUTPUT_HINT
+from prompts import (
+    APPROVAL_TOO_LONG,
+    TURN_COMPLETED_EMPTY,
+    TURN_ENDED_UNEXPECTEDLY,
+    TURN_FAILED,
+    TURN_INTERRUPTED,
+    UNSUPPORTED_INTERACTION,
+    command_approval,
+    file_approval,
+)
 
 
 class CodexRpcError(RuntimeError):
@@ -252,19 +262,31 @@ class CodexBackend:
                                        "item/fileChange/requestApproval")):
             token = secrets.token_hex(4)
             self.pending[token] = msg
-            summary = json.dumps({key: value for key, value in params.items()
-                                  if key not in ("threadId", "turnId", "itemId")},
-                                 ensure_ascii=False, indent=2)
+            if msg["method"] == "item/commandExecution/requestApproval":
+                summary = command_approval(
+                    command=params.get("command") or "未提供",
+                    cwd=params.get("cwd") or self.cwd,
+                    reason=params.get("reason"),
+                    token=token,
+                )
+            else:
+                summary = file_approval(
+                    scope=params.get("grantRoot") or params.get("cwd") or self.cwd,
+                    reason=params.get("reason"),
+                    token=token,
+                )
             # Keep the preview complete: reject very large approval requests rather than truncate.
-            if len(str(summary)) <= 1200:
-                self.notify(f"需要审批 [{token}]：\n{summary}\n"
-                            f"目录：{params.get('cwd', params.get('grantRoot', self.cwd))}\n"
-                            f"同意：/approve {token}\n拒绝：/deny {token}")
+            if len(summary) <= 1200:
+                self.notify(summary)
                 return
             self.pending.pop(token)
+            await self.write({"id": msg["id"], "error": {
+                "code": -32601, "message": "This bridge does not support this request"}})
+            self.notify(APPROVAL_TOO_LONG)
+            return
         await self.write({"id": msg["id"], "error": {
             "code": -32601, "message": "This bridge does not support this request"}})
-        self.notify("Codex 请求了暂不支持的交互，已拒绝；可在电脑端处理该会话。")
+        self.notify(UNSUPPORTED_INTERACTION)
 
     def event(self, msg):
         params = msg.get("params", {})
@@ -320,15 +342,20 @@ class CodexBackend:
             text = "\n\n".join(finals or legacy)
             status = turn["status"]
             if status != "completed":
-                text = (text + "\n\n" if text else "") + f"任务状态：{status}。"
-            current["done"].set_result(text or "本轮已结束，没有文字回复。")
+                status_text = {
+                    "failed": TURN_FAILED,
+                    "interrupted": TURN_INTERRUPTED,
+                }.get(status, TURN_ENDED_UNEXPECTEDLY)
+                text = (text + "\n\n" if text else "") + status_text
+            current["done"].set_result(text or TURN_COMPLETED_EMPTY)
             if current.get("owned"):
                 first = current["first_text"]
                 self.on_timing((first - current["began"]) * 1000 if first is not None else None,
                                (time.perf_counter() - current["began"]) * 1000)
             self.pending.clear()
             if not current.get("owned"):
-                self.on_external_result(current["thread"], text or "本轮已结束，没有文字回复。",
+                self.on_external_result(current["thread"],
+                                        text or TURN_COMPLETED_EMPTY,
                                         self.info.get("cwd") or self.cwd)
                 if self.active is current:
                     self.active = None
