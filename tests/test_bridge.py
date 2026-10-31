@@ -208,7 +208,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.list_threads = threads
         await handle(self.bridge, "/sessions", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
-        self.assertTrue(text.startswith("会话\n```\n"))
+        self.assertTrue(text.startswith("```\n1."))
         self.assertIn("1. 当前会话  [当前  工作中", text)
         self.assertIn("2. Super-agent 调研  [工作中]", text)
         self.assertIn("```\n`/switch {编号或ID}`", text)
@@ -230,13 +230,34 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.models = models
         await handle(self.bridge, "/model", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
-        self.assertTrue(text.startswith("模型\n```\n"))
+        self.assertTrue(text.startswith("```\n1."))
         self.assertIn("1. deepseek-flash", text)
         self.assertIn("2. deepseek-v4-pro", text)
         self.assertNotIn("Low", text)
         self.assertNotIn("High", text)
         self.assertIn("```\n`/model {编号或名称}`", text)
         self.assertNotIn("| 编号", text)
+
+    async def test_sessions_numeric_pages_and_total_footer(self):
+        self.bridge.state["context"] = "context"
+        catalog = [{"id": str(i), "name": f"会话{i}"} for i in range(23)]
+
+        async def threads(cursor=None, search=None):
+            offset = int(cursor or 0)
+            return {"data": catalog[offset:offset + 10],
+                    "nextCursor": str(offset + 10) if offset + 10 < len(catalog) else None}
+
+        self.bridge.backend.list_threads = threads
+        await handle(self.bridge, "/sessions", "2")
+        text = self.bridge.state["outbox"][-1]["text"]
+        self.assertEqual(self.bridge.state["sessionChoices"], [str(i) for i in range(10, 20)])
+        self.assertIn("2/3页\n```", text)
+        self.assertTrue(text.endswith("`/sessions {页码}`"))
+        self.assertNotIn("下一页", text)
+        with self.assertRaises(UserFacingError):
+            await handle(self.bridge, "/sessions", "4")
+        with self.assertRaises(UserFacingError):
+            await handle(self.bridge, "/sessions", "next")
 
     async def test_backend_arguments_are_lowercase(self):
         self.bridge.state["context"] = "context"

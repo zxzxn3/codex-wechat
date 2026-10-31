@@ -107,6 +107,7 @@ class Bridge:
         self.stopping = False
         self.session_lock = asyncio.Lock()
         self.model_choices = []
+        self.session_catalog = None
         self.restarting = False
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:

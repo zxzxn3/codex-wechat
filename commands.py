@@ -1,5 +1,6 @@
 """WeChat conversation controls; lists come from the current backend."""
 from pathlib import Path
+import time
 
 from profiles import backend_argument, backend_label, switch
 from errors import UserFacingError
@@ -19,7 +20,6 @@ from prompts import (
     MODEL_INVALID,
     MODEL_NOT_IN_CATALOG,
     NEW_USAGE,
-    NO_NEXT_PAGE,
     SESSION_INDEX_INVALID,
     SESSION_TARGET_ACTIVE,
     SESSION_TARGET_BLOCKED,
@@ -148,17 +148,38 @@ async def handle(bridge, command, argument):
         bridge.reply(panel("处理提示: " + (value or "关闭")))
         return
     if command == "/sessions":
-        cursor, search = None, argument or None
         if argument == "next":
-            cursor = bridge.state.get("sessionCursor")
-            search = bridge.state.get("sessionSearch")
-            if not cursor:
-                bridge.reply(NO_NEXT_PAGE)
-                return
-        result = await bridge.backend.list_threads(cursor, search)
-        threads = result["data"]
+            raise UserFacingError("用法: /sessions {页码}")
+        page = int(argument) if argument.isdecimal() else 1
+        search = bridge.state.get("sessionSearch") if argument.isdecimal() else argument or None
+        if page < 1:
+            raise UserFacingError("页码必须大于 0")
+        cache = bridge.session_catalog
+        key = (bridge.backend.connection_id, search)
+        if (not argument.isdecimal() or cache is None or cache[0] != key
+                or time.monotonic() - cache[1] > 60):
+            catalog, cursor, cursors, identities = [], None, set(), set()
+            while True:
+                result = await bridge.backend.list_threads(cursor, search)
+                for thread in result["data"]:
+                    if thread["id"] not in identities:
+                        identities.add(thread["id"])
+                        catalog.append(thread)
+                cursor = result.get("nextCursor")
+                if not cursor:
+                    break
+                if cursor in cursors:
+                    raise UserFacingError("会话列表读取未完成，请重试。")
+                cursors.add(cursor)
+            bridge.session_catalog = (key, time.monotonic(), catalog)
+        else:
+            catalog = cache[2]
+        total = max(1, (len(catalog) + 9) // 10)
+        if page > total:
+            raise UserFacingError(f"页码超出范围: 1–{total}")
+        threads = catalog[(page - 1) * 10:page * 10]
         bridge.state["sessionChoices"] = [thread["id"] for thread in threads]
-        bridge.state["sessionCursor"] = result.get("nextCursor")
+        bridge.state.pop("sessionCursor", None)
         bridge.state["sessionSearch"] = search
         bridge.save()
         lines = []
@@ -181,10 +202,9 @@ async def handle(bridge, command, argument):
             lines.append(f"{index}. {title}" + (f"  [{state}]" if state else ""))
         if not threads:
             lines.append("\n没有匹配的会话。")
-        hints = [f"`{REGISTRY['/switch'].usage}`"]
-        if result.get("nextCursor"):
-            hints.append("`/sessions next`")
-        bridge.reply("会话\n" + panel(*lines) + "\n" + "\n".join(hints))
+        lines.append(f"{page}/{total}页")
+        hints = [f"`{REGISTRY['/switch'].usage}`", f"`{REGISTRY['/sessions'].usage}`"]
+        bridge.reply(panel(*lines) + "\n" + "\n".join(hints))
         return
     if command == "/model" and not argument:
         models = await model_entries(bridge)
@@ -195,7 +215,7 @@ async def handle(bridge, command, argument):
             lines.append(f"{index}. {model_name}")
         if not models:
             lines.append("暂无可用模型")
-        bridge.reply("模型\n" + panel(*lines) + f"\n`{REGISTRY['/model'].usage}`")
+        bridge.reply(panel(*lines) + f"\n`{REGISTRY['/model'].usage}`")
         return
     if command == "/cwd" and not argument:
         bridge.reply(fill(WORKING_DIRECTORY, {

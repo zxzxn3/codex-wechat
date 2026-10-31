@@ -17,7 +17,7 @@ class Command:
 COMMANDS = (
     Command("/status", "/status", "当前状态", lane="local"),
     Command("/settings", "/settings", "当前设置", "managed", "local", section="设置"),
-    Command("/sessions", "/sessions [关键词|next]", "会话", "managed", needs_backend=True, section="会话"),
+    Command("/sessions", "/sessions {页码}", "会话", "managed", needs_backend=True, section="会话"),
     Command("/new", "/new", "新建", "managed", needs_backend=True, section="会话"),
     Command("/queue", "/queue {提示词}", "排队到当前任务结束后执行", route="input"),
     Command("/stop", "/stop", "停止并清空待办", lane="urgent"),

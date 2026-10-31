@@ -12,7 +12,6 @@ EFFORT_SUMMARY = "```\n强度: {当前}\n可选: {可选}\n```\n`/effort {{档�
 ACK_VIEW = "```\n处理提示: {模板}\n/ack text {{模板}}\n/ack text  (关闭)\n```"
 ACK_USAGE = "/ack text {模板}\n/ack text  (关闭)"
 ACK_TOO_LONG = "未更新处理提示: 最多 {字节} 字节"
-NO_NEXT_PAGE = "没有下一页"
 WORKING_DIRECTORY = "目录: {目录}"
 MEDIA_USAGE = "/send 路径\n/sendfile 路径\n/sendimage 路径"
 
