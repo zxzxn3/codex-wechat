@@ -26,6 +26,9 @@ class InputDelivery:
 
     def dispatch_input(self, job, phase, turn_id, backend):
         bridge = self.bridge
+        if phase == InputPhase.DISPATCHING and bridge.restarting:
+            job["restartDeferred"] = True
+            return False
         if phase == InputPhase.DISPATCHING and (bridge.stopping or backend is not bridge.backend):
             return False
         job.update(phase=phase, turn=turn_id, source=asdict(backend.source(bridge.state["thread"])))
@@ -52,10 +55,21 @@ class InputDelivery:
                 uncertain = True
             else:
                 job["phase"] = InputPhase.PREPARING
+                job.pop("ingress_ms", None)  # Previous service lifetime is not a network sample.
+                job.pop("restartDeferred", None)
                 job.setdefault("clientId", str(uuid.uuid4()))
                 bridge.state["inbox"].append(job)
         if uncertain or legacy_running:
             bridge.reply("上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。")
+        bridge.save()
+
+    def defer_restart(self, job):
+        bridge = self.bridge
+        job.pop("restartDeferred", None)
+        if not any(item is job for item in bridge.state["inbox"]):
+            bridge.state["inbox"].insert(0, job)
+        if bridge.state.get("currentInput") is job:
+            bridge.state.pop("currentInput")
         bridge.save()
 
     async def worker(self):
@@ -90,17 +104,27 @@ class InputDelivery:
                     raise
                 if bridge.stopping:
                     continue
+                if bridge.restarting:
+                    self.defer_restart(job)
+                    continue
                 bridge.acknowledge(job)
                 if "preparedAttachments" not in job:
                     job["preparedAttachments"] = await bridge.media.incoming(job.get("attachments", []))
                     bridge.save()
                 if bridge.stopping:
                     continue
+                if bridge.restarting:
+                    self.defer_restart(job)
+                    continue
                 bridge.steer_wake.set()
                 answer = await backend.run(bridge.state["thread"], job["text"],
                     attachments=job["preparedAttachments"], client_id=job["clientId"],
                     allow_steer=job.get("mode", "steer") != "queue",
                     dispatch=lambda phase, turn: bridge.dispatch_input(job, phase, turn, backend))
+                if job.get("restartDeferred"):
+                    if not bridge.stopping:
+                        self.defer_restart(job)
+                    continue
                 if answer is not None:
                     await bridge.deliver_answer(answer)
                 else:
@@ -144,7 +168,8 @@ class InputDelivery:
         while True:
             await bridge.steer_wake.wait()
             bridge.steer_wake.clear()
-            while (bridge.running or bridge.active_turn()) and bridge.state["inbox"] and not bridge.stopping:
+            while ((bridge.running or bridge.active_turn()) and bridge.state["inbox"]
+                   and not bridge.stopping and not bridge.restarting):
                 # Explicitly queued work must not block later live corrections.
                 job = next((item for item in bridge.state["inbox"]
                             if item.get("mode", "steer") != "queue"), None)
@@ -174,6 +199,7 @@ class InputDelivery:
                         bridge.save()
                         bridge.acknowledge(job)
                     elif not bridge.stopping:
+                        job.pop("restartDeferred", None)
                         job.update(mode="queue", phase=InputPhase.PREPARING)
                         bridge.save()
                         bridge.reply(QUEUED_STEER)

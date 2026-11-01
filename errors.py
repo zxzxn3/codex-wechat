@@ -3,7 +3,17 @@ class UserFacingError(ValueError):
     """An already complete WeChat-facing error message."""
 
 
+class BackendStartupError(RuntimeError):
+    """A bounded, safe startup reason derived from native service metadata."""
+    def __init__(self, reason, *, retry_after=10):
+        self.reason = reason
+        self.retry_after = retry_after
+        super().__init__(reason)
+
+
 def backend_reason(error):
+    if isinstance(error, BackendStartupError):
+        return error.reason
     text = str(error).casefold()
     if "超时" in text or "timeout" in text:
         return "连接超时"

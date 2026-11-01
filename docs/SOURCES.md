@@ -48,3 +48,5 @@ create_time_ms 是源消息时间戳，未证实等于手机点击发送时间�
 - thread/settings/updated 的 threadSettings 字段映射依据本机 0.166.0 schema，仅用于观察当前选中会话，不触发写入；其实际到达与持久化行为待在线验证。
 - 原生 queue 不迁移：当前本地队列还承载附件准备、停止和交付恢复，官方页面没有建立等价的取消/持久契约。保留稳定客户端 ID，但不声称服务端持久去重，也不自动重发 uncertain 输入。
 - 不增加 loaded/unsubscribe/sample 或全量历史补取。认证、daemon、会话列表/恢复、模型目录、compact、限额和原生事件继续复用 Codex。
+
+关机恢复修复依据：CLI 0.166.0 `app-server proxy --help` 明示只转发 stdio 到运行中的控制 socket；启动器仅此路径跳过密钥预检。systemd 262 的 systemd-run/systemctl 文档明确 Type=exec 的返回不代表后台程序完成，以及 failed unit 状态保留与 reset-failed。通过 ActiveState/Result/ExecMainStatus 检查启动，退出码 78 是本项目 DeepSeek 启动器新定义的密钥环预检失败契约，不是 Codex 原生错误码。实际密钥环未解锁仍需桌面解锁，不能由网关绕过。

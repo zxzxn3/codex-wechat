@@ -12,11 +12,12 @@ class Latency:
     def __init__(self):
         self.sends = deque(maxlen=20)
         self.provider_sample = None
+        self.started_ms = time.time() * 1000
 
-    @staticmethod
-    def received(source_ms=None):
+    def received(self, source_ms=None):
         result = {"received": time.perf_counter()}
-        if isinstance(source_ms, (int, float)) and math.isfinite(source_ms):
+        if (isinstance(source_ms, (int, float)) and math.isfinite(source_ms)
+                and source_ms >= self.started_ms):
             estimate = time.time() * 1000 - source_ms
             if 0 <= estimate < 24 * 60 * 60 * 1000:
                 result["ingress_ms"] = estimate

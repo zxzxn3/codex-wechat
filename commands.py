@@ -271,7 +271,7 @@ async def command_session(bridge, command, argument, received=None):
     if command == "/switch" and not argument:
         raise UserFacingError(SESSION_USAGE)
     # All state-changing session controls use one lock; incoming work waits until done.
-    if (bridge.running or bridge.steering or bridge.active_turn()
+    if (bridge.restarting or bridge.running or bridge.steering or bridge.active_turn()
             or bridge.state["inbox"] or bridge.session_lock.locked()):
         raise UserFacingError(BUSY_CHANGE)
     async with bridge.session_lock:

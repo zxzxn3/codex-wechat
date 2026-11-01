@@ -29,7 +29,7 @@ from profiles import backend_label, definitions, snapshot
 import service_control
 from media import Media, MAX_ATTACHMENTS
 from latency import Latency
-from errors import UserFacingError, backend_reason
+from errors import UserFacingError, BackendStartupError, backend_reason
 from prompts import (
     BACKEND_CONNECT_FAILED,
     BUSY_RESTART,
@@ -64,6 +64,7 @@ class Bridge:
         self.controls = {lane: asyncio.Queue(maxsize=20) for lane in CONTROL_LANES}
         self.connection_lock = asyncio.Lock()
         self.input_paused = False
+        self.backend_recovering = False
         self.latency = Latency()
         self.external_results = asyncio.Queue()
         self.backend = self.make_backend(self.backend_name)
@@ -311,30 +312,37 @@ class Bridge:
 
 
     async def restart_service(self):
-        if self.running or self.steering or self.active_turn() or self.state["inbox"] or self.session_lock.locked():
+        current = self.state.get("currentInput")
+        submitted = current and current.get("phase") != InputPhase.PREPARING
+        if (self.restarting or self.steering or self.active_turn() or submitted
+                or (self.running and not current)
+                or (self.session_lock.locked() and not self.backend_recovering)):
             raise UserFacingError(BUSY_RESTART)
-        async with self.session_lock:
+        # No await before closing the dispatch barrier. Preparing work is recoverable;
+        # queued work must not make a disconnected bridge impossible to restart.
+        self.restarting = True
+        try:
             try:
                 await service_control.require_service_owner()
             except ValueError:
                 raise UserFacingError(RESTART_NOT_SERVICE) from None
-            self.restarting = True
+            self.reply(RESTART_STARTED)
             try:
-                self.reply(RESTART_STARTED)
-                try:
-                    await asyncio.wait_for(self.outbox_drained.wait(), 20)
-                except asyncio.TimeoutError:
-                    raise UserFacingError(RESTART_CONFIRM_UNSENT) from None
-                self.state["restartRequested"] = True
+                await asyncio.wait_for(self.outbox_drained.wait(), 20)
+            except asyncio.TimeoutError:
+                raise UserFacingError(RESTART_CONFIRM_UNSENT) from None
+            self.state["restartRequested"] = True
+            self.save()
+            await service_control.restart()
+            # Native service shutdown cancels preflight; saved preparing jobs recover.
+            await asyncio.Event().wait()
+        finally:
+            if not asyncio.current_task().cancelling():
+                self.state.pop("restartRequested", None)
+                self.restarting = False
                 self.save()
-                await service_control.restart()
-                # Remain quiescent until systemd terminates us; don't accept more work.
-                await asyncio.Event().wait()
-            finally:
-                if not asyncio.current_task().cancelling():
-                    self.state.pop("restartRequested", None)
-                    self.restarting = False
-                    self.save()
+                self.wake.set()
+                self.steer_wake.set()
 
     async def control_worker(self, lane):
         queue = self.controls[lane]
@@ -355,29 +363,38 @@ class Bridge:
                 self.wake.set()
 
     async def maintain_backend(self):
-        reported = False
+        reported = None
         while True:
-            if not self.running and not self.steering and not self.session_lock.locked():
+            delay = 10
+            if (not self.restarting and not self.running and not self.steering
+                    and not self.session_lock.locked()):
                 try:
                     async with self.session_lock:
-                        await self.ensure_backend()
-                        if self.state["thread"]:
-                            await ensure_session(self)
+                        self.backend_recovering = True
+                        try:
+                            await self.ensure_backend()
+                            if self.state["thread"]:
+                                await ensure_session(self)
+                        finally:
+                            self.backend_recovering = False
                     self.input_paused = False
                     self.wake.set()
-                    reported = False
+                    reported = None
                 except Exception as error:
                     self.backend_started = self.backend.connected
                     self.input_paused = True
-                    if not reported:
-                        self.reply(fill(BACKEND_CONNECT_FAILED, {"原因": backend_reason(error)}))
-                        reported = True
+                    reason = backend_reason(error)
+                    if reason != reported:
+                        self.reply(fill(BACKEND_CONNECT_FAILED, {"原因": reason}))
+                        reported = reason
+                    if isinstance(error, BackendStartupError):
+                        delay = error.retry_after
                     print(f"后端恢复失败：{type(error).__name__}", file=sys.stderr, flush=True)
             # Account reads are independent of the active model turn.
-            if self.backend_started and self.backend.connected:
+            if not self.restarting and self.backend_started and self.backend.connected:
                 await self.backend.refresh_usage()
                 await self.backend.rate_limits()
-            await asyncio.sleep(10)
+            await asyncio.sleep(delay)
 
     async def worker(self):
         return await self.inputs.worker()

@@ -4,9 +4,10 @@ import json
 import os
 from pathlib import Path
 import re
-import secrets
 import shutil
 import socket
+
+import daemon_control
 
 SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
 
@@ -75,6 +76,10 @@ class CodexTransport:
                 except CodexRpcError:
                     raise
                 except (RuntimeError, OSError, asyncio.TimeoutError) as error:
+                    state = await daemon_control.status(unit)
+                    failure = daemon_control.failure(state, command)
+                    if failure:
+                        raise failure
                     last_error = str(error) if isinstance(error, RuntimeError) else type(error).__name__
                     await self.close()
                     await asyncio.sleep(0.5)
@@ -84,14 +89,21 @@ class CodexTransport:
     async def start_shared_daemon(self, command, env):
         # Let systemd own the daemon's cgroup, independently of the gateway.
         # Native `daemon start` reuses a running daemon; it never requests a restart.
-        unit = "agent-wechat-codex-" + secrets.token_hex(8) + ".service"
         executable = shutil.which(command[0], path=env.get("PATH"))
         if not executable:
             raise RuntimeError("找不到 Codex 启动器，无法自动启动共享后台")
         command = [executable, *command[1:]]
+        unit = daemon_control.unit_name(command, self.cwd, env)
+        state = await daemon_control.status(unit)
+        if state.get("ActiveState") in ("active", "activating", "reloading"):
+            return unit  # Reuse the existing startup; never stack keyring prompts.
+        if state.get("ActiveState") == "failed":
+            code, _ = await daemon_control.systemctl("reset-failed", unit)
+            if code:
+                raise RuntimeError("无法清理消息桥后台启动失败状态")
         managed = {"INVOCATION_ID", "JOURNAL_STREAM", "NOTIFY_SOCKET", "MAINPID",
                    "MANAGERPID", "SYSTEMD_EXEC_PID", "WATCHDOG_PID", "WATCHDOG_USEC"}
-        args = ["systemd-run", "--user", "--quiet", "--collect", "--no-ask-password",
+        args = ["systemd-run", "--user", "--quiet", "--no-ask-password",
                 "--service-type=exec", "--property=ExitType=cgroup", "--property=UMask=0077",
                 "--expand-environment=no", "--unit=" + unit,
                 "--working-directory=" + self.cwd]
@@ -113,7 +125,13 @@ class CodexTransport:
                 proc.kill()
                 await proc.wait()
         if code:
-            raise RuntimeError("无法自动启动共享后台，请检查用户 systemd 和 systemd-run；微信控制仍可用")
+            # Another client may have started the same native launcher concurrently.
+            state = await daemon_control.status(unit)
+            if state.get("ActiveState") not in ("active", "activating", "reloading"):
+                failure = daemon_control.failure(state, command)
+                if failure:
+                    raise failure
+                raise RuntimeError("无法自动启动共享后台，请检查用户 systemd 和 systemd-run；微信控制仍可用")
         return unit
 
     @property
