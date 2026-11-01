@@ -122,6 +122,8 @@ class Bridge:
         backend.compaction_notice = self.notifications.compaction
         backend.on_limits = lambda payload: self.check_quota(backend, payload)
         backend.on_external_result = self.external_results.put_nowait
+        backend.on_message = lambda message: self.output.deliver_message(message) \
+            if getattr(self, "backend", None) is backend else None
         return backend
 
     def current_input_hint(self):

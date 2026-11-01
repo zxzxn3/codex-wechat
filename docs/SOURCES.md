@@ -14,6 +14,7 @@
 ## Codex
 
 - App Server 提供 thread/start、resume、read、list、turn/start、steer、interrupt、最终消息和审批事件。steer 的 expectedTurnId 必须匹配活动轮次，不接受模型/目录等 turn-level 覆盖。
+- 官方 Items / Events 将 agentMessage 与 reasoning、工具输出分开，phase 可为 commentary、partial_answer、final_answer；item/completed 为该条消息的完整权威文本。中途回复据此逐条转发，不使用 delta 拼接，也不等待 turn/completed。phase 字段可缺失时保留旧收口行为。
 - 原生提问依据官方 `item/tool/requestUserInput`、`serverRequest/resolved` 和本机 0.166.0 的 ToolRequestUserInputParams/Response：回复为以 question ID 为键的 answers 字典，每题值含字符串数组。当前 schema 用 isBlocking，autoResolutionMs 已弃用；桥接不自动选择。桌面请求是否投递到桥接连接尚未在线确认，不根据字段存在宣称请求所有权已转移。
 - 本机 schema 中 turn/start 和 turn/steer 提供 clientUserMessageId，但在线文档没有明确其持久去重保证；本项目仅用它追踪提交，未实现历史接受状态核对。
 - start/resume 响应及 settings/name/tokenUsage 事件提供实际设置和用量。账户限额来自 account/rateLimits/read 和稀疏 updated 事件，缓存独立于会话。没有数据时不推测。

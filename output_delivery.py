@@ -53,6 +53,25 @@ class OutputDelivery:
             bridge.enqueue(bridge.text_entries(text, group=str(uuid.uuid4()), context=context),
                          persist=persist)
 
+    def deliver_message(self, message):
+        """Freeze a whole visible interim message before a turn can complete.
+
+        No disk snapshot awaits here: preserve event order relative to the final
+        result, and never retire the input or emit a completion notice early.
+        """
+        bridge = self.bridge
+        if (message.phase not in ("commentary", "partial_answer")
+                or not bridge.current_source(message.source)):
+            return
+        context = bridge.state.get("context")
+        if not context:
+            return
+        bridge.reload_config()
+        text, _ = split_answer(message.text)  # Attachments are processed only in the final answer.
+        if text.strip():
+            bridge.enqueue(bridge.text_entries(text, group=str(uuid.uuid4()), context=context,
+                                               semantic=True, source=message.source))
+
     def asset_entry(self, asset, *, group=None, context=None, source=None):
         bridge = self.bridge
         return {"id": str(uuid.uuid4()), "group": group or str(uuid.uuid4()), "role": "asset",

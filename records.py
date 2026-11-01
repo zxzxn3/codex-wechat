@@ -21,6 +21,16 @@ class Source:
 
 
 @dataclass(frozen=True)
+class AgentMessage:
+    source: Source
+    turn: str
+    item: str | None
+    text: str
+    cwd: str
+    phase: str
+
+
+@dataclass(frozen=True)
 class TurnResult:
     source: Source
     turn: str | None

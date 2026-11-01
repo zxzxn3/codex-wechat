@@ -12,7 +12,7 @@ import secrets
 import time
 import uuid
 
-from records import Source, TurnResult
+from records import AgentMessage, Source, TurnResult
 from media import OUTPUT_HINT
 from usage import UsageCache
 from questions import QUESTION_METHOD, question_prompt, question_answer
@@ -57,6 +57,7 @@ class CodexBackend:
         self.rate_limits_checked_at = 0
         self.on_activity = lambda: None
         self.on_external_result = lambda *args: None
+        self.on_message = lambda message: None
         self.source_name = "codex"
         self.connection_id = uuid.uuid4().hex
         self.selection_epoch = 0
@@ -285,6 +286,8 @@ class CodexBackend:
             return
         if current["turn"] is None:
             return
+        if current["done"].done():
+            return  # No late item may become progress for an already-ended turn.
         if params.get("turnId") and current["turn"] != params["turnId"]:
             return
         if method == "item/completed":
@@ -294,6 +297,9 @@ class CodexBackend:
                 if identity and any(message.get("id") == identity for message in current["messages"]):
                     return
                 current["messages"].append(item)
+                if item.get("phase") in ("commentary", "partial_answer") and item.get("text"):
+                    self.on_message(AgentMessage(current["source"], current["turn"],
+                        identity, item["text"], current["cwd"], item["phase"]))
         elif method == "turn/completed" and not current["done"].done():
             turn = params["turn"]
             if current["turn"] and turn["id"] != current["turn"]:
@@ -302,6 +308,8 @@ class CodexBackend:
             finals = [m["text"] for m in messages if m.get("phase") == "final_answer"]
             legacy = [m["text"] for m in messages if not m.get("phase")]
             text = "\n\n".join(finals or legacy)
+            has_partial_answer = any(m.get("phase") == "partial_answer" and m.get("text")
+                                     for m in messages)
             status = turn["status"]
             if status != "completed":
                 status_text = {
@@ -310,7 +318,8 @@ class CodexBackend:
                 }.get(status, TURN_ENDED_UNEXPECTEDLY)
                 text = (text + "\n\n" if text else "") + status_text
             result = TurnResult(current["source"], current["turn"],
-                                text or TURN_COMPLETED_EMPTY, current["cwd"], status)
+                                text if text or has_partial_answer else TURN_COMPLETED_EMPTY,
+                                current["cwd"], status)
             current["done"].set_result(result)
             self.pending.clear()
             compact_turn = any(key[:3] == (self.selection_epoch, self.selected_thread, turn["id"])
@@ -607,9 +616,16 @@ class CodexBackend:
                 await self.stop()
             return await current["done"]
         except CodexRpcError as error:
+            early_events = list(current["earlyEvents"])
             if error.definite_rejection:
                 await self.refresh_runtime()
                 if self.active and self.active is not current and not self.active["done"].done():
+                    desktop_turn = self.active["turn"]
+                    for event in early_events:
+                        params = event.get("params", {})
+                        event_turn = params.get("turnId") or params.get("turn", {}).get("id")
+                        if event_turn == desktop_turn:
+                            self.event(event)
                     raise DeferTurn("桌面抢先启动了轮次，稍后重试本条消息") from None
             raise
         finally:
