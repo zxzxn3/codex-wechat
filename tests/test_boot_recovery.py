@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from agent_wechat import Bridge
+from codex_wechat import Bridge
 from codex_transport import CodexTransport
 import daemon_control
 from errors import BackendStartupError, UserFacingError, backend_reason
@@ -45,8 +45,8 @@ class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
         b.state["inbox"] = [job]
         b.backend_recovering = True
         b.reply = lambda *_: None  # No sender needed for this scheduling test.
-        with patch("agent_wechat.service_control.require_service_owner", AsyncMock()), \
-             patch("agent_wechat.service_control.restart", AsyncMock(side_effect=RuntimeError("simulated"))) as restart:
+        with patch("codex_wechat.service_control.require_service_owner", AsyncMock()), \
+             patch("codex_wechat.service_control.restart", AsyncMock(side_effect=RuntimeError("simulated"))) as restart:
             async with b.session_lock:
                 with self.assertRaises(RuntimeError):
                     await b.restart_service()
@@ -94,8 +94,8 @@ class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
             b.input_paused = True
             raise RuntimeError("simulated restart failure")
         with patch("input_delivery.ensure_session", prepare), \
-             patch("agent_wechat.service_control.require_service_owner", owner), \
-             patch("agent_wechat.service_control.restart", abort):
+             patch("codex_wechat.service_control.require_service_owner", owner), \
+             patch("codex_wechat.service_control.restart", abort):
             task = asyncio.create_task(b.worker())
             try:
                 await asyncio.wait_for(entered.wait(), 1)

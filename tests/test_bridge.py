@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from agent_wechat import Bridge, parse_control
+from codex_wechat import Bridge, parse_control
 from backend import CodexBackend, CodexRpcError
 from media import OUTPUT_HINT, MediaError
 from latency import Latency
@@ -188,7 +188,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_restart_refuses_non_service_owner(self):
         owner = AsyncMock(side_effect=ValueError("not service owner"))
-        with patch("agent_wechat.service_control.require_service_owner", owner):
+        with patch("codex_wechat.service_control.require_service_owner", owner):
             with self.assertRaises(UserFacingError) as raised:
                 await self.bridge.restart_service()
         self.assertEqual(str(raised.exception), RESTART_NOT_SERVICE)
@@ -336,7 +336,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 "turnId": "turn",
                 "itemId": "item",
                 "command": "git push origin main",
-                "cwd": "~/projects/agent-wechat",
+                "cwd": "~/projects/codex-wechat",
                 "reason": "Agent 请求推送当前分支",
             },
         })
@@ -363,7 +363,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 "threadId": "thread",
                 "turnId": "turn",
                 "command": "x" * 1300,
-                "cwd": "~/projects/agent-wechat",
+                "cwd": "~/projects/codex-wechat",
             },
         })
         self.assertIn("审批内容过长", notifications[-1])

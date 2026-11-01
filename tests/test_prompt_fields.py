@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
-from agent_wechat import Bridge
+from codex_wechat import Bridge
 from commands import handle
 from prompts import render_ack, status_from_fields
 from storage import Store

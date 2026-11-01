@@ -53,7 +53,7 @@ class WeChat:
             payload = dict(body)
             if auth:
                 payload["base_info"] = {"channel_version": VERSION,
-                                        "bot_agent": "AgentWechat/" + VERSION}
+                                        "bot_agent": "CodexWechat/" + VERSION}
             config.append("data = " + json.dumps(json.dumps(payload)))
         proc = await asyncio.create_subprocess_exec(
             "curl", "--disable", "--silent", "--show-error", "--proto", "=https",

@@ -12,7 +12,7 @@ def unit_name(command, cwd, env):
     # Stable across gateway restarts; never hash or serialize credential values.
     identity = [command, cwd, env.get("CODEX_HOME"), env.get("HOME")]
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
-    return "agent-wechat-codex-" + digest + ".service"
+    return "codex-wechat-codex-" + digest + ".service"
 
 
 async def systemctl(*args):

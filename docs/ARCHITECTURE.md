@@ -4,7 +4,7 @@
 
 - `codex_transport.py`：启动器、共享 daemon 接入、WebSocket/stdio、RPC 配对与连接关闭。
 - `backend.py`：会话、原生事件、轮次与审批；通过 transport 访问 Codex。恢复已有会话与普通 turn/start 不重放缓存的 model/effort/cwd，只有显式设置命令传覆盖；设置事件更新显示缓存。Codex 保存的设置和轮次状态是权威；限额属于账户缓存，模型目录属于连接缓存，不随切换会话丢失。
-- `agent_wechat.py`：组合根、微信接收、控制调度与共享运行上下文。
+- `codex_wechat.py`：组合根、微信接收、控制调度与共享运行上下文。
 - `input_delivery.py`：输入准备/提交状态转换、恢复、steer 和 queue 协调。
 - `output_delivery.py`：输出组、附件快照、重试与顺序发送。连接、准备任务、模型轮次和发送状态不能简化为同一个忙闲值。
 - `records.py`：跨边界的 `Source`、`TurnResult`、输入阶段；不实现通用状态机。

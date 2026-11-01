@@ -1,4 +1,4 @@
-# agent-wechat
+# codex-wechat
 
 微信私聊 ↔ 本机 Codex App Server。支持普通 Codex、codex-deepseek、已有桌面会话、工作中追加消息和图片/文件双向传输。认证、模型配置、工具和权限沿用对应 Codex 启动器。
 
@@ -7,26 +7,26 @@
 需要 Linux、Python 3.11+、已登录的 Codex CLI、curl 8.4+、qrencode；共享后台自动启动需要 systemd 254+。Python 依赖见 `requirements.txt`，协议依据见 [SOURCES](docs/SOURCES.md)。
 
 ```bash
-cd ~/.local/share/agent-wechat
+cd ~/.local/share/codex-wechat
 python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install -r requirements.txt
-./agent-wechat login
+./codex-wechat login
 ./install.sh
 ```
 
-二维码只在手动执行 `./agent-wechat login` 时显示在终端；用手机微信扫描并确认授权，若终端要求验证码则按提示输入。成功后凭据保存到本机 `.state/`。Codex 自身的登录与微信扫码是两件事，使用前需确保对应 Codex 启动器已可正常使用。
+二维码只在手动执行 `./codex-wechat login` 时显示在终端；用手机微信扫描并确认授权，若终端要求验证码则按提示输入。成功后凭据保存到本机 `.state/`。Codex 自身的登录与微信扫码是两件事，使用前需确保对应 Codex 启动器已可正常使用。
 
 接着运行 `./install.sh` 安装命令和用户服务链接、启用自启，并在已绑定时请求启动服务。脚本检查依赖，不安装系统包。已有前台桥接时不会启动第二个实例。
 
 服务启动后，在手机主动发送第一条文字消息，程序取得回复上下文后即可交流。只有绑定用户的私聊进入 Agent。对应 Codex 后台未运行时由桥接自动启动，无需先打开桌面 Codex。
 
-若先运行安装脚本，脚本不会自动弹二维码，会提示先执行 `agent-wechat login`。扫码成功后再执行 `systemctl --user start agent-wechat`。已绑定后的日常启动和 `/restart` 不再要求扫码；凭据失效时才需要重新登录。
+若先运行安装脚本，脚本不会自动弹二维码，会提示先执行 `codex-wechat login`。扫码成功后再执行 `systemctl --user start codex-wechat`。已绑定后的日常启动和 `/restart` 不再要求扫码；凭据失效时才需要重新登录。
 
-服务随**图形登录**自启，电脑须在线；不是登录前启动，不启用 linger。DeepSeek 启动器可能依赖桌面密钥环。`./install.sh --no-start` 只安装并启用下次自启。前台运行用 `./agent-wechat start`。
+服务随**图形登录**自启，电脑须在线；不是登录前启动，不启用 linger。DeepSeek 启动器可能依赖桌面密钥环。`./install.sh --no-start` 只安装并启用下次自启。前台运行用 `./codex-wechat start`。
 
 ```bash
-systemctl --user status agent-wechat
-journalctl --user -u agent-wechat -f
+systemctl --user status codex-wechat
+journalctl --user -u codex-wechat -f
 ```
 
 微信 `/restart` 在空闲、无待办时加载本地更新；不会下载代码或重启共享 Codex 后台。升级时先等空闲，再使用该指令。
@@ -130,7 +130,7 @@ Provider 从已连接后端的原生 `config/read` 取得当前供应商地址�
 
 ## 状态、安全与验证
 
-`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/` 和 `.venv/` 不入库。媒体目前不会自动清理。`./agent-wechat status` 只读取最后保存的摘要，不是健康检查。
+`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/` 和 `.venv/` 不入库。媒体目前不会自动清理。`./codex-wechat status` 只读取最后保存的摘要，不是健康检查。
 
 保留 Codex 原生沙箱和审批，不自动提高权限。控制消息保存游标后进入内存队列，崩溃时可能丢失，**不会自动重放控制命令**。微信发送接口响应丢失仍可能导致重试重复送达，不承诺恰好一次。
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from agent_wechat import Bridge
+from codex_wechat import Bridge
 from commands import handle, notice
 from configuration import completion_template
 from storage import Store

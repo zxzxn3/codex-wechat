@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from agent_wechat import Bridge
+from codex_wechat import Bridge
 from profiles import restore
 from storage import Store
 

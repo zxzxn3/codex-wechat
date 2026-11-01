@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from agent_wechat import Bridge
+from codex_wechat import Bridge
 from backend import CodexBackend
 from command_specs import COMMANDS, HELP, REGISTRY, command_lane
 from commands import HANDLERS, handle, parse_control, validate

@@ -2,7 +2,7 @@
 import asyncio
 import os
 
-UNIT = "agent-wechat.service"
+UNIT = "codex-wechat.service"
 
 
 async def systemctl(*args):

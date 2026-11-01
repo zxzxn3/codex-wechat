@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
-from agent_wechat import Bridge
+from codex_wechat import Bridge
 from backend import CodexBackend
 from commands import activate
 from storage import Store

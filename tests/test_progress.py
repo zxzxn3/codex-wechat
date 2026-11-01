@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
-from agent_wechat import Bridge
+from codex_wechat import Bridge
 from backend import DeferTurn
 from codex_transport import CodexRpcError
 from records import AgentMessage, InputPhase

@@ -54,7 +54,7 @@ class StabilityTests(unittest.IsolatedAsyncioTestCase):
 
 class CompletionStateTests(unittest.IsolatedAsyncioTestCase):
     async def test_completion_uses_finished_state_without_clearing_live_flags(self):
-        from agent_wechat import Bridge
+        from codex_wechat import Bridge
         from storage import Store
         with tempfile.TemporaryDirectory() as root:
             store = Store(Path(root) / "state")

@@ -27,7 +27,7 @@
 
 ## 微信和附件
 
-认证 token 仅发送到可信 HTTPS API 域；拒绝重定向。CDN 不携带 API 认证。应用声明 AgentWechat/0.1.0，不冒充腾讯插件版本。
+认证 token 仅发送到可信 HTTPS API 域；拒绝重定向。CDN 不携带 API 认证。应用声明 CodexWechat/0.1.0，不冒充腾讯插件版本。
 
 按腾讯协议使用 AES-128-ECB/PKCS7 和 MD5，入站兼容原始 key/base64 与十六进制 key/base64；出站先取上传 URL、上传密文取得引用，再发媒体消息。完整协议字段见上游实现，不能仅凭静态类型宣称文件传输通过。
 

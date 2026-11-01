@@ -2,10 +2,10 @@
 # Link the CLI and user unit, following ime-cursor's local installation convention.
 set -euo pipefail
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-EXPECTED_DIR="$HOME/.local/share/agent-wechat"
+EXPECTED_DIR="$HOME/.local/share/codex-wechat"
 BIN_DIR="$HOME/.local/bin"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-UNIT=agent-wechat.service
+UNIT=codex-wechat.service
 START=1
 die() { echo "install.sh: $*" >&2; exit 1; }
 case "${1:-}" in
@@ -34,7 +34,7 @@ SYSTEMD_VERSION=${SYSTEMD_VERSION#systemd }
 SYSTEMD_VERSION=${SYSTEMD_VERSION%% *}
 [[ "$SYSTEMD_VERSION" =~ ^[0-9]+$ ]] && [ "$SYSTEMD_VERSION" -ge 254 ] ||
     die '共享后台自动启动需要 systemd 254+'
-[ -x "$PROJECT_DIR/agent-wechat" ] || die 'agent-wechat 入口不可执行'
+[ -x "$PROJECT_DIR/codex-wechat" ] || die 'codex-wechat 入口不可执行'
 [ -f "$PROJECT_DIR/$UNIT" ] || die "缺少 $UNIT"
 
 # Preflight both destinations before changing either; unrelated files are never overwritten.
@@ -47,11 +47,11 @@ check_link() {
         die "$target 已存在且不是本项目的链接"
     fi
 }
-check_link "$PROJECT_DIR/agent-wechat" "$BIN_DIR/agent-wechat"
+check_link "$PROJECT_DIR/codex-wechat" "$BIN_DIR/codex-wechat"
 check_link "$PROJECT_DIR/$UNIT" "$UNIT_DIR/$UNIT"
 mkdir -p -- "$BIN_DIR" "$UNIT_DIR"
-if [ ! -L "$BIN_DIR/agent-wechat" ]; then
-    ln -s -- "$(realpath --relative-to="$BIN_DIR" -- "$PROJECT_DIR/agent-wechat")" "$BIN_DIR/agent-wechat"
+if [ ! -L "$BIN_DIR/codex-wechat" ]; then
+    ln -s -- "$(realpath --relative-to="$BIN_DIR" -- "$PROJECT_DIR/codex-wechat")" "$BIN_DIR/codex-wechat"
 fi
 if [ ! -L "$UNIT_DIR/$UNIT" ]; then
     ln -s -- "$PROJECT_DIR/$UNIT" "$UNIT_DIR/$UNIT"
@@ -61,7 +61,7 @@ systemctl --user enable "$UNIT"
 if [ "$START" = 0 ]; then
     echo '已启用下次图形登录自启；未启动、停止或重启当前进程。'
 elif [ ! -f "$PROJECT_DIR/.state/account.json" ]; then
-    echo '尚未绑定微信，请先执行 agent-wechat login，然后 systemctl --user start agent-wechat。'
+    echo '尚未绑定微信，请先执行 codex-wechat login，然后 systemctl --user start codex-wechat。'
 else
     # A foreground bridge keeps its connection; don't start a competing systemd instance.
     if "$PYTHON" - "$PROJECT_DIR/.state/lock" <<'PY'

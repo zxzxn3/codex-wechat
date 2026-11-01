@@ -17,7 +17,7 @@ class Store:
         try:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError("另一个 agent-wechat 进程正在使用此状态目录") from None
+            raise RuntimeError("另一个 codex-wechat 进程正在使用此状态目录") from None
 
     def load(self, name, default=None):
         path = self.root / (name + ".json")

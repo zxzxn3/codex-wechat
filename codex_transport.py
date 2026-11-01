@@ -176,7 +176,7 @@ class CodexTransport:
                 limit=16 * 1024 * 1024)
         self.reader = asyncio.create_task(self.read())
         await self.rpc("initialize", {"clientInfo": {
-            "name": "agent_wechat", "title": "Agent WeChat", "version": "0.1.0"},
+            "name": "codex_wechat", "title": "Codex WeChat", "version": "0.1.0"},
             "capabilities": {"experimentalApi": True}})
         await self.write({"method": "initialized", "params": {}})
         # Keep project-owned skills local to this app-server connection instead
