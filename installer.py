@@ -21,6 +21,21 @@ sys.dont_write_bytecode = True
 SOURCE_ROOT = Path(__file__).resolve().parent
 IS_WINDOWS = os.name == "nt"
 LOGO_PATH = Path("assets/logo/codex-wechat.txt")
+DECLARATION_PATHS = {
+    "start": Path("assets/install/after-art.txt"),
+    "complete": Path("assets/install/after-install.txt"),
+}
+NON_INTERACTIVE = False
+# Requirements for Python packages remain solely in requirements.txt.
+DEPENDENCIES = (
+    ("Codex CLI", "codex.exe" if os.name == "nt" else "codex", None, "微信模型任务", "warn"),
+    ("curl", "curl.exe" if os.name == "nt" else "curl", (8, 4), "微信登录与收发", "warn"),
+    ("qrencode", "qrencode", None, "终端二维码", "warn"),
+    ("systemd-run", "systemd-run", (254,), "Linux 共享后台", "warn"),
+)
+COMPONENTS = {
+    "wechat-attachments": ("微信附件说明 skill", Path("skills/wechat-attachments/SKILL.md")),
+}
 RELEASE_FORMAT = 1
 CURRENT_FILE = "current"
 PREVIOUS_FILE = "previous"
@@ -83,6 +98,8 @@ def detail(text: str) -> None:
 
 
 def confirm(prompt: str) -> bool:
+    if NON_INTERACTIVE:
+        return True
     while True:
         try:
             answer = input(
@@ -110,17 +127,27 @@ def introduction() -> bool:
     ))
     print()
     print(textwrap.fill(
-        "接下来会先展示版本和操作计划，再单独确认一次。继续这里不会直接修改文件。",
+        "接下来展示操作计划，确认后执行；不启用新自启、不启动服务、不安装附加组件。",
         width=width,
     ))
     print()
-    return confirm("继续？")
+    return True
+
+
+def asset_path(source: Path, relative: Path) -> Path | None:
+    path = source / relative
+    for part in (path, *path.parents):
+        if part.is_symlink():
+            return None
+        if part == source:
+            break
+    return path if path.is_file() else None
 
 
 def logo_banner(source: Path) -> None:
     """Display optional user-supplied art without requiring it for installation."""
-    path = source / LOGO_PATH
-    if (not path.is_file() or not sys.stdout.isatty()
+    path = asset_path(source, LOGO_PATH)
+    if (path is None or not sys.stdout.isatty()
             or os.environ.get("TERM") == "dumb"):
         return
     try:
@@ -355,6 +382,11 @@ def check_install_target(
                 f"目标不是现有 codex-wechat 安装: {target}\n"
                 "全新安装请使用 install。"
             )
+        if not release_matches(target, state):
+            raise ValueError(
+                f"目标不是完整的现有 codex-wechat 安装: {target}\n"
+                "未修改现有文件。"
+            )
         return
     if state is not None:
         raise ValueError(
@@ -446,20 +478,22 @@ def prepare_runtime(root: Path) -> None:
         "pip",
         "install",
         "--disable-pip-version-check",
+        "--no-cache-dir",
         "-r",
         str(root / "requirements.txt"),
     ], cwd=root)
     _run([
         str(python),
         "-c",
-        "import cryptography, websockets; "
-        "from websockets.asyncio.client import unix_connect",
+        "import importlib.metadata; "
+        "print(\"Python dependencies installed\")",
     ], cwd=root)
     python_files = [
         str(path) for path in project_files(root)
         if path.suffix == ".py"
     ]
-    _run([str(python), "-m", "py_compile", *python_files], cwd=root)
+    _run([str(python), "-c", "from pathlib import Path; import sys; "
+          "[compile(Path(p).read_bytes(), p, 'exec') for p in sys.argv[1:]]", *python_files], cwd=root)
 
 
 def prepare_bootstrap_runtime(target: Path) -> None:
@@ -478,14 +512,16 @@ def prepare_bootstrap_runtime(target: Path) -> None:
             "import sys; raise SystemExit(sys.version_info < (3, 11))",
         ], cwd=target)
         return
-    _run([
-        sys.executable,
-        "-m",
-        "venv",
-        str(root),
-    ], cwd=target)
-    if not python.is_file():
-        raise ValueError(f"Windows supervisor 环境创建失败: {python}")
+    created = not root.exists()
+    try:
+        _run([sys.executable, "-m", "venv", str(root)], cwd=target)
+        if not python.is_file():
+            raise ValueError(f"Windows supervisor 环境创建失败: {python}")
+    except BaseException:
+        if created and root.exists():
+            shutil.rmtree(root)
+        raise
+
 
 
 def install_release(
@@ -539,33 +575,22 @@ def stable_files_match(source: Path, target: Path) -> bool:
 
 
 def install_bootstrap(source: Path, target: Path) -> None:
-    for relative in _stable_files():
-        source_path = source / relative
-        if not source_path.is_file() or source_path.is_symlink():
-            raise ValueError(f"缺少安装入口文件: {relative}")
-        content = source_path.read_bytes()
-        mode = stat.S_IMODE(source_path.stat().st_mode)
-        _atomic_write(target / relative, content, mode, root=target)
-    prepare_bootstrap_runtime(target)
+    # Allocate/write every entry before replacing the first installed file.
+    with tempfile.TemporaryDirectory(prefix=".entry-", dir=target) as directory:
+        staging = Path(directory)
+        for relative in _stable_files():
+            source_path = source / relative
+            destination = target / relative
+            if not source_path.is_file() or source_path.is_symlink() or destination.is_symlink():
+                raise ValueError(f"安装入口不是普通文件: {relative}")
+            _atomic_write(staging / relative, source_path.read_bytes(),
+                          stat.S_IMODE(source_path.stat().st_mode), root=staging)
+        for relative in _stable_files():
+            os.replace(staging / relative, target / relative)
 
 
-def activate_release(target: Path, identifier: str) -> str | None:
-    old = read_pointer(target, CURRENT_FILE)
-    if old == identifier:
-        return old
-    previous = old or (LEGACY_ID if _legacy_installation(target) else "")
-    if previous:
-        _write_pointer(target, PREVIOUS_FILE, previous)
+def activate_release(target: Path, identifier: str) -> None:
     _write_pointer(target, CURRENT_FILE, identifier)
-    return old
-
-
-def rollback_activation(target: Path, old: str | None) -> None:
-    current = target / CURRENT_FILE
-    if old:
-        _write_pointer(target, CURRENT_FILE, old)
-    else:
-        current.unlink(missing_ok=True)
 
 
 def _linux_command_link() -> Path:
@@ -611,8 +636,7 @@ def configure_windows(release: Path, target: Path, *, update: bool) -> None:
         "-InstallRoot",
         str(target),
     ]
-    if update:
-        command.extend(["-PreserveAutostart", "-NoStart"])
+    command.extend(["-PreparedRuntime", "-PreserveAutostart", "-NoStart"])
     _run(command, cwd=release)
 
 
@@ -626,13 +650,7 @@ def operation_plan(operations: list[str]) -> None:
         )
 
 
-def _common_install(
-    source: Path,
-    target: Path,
-    *,
-    dry_run: bool,
-    update: bool,
-) -> int:
+def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) -> int:
     source = _resolved_root(source, "源码目录")
     target = target.expanduser().absolute() if dry_run else _resolved_root(target, "安装目录")
     if not dry_run and source == target and read_pointer(target, CURRENT_FILE):
@@ -640,93 +658,79 @@ def _common_install(
             "版本化安装不能把安装根目录本身当作新源码；"
             "请从另一份源码 checkout 运行 update。"
         )
-    files = project_files(source)
-    identifier = release_identifier(files)
-    if not dry_run:
+    if source != SOURCE_ROOT:
+        logo_banner(source)
+        declaration(source, "start")
+    phase("演练模式，不会修改文件" if dry_run else "安装 / 更新")
+    try:
+        files = project_files(source)
+    except (OSError, ValueError) as error:
+        if not dry_run:
+            raise
+        detail(f"源码检查: {error}；因 --dry-run 放行。")
+        files = None
+    identifier = release_identifier(files) if files is not None else "演示版本"
+    if dry_run:
+        detail("因 --dry-run，真实安装目录与命令入口检查按通过处理；不代表实际安装条件已满足。")
+        current = None
+    else:
         check_install_target(source, target, update=update)
-    current = None if dry_run else read_pointer(target, CURRENT_FILE)
-    if current == identifier and release_matches(target, identifier, files):
-        if stable_files_match(source, target):
+        preflight_command_link(target)
+        current = read_pointer(target, CURRENT_FILE)
+        if current == identifier and release_matches(target, identifier, files) and stable_files_match(source, target):
             print(f"版本 {identifier} 已经安装，没有修改。")
             return 0
-        if dry_run:
-            print(f"版本 {identifier} 未变化，但稳定入口需要修复。")
-            return 0
-        target.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with InstallLock(target):
-            if (read_pointer(target, CURRENT_FILE) != identifier
-                    or not release_matches(target, identifier, files)):
-                raise ValueError("确认期间当前版本发生变化，请重新运行")
-            install_bootstrap(source, target)
-        print(f"版本 {identifier} 未变化，已修复稳定入口。")
-        return 0
-    if not dry_run:
-        preflight_command_link(target)
-    logo_banner(source)
-    if dry_run:
-        phase("演练模式，不会修改文件")
-        detail("因 --dry-run，真实安装目录与命令入口检查按通过处理；不代表实际安装条件已满足。")
     if not introduction():
         return 0
-
-    operations = ["构建并校验新版本", "安装稳定启动入口", "原子切换当前版本"]
-    if IS_WINDOWS:
-        operations.extend(["更新计划任务", "保留现有登录与数据"])
-    else:
-        operations.extend(["校验命令入口", "保留现有登录与数据"])
-    phase("准备更新..." if update else "准备安装...")
-    print()
-    operation_plan(operations)
-    print()
-    print(styled("安装目录:", "2") + "  " + styled(str(target), "1"))
-    print(styled("版本:", "2") + "      " + styled(identifier, "1"))
-    print(styled("版本目录:", "2") + "  " + styled(str(target / RELEASES_DIR / identifier), "1"))
-    previous = None if dry_run else read_pointer(target, PREVIOUS_FILE)
-    if current:
-        detail(f"当前版本: {current}")
-    elif not dry_run and _legacy_installation(target):
-        detail("当前是旧式直接安装，本次会迁移为版本化安装。")
-    if previous:
-        detail(f"上一版本: {previous}")
-    detail("保留 .state、config.json、workspace、日志和未知本地文件。")
-    print()
+    report_dependencies(source, dry_run=dry_run)
+    operation_plan(["准备程序与 Python 依赖", "集中更新入口及当前版本", "保留配置、登录与工作内容", "清理本次无用产物"])
+    print(f"安装目录: {target}")
+    print(f"版本: {identifier}")
     if not confirm("执行更新？" if update else "执行安装？"):
         return 0
     if dry_run:
         print("演练完成，没有修改文件。")
-        phase("正式安装或更新成功后的使用步骤；本次未执行")
-        next_steps(target, update=update, identifier=identifier)
+        declaration(source, "complete")
         return 0
 
-    target.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with InstallLock(target):
-        check_install_target(source, target, update=update)
-        fresh_files = project_files(source)
-        if release_identifier(fresh_files) != identifier or fresh_files != files:
-            raise ValueError("确认期间源码发生变化，未激活新版本；请重新运行")
-        phase("正在构建并校验新版本...")
-        release, created = install_release(target, identifier, files)
-        if created:
-            detail(f"已创建不可变版本: {release}")
-        else:
-            detail(f"复用已校验版本: {release}")
-        phase("正在安装稳定入口...")
-        install_bootstrap(source, target)
-        old = read_pointer(target, CURRENT_FILE)
-        phase("正在原子切换版本...")
-        activate_release(target, identifier)
-        try:
+    created_target = not target.exists()
+    release = None
+    created = False
+    try:
+        target.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with InstallLock(target):
+            check_install_target(source, target, update=update)
+            fresh_files = project_files(source)
+            if fresh_files != files:
+                raise ValueError("确认期间源码发生变化，请重新运行")
+            if read_pointer(target, CURRENT_FILE) != current:
+                raise ValueError("确认期间当前版本发生变化，请重新运行")
+            phase("准备程序与依赖...")
+            release, created = install_release(target, identifier, files)
+            prepare_bootstrap_runtime(target)
+            # Everything requiring downloads/builds/user input finishes above.
+            phase("更新入口与当前版本...")
+            install_bootstrap(source, target)
             install_command_link(target)
+            activate_release(target, identifier)
             configure_windows(release, target, update=update)
-        except (OSError, ValueError, subprocess.SubprocessError):
-            rollback_activation(target, old)
-            raise
-    phase("安装校验...")
-    if not release_matches(target, identifier):
-        rollback_activation(target, old)
-        raise ValueError("激活后的版本校验失败，已恢复原 current 指针")
-    detail("版本内容、运行环境和原子指针校验通过。")
-    print(styled("==> 安装完成。" if not update else "==> 更新完成。", "1;32"))
+            (target / PREVIOUS_FILE).unlink(missing_ok=True)
+    except BaseException:
+        # Only delete a release we created and never activated; no restoration.
+        if created and release is not None and read_pointer(target, CURRENT_FILE) != identifier:
+            shutil.rmtree(release)
+        if created_target:
+            # Remove an empty failed installation, but preserve partial commits.
+            for path in (target / RELEASES_DIR, target):
+                try:
+                    if path == target:
+                        (target / LOCK_FILE).unlink(missing_ok=True)
+                    path.rmdir()
+                except OSError:
+                    pass
+        raise
+    print(styled("==> 更新完成。" if update else "==> 安装完成。", "1;32"))
+    declaration(source, "complete")
     next_steps(target, update=update, identifier=identifier)
     return 0
 
@@ -743,17 +747,14 @@ def next_steps(target: Path, *, update: bool, identifier: str) -> None:
         else:
             print("安装时不扫码，登录自启默认关闭。")
             print(f"首次运行: {command} start")
-            print("尚未绑定微信时会在当前终端显示二维码，绑定后继续启动。")
             print("然后在微信发送 /help 或普通消息。")
     elif update:
         print("重启已有服务: systemctl --user restart codex-wechat")
         print("若未使用服务，先退出原前台进程，再运行 codex-wechat start。")
-        print(f"回滚版本: {target / 'codex-wechat'} rollback")
     else:
         print("1. 确认 Codex 已安装并登录。")
         print(f"2. 在终端运行 {target / 'codex-wechat'} start，保持此终端打开。")
-        print("3. 尚未绑定微信时会显示二维码；手机扫码确认后，程序继续启动。")
-        print("4. 在微信发送 /help、/status，然后发送普通消息开始交流。")
+        print("3. 在微信发送 /help、/status，然后发送普通消息开始交流。")
         print("自启默认关闭；需要时在微信发送 /settings autostart on。")
         print("若提示找不到 codex-wechat，请使用上面的完整路径，或将 ~/.local/bin 加入 PATH。")
 
@@ -858,10 +859,7 @@ def bootstrap(target: Path, choice: dict, *, dry_run: bool = False) -> int:
     phase("安装或更新")
     print(f"来源: {choice['repo']} ({choice['ref']})")
     if dry_run:
-        detail("因 --dry-run，真实安装目录检查按通过处理；不访问网络或修改文件。")
-        operation_plan(["识别现有安装，自动选择安装或更新", "获取源码并展示确认计划",
-                        "准备完整版本，成功后切换", "保留数据和自启设置，不自动重启"])
-        return 0
+        return _common_install(SOURCE_ROOT, target, dry_run=True, update=False)
     _check_target_path(target)
     previous = read_pointer(target, CURRENT_FILE)
     updating = _installation_state(target) is not None
@@ -876,107 +874,204 @@ def bootstrap(target: Path, choice: dict, *, dry_run: bool = False) -> int:
         return result
 
 
-def rollback(target: Path, *, dry_run: bool = False) -> int:
+def declaration(source: Path, stage: str) -> None:
+    path = asset_path(source, DECLARATION_PATHS[stage])
+    if path is not None:
+        text = path.read_text(encoding="utf-8").strip()
+        if text:
+            print(text)
+
+
+def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
+    if sys.version_info < (3, 11):
+        if not dry_run:
+            raise ValueError("安装需要 Python 3.11+，请补齐后重跑。")
+        detail("Python 版本不足 3.11；因 --dry-run 放行。")
+    for name, command, minimum, purpose, policy in DEPENDENCIES:
+        if (IS_WINDOWS and command in ("qrencode", "systemd-run")):
+            continue
+        executable = shutil.which(command)
+        if not executable and name == "Codex CLI" and IS_WINDOWS:
+            local = os.environ.get("LOCALAPPDATA")
+            candidate = Path(local) / "Programs/OpenAI/Codex/bin/codex.exe" if local else None
+            if candidate and candidate.is_file():
+                executable = str(candidate)
+        ready = bool(executable)
+        if ready and minimum and not dry_run:
+            try:
+                result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=5)
+                version = re.search(r"\b(\d+)(?:\.(\d+))?", result.stdout)
+                actual = tuple(int(value or 0) for value in version.groups()) if version else ()
+                ready = result.returncode == 0 and actual[:len(minimum)] >= minimum
+            except (OSError, subprocess.SubprocessError):
+                ready = False
+        if not ready:
+            if policy == "block" and not dry_run:
+                raise ValueError(f"{name} 缺失或版本不足，请补齐后重跑。")
+            detail(f"{name} 缺失或版本不足，{purpose}暂不可用；{'演练继续' if dry_run else '可稍后补齐'}。")
+        elif dry_run and minimum:
+            detail(f"{name}: 已找到；版本检查因 --dry-run 跳过。")
+    requirements = source / "requirements.txt"
+    if requirements.is_file():
+        detail("Python 依赖将从 requirements.txt 安装到程序独立环境。")
+    elif dry_run:
+        detail("requirements.txt 缺失；因 --dry-run 放行。")
+
+
+def component_install(source: Path, name: str, skills_dir: Path, *, dry_run: bool = False) -> int:
+    if source != SOURCE_ROOT and not dry_run:
+        logo_banner(source)
+        declaration(source, "start")
+    label, relative = COMPONENTS[name]
+    content = source / relative
+    destination = skills_dir.expanduser().absolute() / name / "SKILL.md"
+    print(f"{label}: {destination}")
     if dry_run:
-        phase("演练模式，不会修改文件")
-        detail("因 --dry-run，真实安装目录与回滚版本检查按通过处理；不代表已有可回滚版本。")
-        print(f"安装目录: {target.expanduser().absolute()}")
-        print("计划: 将 current 切换到 previous，保留原当前版本供再次回滚。")
-        print("演练完成，没有修改版本指针。")
+        detail("因 --dry-run，来源及目标检查按通过处理；不安装组件。")
         return 0
-    target = _resolved_root(target, "安装目录")
-    _check_target_path(target)
-    current = read_pointer(target, CURRENT_FILE)
-    previous = read_pointer(target, PREVIOUS_FILE)
-    if not current:
-        raise ValueError("当前没有版本化安装，无法回滚")
-    if not previous:
-        raise ValueError("没有可回滚的上一版本")
-    if not release_matches(target, previous):
-        raise ValueError(f"上一版本不完整，拒绝切换: {previous}")
-    print(f"当前版本: {current}")
-    print(f"回滚版本: {previous}")
-    with InstallLock(target):
-        if read_pointer(target, CURRENT_FILE) != current:
-            raise ValueError("确认期间 current 指针发生变化，请重新运行")
-        if previous == LEGACY_ID:
-            (target / CURRENT_FILE).unlink()
-        else:
-            _write_pointer(target, CURRENT_FILE, previous)
-        _write_pointer(target, PREVIOUS_FILE, current)
-    print("==> 回滚指针已切换；重启服务后生效。")
+    if not content.is_file() or content.is_symlink():
+        raise ValueError(f"组件源码缺失: {content}")
+    data = content.read_bytes()
+    if destination.exists():
+        if destination.is_symlink() or destination.read_bytes() != data:
+            raise ValueError(f"目标已有不同内容，保留原文件: {destination}")
+        print("组件已安装，没有修改。")
+        return 0
+    if not confirm("安装此组件？"):
+        return 0
+    # Atomic file replacement never leaves half a skill, even on a full disk.
+    created_directories = []
+    parent = destination.parent
+    while not parent.exists():
+        created_directories.append(parent)
+        parent = parent.parent
+    try:
+        _atomic_write(destination, data, 0o644, root=skills_dir.expanduser().absolute())
+    finally:
+        if not destination.exists():
+            for parent in created_directories:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+    print("组件已安装；Codex 将按请求需要读取 skill。")
     return 0
 
 
+def menu_choice() -> str:
+    print("1. 安装 / 更新\n2. 附加组件\n0. 退出")
+    while True:
+        try:
+            answer = input("选择 [1]: ").strip()
+        except EOFError:
+            return "exit"
+        if answer in ("", "1"):
+            return "install"
+        if answer == "2":
+            return "components"
+        if answer == "0":
+            return "exit"
+        print("请输入 0、1 或 2。")
+
+
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(
-        prog="installer.py",
-        description="安装、更新或回滚 codex-wechat 的不可变版本。",
-    )
-    subparsers = result.add_subparsers(dest="command", required=True)
-    for name, help_text in (
-        ("install", "安装 codex-wechat"),
-        ("update", "从新源码构建并切换版本"),
-        ("rollback", "切换到上一版本"),
-        ("bootstrap", "自动识别首次安装或更新，供一行安装入口调用"),
-    ):
-        command = subparsers.add_parser(name, help=help_text)
-        command.add_argument(
-            "--dir",
-            type=Path,
-            default=None,
-            help="项目安装目录；默认使用当前平台的标准目录",
-        )
-        command.add_argument("--dry-run", action="store_true", help="显示计划但不修改文件")
-        if name != "rollback":
-            command.add_argument("--repo", help="公开 GitHub 更新仓库的 HTTPS 地址；安装时记录，更新时获取源码")
-            command.add_argument("--ref", help="更新来源的分支或标签；默认 main 或已保存的值")
-        if name == "update":
-            command.add_argument("--source", type=Path, help="从本地新源码更新，不访问远程仓库")
+    result = argparse.ArgumentParser(description="安装 / 更新 codex-wechat 或安装附加组件。")
+    result.add_argument("command", nargs="?", default="menu", choices=("menu", "install", "update", "bootstrap", "components"))
+    result.add_argument("--dir", type=Path)
+    result.add_argument("--dry-run", action="store_true")
+    result.add_argument("--non-interactive", action="store_true", help="执行指定操作，保留保守默认，不询问、不启动服务或安装额外组件")
+    result.add_argument("--repo", help="公开 GitHub HTTPS 仓库")
+    result.add_argument("--ref", help="分支或标签")
+    result.add_argument("--source", type=Path, help="本地源码，不联网")
+    result.add_argument("--component", choices=tuple(COMPONENTS))
+    result.add_argument("--skills-dir", type=Path, default=Path.home() / ".agents/skills")
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
+    global NON_INTERACTIVE
     options = parser().parse_args(argv)
-    target = (options.dir or default_target()).expanduser()
-    if not options.dry_run and target.is_symlink():
-        raise ValueError(f"安装目录不能是符号链接: {target}")
-    target = target.absolute() if options.dry_run else target.resolve()
-    if not options.dry_run and not IS_WINDOWS and target != default_target().resolve():
-        raise ValueError(f"Linux 安装目录必须是 {default_target()}")
-    if options.command == "rollback":
-        return rollback(target, dry_run=options.dry_run)
-    if options.command == "bootstrap":
-        if not options.repo:
-            raise ValueError("一行安装入口需要 --repo；公开仓库尚未配置，不会使用旧仓库。")
-        return bootstrap(target, update_source(options.repo, options.ref or "main"),
-                         dry_run=options.dry_run)
-    if options.command == "update":
-        if options.source is not None:
-            if options.repo or options.ref:
-                raise ValueError("--source 不能与 --repo / --ref 同时使用。")
-            return update(options.source, target, dry_run=options.dry_run)
-        installed_entry = SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents
-        if options.repo or options.ref or installed_entry:
-            previous = None if options.repo else saved_update_source(target)
-            if not options.repo and not previous:
-                if options.dry_run:
-                    detail("尚未配置更新来源；正式更新时需要 --repo，演练不要求来源已经配置。")
-                    return remote_update(target, {"repo": "未配置", "ref": options.ref or "main"}, dry_run=True)
-                raise ValueError("尚未配置更新来源，请运行 update --repo https://github.com/OWNER/REPO --ref main；不会使用旧仓库。")
-            choice = update_source(options.repo or previous["repo"],
-                                   options.ref or (previous["ref"] if previous else "main"))
-            return remote_update(target, choice, dry_run=options.dry_run)
-        return update(SOURCE_ROOT, target, dry_run=options.dry_run)
+    if options.command == "bootstrap" and not options.repo:
+        raise ValueError("一行安装入口需要 --repo；不会使用旧仓库。")
+    if options.source is not None and (options.repo or options.ref):
+        raise ValueError("--source 不能与 --repo / --ref 同时使用。")
     if options.ref and not options.repo:
-        raise ValueError("install --ref 需要同时指定 --repo。")
-    choice = update_source(options.repo, options.ref or "main") if options.repo else None
-    if choice:
-        print(f"安装成功后保存更新来源: {choice['repo']} ({choice['ref']})")
-    result = install(SOURCE_ROOT, target, dry_run=options.dry_run)
-    if choice and not options.dry_run:
-        remember_update_source(target, SOURCE_ROOT, choice)
-    return result
+        raise ValueError("--ref 需要同时指定 --repo。")
+    previous_mode = NON_INTERACTIVE
+    NON_INTERACTIVE = options.non_interactive
+    try:
+        command = options.command
+        if options.source is None and not options.repo:
+            logo_banner(SOURCE_ROOT)
+            declaration(SOURCE_ROOT, "start")
+        if command == "bootstrap":
+            # The network entry offers exactly the same menu as the local entry.
+            command = "menu"
+        if command == "menu":
+            if options.non_interactive:
+                command = "install"
+            elif not (sys.stdin.isatty() and sys.stdout.isatty()) and not options.dry_run:
+                raise ValueError("交互安装需要终端；自动化请显式使用 --non-interactive。")
+            else:
+                command = menu_choice()
+        if command == "exit":
+            return 0
+        if not options.non_interactive and not options.dry_run and not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise ValueError("交互安装需要终端；自动化请显式使用 --non-interactive。")
+        target = (options.dir or default_target()).expanduser()
+        if command == "components":
+            name = options.component
+            if name is None:
+                if options.non_interactive:
+                    raise ValueError("非交互组件安装需要 --component。")
+                for number, (key, (label, _)) in enumerate(COMPONENTS.items(), 1):
+                    print(f"{number}. {label} ({key})")
+                print("0. 退出")
+                answer = input("选择 [0]: ").strip()
+                if answer in ("", "0"):
+                    return 0
+                keys = list(COMPONENTS)
+                if not answer.isdigit() or not 1 <= int(answer) <= len(keys):
+                    raise ValueError("组件编号无效")
+                name = keys[int(answer) - 1]
+            source = options.source or SOURCE_ROOT
+            if options.source is None and not options.repo and not options.dry_run:
+                if SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents:
+                    identifier = read_pointer(target, CURRENT_FILE)
+                    if identifier:
+                        source = release_path(target, identifier)
+            if options.repo:
+                choice = update_source(options.repo, options.ref or "main")
+                if options.dry_run:
+                    return component_install(source, name, options.skills_dir, dry_run=True)
+                with tempfile.TemporaryDirectory(prefix="codex-wechat-component-") as directory:
+                    source = Path(directory) / "source"
+                    fetch_update_source(choice, source)
+                    return component_install(source, name, options.skills_dir)
+            return component_install(source, name, options.skills_dir, dry_run=options.dry_run)
+        if options.component or options.skills_dir != Path.home() / ".agents/skills":
+            raise ValueError("组件参数只适用于 components。")
+        if not options.dry_run and target.is_symlink():
+            raise ValueError(f"安装目录不能是符号链接: {target}")
+        target = target.absolute() if options.dry_run else target.resolve()
+        if not options.dry_run and not IS_WINDOWS and target != default_target().resolve():
+            raise ValueError(f"Linux 安装目录必须是 {default_target()}")
+        if options.repo:
+            return bootstrap(target, update_source(options.repo, options.ref or "main"), dry_run=options.dry_run)
+        if options.ref:
+            raise ValueError("--ref 需要同时指定 --repo。")
+        installed_entry = SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents
+        if options.source is None and installed_entry and not options.dry_run and (command == "update" or read_pointer(target, CURRENT_FILE)):
+            choice = saved_update_source(target)
+            if choice:
+                return bootstrap(target, choice, dry_run=options.dry_run)
+            if not options.dry_run:
+                raise ValueError("尚未配置更新来源，请指定 --repo 或 --source。")
+        source = options.source or SOURCE_ROOT
+        updating = False if options.dry_run else _installation_state(target) is not None
+        return (update if updating else install)(source, target, dry_run=options.dry_run)
+    finally:
+        NON_INTERACTIVE = previous_mode
 
 
 if __name__ == "__main__":

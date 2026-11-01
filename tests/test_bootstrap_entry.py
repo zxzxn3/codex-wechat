@@ -57,7 +57,8 @@ class BootstrapEntryTests(unittest.TestCase):
     def test_dry_run_bypasses_target_and_performs_no_download(self):
         self.target.write_text("not a directory")
         with patch.object(installer, "fetch_update_source") as fetch, \
-             patch.object(installer, "_installation_state", side_effect=AssertionError("inspect target")):
+             patch.object(installer, "_installation_state", side_effect=AssertionError("inspect target")), \
+             patch("builtins.input", return_value="y"):
             self.assertEqual(installer.bootstrap(self.target, self.choice, dry_run=True), 0)
             fetch.assert_not_called()
         self.assertEqual(self.target.read_text(), "not a directory")
@@ -67,8 +68,8 @@ class BootstrapEntryTests(unittest.TestCase):
         with patch.object(installer, "default_target", return_value=self.target), \
              patch.object(installer, "saved_update_source", side_effect=AssertionError("infer repo")):
             with self.assertRaisesRegex(ValueError, "需要 --repo"):
-                installer.main(["bootstrap"])
-            self.assertEqual(installer.main(["bootstrap", "--repo", self.choice["repo"], "--dry-run"]), 0)
+                installer.main(["bootstrap", "--non-interactive"])
+            self.assertEqual(installer.main(["bootstrap", "--repo", self.choice["repo"], "--dry-run", "--non-interactive"]), 0)
 
     def test_download_failure_does_not_create_installation(self):
         with patch.object(installer, "fetch_update_source", side_effect=OSError("offline")), \
@@ -81,7 +82,10 @@ class BootstrapEntryTests(unittest.TestCase):
     def test_same_version_rerun_keeps_saved_source_and_repairs_missing_one(self):
         source = self.make_source(self.root / "source")
         self.target.mkdir()
-        identifier = installer.release_identifier(installer.project_files(source))
+        files = installer.project_files(source)
+        identifier = installer.release_identifier(files)
+        with patch.object(installer, "prepare_runtime"):
+            installer.install_release(self.target, identifier, files)
         (self.target / installer.CURRENT_FILE).write_text(identifier + "\n")
         saved = self.target / installer.UPDATE_SOURCE_FILE
         old = {"repo": "https://github.com/old/repo.git", "ref": "main"}

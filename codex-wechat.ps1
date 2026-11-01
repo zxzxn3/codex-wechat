@@ -3,7 +3,7 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet('login', 'start', 'status', 'service-start', 'service-stop',
-                 'service-restart', 'service-status', 'autostart', 'logs', 'uninstall', 'update', 'rollback')]
+                 'service-restart', 'service-status', 'autostart', 'logs', 'uninstall', 'update', 'install', 'menu', 'components')]
     [string]$Command = 'status',
     [Parameter(Position = 1)]
     [ValidateSet('on', 'off')]
@@ -13,7 +13,10 @@ param(
     [switch]$Json,
     [string]$Repo,
     [string]$Ref,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NonInteractive,
+    [string]$Component,
+    [string]$SkillsDir
 )
 
 Set-StrictMode -Version Latest
@@ -28,12 +31,9 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
 } else {
     $ScriptRoot
 }
-if ($Command -in @('update', 'rollback')) {
+if ($Command -in @('update', 'install', 'menu', 'components')) {
     if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $PurgeData -or $Json) {
-        throw 'update/rollback do not accept -Value, -Follow, -PurgeData or -Json'
-    }
-    if ($Command -eq 'rollback' -and ($Repo -or $Ref)) {
-        throw 'rollback does not accept -Repo or -Ref'
+        throw 'installer commands do not accept -Value, -Follow, -PurgeData or -Json'
     }
     $Installer = Join-Path $InstallRoot 'installer.py'
     if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
@@ -49,10 +49,13 @@ if ($Command -in @('update', 'rollback')) {
     if ($Repo) { $InstallerArguments += @('--repo', $Repo) }
     if ($Ref) { $InstallerArguments += @('--ref', $Ref) }
     if ($DryRun) { $InstallerArguments += '--dry-run' }
+    if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
+    if ($Component) { $InstallerArguments += @('--component', $Component) }
+    if ($SkillsDir) { $InstallerArguments += @('--skills-dir', $SkillsDir) }
     & $UpdatePython @InstallerArguments
     exit $LASTEXITCODE
 }
-if ($Repo -or $Ref -or $DryRun) { throw '-Repo, -Ref and -DryRun are only valid with update/rollback' }
+if ($Repo -or $Ref -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) { throw '-Repo, -Ref and -DryRun are only valid with installer commands' }
 $Project = $ScriptRoot
 $CurrentFile = Join-Path $InstallRoot 'current'
 $CurrentItem = Get-Item -LiteralPath $CurrentFile -Force -ErrorAction SilentlyContinue

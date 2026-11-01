@@ -1,538 +1,100 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [switch]$NoStart,
-    [switch]$Force,
+    [switch]$PreparedRuntime,
     [switch]$PreserveAutostart,
+    [switch]$NoStart,
     [string]$InstallRoot,
-    [ValidateSet('on', 'off')]
-    [string]$Autostart
+    [switch]$DryRun,
+    [switch]$NonInteractive,
+    [string]$Repo,
+    [string]$Ref
 )
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$TaskName = 'CodexWeChat'
-$Project = $PSScriptRoot
-if (-not $InstallRoot) {
-    if ($env:CODEX_WECHAT_INSTALL_ROOT) {
-        $InstallRoot = $env:CODEX_WECHAT_INSTALL_ROOT
-    } elseif ((Split-Path -Leaf (Split-Path -Parent $Project)) -eq 'releases') {
-        $InstallRoot = Split-Path -Parent (Split-Path -Parent $Project)
-    } else {
-        $InstallRoot = $Project
+# Public local entry delegates to the same installer as the network entry.
+if (-not $PreparedRuntime) {
+    $py = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue
+    $prefix = @('-3')
+    if (-not $py) {
+        $py = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+        $prefix = @()
     }
+    if (-not $py) { throw 'Python 3.11+ is required to run the installer.' }
+    $arguments = @((Join-Path $PSScriptRoot 'installer.py'), 'menu')
+    if ($InstallRoot) { $arguments += @('--dir', $InstallRoot) }
+    if ($DryRun) { $arguments += '--dry-run' }
+    if ($NonInteractive) { $arguments += '--non-interactive' }
+    if ($Repo) { $arguments += @('--repo', $Repo) }
+    if ($Ref) { $arguments += @('--ref', $Ref) }
+    & $py.Source @prefix -u @arguments
+    exit $LASTEXITCODE
 }
+# Internal integration only: Python has finished downloads and runtime checks.
+if (-not $InstallRoot -or -not $env:LOCALAPPDATA) { throw 'InstallRoot and LOCALAPPDATA are required.' }
+if ($DryRun -or $NonInteractive -or $Repo -or $Ref) { throw 'Invalid internal integration arguments.' }
+$TaskName = 'CodexWeChat'
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
+$Project = $PSScriptRoot
 $DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
-$LogDir = Join-Path $DataRoot 'logs'
-$LogPath = Join-Path $LogDir 'service.log'
-$Venv = Join-Path $Project '.venv'
-$VenvPython = Join-Path $Venv 'Scripts\python.exe'
-$VenvPythonw = Join-Path $Venv 'Scripts\pythonw.exe'
-$serviceScript = Join-Path $Project 'windows_service.py'
-$StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
-$StablePythonw = Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'
-$StablePython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
-$StableSupervisorReady = (
-    (Test-Path -LiteralPath $StableServiceScript -PathType Leaf) -and
-    (Test-Path -LiteralPath $StablePython)
-)
-$ExpectedActionPrefixes = @(
-    ('"' + $StableServiceScript + '" supervise'),
-    ('"' + $serviceScript + '" supervise'),
-    ('"' + (Join-Path $InstallRoot 'windows_service.py') + '" supervise')
-)
-$script:Warnings = @()
-
-function Fail([string]$Message) {
-    throw "install.ps1: $Message"
+$LogPath = Join-Path $DataRoot 'logs\service.log'
+$ServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
+$Python = Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    $Python = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
 }
-
-function Add-Warning([string]$Message) {
-    $script:Warnings += $Message
-    Write-Warning $Message
+foreach ($path in @($Python, $ServiceScript)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Prepared runtime missing: $path" }
 }
-
-function Quote-Arg([string]$Value) {
-    if ($Value.Contains('"')) {
-        Fail "paths containing a double quote are not supported"
-    }
-    return '"' + $Value + '"'
-}
-
-function Test-OwnedTask([object]$Task) {
-    if (-not $Task) {
-        return $false
-    }
-    $actions = @($Task.Actions)
-    if ($actions.Count -ne 1) {
-        return $false
-    }
-    $actionText = [string]$actions[0].Arguments
-    foreach ($prefix in $ExpectedActionPrefixes) {
-        if ($actionText.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-            if ($actionText.Length -eq $prefix.Length -or
-                    [char]::IsWhiteSpace($actionText[$prefix.Length])) {
-                return $true
-            }
-        }
-    }
-    return $false
-}
-
-function Get-LogonTriggers([object]$Task) {
-    return @($Task.Triggers | Where-Object {
-        $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger'
-    })
-}
-
-function Get-EffectiveAutostart([object]$Task) {
-    $triggers = @(Get-LogonTriggers $Task)
-    if ($triggers.Count -eq 0) {
-        return $null
-    }
-    $triggerEnabled = @($triggers | Where-Object { [bool]$_.Enabled }).Count -gt 0
-    return [bool]$Task.Settings.Enabled -and $triggerEnabled
-}
-
-function Find-Python {
-    $py = Get-Command py.exe -ErrorAction SilentlyContinue
-    if ($py) {
-        try {
-            $candidate = & $py.Source -3 -c "import sys; print(sys.executable)" 2>$null
-            if ($LASTEXITCODE -eq 0 -and $candidate) {
-                return [string]$candidate
-            }
-        } catch {
-        }
-    }
-    $python = Get-Command python.exe -ErrorAction SilentlyContinue
-    if ($python) {
-        return $python.Source
-    }
-    return $null
-}
-
-function Test-Python311([string]$Path) {
-    if (-not $Path) {
-        return $false
-    }
-    $exitCode = 1
-    try {
-        & $Path -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" 2>$null |
-            Out-Null
-        $exitCode = $LASTEXITCODE
-    } catch {
-        $exitCode = 1
-    }
-    return $exitCode -eq 0
-}
-
-function Test-PythonDependencies([string]$Python) {
-    if (-not $Python) {
-        return $false
-    }
-    $check = @'
-try:
-    import cryptography
-    import qrcode
-    import websockets
-    from websockets.asyncio.client import unix_connect
-    crypto = tuple(int(part) for part in cryptography.__version__.split(".")[:2])
-    websocket_major = int(websockets.__version__.split(".")[0])
-except Exception:
-    raise SystemExit(1)
-raise SystemExit(0 if crypto >= (38, 0) and 15 <= websocket_major < 18 else 1)
-'@
-    $exitCode = 1
-    try {
-        & $Python -c $check 2>$null | Out-Null
-        $exitCode = $LASTEXITCODE
-    } catch {
-        $exitCode = 1
-    }
-    return $exitCode -eq 0
-}
-
-function Get-NativeCodexState {
-    $candidates = @()
-    $standalone = Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.exe'
-    if (Test-Path -LiteralPath $standalone -PathType Leaf) {
-        $candidates += $standalone
-    }
-    $command = Get-Command codex.exe -CommandType Application -ErrorAction SilentlyContinue
-    if ($command) {
-        $candidates += $command.Source
-    }
-    $candidates = @($candidates | Select-Object -Unique)
-    foreach ($candidate in $candidates) {
-        $exitCode = 1
-        try {
-            & $candidate --version 2>$null | Out-Null
-            $exitCode = $LASTEXITCODE
-        } catch {
-            $exitCode = 1
-        }
-        if ($exitCode -eq 0) {
-            return [pscustomobject]@{ Ready = $true; Path = $candidate }
-        }
-        Add-Warning "Codex CLI candidate could not run: $candidate"
-    }
-    Add-Warning 'Native Codex CLI (codex.exe) was not found or is not runnable. Install the CLI or configure a native launcher, then rerun.'
-    return [pscustomobject]@{ Ready = $false; Path = $null }
-}
-
-function Get-CurlState {
-    $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
-    if (-not $curl) {
-        Add-Warning 'curl.exe 8.4 or newer was not found; runtime login and messaging will be unavailable.'
-        return [pscustomobject]@{ Ready = $false; Version = $null }
-    }
-    $versionLine = $null
-    $exitCode = 1
-    try {
-        $versionLine = (& $curl.Source --version 2>$null | Select-Object -First 1)
-        $exitCode = $LASTEXITCODE
-    } catch {
-        $exitCode = 1
-    }
-    if ($exitCode -ne 0 -or -not $versionLine -or
-            $versionLine -notmatch 'curl\s+(\d+)\.(\d+)') {
-        Add-Warning "curl.exe could not be executed or its version could not be read: $($curl.Source)"
-        return [pscustomobject]@{ Ready = $false; Version = $null }
-    }
-    $major = [int]$Matches[1]
-    $minor = [int]$Matches[2]
-    if ($major -lt 8 -or ($major -eq 8 -and $minor -lt 4)) {
-        Add-Warning "curl.exe 8.4 or newer is required; found $major.$minor at $($curl.Source)."
-        return [pscustomobject]@{ Ready = $false; Version = "$major.$minor" }
-    }
-    return [pscustomobject]@{ Ready = $true; Version = "$major.$minor" }
-}
-
-if ($env:OS -ne 'Windows_NT') {
-    Fail 'this installer is for Windows only'
-}
-if ([Environment]::OSVersion.Version.Build -lt 22000) {
-    Fail 'Windows 11 is required'
-}
-if (-not $env:LOCALAPPDATA) {
-    Fail 'LOCALAPPDATA is not set'
-}
-if (-not (Test-Path (Join-Path $Project 'codex_wechat.py'))) {
-    Fail 'codex_wechat.py is missing from the project directory'
-}
-
-# Keep the parameter contract strict even when dependencies are missing.
-if (-not $PSBoundParameters.ContainsKey('Autostart') -and -not $PreserveAutostart) {
-    if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected -or
-            -not [Environment]::UserInteractive) {
-        Fail 'non-interactive install requires an explicit -Autostart on|off choice'
+foreach ($path in @($DataRoot, $InstallRoot)) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if ($item -and ((-not $item.PSIsContainer) -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+        throw "Directory must not be a file or reparse point: $path"
     }
 }
-
-if (Test-Path $DataRoot) {
-    $dataItem = Get-Item -LiteralPath $DataRoot -Force
-    if (-not $dataItem.PSIsContainer) {
-        Fail "data path is not a directory: $DataRoot"
-    }
-    if (($dataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        Fail "data path must not be a reparse point: $DataRoot"
-    }
+function Quote-Arg([string]$value) {
+    if ($value.Contains('"')) { throw 'Paths containing double quotes are not supported.' }
+    return '"' + $value + '"'
 }
-New-Item -ItemType Directory -Force -Path $DataRoot, $StateDir, (Join-Path $DataRoot 'workspace'), $LogDir | Out-Null
-if (-not (Test-Path $ConfigPath)) {
-    $defaultConfig = [ordered]@{
-        cwd = (Join-Path $DataRoot 'workspace')
-        backends = [ordered]@{
-            codex = [ordered]@{
-                env = [ordered]@{}
-                threadOptions = [ordered]@{}
-            }
-        }
-    }
-    $json = ($defaultConfig | ConvertTo-Json -Depth 8) + "`n"
-    [IO.File]::WriteAllText($ConfigPath, $json, (New-Object Text.UTF8Encoding($false)))
-}
-
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-$ownedExisting = $existing -and (Test-OwnedTask $existing)
-if ($existing -and -not $ownedExisting -and -not $Force) {
-    Fail "scheduled task '$TaskName' exists but is not this installation; use -Force to replace it"
-}
-
-# Python is optional for preparation: its absence skips only the stages that
-# need it, and never overwrites an existing environment or data directory.
-$BootstrapPython = Find-Python
-$bootstrapReady = $false
-if ($BootstrapPython) {
-    $bootstrapReady = Test-Python311 $BootstrapPython
-}
-
-$venvPythonReady = $false
-if (Test-Path $VenvPython) {
-    if (Test-Python311 $VenvPython) {
-        $venvPythonReady = $true
-    } else {
-        Add-Warning "The existing .venv Python is not usable; remove .venv and rerun after installing Python 3.11+."
-    }
-} elseif (Test-Path $Venv) {
-    $venvItem = Get-Item -LiteralPath $Venv -Force
-    if (-not $venvItem.PSIsContainer) {
-        Fail "path conflict: $Venv is not a directory"
-    }
-    Add-Warning "The existing .venv has no Scripts\python.exe; remove .venv and rerun after installing Python 3.11+."
-} elseif ($bootstrapReady) {
-    $venvCreated = $false
-    try {
-        & $BootstrapPython -m venv $Venv
-        $venvCreated = ($LASTEXITCODE -eq 0)
-    } catch {
-        $venvCreated = $false
-    }
-    if (-not $venvCreated -or -not (Test-Path $VenvPython)) {
-        Add-Warning "Could not create a usable .venv; pip and task registration will be skipped."
-    } elseif (Test-Python311 $VenvPython) {
-        $venvPythonReady = $true
-    } else {
-        Add-Warning "The new .venv Python is not 3.11+; remove .venv and rerun after installing a supported Python."
-    }
-} else {
-    Add-Warning 'Python 3.11+ is unavailable; .venv creation, pip and task registration will be skipped.'
-}
-
-$pythonDepsReady = $false
-if ($venvPythonReady) {
-    $requirements = Join-Path $Project 'requirements.txt'
-    if (Test-Path $requirements) {
-        $pipOk = $false
-        try {
-            & $VenvPython -m pip install --disable-pip-version-check -r $requirements
-            $pipOk = ($LASTEXITCODE -eq 0)
-        } catch {
-            $pipOk = $false
-        }
-        if (-not $pipOk) {
-            Add-Warning "pip could not install requirements.txt; checking the packages already present in .venv."
-        }
-    } else {
-        Add-Warning 'requirements.txt is missing; checking the packages already present in .venv.'
-    }
-    if (Test-PythonDependencies $VenvPython) {
-        $pythonDepsReady = $true
-    } else {
-        Add-Warning "Python dependencies are missing or incompatible; run .venv\Scripts\python.exe -m pip install -r requirements.txt."
-    }
-}
-
-$codexState = Get-NativeCodexState
-$curlState = Get-CurlState
-$runtimeReady = $venvPythonReady -and $pythonDepsReady -and $codexState.Ready -and $curlState.Ready
-
-$canRegisterTask = $venvPythonReady
-$autostartEnabled = $null
-if ($PSBoundParameters.ContainsKey('Autostart')) {
-    $autostartEnabled = $Autostart -eq 'on'
-}
-$taskRegistered = $false
-$taskPreserved = $false
-$foreignTaskPreserved = $false
-
-if ($canRegisterTask) {
-    if (-not $PSBoundParameters.ContainsKey('Autostart')) {
-        $defaultAutostart = $false
-        if ($ownedExisting) {
-            $currentAutostart = Get-EffectiveAutostart $existing
-            if ($null -ne $currentAutostart) {
-                $defaultAutostart = [bool]$currentAutostart
-            }
-        }
-        if ($PreserveAutostart) {
-            $autostartEnabled = $defaultAutostart
-        } else {
-            $prompt = if ($defaultAutostart) {
-                'Enable automatic start at Windows sign-in? [Y/n]'
-            } else {
-                'Enable automatic start at Windows sign-in? [y/N]'
-            }
-            while ($true) {
-                $answer = Read-Host $prompt
-                if ([string]::IsNullOrWhiteSpace($answer)) {
-                    $autostartEnabled = $defaultAutostart
-                    break
-                }
-                if ($answer -match '^(?i:y|yes)$') {
-                    $autostartEnabled = $true
-                    break
-                }
-                if ($answer -match '^(?i:n|no)$') {
-                    $autostartEnabled = $false
-                    break
-                }
-                Write-Host 'Please answer yes or no.'
+$autostart = $false
+if ($existing) {
+    $prefixes = @(
+        ('"' + $ServiceScript + '" supervise'),
+        ('"' + (Join-Path $InstallRoot 'windows_service.py') + '" supervise'),
+        ('"' + (Join-Path $Project 'windows_service.py') + '" supervise')
+    )
+    $owned = $false
+    $actions = @($existing.Actions)
+    if ($actions.Count -eq 1) {
+        $text = [string]$actions[0].Arguments
+        foreach ($prefix in $prefixes) {
+            if ($text.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
+                    ($text.Length -eq $prefix.Length -or [char]::IsWhiteSpace($text[$prefix.Length]))) {
+                $owned = $true
             }
         }
     }
-
-    if ($StableSupervisorReady) {
-        $taskPython = $StablePythonw
-        if (-not (Test-Path -LiteralPath $taskPython)) {
-            $taskPython = $StablePython
-        }
-        $taskScript = $StableServiceScript
-        $taskArguments = @(
-            (Quote-Arg $taskScript),
-            'supervise',
-            '--install-root', (Quote-Arg $InstallRoot),
-            '--state-dir', (Quote-Arg $StateDir),
-            '--config', (Quote-Arg $ConfigPath),
-            '--log', (Quote-Arg $LogPath)
-        ) -join ' '
-        $taskWorkingDirectory = $InstallRoot
-    } else {
-        $taskPython = $VenvPythonw
-        if (-not (Test-Path $taskPython)) {
-            $taskPython = $VenvPython
-        }
-        $taskScript = $serviceScript
-        $taskArguments = @(
-            (Quote-Arg $taskScript),
-            'supervise',
-            '--project', (Quote-Arg $Project),
-            '--state-dir', (Quote-Arg $StateDir),
-            '--config', (Quote-Arg $ConfigPath),
-            '--log', (Quote-Arg $LogPath)
-        ) -join ' '
-        $taskWorkingDirectory = $Project
-    }
-
-    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $action = New-ScheduledTaskAction -Execute $taskPython -Argument $taskArguments `
-        -WorkingDirectory $taskWorkingDirectory
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
-    $trigger.Enabled = [bool]$autostartEnabled
-    $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) `
-        -MultipleInstances IgnoreNew `
-        -StartWhenAvailable `
-        -Hidden
-
-    try {
-        if ($ownedExisting) {
-            Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-                -Principal $principal -Settings $settings | Out-Null
-        } else {
-            Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-                -Principal $principal -Settings $settings -Force | Out-Null
-        }
-        $installedTask = Get-ScheduledTask -TaskName $TaskName
-        if (-not $installedTask) {
-            Fail "scheduled task '$TaskName' could not be read after registration"
-        }
-        if (-not [bool]$installedTask.Settings.Enabled) {
-            Enable-ScheduledTask -TaskName $TaskName | Out-Null
-        }
-        $taskRegistered = $true
-    } catch {
-        Fail "could not register or update scheduled task '$TaskName': $($_.Exception.Message)"
-    }
+    if (-not $owned) { throw "Task $TaskName belongs to another installation; it was not changed." }
+    $triggers = @($existing.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' })
+    $autostart = [bool]$existing.Settings.Enabled -and @($triggers | Where-Object { $_.Enabled }).Count -gt 0
+}
+$user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$arguments = @((Quote-Arg $ServiceScript), 'supervise', '--install-root', (Quote-Arg $InstallRoot),
+    '--state-dir', (Quote-Arg $StateDir), '--config', (Quote-Arg $ConfigPath), '--log', (Quote-Arg $LogPath)) -join ' '
+$action = New-ScheduledTaskAction -Execute $Python -Argument $arguments -WorkingDirectory $InstallRoot
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+$trigger.Enabled = $autostart
+$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable -Hidden
+if ($existing) {
+    $settings.Enabled = [bool]$existing.Settings.Enabled
+    Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 } else {
-    if ($existing) {
-        $taskPreserved = $true
-        if ($ownedExisting) {
-            Add-Warning "The existing scheduled task was preserved but not updated because no usable Python environment is available."
-        } else {
-            $foreignTaskPreserved = $true
-            Add-Warning "The existing scheduled task is not owned by this project and was not replaced because no usable Python environment is available."
-        }
-    } else {
-        Add-Warning "The scheduled task was not registered because no usable Python 3.11+ environment is available."
-    }
-    if ($PSBoundParameters.ContainsKey('Autostart')) {
-        Add-Warning 'The autostart choice was not applied because the scheduled task was not registered or updated.'
-    }
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 }
-
-# Binding belongs to the first interactive foreground launch, never installation.
-$accountPath = Join-Path $StateDir 'account.json'
-$bound = Test-Path $accountPath
-$loginState = if ($bound) { 'already bound' } else { 'not bound (scan on first foreground start)' }
-
-$startState = 'not started'
-if ($taskRegistered) {
-    $task = Get-ScheduledTask -TaskName $TaskName
-    if (-not $task) {
-        Fail "scheduled task '$TaskName' disappeared after registration"
-    }
-    if ($task.State -in @('Running', 'Queued')) {
-        $startState = 'already running'
-    } elseif ($NoStart) {
-        $startState = 'not requested (-NoStart)'
-    } elseif (-not $bound) {
-        $startState = 'not started (WeChat not bound)'
-    } elseif (-not $runtimeReady) {
-        $startState = 'not started (dependencies missing)'
-    } else {
-        try {
-            Start-ScheduledTask -TaskName $TaskName
-            $startState = 'start request sent'
-        } catch {
-            Fail "could not request a service start: $($_.Exception.Message)"
-        }
-    }
-} elseif ($taskPreserved) {
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($task -and $task.State -in @('Running', 'Queued')) {
-        $startState = 'already running (existing task preserved)'
-    } else {
-        $startState = 'not started (task not updated; Python missing)'
-    }
-} else {
-    $startState = 'not started (task not registered)'
-}
-
-$pending = (-not $runtimeReady) -or (-not $taskRegistered)
-Write-Host ''
-if ($script:Warnings.Count -gt 0) {
-    Write-Host 'Warnings:'
-    foreach ($warning in $script:Warnings) {
-        Write-Host (" - " + $warning)
-    }
-    Write-Host ''
-}
-if ($pending) {
-    Write-Host 'Result: preparation incomplete; dependencies or task registration are pending.'
-} elseif ($NoStart) {
-    Write-Host 'Result: ready; start was not requested because -NoStart was used.'
-} else {
-    Write-Host 'Result: ready.'
-}
-if ($taskRegistered) {
-    Write-Host "Task: registered ($TaskName)"
-} elseif ($taskPreserved) {
-    if ($foreignTaskPreserved) {
-        Write-Host "Task: existing foreign task preserved; not updated ($TaskName)"
-    } else {
-        Write-Host "Task: existing task preserved; not updated ($TaskName)"
-    }
-} else {
-    Write-Host 'Task: not registered (no usable Python)'
-}
-if ($taskRegistered) {
-    Write-Host ("Autostart: " + $(if ($autostartEnabled) { 'on' } else { 'off' }))
-} else {
-    Write-Host 'Autostart: not applied'
-}
-Write-Host ("Login: " + $loginState)
-Write-Host ("Start: " + $startState)
-Write-Host ("Data: " + $DataRoot)
-Write-Host ("Log:  " + $LogPath)
-if ($pending -or -not $bound) {
-    Write-Host ("Next: fix dependency warnings if any, then run .\codex-wechat.ps1 start in an interactive terminal.")
-}
+Write-Host 'Task prepared; autostart preserved (off on first install); service not started.'

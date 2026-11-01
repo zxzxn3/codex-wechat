@@ -64,21 +64,17 @@ Windows 使用当前交互用户的计划任务和 `windows_service.py` supervis
 
 ## 安装与更新
 
-`bootstrap.sh` / `bootstrap.ps1` 是可从网络单独运行的薄入口，显式接收仓库与 ref，不读取旧仓库配置；只检查入口所需环境并获取同来源的 installer.py。完整项目获取、现有安装识别和版本操作均由安装器的 bootstrap 子命令完成，不在两个平台复制业务逻辑。Linux 将确认输入输出连接到交互终端，解决 curl 管道占用 stdin 的问题；临时下载仅在本次独立临时目录内清理。入口 dry-run 不下载、不修改安装。没有公开仓库默认值，发布前仍需确定来源地址。
+installer.py 维护菜单、依赖检查、安装/更新、演练及组件安装，两个平台的网络入口和本地脚本只负责启动它。正式交互流程为安装/更新、附加组件、退出；显式 --non-interactive 执行保守默认，不启动服务或安装额外组件。
 
-`installer.py` 是只用标准库的源码安装层，不依赖项目 `.venv`。安装只读取可分发文件，排除 `.state`、`.venv`、`.bootstrap-venv`、workspace、`config.json`、缓存和已有版本目录；源码中的公开符号链接会被拒绝。Linux 默认安装目录固定为 `~/.local/share/codex-wechat`，Windows 默认安装到 `LOCALAPPDATA/codex-wechat/app`。
+程序载荷排除私有状态、配置、缓存及版本目录。新版本在 staging 内完成文件复制、Python 环境准备与校验；稳定入口先写好临时文件，再集中替换和更新 current。current 是运行入口使用的版本选择，不再维护 previous，不提供安装回滚命令或提交失败后的自动恢复。
 
-每次发布按程序文件和权限的内容指纹进入 `releases/<版本>`，并带有内部 manifest。新版本先在 staging 目录复制文件、创建独立 `.venv`、安装依赖并编译 Python 文件；全部成功后才移动到 `releases` 并原子更新根目录的 `current`。`previous` 与 `current` 一起标识可回滚版本。运行数据始终留在安装根目录，不进入版本包。
+本次下载与 staging 使用上下文清理；未激活的本次构建在失败后删除，已激活的版本保持失败现场。已安装旧版可能仍被进程使用，不作为本次临时产物删除；用户数据、配置和未知文件始终保留。安装不收集账户信息、不扫码、不自动启用新自启或重启桥接；微信绑定属于首次交互 start。
 
-稳定入口是根目录的 `codex-wechat`/`codex-wechat.ps1`，Linux 另保留只依赖标准库的根目录 `installer.py` 供版本切换与恢复；systemd unit 和 Windows 计划任务不再固定到某个程序版本。Linux unit 直接调用稳定入口；Windows 计划任务调用稳定的 `bootstrap_supervisor.py`，它读取 `current` 后加载对应版本。所有入口都拒绝符号链接形式的版本指针，安装器也拒绝链接的版本目录。更新后到服务重启前，旧进程继续使用原版本，不会读取半更新文件。
+requirements.txt 是 Python 包声明；平台工具及缺失策略来自 DEPENDENCIES。Windows 内部 install.ps1 的 PreparedRuntime 分支只注册/更新本项目的计划任务，复用已准备环境，保留自启且不启动任务；普通调用转到统一菜单。Linux install.sh 同样转发，不注册服务。
 
-本地更新使用另一份新源码；安装根入口也可按明确记录的来源获取源码。相同内容指纹直接视为 no-op；确认期间源码改变会拒绝激活。`rollback` 只原子切换 `current`/`previous`，不复制状态、不重建环境。当前实现不会自动删除旧版本目录，也不会在激活前删除现有版本；未知根目录文件保持不变。已有直接安装第一次 update 时以 `legacy` 作为 previous，保留原目录用于回滚。
+附加组件来自 COMPONENTS；微信附件 skill 复制到用户明确确认的 skill 目录，默认 ~/.agents/skills。同名不同内容拒绝覆盖，失败清理本次空目录。附件格式与安全边界沿用现有 media.py，skill 仅提供按需说明，不赋予额外发送权限。
 
-安装根目录中的 `update` 也可按 `.update-source.json` 获取公开 GitHub 源码，来源只能显式通过 `--repo` / `--ref` 记录，不推断 cfg 的远端。Git 浅克隆到临时目录，关闭交互凭据和 checkout hooks，再复用同一个版本构建/激活流程；不在确认前执行远程安装脚本。来源仅在对应版本成功激活或已存在时保存；下载/构建失败、取消不会改变来源。显式 `--source` 强制本地更新；远程 dry-run 不联网。该来源不属于版本载荷，回滚不会更改它。
-
-`--dry-run` 只演练交互与计划，不根据真实安装目录、命令链接或回滚版本拒绝操作，并明确标注这些检查因演练而放行。源码校验仍执行；不创建目标目录、不安装依赖、不调用平台安装脚本、不改服务或版本指针。它不是实际安装环境的预检。
-
-Linux 高层安装器建立版本环境并维护命令链接，不注册服务；Windows 高层安装器把计划任务设置交给新版本的 `install.ps1`，任务本身指向稳定 bootstrap。prompts 属于版本内容，systemd 与计划任务仍由各平台既有入口管理。可选 art 只从 `assets/logo/codex-wechat.txt` 读取，缺失时不输出占位内容。
+网络来源必须显式记录为公开 GitHub HTTPS 地址和 ref，不推断旧库。获取源码后复用同一安装流程；同版重跑和取消不重写已记录来源。dry-run 本地演练可放行环境阻碍且不写、不联网；网络薄入口演练只显示计划，不下载完整项目。
 
 ## 自启与失败恢复
 

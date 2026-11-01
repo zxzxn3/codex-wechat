@@ -83,14 +83,16 @@ class RemoteUpdateTests(unittest.TestCase):
 
     def test_installed_command_uses_saved_source_and_explicit_local_source_wins(self):
         self.target.mkdir()
+        (self.target / "codex_wechat.py").write_text("legacy")
+        (self.target / "installer.py").write_text("legacy")
         (self.target / installer.UPDATE_SOURCE_FILE).write_text(json.dumps(self.choice))
         with patch.object(installer, "SOURCE_ROOT", self.target), \
              patch.object(installer, "default_target", return_value=self.target), \
-             patch.object(installer, "remote_update", return_value=0) as remote, \
+             patch.object(installer, "bootstrap", return_value=0) as remote, \
              patch.object(installer, "update", return_value=0) as local:
-            self.assertEqual(installer.main(["update"]), 0)
+            self.assertEqual(installer.main(["update", "--non-interactive"]), 0)
             remote.assert_called_once_with(self.target, self.choice, dry_run=False)
-            self.assertEqual(installer.main(["update", "--source", str(self.source)]), 0)
+            self.assertEqual(installer.main(["update", "--source", str(self.source), "--non-interactive"]), 0)
             local.assert_called_once_with(self.source, self.target, dry_run=False)
 
     def test_missing_source_does_not_infer_any_git_remote(self):
@@ -98,14 +100,14 @@ class RemoteUpdateTests(unittest.TestCase):
              patch.object(installer, "default_target", return_value=self.target), \
              patch.object(installer, "fetch_update_source") as fetch:
             with self.assertRaisesRegex(ValueError, "尚未配置更新来源"):
-                installer.main(["update"])
+                installer.main(["update", "--non-interactive"])
         fetch.assert_not_called()
 
     def test_unconfigured_source_still_allows_dry_run(self):
         with patch.object(installer, "SOURCE_ROOT", self.target), \
              patch.object(installer, "default_target", return_value=self.target), \
              patch.object(installer, "fetch_update_source") as fetch:
-            self.assertEqual(installer.main(["update", "--dry-run"]), 0)
+            self.assertEqual(installer.main(["update", "--dry-run", "--non-interactive"]), 0)
         fetch.assert_not_called()
         self.assertFalse(self.target.exists())
 

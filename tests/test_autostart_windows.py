@@ -38,19 +38,18 @@ class AutostartScriptContractTests(unittest.TestCase):
     def test_ownership_check_has_an_exact_prefix_boundary(self):
         for text in (self.entry, self.install):
             self.assertIn("[StringComparison]::OrdinalIgnoreCase", text)
-            self.assertIn(
-                "[char]::IsWhiteSpace($actionText[$prefix.Length])",
-                text)
+            self.assertTrue("[char]::IsWhiteSpace($actionText[$prefix.Length])" in text
+                            or "[char]::IsWhiteSpace($text[$prefix.Length])" in text)
         self.assertIn("$actions.Count -ne 1", self.entry)
-        self.assertIn("$actions.Count -ne 1", self.install)
+        self.assertIn("$actions.Count -eq 1", self.install)
 
     def test_installer_keeps_autostart_and_immediate_start_independent(self):
         lowered = self.install.lower()
         self.assertIn("[switch]$nostart", lowered)
-        self.assertIn("[validateset('on', 'off')]", lowered)
-        self.assertIn("explicit -autostart on|off choice", lowered)
-        self.assertIn("$trigger.Enabled = [bool]$autostartEnabled", self.install)
-        self.assertIn("Enable-ScheduledTask", self.install)
+        self.assertIn("[switch]$preparedruntime", lowered)
+        self.assertIn("$autostart = $false", self.install)
+        self.assertIn("$trigger.Enabled = $autostart", self.install)
+        self.assertNotIn("Start-ScheduledTask", self.install)
         self.assertNotIn("RestartCount", self.install)
         self.assertNotIn("RestartInterval", self.install)
         self.assertNotIn("Disable-ScheduledTask", self.install)

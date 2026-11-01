@@ -63,3 +63,5 @@ create_time_ms 是源消息时间戳，未证实等于手机点击发送时间�
 在线更新使用 [Git clone](https://git-scm.com/docs/git-clone) 的 `--depth 1`、`--single-branch`、`--branch`：ref 可为分支或标签。源码进入临时目录，项目私有数据和 `.git` 不进入版本载荷；继续由本地稳定安装器执行源码校验、确认、构建和切换，不直接运行下载仓库的安装脚本。
 
 一行入口的 Windows 下载使用 [Invoke-WebRequest 5.1](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/invoke-webrequest?view=powershell-5.1) 的 `-UseBasicParsing`、`-OutFile` 和超时参数；下载到本次临时文件后调用 Python 安装器。此公开入口本身就是用户明确执行的远程安装代码，不提供来源签名或免信任保证；实际版本化安装逻辑仍只有一份。
+
+安装器本轮依据 Python 3.11 的 argparse、tempfile 和 os.replace：临时目录上下文清理、原子替换不等于跨多文件的全局事务；按已批准规则不提供回滚。附加 skill 的默认发现路径与按需读取依据 [Build skills](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills)。

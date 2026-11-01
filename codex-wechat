@@ -5,7 +5,7 @@ INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 PROJECT_DIR="$INSTALL_ROOT"
 CURRENT_FILE="$INSTALL_ROOT/current"
 case "${1:-}" in
-    install|update|rollback)
+    install|update|menu|components)
         INSTALLER="$INSTALL_ROOT/installer.py"
         if [ ! -f "$INSTALLER" ]; then
             echo "codex-wechat: 稳定安装器缺失: $INSTALLER" >&2

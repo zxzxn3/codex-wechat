@@ -1,14 +1,10 @@
 # codex-wechat
 
-当前源码由 cfg 仓库管理，Linux / Windows 共用一套 CLI 桥接实现。本分支开发不可变版本安装，仅支持普通 Codex CLI 和 codex-deepseek。
+微信私聊连接本机 Codex CLI，支持普通 Codex、codex-deepseek、已有会话、工作中追加消息及图片/文件收发。Linux / Windows 共用安装与桥接逻辑；桌面 App 适配不在此分支。
 
-微信私聊 ↔ 本机 Codex App Server。支持普通 Codex、codex-deepseek、已有 CLI 会话、工作中追加消息和图片/文件双向传输。认证、模型配置、工具和权限沿用对应 Codex 启动器。
+## 安装 / 更新
 
-Windows 11 原生安装见 [Windows 指南](docs/WINDOWS.md)：安装 Python 和原生 Codex CLI 后运行安装器，选择登录自启；安装后首次在终端启动时再扫码。Windows 默认仅启用普通 Codex、使用独立 stdio 后端；接管其他 CLI 活动会话的共享模式为显式实验选项，不等同于 Linux 已有运行证据。
-
-## 一行安装或更新
-
-首次安装和以后更新使用同一条命令，入口自动判断已有安装。公开仓库尚未确定，下面的 OWNER/REPO 仅为占位符；目前需显式指定 `--repo`，不使用旧私人仓库。运行前需要 Python 3.11+ 和 Git，Linux 另需 curl；缺失时提示补齐，再重跑同一命令，不自动安装系统软件。
+公开仓库尚未确定，OWNER/REPO 是占位符，不能原样执行；不使用旧私人仓库。首次安装和以后更新复用同一网络入口，也可先下载入口脚本、审阅后执行。
 
 Linux：
 
@@ -16,100 +12,79 @@ Linux：
 bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.sh | bash -s -- --repo https://github.com/OWNER/REPO'
 ```
 
-Windows PowerShell（不要求 curl）：
+Windows PowerShell：
 
 ```powershell
 & ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.ps1))) -Repo https://github.com/OWNER/REPO
 ```
 
-入口下载当前来源的安装器，再自动获取完整项目；已有安装会更新，未安装则首次安装。仍会显示确认计划，保留配置、微信登录、待办和原有自启，不在更新后自动重启服务。第一次使用在安装后运行 `start`，需要时才扫码。Linux 的确认从交互终端读取，不会把 curl 管道当成用户输入。
+入口要求 Python 3.11+ 和 Git；Linux 还需 curl。缺少入口依赖时提示补齐后重跑，不自动安装系统软件。进入安装器后显示：
 
-只演练入口、不联网，可在本地源码里运行 `bash bootstrap.sh --repo https://github.com/OWNER/REPO --dry-run`，Windows 使用 `bootstrap.ps1 -Repo https://github.com/OWNER/REPO -DryRun`。若修改分支或标签，入口的下载 URL 与 `--ref` / `-Ref` 应保持一致，默认均为 main。
+```text
+1. 安装 / 更新
+2. 附加组件
+0. 退出
+```
 
-## Linux 安装与运行
+第 1 项自动识别现有安装，展示计划并确认后执行；第 2 项单独选择组件，主体安装不附带安装所有组件。安装与更新保留配置、微信登录、待办、工作内容及原有自启状态，不自动启动或重启服务。新安装自启默认关闭。
 
-完整运行需要 Linux、Python 3.11+、已登录且可执行 app-server 的 Codex CLI、curl 8.4+；终端二维码使用 qrencode，共享后台自动启动使用 systemd 254+。Python 依赖见 `requirements.txt`，协议依据见 [SOURCES](docs/SOURCES.md)。版本化安装器必须先把 Python 包安装到新版本环境并校验成功，否则不会切换 `current`；Codex CLI、curl 和服务管理器可稍后补齐，`install.sh` 仍保留其低层软检查行为。
+已下载源码也使用同一安装器：
 
 ```bash
-./codex-wechat install
+python3 installer.py
+# Windows: py -3 installer.py
+```
+
+`install.sh` / `install.ps1` 是本地适配入口，业务由 installer.py 维护。已安装后可执行 `codex-wechat menu` 或 `codex-wechat update`；更新来源由第一次在线安装保存，也可以显式传入 `--repo URL --ref main`。本地更新用 `--source /path/to/source`，不读取 cfg 或旧私人库的远端。
+
+### 演练与自动化
+
+```bash
+python3 installer.py --dry-run
+python3 installer.py install --non-interactive
+python3 installer.py update --source /path/to/source --non-interactive
+```
+
+演练可走菜单和确认流程；不会写安装目录、安装依赖、绑定账户或修改服务。真实目录冲突、依赖缺失与源码不全会提示并放行。演练完成不表示正式安装条件已满足。网络薄入口的 `--dry-run` / `-DryRun` 只显示网络安装计划，不联网、不下载；完整交互演练使用上面的本地命令。
+
+`--non-interactive` 显式授权指定安装操作，使用保守默认：保留配置与自启、不启动服务、不额外安装组件。不带此参数的正式安装需要交互终端。网络入口也接受该参数；Windows 适配入口使用 `-NonInteractive`。
+
+### 启动与用户初始化
+
+安装器不收集账户、授权或凭据。安装后在交互终端运行：
+
+```bash
 codex-wechat start
 ```
 
-安装器默认把源码部署到 `~/.local/share/codex-wechat`。如果该目录仍是旧式直接安装，首次 install/update 会把现有代码保留为 `legacy` 回滚版本，再从新源码建立版本化安装。安装前会显示计划并二次确认；已有登录、配置、待办、会话和工作目录不会被覆盖。
+程序在未绑定微信时显示二维码，扫码确认后继续启动；已有登录直接使用。后台进程不会等待扫码，掉线也不自动重新绑定。Codex 自身的安装与登录是单独的运行条件。
 
-程序按内容指纹安装到 `releases/<版本>`，根目录的 `current` 只记录当前版本。新版本会先在独立目录建立 Python 环境并完成校验，随后原子切换 `current`；运行数据仍保存在原位置。更新失败时旧 `current` 不变，已经安装的版本也不会被原地混合修改。
-
-安装和更新都支持只读演练：
-
-```bash
-./codex-wechat install --dry-run
-./codex-wechat update --dry-run
-./codex-wechat rollback --dry-run
-```
-
-已有安装也可以用 `install --dry-run` 体验全新安装的交互。演练时真实安装目录、命令入口和回滚版本检查按通过处理，并明确提示原因；仍检查源码是否完整，但不安装依赖、不扫码、不修改服务或版本指针。演练通过不代表机器已具备运行条件。最后显示正式安装成功后的扫码、启动和微信使用步骤；这些步骤不会自动执行。
-
-也可以手动克隆或下载并解压源码，再进入源码目录运行 `python3 installer.py install`（Windows 使用 `py -3 installer.py install`）。安装完成后在终端运行 `codex-wechat start`（Windows 用 `codex-wechat.ps1 start`），尚未绑定微信时自动显示二维码，确认绑定后继续启动，再到微信发 `/help`、`/status` 和普通消息。安装器不扫码；自启默认关闭。
-
-在交互终端运行 `codex-wechat start` 时，如果尚未绑定微信，程序会显示二维码；用手机微信扫描并确认授权，若终端要求验证码则按提示输入。绑定后同一进程继续启动，不必再执行一次 start。显式 `login` 命令仍可单独绑定。后台或重定向输入输出的进程不扫码，而是提示到交互终端完成首次绑定。网络掉线沿用现有登录重连，不会自动重新扫码。成功后凭据保存到本机 `.state/`。Codex 自身的登录与微信扫码是两件事，使用前需确保对应 Codex 启动器已可正常使用。
-
-`./install.sh` 仍可用于直接源码目录的依赖检查和命令入口，不注册服务、不启动程序、不修改已有自启。推荐的公开安装路径是版本化安装器。
-
-首次用 `codex-wechat start` 在前台运行并按需完成扫码；微信里执行 `/settings autostart on` 时，程序才会检查并安装缺失的用户服务。第一次移交需要空闲，确认消息发出后前台退出、新服务接管；正在进行任务时会拒绝移交而不打断任务。后台接管只支持默认状态/配置路径和 `~/.local/share/codex-wechat` 目录。
-
-服务随**图形登录**自启，不启用 linger；关闭自启不停止当前进程。已有服务的用户不需要重新扫码，也不会被安装器关闭自启。
-
-```bash
-systemctl --user status codex-wechat
-journalctl --user -u codex-wechat -f
-```
-
-### 更新
-
-首次安装时可记录将来的公开更新仓库（下面的 OWNER/REPO 是占位符，不是旧私人仓库）：
-
-```bash
-python3 installer.py install --repo https://github.com/OWNER/REPO --ref main
-```
-
-安装完成后，无需自己下载新源码，直接运行：
-
-```bash
-codex-wechat update
-```
-
-也可以直接重跑上面的“一行安装或更新”命令，不需要记住另一条更新命令。
-
-如果此前没有记录来源，第一次更新显式指定，成功后自动保存：
-
-```bash
-codex-wechat update --repo https://github.com/OWNER/REPO --ref main
-```
-
-在线更新需要 Git，只接受公开 GitHub HTTPS 仓库；可跟随分支，也可用 `--ref` 指定标签，不会自动切换来源或读取 cfg/旧仓库的远端配置。先将指定源码获取到临时目录，再由现有安装器展示计划、请求确认、构建和校验；失败不切换旧版，取消不保存新来源。`update --dry-run` 不访问网络，也不安装依赖。
-
-来源保存在安装根目录的 `.update-source.json`，与微信配置/凭据分开；回滚代码不回滚该来源。已有的新源码仍可本地更新：`codex-wechat update --source /path/to/new-source`。直接从独立源码目录执行 `python3 installer.py update` 也保留原来的本地更新方式。
-
-Windows 安装后使用稳定入口（或用 Python 直接运行稳定的 installer.py）：
-
-```powershell
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" update -Repo https://github.com/OWNER/REPO -Ref main
-# 后续只需 update；演练用 -DryRun
-```
-
-安装器会创建新的不可变版本并原子切换，保留 `.state/`、`config.json`、`workspace/` 和未知本地文件。旧版本不会删除，因此代码和环境可以一起回滚：
-
-```bash
-./codex-wechat rollback
-```
-
-回滚只切换 `current` 和 `previous`，旧版本目录仍原样保留。版本目录不会自动清理；确认当前版本稳定且不再需要回滚后，可手动删除未被 `current`、`previous` 引用的版本。完成后重启服务：
+Linux 在微信执行 `/settings autostart on` 时才注册缺失的用户服务；已有服务不受安装器关闭。Windows 准备当前用户计划任务，保留已有自启，首次默认关闭。更新后何时重启由用户决定，微信 `/restart` 不下载或更新程序。
 
 ```bash
 systemctl --user restart codex-wechat
 ```
 
-版本切换后的实际接管按上面的平台服务命令操作。微信 `/restart` 在空闲、无待办时重启桥接；不会下载代码或重启共享 Codex 后台。
+Windows 的入口与服务命令见 [Windows 指南](docs/WINDOWS.md)。
+
+### 安装边界
+
+Python 包声明在 requirements.txt，平台依赖检查集中在 installer.py 的 DEPENDENCIES；缺失的运行依赖提示后可稍后补齐，程序环境构建失败则停止安装。构建使用独立版本目录；稳定入口及当前版本在准备完成后集中更新，不提供 rollback 命令或失败后的自动回滚。失败发生在版本切换后时，如实报错并保留当时状态，不谎称回到旧版。
+
+下载、staging、入口临时文件和本次未激活的构建在成功或失败后清理，不保留下载续传缓存；已安装的版本可能仍被运行中的进程使用，不按临时文件删除。数据和未知用户文件不作为安装垃圾清理。
+
+ASCII art 位置为 assets/logo/codex-wechat.txt；图案后的声明与完成后的声明分别来自 assets/install/after-art.txt 和 after-install.txt。未提供这些文件时没有占位输出。
+
+### 附加组件
+
+微信附件通道说明已独立为 `skills/wechat-attachments/SKILL.md`。在菜单“附加组件”中选择安装，或显式执行：
+
+```bash
+python3 installer.py components --component wechat-attachments
+# 自动化需额外加 --non-interactive；查看计划用 --dry-run
+```
+
+默认安装到当前用户的 `~/.agents/skills/wechat-attachments`，供 Codex 原生发现并按需读取；不把完整附件说明重复附到每轮消息。`--skills-dir PATH` 可指定独立的 skill 目录。同名文件内容不同则保留原文件并报冲突，不覆盖用户修改。skill 不包含微信凭据，发送权限与路径校验仍由桥接执行。
 
 ## 支持的后端
 
@@ -119,7 +94,7 @@ App Server 是 CLI 提供的原生协议名称，不表示本分支支持桌面 
 
 ## 登录自启与异常恢复
 
-新安装默认不自启。Linux 只在设置中显式开启时注册缺失服务；Windows 安装时可选择，默认关闭。之后均可即时修改：
+新安装默认不自启。Linux 只在设置中显式开启时注册缺失服务；Windows 首次安装默认关闭。之后均可即时修改：
 
 ```text
 /settings
@@ -129,10 +104,11 @@ App Server 是 CLI 提供的原生协议名称，不表示本分支支持桌面 
 
 `/settings` 显示系统实际状态。关闭只影响以后登录，不停止当前会话，也不阻止手动启动。Linux 缺少服务时查询显示关闭，不会为了查询自动安装；首次开启会注册并安全移交到新服务。服务已有时只改变自启状态。无法读取或服务归属不匹配时显示“不可用”。自启直接保存在 systemd/计划任务，不在 config.json 或 bridge state 中再保存一个容易失真的开关。
 
-Linux 安装没有自启参数，安装器不会注册服务。Windows 非交互安装仍需明确选择：
+Linux 安装没有自启参数，安装器不会注册服务。Windows 首次安装默认关闭自启，
+之后可在微信发送 `/settings autostart on`；非交互安装使用：
 
 ```powershell
-.\install.ps1 -Autostart off -NoStart
+.\install.ps1 -NonInteractive
 ```
 
 自启与异常恢复是两件事。正常退出不自动重开；已识别的持久配置错误退出码为 78，需人工修正。Linux 使用 systemd 的 on-failure，5 分钟内最多 5 次启动；Windows 仅由 supervisor 处理异常子进程退出，带退避，5 分钟内达到 5 次失败后停止；计划任务不再叠加另一层失败重试。微信 `/restart` 属于用户主动重启，不等于崩溃。

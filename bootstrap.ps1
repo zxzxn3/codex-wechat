@@ -4,7 +4,10 @@ param(
     [Parameter(Mandatory = $true)][string]$Repo,
     [string]$Ref = 'main',
     [string]$Dir,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NonInteractive,
+    [string]$Component,
+    [string]$SkillsDir
 )
 
 Set-StrictMode -Version Latest
@@ -20,7 +23,8 @@ if ($RepoUri.Scheme -ne 'https' -or $RepoUri.Authority -ne 'github.com' -or $Rep
 if ($DryRun) {
     Write-Host "Dry run: no download or file changes. Source: $Repo ($Ref)"
     Write-Host 'Target directory checks are bypassed because of -DryRun; this is not an environment preflight.'
-    Write-Host 'The installer will detect an existing installation and choose install or update.'
+    Write-Host '1. Install / Update  2. Components  0. Exit'
+    Write-Host 'The installer will show the plan; no login, new autostart or service start.'
     return
 }
 
@@ -36,8 +40,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Python 3.11+ is required. Install it and rerun
 if (-not (Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue)) {
     throw 'Git is required. Install it and rerun the same command.'
 }
-if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
-    throw 'Installation confirmation needs an interactive terminal. Use -DryRun for a preview.'
+if (-not $NonInteractive -and ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected)) {
+    throw 'Installation needs an interactive terminal. Use -NonInteractive for conservative defaults, or -DryRun.'
 }
 $TaskTemporary = Join-Path ([IO.Path]::GetTempPath()) ('codex-wechat-bootstrap-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $TaskTemporary | Out-Null
@@ -46,7 +50,13 @@ try {
     $InstallerUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' + [Uri]::EscapeDataString($Ref) + '/installer.py'
     Invoke-WebRequest -UseBasicParsing -Uri $InstallerUri -OutFile $Installer -TimeoutSec 120
     $InstallerArguments = @($Installer, 'bootstrap', '--repo', $Repo, '--ref', $Ref)
+    if ($Component) {
+        $InstallerArguments[1] = 'components'
+        $InstallerArguments += @('--component', $Component)
+    }
     if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
+    if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
+    if ($SkillsDir) { $InstallerArguments += @('--skills-dir', $SkillsDir) }
     & $PythonCommand.Source @PythonPrefix -u @InstallerArguments
     if ($LASTEXITCODE -ne 0) { throw "Installer failed with exit code $LASTEXITCODE" }
 } finally {
