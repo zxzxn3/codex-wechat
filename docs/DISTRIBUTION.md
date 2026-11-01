@@ -2,6 +2,13 @@
 
 当前 cross-platform 分支是一套源码，Windows 尚未完成实机验收。本轮实现登录自启选择、运行时设置和有限崩溃恢复；没有发布独立 exe 或 GitHub Release。
 
+源码安装和更新由标准库实现的 `installer.py` 负责：Linux 默认部署到
+`~/.local/share/codex-wechat`，Windows 默认部署到
+`%LOCALAPPDATA%\codex-wechat\app`。更新器只替换项目文件，保留私有状态和
+`.venv`，并将被替换文件写入 `.update-backups`。平台服务仍由现有
+systemd unit 或 Windows 计划任务脚本管理。安装器预留
+`assets/logo/codex-wechat.txt` 作为终端 art 接口，当前不附带 art。
+
 主要参考 [yt-dlp 的发行文件和构建说明](https://github.com/yt-dlp/yt-dlp#release-files)：同一仓库和版本，分别产出平台适配的文件。自启接入参考 [Syncthing](https://docs.syncthing.net/users/autostart)：业务核心共享，接入各系统原生启动机制，不要求跨平台共用同一服务管理器。
 
 下一阶段先添加 Windows/Linux CI，执行各自的离线用例及安装入口检查；再从同一 tag 用平台构建任务生成 Windows x64 / Linux x64 产物及校验和。优先打包目录而非单文件，便于随包带安装脚本、技能和数据文件；不复制用户登录、密钥或状态。具体构建工具尚未实现。

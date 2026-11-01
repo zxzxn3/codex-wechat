@@ -32,13 +32,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 当前后端需要可执行 `app-server` 的 CLI，只有 Codex App 不等同于 CLI 可用；App 本身不是必需依赖，也不自动扫描它的私有安装目录。Windows App 与原生 CLI 默认共享 Codex home，活动桌面接管仍需实机验证。
 
-在项目解压目录打开 PowerShell：
+推荐从解压后的源码目录运行统一安装器：
+
+```powershell
+py -3 installer.py install
+```
+
+它会显示计划并二次确认，然后把程序安装到
+`%LOCALAPPDATA%\codex-wechat\app`，再调用项目内的原生 Windows
+安装脚本完成 Python 环境、微信扫码和计划任务设置。继续使用已有的手动安装方式也可以：
 
 ```powershell
 .\install.ps1
 ```
 
-安装器会：
+原生 Windows 安装阶段会：
 
 1. 检查 Windows 11、Python 3.11+、Codex CLI 和 `curl.exe` 版本；
 2. 创建项目内 `.venv` 并安装 `requirements.txt`；
@@ -47,6 +55,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
    `config.json` 不会被覆盖；
 5. 在交互终端执行 `login`，由手机微信扫码；
 6. 询问登录自启选择（首次默认关闭，已有安装默认保留实际状态），注册当前用户计划任务并另行请求立即启动。
+
+## 更新
+
+下载或解压新版本到另一份源码目录，在 PowerShell 中运行：
+
+```powershell
+py -3 installer.py update
+```
+
+更新器只替换程序文件，保留 `%LOCALAPPDATA%\codex-wechat` 下的配置、
+`.state`、workspace 和日志，也保留项目内 `.venv`。被替换文件备份到
+`%LOCALAPPDATA%\codex-wechat\app\.update-backups\update-*`。完成后重启任务：
+
+```powershell
+cd "$env:LOCALAPPDATA\codex-wechat\app"
+.\codex-wechat.ps1 service-restart
+```
+
+新版本删除的旧程序文件不会自动清除，更新失败也不会自动整体回滚。
 
 只准备安装、不立即启动（自启选项仍单独选择）：
 

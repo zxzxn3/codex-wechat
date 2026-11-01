@@ -62,9 +62,17 @@ Windows 使用当前交互用户的计划任务和 `windows_service.py` supervis
 
 监督器用 Local mutex 防重复实例，以短期 token 和父子 PID 确认重启归属。桥接加入 KILL_ON_JOB_CLOSE + SILENT_BREAKAWAY_OK 的 Job Object：停止监督器可清理桥接，同时其后代可脱离该 Job，避免将共享 Codex daemon 一并结束；后代退出仍依赖桥接与原生 CLI 的生命周期，实际进程树行为待 Windows 验证。此机制不保证清理任意外部工具进程。
 
+## 安装与更新
+
+`installer.py` 是只用标准库的源码安装层，不依赖项目 `.venv`。安装只复制可分发文件，排除 `.state`、`.venv`、`.update-backups`、workspace、`config.json`、缓存和发布目录；源码或目标中的符号链接会被拒绝。Linux 默认安装目录固定为 `~/.local/share/codex-wechat`，Windows 默认安装到 `LOCALAPPDATA/codex-wechat/app`。
+
+更新必须从另一份新源码运行，按原安装清单逐个比较内容与执行位。替换前再次核对确认期间没有并发变化，被替换文件写入 `.update-backups/update-*`；新增文件直接加入，旧版本删除的文件和未知本地文件不清理，也不承诺自动整体回滚。更新后只刷新现有 `.venv` 的 Python 依赖，私有状态、配置、会话和工作目录保持不变。
+
+Linux 高层安装器准备 `.venv` 后调用低层 `install.sh` 建命令入口，不注册服务；Windows 高层安装器把环境、扫码和计划任务交给 `install.ps1`。prompts 属于安装层，systemd 与计划任务仍由各平台既有入口管理。可选 art 只从 `assets/logo/codex-wechat.txt` 读取，缺失时不输出占位内容。
+
 ## 自启与失败恢复
 
-`autostart.py` 读取系统实际注册状态；/settings 直接调用，不经过后端、不持久化第二份布尔值。Linux 核对 FragmentPath 属于当前项目，缺失时只有显式开启可创建；首次创建还要求规范项目目录。enable/disable 之后读取实际结果；disable 会移除服务链接，因此重建 link 保留手动启动能力。Windows 委托本项目 PowerShell 入口，只切换登录触发器，不停止当前实例、不禁用整项任务。Linux 安装器仅准备命令入口，不注册、启用或启动服务；查询缺少服务视为关闭，首次显式开启才 enable，并启动缺失服务。Windows 仍由安装器注册任务，首次默认关闭登录触发器；已有状态不重置。修改不是后台持续重试的同步器。
+`autostart.py` 读取系统实际注册状态；/settings 直接调用，不经过后端、不持久化第二份布尔值。Linux 核对 FragmentPath 属于当前项目，缺失时只有显式开启可创建；首次创建还要求规范项目目录。enable/disable 之后读取实际结果；disable 会移除服务链接，因此重建 link 保留手动启动能力。Windows 委托本项目 PowerShell 入口，只切换登录触发器，不停止当前实例、不禁用整项任务。Linux 低层 `install.sh` 只准备命令入口，不注册、启用或启动服务；查询缺少服务视为关闭，首次显式开启才 enable，并启动缺失服务。Windows 仍由 `install.ps1` 注册任务，首次默认关闭登录触发器；已有状态不重置。修改不是后台持续重试的同步器。
 
 已识别的启动配置错误使用 ConfigurationError / exit 78；运行期未知故障仍属普通异常。Linux 的 systemd 限制 300 秒/5 次启动，78 不重启；Windows supervisor 0/78 不重开、75 主动重启、其他退出采用有界退避，停止后保留失败结果，计划任务不叠加重试。微信网络重连和单条消息发送重试是独立交付策略，不因此禁用。
 

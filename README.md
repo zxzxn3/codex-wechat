@@ -4,24 +4,30 @@
 
 微信私聊 ↔ 本机 Codex App Server。支持普通 Codex、codex-deepseek、已有桌面会话、工作中追加消息和图片/文件双向传输。认证、模型配置、工具和权限沿用对应 Codex 启动器。
 
-Windows 11 原生安装见 [Windows 指南](docs/WINDOWS.md)：解压到固定目录，安装 Python 和原生 Codex CLI 后运行 `install.ps1`，交互扫码，再注册当前用户登录自启。Windows 默认仅启用普通 Codex、使用独立 stdio 后端；接管桌面活动会话的共享模式为显式实验选项，不等同于 Linux 已有运行证据。
+Windows 11 原生安装见 [Windows 指南](docs/WINDOWS.md)：安装 Python 和原生 Codex CLI 后运行安装器，交互扫码，再选择登录自启。Windows 默认仅启用普通 Codex、使用独立 stdio 后端；接管桌面活动会话的共享模式为显式实验选项，不等同于 Linux 已有运行证据。
 
 ## Linux 安装与运行
 
-完整运行需要 Linux、Python 3.11+、已登录且可执行 app-server 的 Codex CLI、curl 8.4+；终端二维码使用 qrencode，共享后台自动启动使用 systemd 254+。Python 依赖见 `requirements.txt`，协议依据见 [SOURCES](docs/SOURCES.md)。 安装脚本会检查运行依赖，缺失时只提示并继续能完成的步骤，不要求先装齐才执行 install.sh。Python 或用户服务管理器缺失时，仍可准备命令入口；扫码、运行或以后开启自启可能暂不可用。补齐依赖后用相同参数重跑即可，不覆盖已保存配置和登录。
+完整运行需要 Linux、Python 3.11+、已登录且可执行 app-server 的 Codex CLI、curl 8.4+；终端二维码使用 qrencode，共享后台自动启动使用 systemd 254+。Python 依赖见 `requirements.txt`，协议依据见 [SOURCES](docs/SOURCES.md)。安装器会检查运行依赖，缺失时只提示并继续能完成的步骤，不要求先装齐才执行安装。Python 或用户服务管理器缺失时，仍可准备命令入口；扫码、运行或以后开启自启可能暂不可用。补齐依赖后用相同命令重跑即可，不覆盖已保存配置和登录。
 
 ```bash
-cd ~/.local/share/codex-wechat
-python3 -m venv --system-site-packages .venv
-.venv/bin/python -m pip install -r requirements.txt
-./codex-wechat login
-./install.sh
+./codex-wechat install
+codex-wechat login
 codex-wechat start
+```
+
+安装器默认把源码部署到 `~/.local/share/codex-wechat`。如果当前源码已经在该目录，它只准备环境，不重复复制。安装前会显示计划并二次确认；已有登录、配置、待办、会话和工作目录不会被覆盖。
+
+安装和更新都支持只读演练：
+
+```bash
+./codex-wechat install --dry-run
+./codex-wechat update --dry-run
 ```
 
 二维码只在手动执行 `./codex-wechat login` 时显示在终端；用手机微信扫描并确认授权，若终端要求验证码则按提示输入。成功后凭据保存到本机 `.state/`。Codex 自身的登录与微信扫码是两件事，使用前需确保对应 Codex 启动器已可正常使用。
 
-`./install.sh` 只检查依赖并建立命令入口，不注册服务、不启动程序、不修改已有自启。缺失运行依赖只提示；补齐后可重新检查。新安装默认不自启，重新安装保留系统已有设置。
+`./install.sh` 仍可单独使用，负责低层依赖检查和命令入口，不注册服务、不启动程序、不修改已有自启。安装器会在准备 `.venv` 后调用它。
 
 首次扫码成功后，用 `codex-wechat start` 在前台运行；微信里执行 `/settings autostart on` 时，程序才会检查并安装缺失的用户服务。第一次移交需要空闲，确认消息发出后前台退出、新服务接管；正在进行任务时会拒绝移交而不打断任务。后台接管只支持默认状态/配置路径和 `~/.local/share/codex-wechat` 目录。
 
@@ -32,7 +38,21 @@ systemctl --user status codex-wechat
 journalctl --user -u codex-wechat -f
 ```
 
-微信 `/restart` 在空闲、无待办时加载本地更新；不会下载代码或重启共享 Codex 后台。升级时先等空闲，再使用该指令。
+### 更新
+
+从另一份新源码运行：
+
+```bash
+./codex-wechat update
+```
+
+更新器只替换项目文件，保留 `.state/`、`.venv/`、`config.json`、`workspace/` 和未知本地文件。被替换文件备份到 `.update-backups/update-*`；新版本删除的旧文件不会自动删除，更新失败也不自动整体回滚。完成后重启服务：
+
+```bash
+systemctl --user restart codex-wechat
+```
+
+微信 `/restart` 在空闲、无待办时加载代码修改；不会下载代码或重启共享 Codex 后台。
 
 ## Codex CLI 与桌面 App
 
@@ -52,7 +72,7 @@ journalctl --user -u codex-wechat -f
 
 `/settings` 显示系统实际状态。关闭只影响以后登录，不停止当前会话，也不阻止手动启动。Linux 缺少服务时查询显示关闭，不会为了查询自动安装；首次开启会注册并安全移交到新服务。服务已有时只改变自启状态。无法读取或服务归属不匹配时显示“不可用”。自启直接保存在 systemd/计划任务，不在 config.json 或 bridge state 中再保存一个容易失真的开关。
 
-Linux 安装无需自启参数，运行 `./install.sh` 即可；它不会执行服务管理操作。Windows 非交互安装仍需明确选择：
+Linux 安装没有自启参数，安装器不会注册服务。Windows 非交互安装仍需明确选择：
 
 ```powershell
 .\install.ps1 -Autostart off -NoStart
