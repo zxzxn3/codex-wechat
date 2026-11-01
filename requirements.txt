@@ -1,4 +1,4 @@
-# Media encryption and shared-daemon transport.
+# Media encryption, shared-daemon transport and terminal QR output.
 cryptography>=38
 websockets>=15,<18
-qrcode>=7.4,<9; sys_platform == 'win32'
+qrcode>=7.4,<9

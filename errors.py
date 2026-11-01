@@ -11,6 +11,14 @@ class BackendStartupError(RuntimeError):
         super().__init__(reason)
 
 
+class WeChatAuthExpired(RuntimeError):
+    """The saved bot token was rejected and requires an interactive relink."""
+    code = -14
+
+    def __init__(self):
+        super().__init__("微信绑定已失效，请运行 codex-wechat relink")
+
+
 def backend_reason(error):
     if isinstance(error, BackendStartupError):
         return error.reason

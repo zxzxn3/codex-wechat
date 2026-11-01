@@ -11,7 +11,7 @@
 | CDN 请求 | [curl 手册](https://curl.se/docs/manpage.html)，最低 8.4 以支持传输中大小限制；保留默认 Happy Eyeballs |
 | 服务 | systemd 262 本机手册、[systemd-run](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html)、[systemd.service](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html)、[systemd.special](https://www.freedesktop.org/software/systemd/man/latest/systemd.special.html) |
 | Windows | [原生 CLI 部署](https://learn.chatgpt.com/docs/enterprise/windows-deployment)、[Python asyncio 平台差异](https://docs.python.org/3.14/library/asyncio-platforms.html)、[msvcrt 文件锁](https://docs.python.org/3.14/library/msvcrt.html)、[任务设置](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset)；当前无 Windows 实机验证 |
-| 管道 WebSocket / 二维码 | [websockets Sans-I/O Client](https://websockets.readthedocs.io/en/stable/reference/sansio/client.html)、[qrcode](https://pypi.org/project/qrcode/)；Windows 的 QR 使用纯 Python 控制台输出 |
+| 管道 WebSocket / 二维码 | [websockets Sans-I/O Client](https://websockets.readthedocs.io/en/stable/reference/sansio/client.html)、[qrencode](https://fukuchi.org/works/qrencode/)、[qrcode](https://pypi.org/project/qrcode/)；优先 `qrencode`，Python `qrcode` 为跨平台回退 |
 
 ## Codex
 
@@ -31,6 +31,8 @@
 ## 微信和附件
 
 认证 token 仅发送到可信 HTTPS API 域；拒绝重定向。CDN 不携带 API 认证。应用声明 CodexWechat/0.1.0，不冒充腾讯插件版本。
+
+腾讯后端协议明确：`getUpdates` 的 `ret` 或 `errcode` 为 `-14` 时，上游客户端会暂停该账号会话一小时；`get_qrcode_status` 的 `binded_redirect` 表示 bot 已绑定，上游将其视为“无需重复连接”的成功结果并保留本地凭据。当前桥接据此把任意微信 API 响应中的 `-14` 转为持久 `reauth_required`，不在后台循环重试，也不自动清除待办；恢复由用户显式运行的交互式 `relink` 完成，`binded_redirect` 则保留原 account 并清除暂停状态。上游暂停一小时是其客户端策略，不是本项目承诺的恢复倒计时或 token 必然在此时刻失效。
 
 按腾讯协议使用 AES-128-ECB/PKCS7 和 MD5，入站兼容原始 key/base64 与十六进制 key/base64；出站先取上传 URL、上传密文取得引用，再发媒体消息。完整协议字段见上游实现，不能仅凭静态类型宣称文件传输通过。
 

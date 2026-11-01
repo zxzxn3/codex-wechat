@@ -3,15 +3,28 @@ import asyncio
 import base64
 import json
 import secrets
+import shutil
 import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from platform_support import IS_WINDOWS, curl_command, subprocess_options
+from dataclasses import dataclass
+
+from errors import WeChatAuthExpired
+from platform_support import curl_command, subprocess_options
+from wechat_auth import identity
 
 BASE_URL = "https://ilinkai.weixin.qq.com"
 VERSION = "0.1.0"
+
+
+@dataclass(frozen=True)
+class LoginResult:
+    account: dict
+    previous: dict | None
+    identity_changed: bool
+    already_connected: bool = False
 
 
 def trusted_url(value):
@@ -91,8 +104,9 @@ class WeChat:
             raise RuntimeError("微信响应无法解析") from None
         if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
             code = result.get("errcode") or result.get("ret")
-            raise RuntimeError(f"微信 API 错误 {code}" +
-                               ("，请重新 login" if code == -14 else ""))
+            if auth and str(code) == "-14":
+                raise WeChatAuthExpired()
+            raise RuntimeError(f"微信 API 错误 {code}")
         return result
 
     async def poll(self, cursor):
@@ -107,22 +121,39 @@ class WeChat:
                          [{"type": 1, "text_item": {"text": entry["text"]}}]}})
 
 
-async def login(store, *, starting=False):
+def print_qr(url):
+    executable = shutil.which("qrencode")
+    if executable:
+        try:
+            subprocess.run(
+                [executable, "-t", "ANSIUTF8", "-o", "-"],
+                input=url.encode(),
+                check=True,
+                **subprocess_options(),
+            )
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        import qrcode
+        code = qrcode.QRCode(border=4)
+        code.add_data(url)
+        code.print_ascii(invert=True)
+    except (ImportError, OSError, UnicodeError):
+        print("未能绘制二维码，可使用二维码工具打开下面的链接。")
+
+
+async def login(store, *, starting=False, allow_identity_change=False,
+                before_identity_change=None):
     client = WeChat()
+    previous = store.load("account")
+    local_tokens = ([str(previous["token"])]
+                    if previous and previous.get("token") else [])
     qr = await client.request("ilink/bot/get_bot_qrcode?bot_type=3",
-                              {"local_token_list": []}, auth=False)
+                              {"local_token_list": local_tokens[-10:]}, auth=False)
     url = qr["qrcode_img_content"]
     print("用手机微信扫描二维码并确认授权：", flush=True)
-    try:
-        if IS_WINDOWS:
-            import qrcode
-            code = qrcode.QRCode(border=4)
-            code.add_data(url)
-            code.print_ascii(invert=True)
-        else:
-            subprocess.run(["qrencode", "-t", "ANSIUTF8", "--", url], check=True)
-    except (ImportError, FileNotFoundError, subprocess.CalledProcessError):
-        print("未能绘制二维码，可使用二维码工具打开下面的链接。")
+    print_qr(url)
     print(url, flush=True)
     deadline = time.monotonic() + 300
     verify = None
@@ -143,19 +174,28 @@ async def login(store, *, starting=False):
                        "base_url": trusted_url(data.get("baseurl", BASE_URL))}
             if not account["user"] or not account["token"]:
                 raise RuntimeError("微信登录响应缺少身份或凭据")
-            previous = store.load("account")
-            if previous and (previous["bot"], previous["user"]) != (account["bot"], account["user"]):
-                raise RuntimeError("此状态目录已绑定另一个身份；请使用新的 --state-dir")
+            identity_changed = bool(previous and identity(previous) != identity(account))
+            if identity_changed and not allow_identity_change:
+                raise RuntimeError(
+                    "扫码得到另一个微信机器人身份；确认要换聊天请运行 "
+                    "codex-wechat relink --replace-identity")
+            if identity_changed and before_identity_change is not None:
+                before_identity_change(previous, account)
             store.save("account", account)
             print("绑定成功。只接受此次扫码用户的私聊；" +
                   ("正在继续启动桥接。" if starting else "运行 start 启动桥接。"))
-            return
+            return LoginResult(account, previous, identity_changed)
         if status == "scaned_but_redirect":
             host = data.get("redirect_host", "")
             client.base = trusted_url(host if host.startswith("https://") else "https://" + host)
         elif status == "need_verifycode":
             verify = await asyncio.to_thread(input, "请输入手机显示的配对码（仅本机）：")
-        elif status in ("expired", "verify_code_blocked", "binded_redirect"):
-            raise RuntimeError("二维码已过期、验证受限或已绑定；请重新运行 login")
+        elif status == "binded_redirect":
+            if not previous or not previous.get("token") or not previous.get("user"):
+                raise RuntimeError("微信报告已绑定，但本机没有可用凭据；请检查状态目录")
+            print("服务端确认此微信机器人已绑定；本地凭据保持不变。", flush=True)
+            return LoginResult(previous, previous, False, already_connected=True)
+        elif status in ("expired", "verify_code_blocked"):
+            raise RuntimeError("二维码已过期或验证受限；请重新运行 login")
         await asyncio.sleep(1)
     raise RuntimeError("扫码等待超时，请重新运行 login")

@@ -30,7 +30,7 @@ NON_INTERACTIVE = False
 DEPENDENCIES = (
     ("Codex CLI", "codex.exe" if os.name == "nt" else "codex", None, "微信模型任务", "warn"),
     ("curl", "curl.exe" if os.name == "nt" else "curl", (8, 4), "微信登录与收发", "warn"),
-    ("qrencode", "qrencode", None, "终端二维码", "warn"),
+    ("qrencode", "qrencode", None, "优先使用终端二维码", "warn"),
     ("systemd-run", "systemd-run", (254,), "Linux 共享后台", "warn"),
 )
 COMPONENTS = {
@@ -888,7 +888,7 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
             raise ValueError("安装需要 Python 3.11+，请补齐后重跑。")
         detail("Python 版本不足 3.11；因 --dry-run 放行。")
     for name, command, minimum, purpose, policy in DEPENDENCIES:
-        if (IS_WINDOWS and command in ("qrencode", "systemd-run")):
+        if IS_WINDOWS and command in ("qrencode", "systemd-run"):
             continue
         executable = shutil.which(command)
         if not executable and name == "Codex CLI" and IS_WINDOWS:

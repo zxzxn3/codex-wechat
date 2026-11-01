@@ -12,7 +12,7 @@ from configuration import completion_template
 from records import TurnResult
 from slicing import split_text
 from media import MediaError, MAX_ATTACHMENTS, split_answer
-from errors import attachment_reason
+from errors import WeChatAuthExpired, attachment_reason
 from prompts import (
     ATTACHMENT_SEND_FAILED,
     AUTO_ATTACHMENT_FAILED,
@@ -176,6 +176,10 @@ class OutputDelivery:
     async def sender(self):
         bridge = self.bridge
         while True:
+            if bridge.wechat_paused:
+                bridge.send_wake.clear()
+                await bridge.send_wake.wait()
+                continue
             if not bridge.state["outbox"]:
                 bridge.send_wake.clear()
                 await bridge.send_wake.wait()
@@ -185,9 +189,14 @@ class OutputDelivery:
                 if "asset" in entry and "item" not in entry:
                     entry["item"] = await bridge.media.upload(entry)
                     bridge.save()
+                if bridge.wechat_paused:
+                    continue
                 send_started = time.perf_counter()
                 await bridge.channel.send(entry)
                 send_ms = (time.perf_counter() - send_started) * 1000
+            except WeChatAuthExpired:
+                await bridge.require_wechat_relink()
+                continue
             except Exception as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1
                 if entry["attempts"] >= SEND_ATTEMPTS:
@@ -200,6 +209,7 @@ class OutputDelivery:
             bridge.state["outbox"].pop(0)
             bridge.state["consecutiveSendFailures"] = 0
             bridge.latency.sends.append(send_ms)
+            bridge.mark_wechat_valid()
             bridge.save()
             if not bridge.state["outbox"]:
                 bridge.outbox_drained.set()
