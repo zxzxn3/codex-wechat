@@ -1,0 +1,77 @@
+"""Control only the installed per-user service owning this gateway process."""
+import asyncio
+import hmac
+import json
+import os
+import signal
+from pathlib import Path
+
+UNIT = "codex-wechat.service"
+WINDOWS = os.name == "nt"
+RESTART_EXIT_CODE = 75
+_restart_requested = False
+
+
+async def systemctl(*args):
+    process = await asyncio.create_subprocess_exec(
+        "systemctl", "--user", *args,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    try:
+        output, _ = await asyncio.wait_for(process.communicate(), 5)
+    except BaseException:
+        if process.returncode is None:
+            process.kill()
+        await process.wait()
+        raise
+    if process.returncode:
+        raise RuntimeError("无法控制 systemd 用户服务，请在电脑端查看服务状态。")
+    return output.decode().strip()
+
+
+async def require_service_owner():
+    if WINDOWS:
+        _require_windows_owner()
+        return
+    pid = await systemctl("show", UNIT, "--property=MainPID", "--value")
+    if pid != str(os.getpid()):
+        raise ValueError("当前桥接不是该用户服务的主进程，不能远程重启。"
+                         "请退出前台桥接后在电脑执行 systemctl --user start " + UNIT)
+
+
+def _require_windows_owner():
+    status_path = os.environ.get("AGENT_WECHAT_SERVICE_OWNER")
+    token = os.environ.get("AGENT_WECHAT_SERVICE_TOKEN")
+    if not status_path or not token:
+        raise ValueError("当前桥接不是计划任务托管的服务，不能远程重启。")
+    try:
+        status = json.loads(Path(status_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        raise ValueError("服务所有者信息不可读，不能远程重启。") from None
+    if not isinstance(status, dict):
+        raise ValueError("服务所有者信息无效，不能远程重启。")
+    recorded_token = str(status.get("token", ""))
+    if not hmac.compare_digest(recorded_token, token):
+        raise ValueError("服务所有者令牌不匹配，不能远程重启。")
+    if status.get("child_pid") != os.getpid():
+        raise ValueError("当前桥接不是服务记录的桥接进程，不能远程重启。")
+    from windows_service import parent_pid
+    if status.get("supervisor_pid") != parent_pid(os.getpid()):
+        raise ValueError("当前进程不是计划任务 supervisor 的直接子进程，"
+                         "不能远程重启。")
+
+
+async def restart():
+    global _restart_requested
+    if WINDOWS:
+        # The supervisor starts a fresh child; restarting the ScheduledTask here
+        # would deadlock or be ignored while this child is still running.
+        _restart_requested = True
+        signal.raise_signal(signal.SIGINT)
+        return
+    # Waiting for our own restart job would deadlock with systemd waiting for us to exit.
+    await systemctl("--no-block", "restart", UNIT)
+
+
+def exit_code():
+    """Process exit code consumed by the shared entry point."""
+    return RESTART_EXIT_CODE if WINDOWS and _restart_requested else 0

@@ -1,0 +1,4 @@
+# Media encryption and shared-daemon transport.
+cryptography>=38
+websockets>=15,<18
+qrcode>=7.4,<9; sys_platform == 'win32'
