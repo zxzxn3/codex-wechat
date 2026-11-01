@@ -54,6 +54,7 @@ class Bridge:
         self.settings = ConfigLoader(config, config_path)
         self.state = store.load("bridge", {"cursor": "", "thread": None,
             "inbox": [], "outbox": [], "seen": [], "running": False})
+        self.state.setdefault("consecutiveSendFailures", 0)
         self.channel = channel or WeChat(account)
         self.media = Media(store, self.channel, config.get("media"))
         self.backend_factory = backend_factory
@@ -171,7 +172,7 @@ class Bridge:
             backend=backend_label(self.backend_name),
             queued=len(self.state["inbox"]),
             pending=len(self.backend.pending),
-            failed=len(self.state.get("failedOutbox", [])),
+            failed=self.state["consecutiveSendFailures"],
             name=details.get("name"),
             model=details.get("model"),
             provider=details.get("provider"),

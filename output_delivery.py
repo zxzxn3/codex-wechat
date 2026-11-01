@@ -125,8 +125,8 @@ class OutputDelivery:
                 bridge.external_results.task_done()
 
     def fail_output(self, entry):
-        bridge = self.bridge
         """Freeze a partial group; never present a suffix as a complete answer."""
+        bridge = self.bridge
         bridge.state["outbox"].pop(0)
         group = entry.get("group")
         skipped = []
@@ -141,6 +141,7 @@ class OutputDelivery:
             bridge.state["outbox"] = kept
         failed = {**entry, "status": "partial", "skipped": skipped}
         bridge.state["failedOutbox"] = (bridge.state.get("failedOutbox", []) + [failed])[-20:]
+        bridge.state["consecutiveSendFailures"] += 1
         # Never recursively report a failed failure notice.
         if not entry.get("failureNotice"):
             text = (fill(ATTACHMENT_SEND_FAILED, {"名称": entry["asset"]["name"], "次数": SEND_ATTEMPTS})
@@ -178,6 +179,7 @@ class OutputDelivery:
                 await asyncio.sleep(5)
                 continue
             bridge.state["outbox"].pop(0)
+            bridge.state["consecutiveSendFailures"] = 0
             bridge.latency.sends.append(send_ms)
             bridge.save()
             if not bridge.state["outbox"]:
