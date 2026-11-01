@@ -629,16 +629,17 @@ def _common_install(
     update: bool,
 ) -> int:
     source = _resolved_root(source, "源码目录")
-    target = _resolved_root(target, "安装目录")
-    if source == target and read_pointer(target, CURRENT_FILE):
+    target = target.expanduser().absolute() if dry_run else _resolved_root(target, "安装目录")
+    if not dry_run and source == target and read_pointer(target, CURRENT_FILE):
         raise ValueError(
             "版本化安装不能把安装根目录本身当作新源码；"
             "请从另一份源码 checkout 运行 update。"
         )
     files = project_files(source)
     identifier = release_identifier(files)
-    check_install_target(source, target, update=update)
-    current = read_pointer(target, CURRENT_FILE)
+    if not dry_run:
+        check_install_target(source, target, update=update)
+    current = None if dry_run else read_pointer(target, CURRENT_FILE)
     if current == identifier and release_matches(target, identifier, files):
         if stable_files_match(source, target):
             print(f"版本 {identifier} 已经安装，没有修改。")
@@ -654,10 +655,12 @@ def _common_install(
             install_bootstrap(source, target)
         print(f"版本 {identifier} 未变化，已修复稳定入口。")
         return 0
-    preflight_command_link(target)
+    if not dry_run:
+        preflight_command_link(target)
     logo_banner(source)
     if dry_run:
         phase("演练模式，不会修改文件")
+        detail("因 --dry-run，真实安装目录与命令入口检查按通过处理；不代表实际安装条件已满足。")
     if not introduction():
         return 0
 
@@ -673,10 +676,10 @@ def _common_install(
     print(styled("安装目录:", "2") + "  " + styled(str(target), "1"))
     print(styled("版本:", "2") + "      " + styled(identifier, "1"))
     print(styled("版本目录:", "2") + "  " + styled(str(target / RELEASES_DIR / identifier), "1"))
-    previous = read_pointer(target, PREVIOUS_FILE)
+    previous = None if dry_run else read_pointer(target, PREVIOUS_FILE)
     if current:
         detail(f"当前版本: {current}")
-    elif _legacy_installation(target):
+    elif not dry_run and _legacy_installation(target):
         detail("当前是旧式直接安装，本次会迁移为版本化安装。")
     if previous:
         detail(f"上一版本: {previous}")
@@ -686,6 +689,8 @@ def _common_install(
         return 0
     if dry_run:
         print("演练完成，没有修改文件。")
+        phase("正式安装或更新成功后的使用步骤；本次未执行")
+        next_steps(target, update=update, identifier=identifier)
         return 0
 
     target.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -724,12 +729,28 @@ def _common_install(
 def next_steps(target: Path, *, update: bool, identifier: str) -> None:
     print()
     phase("下一步")
-    print(f"当前版本: {identifier}")
+    print(f"版本: {identifier}")
     if IS_WINDOWS:
-        print("重启服务: .\\codex-wechat.ps1 service-restart")
+        entry = str(target / "codex-wechat.ps1").replace("'", "''")
+        command = f"& '{entry}'"
+        if update:
+            print(f"重启服务: {command} service-restart")
+        else:
+            print("安装时会在终端请求微信扫码，并询问登录自启（默认关闭）。")
+            print("若已扫码并启动，可直接在微信发送 /help 或普通消息。")
+            print(f"补做扫码: {command} login")
+            print(f"手动启动: {command} service-start")
+    elif update:
+        print("重启已有服务: systemctl --user restart codex-wechat")
+        print("若未使用服务，先退出原前台进程，再运行 codex-wechat start。")
+        print(f"回滚版本: {target / 'codex-wechat'} rollback")
     else:
-        print("重启服务: systemctl --user restart codex-wechat")
-    print(f"回滚版本: {target / 'codex-wechat'} rollback")
+        print("1. 确认 Codex 已安装并登录。")
+        print(f"2. 在终端运行 {target / 'codex-wechat'} login，手机微信扫码确认。")
+        print(f"3. 运行 {target / 'codex-wechat'} start，保持此终端打开。")
+        print("4. 在微信发送 /help、/status，然后发送普通消息开始交流。")
+        print("自启默认关闭；需要时在微信发送 /settings autostart on。")
+        print("若提示找不到 codex-wechat，请使用上面的完整路径，或将 ~/.local/bin 加入 PATH。")
 
 
 def install(source: Path, target: Path, *, dry_run: bool = False) -> int:
@@ -741,6 +762,13 @@ def update(source: Path, target: Path, *, dry_run: bool = False) -> int:
 
 
 def rollback(target: Path, *, dry_run: bool = False) -> int:
+    if dry_run:
+        phase("演练模式，不会修改文件")
+        detail("因 --dry-run，真实安装目录与回滚版本检查按通过处理；不代表已有可回滚版本。")
+        print(f"安装目录: {target.expanduser().absolute()}")
+        print("计划: 将 current 切换到 previous，保留原当前版本供再次回滚。")
+        print("演练完成，没有修改版本指针。")
+        return 0
     target = _resolved_root(target, "安装目录")
     _check_target_path(target)
     current = read_pointer(target, CURRENT_FILE)
@@ -753,9 +781,6 @@ def rollback(target: Path, *, dry_run: bool = False) -> int:
         raise ValueError(f"上一版本不完整，拒绝切换: {previous}")
     print(f"当前版本: {current}")
     print(f"回滚版本: {previous}")
-    if dry_run:
-        print("演练完成，没有修改版本指针。")
-        return 0
     with InstallLock(target):
         if read_pointer(target, CURRENT_FILE) != current:
             raise ValueError("确认期间 current 指针发生变化，请重新运行")
@@ -793,10 +818,10 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     options = parser().parse_args(argv)
     target = (options.dir or default_target()).expanduser()
-    if target.is_symlink():
+    if not options.dry_run and target.is_symlink():
         raise ValueError(f"安装目录不能是符号链接: {target}")
-    target = target.resolve()
-    if not IS_WINDOWS and target != default_target().resolve():
+    target = target.absolute() if options.dry_run else target.resolve()
+    if not options.dry_run and not IS_WINDOWS and target != default_target().resolve():
         raise ValueError(f"Linux 安装目录必须是 {default_target()}")
     if options.command == "rollback":
         return rollback(target, dry_run=options.dry_run)

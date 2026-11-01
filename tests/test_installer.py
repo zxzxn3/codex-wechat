@@ -132,6 +132,32 @@ class InstallerTests(unittest.TestCase):
             prompt.assert_not_called()
         self.assertEqual(marker.read_text(), "keep")
 
+    def test_dry_run_accepts_conflicting_target_without_reading_or_writing_it(self):
+        self.target.write_text("existing file, not an installation directory", encoding="utf-8")
+        output = io.StringIO()
+        with patch("builtins.input", return_value="y"), \
+             patch.object(installer, "read_pointer", side_effect=AssertionError("read target")), \
+             patch.object(installer, "preflight_command_link", side_effect=AssertionError("check link")), \
+             patch.object(installer, "prepare_runtime") as prepare, \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(installer.install(self.source, self.target, dry_run=True), 0)
+            self.assertEqual(installer.update(self.source, self.target, dry_run=True), 0)
+        prepare.assert_not_called()
+        self.assertIn("因 --dry-run", output.getvalue())
+        self.assertEqual(self.target.read_text(), "existing file, not an installation directory")
+
+    def test_dry_run_main_accepts_nonstandard_target_and_rollback_without_versions(self):
+        self.target.write_text("keep", encoding="utf-8")
+        with patch("builtins.input", return_value="y"), \
+             patch.object(installer, "IS_WINDOWS", False), \
+             patch.object(installer, "SOURCE_ROOT", self.source), \
+             patch.object(installer, "read_pointer", side_effect=AssertionError("read target")):
+            for operation in ("install", "update", "rollback"):
+                self.assertEqual(installer.main([
+                    operation, "--dir", str(self.target), "--dry-run",
+                ]), 0)
+        self.assertEqual(self.target.read_text(), "keep")
+
     def test_target_root_symlink_is_rejected(self):
         real_target = self.base / "real-target"
         real_target.mkdir()

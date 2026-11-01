@@ -28,6 +28,10 @@ codex-wechat start
 ./codex-wechat rollback --dry-run
 ```
 
+已有安装也可以用 `install --dry-run` 体验全新安装的交互。演练时真实安装目录、命令入口和回滚版本检查按通过处理，并明确提示原因；仍检查源码是否完整，但不安装依赖、不扫码、不修改服务或版本指针。演练通过不代表机器已具备运行条件。最后显示正式安装成功后的扫码、启动和微信使用步骤；这些步骤不会自动执行。
+
+新用户拿到公开 GitHub URL 后，先克隆或下载并解压源码，再进入源码目录运行 `python3 installer.py install`（Windows 使用 `py -3 installer.py install`）。Linux 安装完成后在终端执行 `codex-wechat login` 扫码、`codex-wechat start` 启动，再到微信发 `/help`、`/status` 和普通消息。Windows 安装器会按条件引导扫码和启动，未完成时按结束提示补做；自启默认关闭。公开仓库地址尚未确定，这里不引用旧私人仓库。
+
 二维码只在手动执行 `./codex-wechat login` 时显示在终端；用手机微信扫描并确认授权，若终端要求验证码则按提示输入。成功后凭据保存到本机 `.state/`。Codex 自身的登录与微信扫码是两件事，使用前需确保对应 Codex 启动器已可正常使用。
 
 `./install.sh` 仍可用于直接源码目录的依赖检查和命令入口，不注册服务、不启动程序、不修改已有自启。推荐的公开安装路径是版本化安装器。
