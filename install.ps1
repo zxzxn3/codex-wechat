@@ -3,6 +3,8 @@
 param(
     [switch]$NoStart,
     [switch]$Force,
+    [switch]$PreserveAutostart,
+    [string]$InstallRoot,
     [ValidateSet('on', 'off')]
     [string]$Autostart
 )
@@ -12,6 +14,16 @@ $ErrorActionPreference = 'Stop'
 
 $TaskName = 'CodexWeChat'
 $Project = $PSScriptRoot
+if (-not $InstallRoot) {
+    if ($env:CODEX_WECHAT_INSTALL_ROOT) {
+        $InstallRoot = $env:CODEX_WECHAT_INSTALL_ROOT
+    } elseif ((Split-Path -Leaf (Split-Path -Parent $Project)) -eq 'releases') {
+        $InstallRoot = Split-Path -Parent (Split-Path -Parent $Project)
+    } else {
+        $InstallRoot = $Project
+    }
+}
+$InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
@@ -21,7 +33,18 @@ $Venv = Join-Path $Project '.venv'
 $VenvPython = Join-Path $Venv 'Scripts\python.exe'
 $VenvPythonw = Join-Path $Venv 'Scripts\pythonw.exe'
 $serviceScript = Join-Path $Project 'windows_service.py'
-$ExpectedActionPrefix = '"' + $serviceScript + '" supervise'
+$StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
+$StablePythonw = Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'
+$StablePython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
+$StableSupervisorReady = (
+    (Test-Path -LiteralPath $StableServiceScript -PathType Leaf) -and
+    (Test-Path -LiteralPath $StablePython)
+)
+$ExpectedActionPrefixes = @(
+    ('"' + $StableServiceScript + '" supervise'),
+    ('"' + $serviceScript + '" supervise'),
+    ('"' + (Join-Path $InstallRoot 'windows_service.py') + '" supervise')
+)
 $script:Warnings = @()
 
 function Fail([string]$Message) {
@@ -49,15 +72,15 @@ function Test-OwnedTask([object]$Task) {
         return $false
     }
     $actionText = [string]$actions[0].Arguments
-    if (-not $actionText.StartsWith(
-            $ExpectedActionPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        return $false
+    foreach ($prefix in $ExpectedActionPrefixes) {
+        if ($actionText.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            if ($actionText.Length -eq $prefix.Length -or
+                    [char]::IsWhiteSpace($actionText[$prefix.Length])) {
+                return $true
+            }
+        }
     }
-    if ($actionText.Length -gt $ExpectedActionPrefix.Length -and
-            -not [char]::IsWhiteSpace($actionText[$ExpectedActionPrefix.Length])) {
-        return $false
-    }
-    return $true
+    return $false
 }
 
 function Get-LogonTriggers([object]$Task) {
@@ -204,7 +227,7 @@ if (-not (Test-Path (Join-Path $Project 'codex_wechat.py'))) {
 }
 
 # Keep the parameter contract strict even when dependencies are missing.
-if (-not $PSBoundParameters.ContainsKey('Autostart')) {
+if (-not $PSBoundParameters.ContainsKey('Autostart') -and -not $PreserveAutostart) {
     if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected -or
             -not [Environment]::UserInteractive) {
         Fail 'non-interactive install requires an explicit -Autostart on|off choice'
@@ -327,44 +350,68 @@ if ($canRegisterTask) {
                 $defaultAutostart = [bool]$currentAutostart
             }
         }
-        $prompt = if ($defaultAutostart) {
-            'Enable automatic start at Windows sign-in? [Y/n]'
+        if ($PreserveAutostart) {
+            $autostartEnabled = $defaultAutostart
         } else {
-            'Enable automatic start at Windows sign-in? [y/N]'
-        }
-        while ($true) {
-            $answer = Read-Host $prompt
-            if ([string]::IsNullOrWhiteSpace($answer)) {
-                $autostartEnabled = $defaultAutostart
-                break
+            $prompt = if ($defaultAutostart) {
+                'Enable automatic start at Windows sign-in? [Y/n]'
+            } else {
+                'Enable automatic start at Windows sign-in? [y/N]'
             }
-            if ($answer -match '^(?i:y|yes)$') {
-                $autostartEnabled = $true
-                break
+            while ($true) {
+                $answer = Read-Host $prompt
+                if ([string]::IsNullOrWhiteSpace($answer)) {
+                    $autostartEnabled = $defaultAutostart
+                    break
+                }
+                if ($answer -match '^(?i:y|yes)$') {
+                    $autostartEnabled = $true
+                    break
+                }
+                if ($answer -match '^(?i:n|no)$') {
+                    $autostartEnabled = $false
+                    break
+                }
+                Write-Host 'Please answer yes or no.'
             }
-            if ($answer -match '^(?i:n|no)$') {
-                $autostartEnabled = $false
-                break
-            }
-            Write-Host 'Please answer yes or no.'
         }
     }
 
-    $taskPython = $VenvPythonw
-    if (-not (Test-Path $taskPython)) {
-        $taskPython = $VenvPython
+    if ($StableSupervisorReady) {
+        $taskPython = $StablePythonw
+        if (-not (Test-Path -LiteralPath $taskPython)) {
+            $taskPython = $StablePython
+        }
+        $taskScript = $StableServiceScript
+        $taskArguments = @(
+            (Quote-Arg $taskScript),
+            'supervise',
+            '--install-root', (Quote-Arg $InstallRoot),
+            '--state-dir', (Quote-Arg $StateDir),
+            '--config', (Quote-Arg $ConfigPath),
+            '--log', (Quote-Arg $LogPath)
+        ) -join ' '
+        $taskWorkingDirectory = $InstallRoot
+    } else {
+        $taskPython = $VenvPythonw
+        if (-not (Test-Path $taskPython)) {
+            $taskPython = $VenvPython
+        }
+        $taskScript = $serviceScript
+        $taskArguments = @(
+            (Quote-Arg $taskScript),
+            'supervise',
+            '--project', (Quote-Arg $Project),
+            '--state-dir', (Quote-Arg $StateDir),
+            '--config', (Quote-Arg $ConfigPath),
+            '--log', (Quote-Arg $LogPath)
+        ) -join ' '
+        $taskWorkingDirectory = $Project
     }
-    $arguments = @(
-        (Quote-Arg $serviceScript),
-        'supervise',
-        '--project', (Quote-Arg $Project),
-        '--state-dir', (Quote-Arg $StateDir),
-        '--config', (Quote-Arg $ConfigPath),
-        '--log', (Quote-Arg $LogPath)
-    ) -join ' '
 
     $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $action = New-ScheduledTaskAction -Execute $taskPython -Argument $arguments -WorkingDirectory $Project
+    $action = New-ScheduledTaskAction -Execute $taskPython -Argument $taskArguments `
+        -WorkingDirectory $taskWorkingDirectory
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
     $trigger.Enabled = [bool]$autostartEnabled
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited

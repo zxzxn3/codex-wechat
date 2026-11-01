@@ -4,13 +4,13 @@ import json
 from pathlib import Path
 import sys
 
-from platform_support import IS_WINDOWS, PROJECT_ROOT, subprocess_options
+from platform_support import INSTALL_ROOT, IS_WINDOWS, subprocess_options
 from service_control import UNIT, systemctl
 
 
 async def _windows_request(mode):
     command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-               "-File", str(PROJECT_ROOT / "codex-wechat.ps1"), "autostart"]
+               "-File", str(INSTALL_ROOT / "codex-wechat.ps1"), "autostart"]
     if mode != "status":
         command.append(mode)
     command.append("-Json")
@@ -49,7 +49,7 @@ async def _linux_status():
     fragment = fields.get("FragmentPath")
     if fields.get("LoadState") == "not-found" and not fragment:
         return None
-    expected = (PROJECT_ROOT / UNIT).resolve()
+    expected = (INSTALL_ROOT / UNIT).resolve()
     if not fragment or Path(fragment).resolve() != expected:
         raise ValueError("尚未安装本项目的用户服务，或该服务属于另一个目录。")
     return fields.get("UnitFileState") == "enabled"
@@ -68,10 +68,10 @@ async def set_enabled(enabled, *, start_if_missing=True):
         previous = await _linux_status()  # Never modify a different installation's service.
         if previous is None and not enabled:
             return False
-        if (previous is None and enabled and PROJECT_ROOT.resolve() !=
+        if (previous is None and enabled and INSTALL_ROOT.resolve() !=
                 (Path.home() / ".local/share/codex-wechat").resolve()):
             raise ValueError("首次注册 Linux 服务要求项目位于 ~/.local/share/codex-wechat。")
-        source = str((PROJECT_ROOT / UNIT).resolve())
+        source = str((INSTALL_ROOT / UNIT).resolve())
         if not Path(source).is_file():
             raise ValueError("本项目的服务模板不存在。")
         if enabled:

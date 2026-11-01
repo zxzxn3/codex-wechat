@@ -1,8 +1,13 @@
 # cfg 在 $HOME 默认全忽略；收录项目源码，排除私有运行数据。
 !*
 .venv/
+.bootstrap-venv/
 .state/
 .update-backups/
+releases/
+current
+previous
+.install-lock
 workspace/
 config.json
 __pycache__/

@@ -8,7 +8,7 @@ Windows 11 原生安装见 [Windows 指南](docs/WINDOWS.md)：安装 Python 和
 
 ## Linux 安装与运行
 
-完整运行需要 Linux、Python 3.11+、已登录且可执行 app-server 的 Codex CLI、curl 8.4+；终端二维码使用 qrencode，共享后台自动启动使用 systemd 254+。Python 依赖见 `requirements.txt`，协议依据见 [SOURCES](docs/SOURCES.md)。安装器会检查运行依赖，缺失时只提示并继续能完成的步骤，不要求先装齐才执行安装。Python 或用户服务管理器缺失时，仍可准备命令入口；扫码、运行或以后开启自启可能暂不可用。补齐依赖后用相同命令重跑即可，不覆盖已保存配置和登录。
+完整运行需要 Linux、Python 3.11+、已登录且可执行 app-server 的 Codex CLI、curl 8.4+；终端二维码使用 qrencode，共享后台自动启动使用 systemd 254+。Python 依赖见 `requirements.txt`，协议依据见 [SOURCES](docs/SOURCES.md)。版本化安装器必须先把 Python 包安装到新版本环境并校验成功，否则不会切换 `current`；Codex CLI、curl 和服务管理器可稍后补齐，`install.sh` 仍保留其低层软检查行为。
 
 ```bash
 ./codex-wechat install
@@ -16,18 +16,21 @@ codex-wechat login
 codex-wechat start
 ```
 
-安装器默认把源码部署到 `~/.local/share/codex-wechat`。如果当前源码已经在该目录，它只准备环境，不重复复制。安装前会显示计划并二次确认；已有登录、配置、待办、会话和工作目录不会被覆盖。
+安装器默认把源码部署到 `~/.local/share/codex-wechat`。如果该目录仍是旧式直接安装，首次 install/update 会把现有代码保留为 `legacy` 回滚版本，再从新源码建立版本化安装。安装前会显示计划并二次确认；已有登录、配置、待办、会话和工作目录不会被覆盖。
+
+程序按内容指纹安装到 `releases/<版本>`，根目录的 `current` 只记录当前版本。新版本会先在独立目录建立 Python 环境并完成校验，随后原子切换 `current`；运行数据仍保存在原位置。更新失败时旧 `current` 不变，已经安装的版本也不会被原地混合修改。
 
 安装和更新都支持只读演练：
 
 ```bash
 ./codex-wechat install --dry-run
 ./codex-wechat update --dry-run
+./codex-wechat rollback --dry-run
 ```
 
 二维码只在手动执行 `./codex-wechat login` 时显示在终端；用手机微信扫描并确认授权，若终端要求验证码则按提示输入。成功后凭据保存到本机 `.state/`。Codex 自身的登录与微信扫码是两件事，使用前需确保对应 Codex 启动器已可正常使用。
 
-`./install.sh` 仍可单独使用，负责低层依赖检查和命令入口，不注册服务、不启动程序、不修改已有自启。安装器会在准备 `.venv` 后调用它。
+`./install.sh` 仍可用于直接源码目录的依赖检查和命令入口，不注册服务、不启动程序、不修改已有自启。推荐的公开安装路径是版本化安装器。
 
 首次扫码成功后，用 `codex-wechat start` 在前台运行；微信里执行 `/settings autostart on` 时，程序才会检查并安装缺失的用户服务。第一次移交需要空闲，确认消息发出后前台退出、新服务接管；正在进行任务时会拒绝移交而不打断任务。后台接管只支持默认状态/配置路径和 `~/.local/share/codex-wechat` 目录。
 
@@ -46,13 +49,19 @@ journalctl --user -u codex-wechat -f
 ./codex-wechat update
 ```
 
-更新器只替换项目文件，保留 `.state/`、`.venv/`、`config.json`、`workspace/` 和未知本地文件。被替换文件备份到 `.update-backups/update-*`；新版本删除的旧文件不会自动删除，更新失败也不自动整体回滚。完成后重启服务：
+安装器会创建新的不可变版本并原子切换，保留 `.state/`、`config.json`、`workspace/` 和未知本地文件。旧版本不会删除，因此代码和环境可以一起回滚：
+
+```bash
+./codex-wechat rollback
+```
+
+回滚只切换 `current` 和 `previous`，旧版本目录仍原样保留。版本目录不会自动清理；确认当前版本稳定且不再需要回滚后，可手动删除未被 `current`、`previous` 引用的版本。完成后重启服务：
 
 ```bash
 systemctl --user restart codex-wechat
 ```
 
-微信 `/restart` 在空闲、无待办时加载代码修改；不会下载代码或重启共享 Codex 后台。
+版本切换后的实际接管按上面的平台服务命令操作。微信 `/restart` 在空闲、无待办时重启桥接；不会下载代码或重启共享 Codex 后台。
 
 ## Codex CLI 与桌面 App
 
@@ -181,7 +190,7 @@ Provider 从已连接后端的原生 `config/read` 取得当前供应商地址�
 
 ## 状态、安全与验证
 
-`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/` 和 `.venv/` 不入库。媒体目前不会自动清理。`./codex-wechat status` 只读取最后保存的摘要，不是健康检查。
+`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/`、`releases/`、版本指针和各版本 `.venv/` 都不入库。媒体目前不会自动清理。`./codex-wechat status` 只读取最后保存的摘要，不是健康检查。
 
 保留 Codex 原生沙箱和审批，不自动提高权限。控制消息保存游标后进入内存队列，崩溃时可能丢失，**不会自动重放控制命令**。微信发送接口响应丢失仍可能导致重试重复送达，不承诺恰好一次。
 

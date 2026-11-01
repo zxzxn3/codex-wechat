@@ -9,8 +9,8 @@ principal，只在该用户图形登录后启动。
 ## 前置条件
 
 - Windows 11；当前用户能打开普通终端。
-- Python 3.11 或更新版本，包含 `venv` 和 `pip`。安装后项目内使用
-  `.venv\Scripts\python.exe`。
+- Python 3.11 或更新版本，包含 `venv` 和 `pip`。每个程序版本使用自己的
+  `releases\<版本>\.venv`，不再共享会被更新原地修改的环境。
 - 已安装并登录原生 Codex CLI。安装器只接受 `codex.exe`（优先查找官方
   `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`），拒绝 npm 的
   `codex.cmd`、`.bat` 或 `.ps1` 转发包装。
@@ -49,7 +49,7 @@ py -3 installer.py install
 原生 Windows 安装阶段会：
 
 1. 检查 Windows 11、Python 3.11+、Codex CLI 和 `curl.exe` 版本；
-2. 创建项目内 `.venv` 并安装 `requirements.txt`；
+2. 在版本目录创建独立 `.venv` 并安装 `requirements.txt`；
 3. 在 `%LOCALAPPDATA%\codex-wechat` 创建数据目录；
 4. 如果配置不存在，创建只含普通 `codex` 后端的 `config.json`，已有的
    `config.json` 不会被覆盖；
@@ -64,16 +64,27 @@ py -3 installer.py install
 py -3 installer.py update
 ```
 
-更新器只替换程序文件，保留 `%LOCALAPPDATA%\codex-wechat` 下的配置、
-`.state`、workspace 和日志，也保留项目内 `.venv`。被替换文件备份到
-`%LOCALAPPDATA%\codex-wechat\app\.update-backups\update-*`。完成后重启任务：
+更新器把新源码完整安装到
+`%LOCALAPPDATA%\codex-wechat\app\releases\<版本>`，在该目录建立独立
+Python 环境并校验，成功后原子切换 `app\current`。原版本目录保持不变，
+因此可以只切指针回滚：
+
+```powershell
+py -3 installer.py rollback
+```
+
+Windows 计划任务指向稳定的 `app\bootstrap_supervisor.py`，不再绑定某个
+具体版本路径。更新时保留现有自启状态，但不自动启动任务；完成后重启
+任务使新版本接管：
 
 ```powershell
 cd "$env:LOCALAPPDATA\codex-wechat\app"
 .\codex-wechat.ps1 service-restart
 ```
 
-新版本删除的旧程序文件不会自动清除，更新失败也不会自动整体回滚。
+版本目录不会自动删除。确认 `current` 稳定且不再需要 `previous` 后，可
+手动清理未引用的旧版本目录。配置、`.state`、workspace 和日志始终位于
+`app` 的上一级数据目录，不会被版本切换触碰。
 
 只准备安装、不立即启动（自启选项仍单独选择）：
 
@@ -114,8 +125,9 @@ cd "$env:LOCALAPPDATA\codex-wechat\app"
 前台 `start` 与后台任务共用状态目录的单实例锁。后台服务运行时先停止
 后台服务，再启动前台实例。
 
-计划任务记录项目的绝对路径和 `.venv` 解释器路径；移动项目目录后需重新
-运行 `install.ps1`。
+计划任务记录稳定 bootstrap、数据路径和安装根目录，不记录某个具体版本的
+程序或 `.venv`。版本切换不需要重写任务；移动整个安装根目录后仍需重新运行
+安装器。
 
 ## 数据、配置与日志
 
@@ -174,7 +186,7 @@ Windows 数据继承当前用户目录权限，不把 POSIX `chmod` 当作 ACL �
 .\uninstall.ps1
 ```
 
-默认只移除 `CodexWeChat` 计划任务，保留项目、`.venv` 和
+默认只移除 `CodexWeChat` 计划任务，保留版本目录、稳定入口和
 `%LOCALAPPDATA%\codex-wechat` 数据。确认不再需要凭据、待办和历史后，
 可显式清除数据：
 
@@ -189,7 +201,11 @@ Windows 数据继承当前用户目录权限，不把 POSIX `chmod` 当作 ACL �
 当前 Linux 固定副本离线回归执行 130 项，129 通过、1 项原生 Windows 文件锁检查跳过；PowerShell 7.6.6 脚本语法检查通过。这些不是 Windows 实机验收。Windows 上可先运行专门的离线用例，不会登录微信或调用模型：
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_windows*.py" -v
+$app = "$env:LOCALAPPDATA\codex-wechat\app"
+$release = (Get-Content "$app\current" -TotalCount 1).Trim()
+& "$app\releases\$release\.venv\Scripts\python.exe" `
+    -m unittest discover -s "$app\releases\$release\tests" `
+    -p "test_windows*.py" -v
 ```
 
 主套件还有 POSIX 权限等 Linux 专用断言，不应直接把其在 Windows 的全部结果作为平台验收。真实安装后应逐项检查扫码、重登录自启、文字/图片/文件收发、会话切换和 `/restart`；请使用独立测试会话，不操作正在工作的桌面会话。

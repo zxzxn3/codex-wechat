@@ -39,7 +39,7 @@ class AutostartScriptContractTests(unittest.TestCase):
         for text in (self.entry, self.install):
             self.assertIn("[StringComparison]::OrdinalIgnoreCase", text)
             self.assertIn(
-                "[char]::IsWhiteSpace($actionText[$ExpectedActionPrefix.Length])",
+                "[char]::IsWhiteSpace($actionText[$prefix.Length])",
                 text)
         self.assertIn("$actions.Count -ne 1", self.entry)
         self.assertIn("$actions.Count -ne 1", self.install)
@@ -54,6 +54,15 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertNotIn("RestartCount", self.install)
         self.assertNotIn("RestartInterval", self.install)
         self.assertNotIn("Disable-ScheduledTask", self.install)
+
+    def test_scheduled_task_can_target_stable_release_bootstrap(self):
+        self.assertIn("bootstrap_supervisor.py", self.install)
+        self.assertIn(".bootstrap-venv\\Scripts\\pythonw.exe", self.install)
+        self.assertIn("'--install-root'", self.install)
+        self.assertIn("[switch]$PreserveAutostart", self.install)
+        self.assertIn("bootstrap_supervisor.py", self.entry)
+        self.assertIn(r"releases\$ReleaseId", self.entry)
+        self.assertIn("[IO.FileAttributes]::ReparsePoint", self.entry)
 
     def test_autostart_parameters_are_rejected_by_other_commands(self):
         shell = powershell()

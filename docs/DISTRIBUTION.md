@@ -4,9 +4,11 @@
 
 源码安装和更新由标准库实现的 `installer.py` 负责：Linux 默认部署到
 `~/.local/share/codex-wechat`，Windows 默认部署到
-`%LOCALAPPDATA%\codex-wechat\app`。更新器只替换项目文件，保留私有状态和
-`.venv`，并将被替换文件写入 `.update-backups`。平台服务仍由现有
-systemd unit 或 Windows 计划任务脚本管理。安装器预留
+`%LOCALAPPDATA%\codex-wechat\app`。程序按内容指纹安装到不可变
+`releases/<版本>`，每个版本拥有独立 `.venv`；根目录 `current` 原子指向
+当前版本，`previous` 支持只切指针回滚。稳定命令入口和 Windows bootstrap
+supervisor 不随普通更新改写。平台服务仍由现有 systemd unit 或 Windows
+计划任务脚本管理。安装器预留
 `assets/logo/codex-wechat.txt` 作为终端 art 接口，当前不附带 art。
 
 主要参考 [yt-dlp 的发行文件和构建说明](https://github.com/yt-dlp/yt-dlp#release-files)：同一仓库和版本，分别产出平台适配的文件。自启接入参考 [Syncthing](https://docs.syncthing.net/users/autostart)：业务核心共享，接入各系统原生启动机制，不要求跨平台共用同一服务管理器。

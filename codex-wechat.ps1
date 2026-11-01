@@ -17,7 +17,34 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $TaskName = 'CodexWeChat'
-$Project = $PSScriptRoot
+$ScriptRoot = $PSScriptRoot
+$InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
+    [IO.Path]::GetFullPath($env:CODEX_WECHAT_INSTALL_ROOT)
+} elseif ((Split-Path -Leaf (Split-Path -Parent $ScriptRoot)) -eq 'releases') {
+    Split-Path -Parent (Split-Path -Parent $ScriptRoot)
+} else {
+    $ScriptRoot
+}
+$Project = $ScriptRoot
+$CurrentFile = Join-Path $InstallRoot 'current'
+$CurrentItem = Get-Item -LiteralPath $CurrentFile -Force -ErrorAction SilentlyContinue
+if ($null -ne $CurrentItem) {
+    if ($CurrentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "codex-wechat.ps1: current must not be a reparse point: $CurrentFile"
+    }
+    if ($CurrentItem.PSIsContainer) {
+        throw "codex-wechat.ps1: current must be a file: $CurrentFile"
+    }
+    $ReleaseId = (Get-Content -LiteralPath $CurrentFile -TotalCount 1).Trim()
+    if (-not $ReleaseId -or $ReleaseId -notmatch '^[A-Za-z0-9._-]+$') {
+        throw "codex-wechat.ps1: invalid release id in $CurrentFile"
+    }
+    $Project = Join-Path $InstallRoot "releases\$ReleaseId"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $Project 'codex_wechat.py') -PathType Leaf)) {
+    throw "codex-wechat.ps1: active project files are missing: $Project"
+}
+$env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot
 $DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
@@ -25,7 +52,11 @@ $LogPath = Join-Path $DataRoot 'logs\service.log'
 $VenvPython = Join-Path $Project '.venv\Scripts\python.exe'
 $Agent = Join-Path $Project 'codex_wechat.py'
 $ServiceScript = Join-Path $Project 'windows_service.py'
-$ExpectedActionPrefix = '"' + $ServiceScript + '" supervise'
+$StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
+$ExpectedActionPrefixes = @(
+    ('"' + $StableServiceScript + '" supervise'),
+    ('"' + $ServiceScript + '" supervise')
+)
 
 function Fail([string]$Message) {
     throw "codex-wechat.ps1: $Message"
@@ -53,15 +84,15 @@ function Test-OwnedTask([object]$Task) {
         return $false
     }
     $actionText = [string]$actions[0].Arguments
-    if (-not $actionText.StartsWith(
-            $ExpectedActionPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        return $false
+    foreach ($prefix in $ExpectedActionPrefixes) {
+        if ($actionText.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            if ($actionText.Length -eq $prefix.Length -or
+                    [char]::IsWhiteSpace($actionText[$prefix.Length])) {
+                return $true
+            }
+        }
     }
-    if ($actionText.Length -gt $ExpectedActionPrefix.Length -and
-            -not [char]::IsWhiteSpace($actionText[$ExpectedActionPrefix.Length])) {
-        return $false
-    }
-    return $true
+    return $false
 }
 
 function Get-LogonTriggers([object]$Task) {

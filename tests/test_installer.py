@@ -1,4 +1,4 @@
-"""Offline installer and update contracts using disposable source trees."""
+"""Offline contracts for immutable release installation and rollback."""
 import contextlib
 import io
 import os
@@ -23,11 +23,17 @@ class InstallerTests(unittest.TestCase):
         self.make_project(self.source)
         self.enterContext(patch.object(installer, "introduction", return_value=True))
         self.enterContext(patch.object(installer, "prepare_runtime"))
+        self.enterContext(patch.object(installer, "prepare_bootstrap_runtime"))
+        self.enterContext(patch.object(installer, "preflight_command_link"))
+        self.enterContext(patch.object(installer, "install_command_link"))
+        self.enterContext(patch.object(installer, "configure_windows"))
         self.enterContext(patch.object(installer, "next_steps"))
 
     def make_project(self, root, *, version="one"):
         root.mkdir(parents=True, exist_ok=True)
-        for relative in installer.REQUIRED_FILES:
+        required = installer.REQUIRED_FILES | set(installer.STABLE_LINUX_FILES)
+        required.update(installer.STABLE_WINDOWS_FILES)
+        for relative in required:
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"{relative}: {version}\n", encoding="utf-8")
@@ -44,6 +50,7 @@ class InstallerTests(unittest.TestCase):
         private = {
             ".state/account.json": "private",
             ".venv/bin/python": "private",
+            ".bootstrap-venv/bin/python": "private",
             ".update-backups/old/file.py": "private",
             "workspace/notes.txt": "private",
             "config.json": "private",
@@ -56,6 +63,12 @@ class InstallerTests(unittest.TestCase):
             path.write_text(content, encoding="utf-8")
         return private
 
+    def current(self):
+        return installer.read_pointer(self.target, installer.CURRENT_FILE)
+
+    def previous(self):
+        return installer.read_pointer(self.target, installer.PREVIOUS_FILE)
+
     def test_payload_excludes_private_runtime_content(self):
         self.add_private_data(self.source)
         files = installer.project_files(self.source)
@@ -65,18 +78,18 @@ class InstallerTests(unittest.TestCase):
             Path("config.json"),
             Path(".state/account.json"),
             Path(".venv/bin/python"),
+            Path(".bootstrap-venv/bin/python"),
             Path(".update-backups/old/file.py"),
             Path("workspace/notes.txt"),
         ):
             self.assertNotIn(relative, files)
 
-    def test_payload_refuses_symlink(self):
+    def test_payload_refuses_file_source_and_directory_symlinks(self):
         link = self.source / "link.py"
         link.symlink_to(self.source / "extra.py")
         with self.assertRaisesRegex(ValueError, "符号链接"):
             installer.project_files(self.source)
-
-    def test_payload_refuses_symlinked_source_and_directory(self):
+        link.unlink()
         source_link = self.base / "source-link"
         source_link.symlink_to(self.source, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, "源码目录"):
@@ -86,24 +99,30 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "符号链接"):
             installer.project_files(self.source)
 
-    def test_install_copies_only_project_files_and_keeps_modes(self):
+    def test_install_creates_immutable_release_and_pointer(self):
         with patch("builtins.input", return_value="y"):
             self.assertEqual(installer.install(self.source, self.target), 0)
-        self.assertEqual((self.target / "extra.py").read_text(), "VERSION = 'one'\n")
-        self.assertTrue((self.target / "docs/guide.md").is_file())
-        self.assertTrue((self.target / "codex-wechat").stat().st_mode & stat.S_IXUSR)
+        identifier = self.current()
+        self.assertIsNotNone(identifier)
+        release = self.target / installer.RELEASES_DIR / identifier
+        self.assertTrue((release / "extra.py").is_file())
+        self.assertTrue((release / "docs/guide.md").is_file())
+        self.assertTrue((release / "codex-wechat").stat().st_mode & stat.S_IXUSR)
+        self.assertTrue(installer.release_matches(self.target, identifier))
+        self.assertTrue((self.target / "codex-wechat").is_file())
+        self.assertTrue((self.target / "installer.py").is_file())
         self.assertFalse((self.target / "config.json").exists())
         self.assertFalse((self.target / ".state").exists())
 
-    def test_cancel_and_dry_run_do_not_write(self):
+    def test_cancel_and_dry_run_do_not_create_version_state(self):
         with patch("builtins.input", return_value="n"):
             self.assertEqual(installer.install(self.source, self.target), 0)
-        self.assertFalse(self.target.exists())
+        self.assertFalse((self.target / installer.CURRENT_FILE).exists())
         with patch("builtins.input", return_value="y"):
             self.assertEqual(installer.install(self.source, self.target, dry_run=True), 0)
-        self.assertFalse(self.target.exists())
+        self.assertFalse((self.target / installer.RELEASES_DIR).exists())
 
-    def test_nonempty_target_requires_update(self):
+    def test_nonempty_unrelated_target_is_rejected_before_prompt(self):
         self.target.mkdir()
         marker = self.target / "unrelated"
         marker.write_text("keep", encoding="utf-8")
@@ -122,67 +141,116 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "符号链接"):
             installer.update(self.source, self.target)
 
-    def test_existing_source_can_prepare_in_place(self):
-        marker = self.source / "workspace/keep.txt"
+    def test_legacy_in_place_install_is_adopted_without_moving_data(self):
+        self.source.rename(self.target)
+        self.make_project(self.source, version="new")
+        marker = self.target / "workspace/keep.txt"
         marker.parent.mkdir()
         marker.write_text("keep", encoding="utf-8")
         with patch("builtins.input", return_value="y"):
-            self.assertEqual(installer.install(self.source, self.source), 0)
+            self.assertEqual(installer.update(self.source, self.target), 0)
+        self.assertIsNotNone(self.current())
+        self.assertEqual(self.previous(), installer.LEGACY_ID)
         self.assertEqual(marker.read_text(), "keep")
-        installer.prepare_runtime.assert_called_with(self.source, update=False)
+        self.assertTrue((self.target / "codex_wechat.py").is_file())
 
-    def test_update_backs_up_replacements_and_preserves_private_data(self):
-        installer.install_files(self.source, self.target, installer.project_files(self.source))
+    def test_update_switches_as_a_whole_and_preserves_private_data(self):
+        (self.source / "removed-in-v2.py").write_text("OLD = True\n", encoding="utf-8")
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        first = self.current()
         self.add_private_data(self.target)
         unknown = self.target / "local-note.txt"
         unknown.write_text("keep", encoding="utf-8")
+        (self.source / "removed-in-v2.py").unlink()
         self.make_project(self.source, version="two")
         (self.source / "new.py").write_text("NEW = True\n", encoding="utf-8")
         with patch("builtins.input", return_value="y"):
             self.assertEqual(installer.update(self.source, self.target), 0)
-        self.assertEqual((self.target / "extra.py").read_text(), "VERSION = 'two'\n")
-        self.assertTrue((self.target / "new.py").is_file())
+        second = self.current()
+        self.assertNotEqual(first, second)
+        self.assertEqual(self.previous(), first)
+        release = self.target / installer.RELEASES_DIR / second
+        self.assertTrue((release / "new.py").is_file())
+        self.assertFalse((release / "removed-in-v2.py").exists())
         self.assertEqual(unknown.read_text(), "keep")
         self.assertEqual((self.target / "config.json").read_text(), "private")
         self.assertEqual((self.target / ".state/account.json").read_text(), "private")
-        backups = sorted((self.target / ".update-backups").glob("update-*"))
-        self.assertTrue(backups)
-        self.assertEqual((backups[-1] / "extra.py").read_text(), "VERSION = 'one'\n")
 
-    def test_update_is_noop_when_files_match(self):
-        installer.install_files(self.source, self.target, installer.project_files(self.source))
+    def test_noop_update_does_not_prompt_for_confirmation(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
         with patch.object(installer, "introduction") as intro:
             self.assertEqual(installer.update(self.source, self.target), 0)
             intro.assert_not_called()
-        self.assertEqual((self.target / "extra.py").read_text(), "VERSION = 'one'\n")
 
-    def test_update_rejects_same_checkout(self):
-        with self.assertRaisesRegex(ValueError, "另一份"):
-            installer.update(self.source, self.source)
-
-    def test_update_rechecks_after_confirmation(self):
-        installer.install_files(self.source, self.target, installer.project_files(self.source))
+    def test_failed_runtime_build_keeps_previous_pointer(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        first = self.current()
         self.make_project(self.source, version="two")
+        with patch("builtins.input", return_value="y"), \
+             patch.object(installer, "prepare_runtime",
+                          side_effect=ValueError("build failed")):
+            with self.assertRaisesRegex(ValueError, "build failed"):
+                installer.update(self.source, self.target)
+        self.assertEqual(self.current(), first)
 
-        def change_target(_):
-            (self.target / "extra.py").write_text("changed while reading\n", encoding="utf-8")
+    def test_source_change_after_confirmation_is_rejected(self):
+        def change_source(_):
+            (self.source / "extra.py").write_text("CHANGED = True\n", encoding="utf-8")
             return "y"
 
-        with patch("builtins.input", side_effect=change_target):
-            with self.assertRaisesRegex(ValueError, "发生变化"):
-                installer.update(self.source, self.target)
-        self.assertEqual((self.target / "extra.py").read_text(), "changed while reading\n")
+        with patch("builtins.input", side_effect=change_source):
+            with self.assertRaisesRegex(ValueError, "源码发生变化"):
+                installer.install(self.source, self.target)
+        self.assertFalse((self.target / installer.CURRENT_FILE).exists())
 
-    def test_update_refuses_symlinked_target_file(self):
-        installer.install_files(self.source, self.target, installer.project_files(self.source))
-        extra = self.target / "extra.py"
-        outside = self.base / "outside.py"
-        outside.write_text("outside\n", encoding="utf-8")
-        extra.unlink()
-        extra.symlink_to(outside)
-        with self.assertRaisesRegex(ValueError, "符号链接"):
+    def test_rollback_toggles_pointer_and_keeps_both_releases(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        first = self.current()
+        self.make_project(self.source, version="two")
+        with patch("builtins.input", return_value="y"):
             installer.update(self.source, self.target)
-        self.assertEqual(outside.read_text(), "outside\n")
+        second = self.current()
+        self.assertEqual(installer.rollback(self.target), 0)
+        self.assertEqual(self.current(), first)
+        self.assertEqual(self.previous(), second)
+        self.assertTrue((self.target / installer.RELEASES_DIR / first).is_dir())
+        self.assertTrue((self.target / installer.RELEASES_DIR / second).is_dir())
+
+    def test_rollback_rejects_linked_releases_directory(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        self.make_project(self.source, version="two")
+        with patch("builtins.input", return_value="y"):
+            installer.update(self.source, self.target)
+        current = self.current()
+        releases = self.target / installer.RELEASES_DIR
+        outside = self.base / "outside-releases"
+        releases.rename(outside)
+        releases.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "上一版本不完整"):
+            installer.rollback(self.target)
+        self.assertEqual(self.current(), current)
+
+    def test_same_version_update_repairs_missing_stable_entry(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        current = self.current()
+        (self.target / "codex-wechat").unlink()
+        with patch.object(installer, "introduction") as intro:
+            self.assertEqual(installer.update(self.source, self.target), 0)
+            intro.assert_not_called()
+        self.assertEqual(self.current(), current)
+        self.assertTrue((self.target / "codex-wechat").is_file())
+
+    def test_update_rejects_same_versioned_root_as_source(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        with self.assertRaisesRegex(ValueError, "另一份源码"):
+            installer.update(self.target, self.target)
 
     def test_optional_logo_is_displayed_only_when_present(self):
         with contextlib.redirect_stdout(io.StringIO()) as output:
@@ -194,7 +262,8 @@ class InstallerTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output), \
              patch.object(installer.sys.stdout, "isatty", return_value=True), \
-             patch.object(installer.shutil, "get_terminal_size", return_value=os.terminal_size((80, 24))), \
+             patch.object(installer.shutil, "get_terminal_size",
+                          return_value=os.terminal_size((80, 24))), \
              patch.dict(os.environ, {"TERM": "xterm"}):
             installer.logo_banner(self.source)
         self.assertIn("future art", output.getvalue())
@@ -213,26 +282,19 @@ class InstallerTests(unittest.TestCase):
                 self.base / "local/codex-wechat/app",
             )
 
-    def test_windows_update_only_refreshes_existing_venv(self):
-        python = self.target / ".venv/Scripts/python.exe"
-        python.parent.mkdir(parents=True)
-        python.write_text("fixture", encoding="utf-8")
-        with patch.object(installer, "IS_WINDOWS", True), \
-             patch.object(installer.shutil, "which", return_value="powershell.exe"), \
-             patch.object(installer, "_run") as run:
-            installer.prepare_windows(self.target, update=True)
-        self.assertEqual(run.call_args.args[0][0], str(python))
-
     def test_linux_rejects_nonstandard_install_directory(self):
         with patch.object(installer, "IS_WINDOWS", False), \
-             patch.object(installer, "default_target", return_value=self.base / "canonical"):
+             patch.object(installer, "default_target",
+                          return_value=self.base / "canonical"):
             with self.assertRaisesRegex(ValueError, "必须是"):
                 installer.main(["install", "--dir", str(self.target)])
 
-    def test_linux_wrapper_routes_install_and_update_to_installer(self):
+    def test_linux_wrapper_routes_release_commands_to_installer(self):
         text = (installer.SOURCE_ROOT / "codex-wechat").read_text(encoding="utf-8")
-        self.assertIn("install|update", text)
-        self.assertIn('installer.py" "$@"', text)
+        self.assertIn("install|update|rollback", text)
+        self.assertIn('INSTALL_ROOT/installer.py', text)
+        self.assertIn('INSTALL_ROOT/releases/$RELEASE_ID', text)
+        self.assertIn('[ -L "$CURRENT_FILE" ]', text)
 
 
 if __name__ == "__main__":

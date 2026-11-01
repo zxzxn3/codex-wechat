@@ -29,7 +29,7 @@ class LazyRegistrationTests(unittest.IsolatedAsyncioTestCase):
             for should_start in (True, False):
                 native = AsyncMock()
                 with patch.object(autostart, "IS_WINDOWS", False), \
-                        patch.object(autostart, "PROJECT_ROOT", project), \
+                        patch.object(autostart, "INSTALL_ROOT", project), \
                         patch("autostart.Path.home", return_value=home), \
                         patch.object(autostart, "_linux_status", AsyncMock(side_effect=[None, True])), \
                         patch.object(autostart, "systemctl", native):

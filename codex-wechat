@@ -1,15 +1,43 @@
 #!/usr/bin/env bash
 # Preserve system PATH defaults while making the existing personal launchers available.
 set -euo pipefail
-PROJECT_DIR="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+PROJECT_DIR="$INSTALL_ROOT"
+CURRENT_FILE="$INSTALL_ROOT/current"
+case "${1:-}" in
+    install|update|rollback)
+        INSTALLER="$INSTALL_ROOT/installer.py"
+        if [ ! -f "$INSTALLER" ]; then
+            echo "codex-wechat: 稳定安装器缺失: $INSTALLER" >&2
+            exit 1
+        fi
+        exec python3 -u "$INSTALLER" "$@"
+        ;;
+esac
+if [ -L "$CURRENT_FILE" ]; then
+    echo "codex-wechat: current 不能是符号链接" >&2
+    exit 1
+fi
+if [ -f "$CURRENT_FILE" ]; then
+    IFS= read -r RELEASE_ID < "$CURRENT_FILE" || true
+    case "$RELEASE_ID" in
+        ""|*[!A-Za-z0-9._-]*)
+            echo "codex-wechat: current 文件包含无效版本标识" >&2
+            exit 1
+            ;;
+    esac
+    PROJECT_DIR="$INSTALL_ROOT/releases/$RELEASE_ID"
+    if [ ! -f "$PROJECT_DIR/codex_wechat.py" ]; then
+        echo "codex-wechat: 当前版本不完整: $PROJECT_DIR" >&2
+        echo "请从新源码重新运行 update。" >&2
+        exit 1
+    fi
+    export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
+    export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"
+fi
 export PATH="$HOME/.local/bin:$PATH"
 PYTHON=python3
 if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
     PYTHON="$PROJECT_DIR/.venv/bin/python"
 fi
-case "${1:-}" in
-    install|update)
-        exec "$PYTHON" -u "$PROJECT_DIR/installer.py" "$@"
-        ;;
-esac
 exec "$PYTHON" -u "$PROJECT_DIR/codex_wechat.py" "$@"

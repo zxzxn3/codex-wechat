@@ -6,9 +6,15 @@ import subprocess
 
 IS_WINDOWS = os.name == "nt"
 PROJECT_ROOT = Path(__file__).resolve().parent
+INSTALL_ROOT = Path(
+    os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(PROJECT_ROOT))
+).expanduser().resolve()
 
 
 def data_root():
+    override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
+    if override:
+        return Path(override).expanduser().resolve()
     if IS_WINDOWS:
         local = os.environ.get("LOCALAPPDATA")
         if not local:

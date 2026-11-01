@@ -10,7 +10,20 @@ $ErrorActionPreference = 'Stop'
 
 $TaskName = 'CodexWeChat'
 $Project = $PSScriptRoot
+$InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
+    [IO.Path]::GetFullPath($env:CODEX_WECHAT_INSTALL_ROOT)
+} elseif ((Split-Path -Leaf (Split-Path -Parent $Project)) -eq 'releases') {
+    Split-Path -Parent (Split-Path -Parent $Project)
+} else {
+    $Project
+}
 $ServiceScript = Join-Path $Project 'windows_service.py'
+$StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
+$ExpectedActionPrefixes = @(
+    ('"' + $StableServiceScript + '" supervise'),
+    ('"' + $ServiceScript + '" supervise'),
+    ('"' + (Join-Path $InstallRoot 'windows_service.py') + '" supervise')
+)
 $DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
 
 function Fail([string]$Message) {
@@ -32,7 +45,15 @@ function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($task) {
     $actionText = [string]$task.Actions[0].Arguments
-    $owned = (@($task.Actions).Count -eq 1) -and ($actionText.IndexOf($ServiceScript, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    $owned = $false
+    if (@($task.Actions).Count -eq 1) {
+        foreach ($prefix in $ExpectedActionPrefixes) {
+            if ($actionText.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                $owned = $true
+                break
+            }
+        }
+    }
     if (-not $owned -and -not $Force) {
         Fail "task '$TaskName' is not owned by this installation; use -Force to remove it anyway"
     }

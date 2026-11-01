@@ -30,6 +30,9 @@ class PlatformTests(unittest.TestCase):
         with patch.object(platform_support, "IS_WINDOWS", True), \
                 patch.dict("os.environ", {"LOCALAPPDATA": "/tmp/local"}):
             self.assertEqual(platform_support.data_root(), Path("/tmp/local/codex-wechat"))
+        with patch.object(platform_support, "IS_WINDOWS", False), \
+                patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": "/tmp/stable-data"}):
+            self.assertEqual(platform_support.data_root(), Path("/tmp/stable-data"))
         with patch("profiles.IS_WINDOWS", True):
             self.assertEqual(set(definitions({})), {"codex"})
             self.assertEqual(set(definitions({"backends": {"deepseek": {

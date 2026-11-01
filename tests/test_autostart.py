@@ -14,7 +14,7 @@ from storage import Store
 class AutostartTests(unittest.IsolatedAsyncioTestCase):
     async def test_linux_reads_native_state_and_checks_installation_identity(self):
         for value, expected in (("enabled", True), ("disabled", False), ("linked", False)):
-            output = f"FragmentPath={autostart.PROJECT_ROOT / autostart.UNIT}\nUnitFileState={value}"
+            output = f"FragmentPath={autostart.INSTALL_ROOT / autostart.UNIT}\nUnitFileState={value}"
             with patch.object(autostart, "IS_WINDOWS", False), \
                     patch.object(autostart, "systemctl", AsyncMock(return_value=output)):
                 self.assertIs(await autostart.status(), expected)
@@ -31,7 +31,7 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await autostart.set_enabled(False))
         args = [call.args for call in native.await_args_list]
         self.assertEqual(args, [("disable", autostart.UNIT),
-            ("link", str((autostart.PROJECT_ROOT / autostart.UNIT).resolve())), ("daemon-reload",)])
+            ("link", str((autostart.INSTALL_ROOT / autostart.UNIT).resolve())), ("daemon-reload",)])
         self.assertFalse(any("stop" in arg or "--now" in arg for arg in args))
 
     async def test_enable_uses_installed_source_without_starting(self):
@@ -40,7 +40,7 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(autostart, "_linux_status", AsyncMock(side_effect=[False, True])), \
                 patch.object(autostart, "systemctl", native):
             self.assertTrue(await autostart.set_enabled(True))
-        native.assert_awaited_once_with("enable", str((autostart.PROJECT_ROOT / autostart.UNIT).resolve()))
+        native.assert_awaited_once_with("enable", str((autostart.INSTALL_ROOT / autostart.UNIT).resolve()))
 
     async def test_invalid_installation_prevents_mutation(self):
         native = AsyncMock()
@@ -66,7 +66,7 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await autostart.set_enabled(False))
         args = spawn.call_args.args
         self.assertEqual(args[-3:], ("autostart", "off", "-Json"))
-        self.assertIn(str(autostart.PROJECT_ROOT / "codex-wechat.ps1"), args)
+        self.assertIn(str(autostart.INSTALL_ROOT / "codex-wechat.ps1"), args)
 
     async def test_windows_failure_and_malformed_response_are_not_success(self):
         for code, output in ((1, b''), (0, b'{"enabled":"true"}'), (0, b'bad')):

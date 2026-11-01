@@ -64,11 +64,15 @@ Windows 使用当前交互用户的计划任务和 `windows_service.py` supervis
 
 ## 安装与更新
 
-`installer.py` 是只用标准库的源码安装层，不依赖项目 `.venv`。安装只复制可分发文件，排除 `.state`、`.venv`、`.update-backups`、workspace、`config.json`、缓存和发布目录；源码或目标中的符号链接会被拒绝。Linux 默认安装目录固定为 `~/.local/share/codex-wechat`，Windows 默认安装到 `LOCALAPPDATA/codex-wechat/app`。
+`installer.py` 是只用标准库的源码安装层，不依赖项目 `.venv`。安装只读取可分发文件，排除 `.state`、`.venv`、`.bootstrap-venv`、workspace、`config.json`、缓存和已有版本目录；源码中的公开符号链接会被拒绝。Linux 默认安装目录固定为 `~/.local/share/codex-wechat`，Windows 默认安装到 `LOCALAPPDATA/codex-wechat/app`。
 
-更新必须从另一份新源码运行，按原安装清单逐个比较内容与执行位。替换前再次核对确认期间没有并发变化，被替换文件写入 `.update-backups/update-*`；新增文件直接加入，旧版本删除的文件和未知本地文件不清理，也不承诺自动整体回滚。更新后只刷新现有 `.venv` 的 Python 依赖，私有状态、配置、会话和工作目录保持不变。
+每次发布按程序文件和权限的内容指纹进入 `releases/<版本>`，并带有内部 manifest。新版本先在 staging 目录复制文件、创建独立 `.venv`、安装依赖并编译 Python 文件；全部成功后才移动到 `releases` 并原子更新根目录的 `current`。`previous` 与 `current` 一起标识可回滚版本。运行数据始终留在安装根目录，不进入版本包。
 
-Linux 高层安装器准备 `.venv` 后调用低层 `install.sh` 建命令入口，不注册服务；Windows 高层安装器把环境、扫码和计划任务交给 `install.ps1`。prompts 属于安装层，systemd 与计划任务仍由各平台既有入口管理。可选 art 只从 `assets/logo/codex-wechat.txt` 读取，缺失时不输出占位内容。
+稳定入口是根目录的 `codex-wechat`/`codex-wechat.ps1`，Linux 另保留只依赖标准库的根目录 `installer.py` 供版本切换与恢复；systemd unit 和 Windows 计划任务不再固定到某个程序版本。Linux unit 直接调用稳定入口；Windows 计划任务调用稳定的 `bootstrap_supervisor.py`，它读取 `current` 后加载对应版本。所有入口都拒绝符号链接形式的版本指针，安装器也拒绝链接的版本目录。更新后到服务重启前，旧进程继续使用原版本，不会读取半更新文件。
+
+更新必须从另一份新源码运行。相同内容指纹直接视为 no-op；确认期间源码改变会拒绝激活。`rollback` 只原子切换 `current`/`previous`，不复制状态、不重建环境。当前实现不会自动删除旧版本目录，也不会在激活前删除现有版本；未知根目录文件保持不变。已有直接安装第一次 update 时以 `legacy` 作为 previous，保留原目录用于回滚。
+
+Linux 高层安装器建立版本环境并维护命令链接，不注册服务；Windows 高层安装器把扫码和计划任务交给新版本的 `install.ps1`，任务本身指向稳定 bootstrap。prompts 属于版本内容，systemd 与计划任务仍由各平台既有入口管理。可选 art 只从 `assets/logo/codex-wechat.txt` 读取，缺失时不输出占位内容。
 
 ## 自启与失败恢复
 
