@@ -421,7 +421,7 @@ class InstallerFlowTests(unittest.TestCase):
         out = self.output(result)
         self.assertEqual(result.returncode, 0, out)
         self.assertIn("Task: not registered (no usable Python)", out)
-        self.assertIn("Login: skipped (no usable Python)", out)
+        self.assertIn("Login: not bound (scan on first foreground start)", out)
         self.assertIn("Start: not started (task not registered)", out)
         self.assertIn("Result: preparation incomplete", out)
         self.assertNotIn("REGISTER", calls)
@@ -479,22 +479,23 @@ class InstallerFlowTests(unittest.TestCase):
         out = self.output(result)
         self.assertEqual(result.returncode, 0, out)
         self.assertIn("Task: registered", out)
-        self.assertIn("Login: skipped (curl missing or too old)", out)
+        self.assertIn("Login: not bound (scan on first foreground start)", out)
         self.assertIn("Start: not started (WeChat not bound)", out)
         self.assertNotIn("LOGIN", calls)
         self.assertNotIn("START", calls)
 
-    def test_interactive_login_success_then_start(self):
+    def test_interactive_install_never_logs_in_or_starts_an_unbound_service(self):
         result, calls = self.run_installer(
             codex=True, curl=True, account=False, autostart="on",
             interactive=True, login=True)
         out = self.output(result)
         self.assertEqual(result.returncode, 0, out)
-        self.assertIn("Login: completed", out)
-        self.assertIn("Start: start request sent", out)
-        self.assertIn("LOGIN", calls)
-        self.assertIn("START", calls)
-        self.assertTrue((self.data / ".state" / "account.json").exists())
+        self.assertIn("Login: not bound (scan on first foreground start)", out)
+        self.assertIn("Start: not started (WeChat not bound)", out)
+        self.assertIn("Result: ready.", out)
+        self.assertNotIn("LOGIN", calls)
+        self.assertNotIn("START", calls)
+        self.assertFalse((self.data / ".state" / "account.json").exists())
 
     def test_no_start_preserves_task_and_autostart(self):
         result, calls = self.run_installer(

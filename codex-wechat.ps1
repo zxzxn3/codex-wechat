@@ -3,14 +3,17 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet('login', 'start', 'status', 'service-start', 'service-stop',
-                 'service-restart', 'service-status', 'autostart', 'logs', 'uninstall')]
+                 'service-restart', 'service-status', 'autostart', 'logs', 'uninstall', 'update', 'rollback')]
     [string]$Command = 'status',
     [Parameter(Position = 1)]
     [ValidateSet('on', 'off')]
     [string]$Value,
     [switch]$Follow,
     [switch]$PurgeData,
-    [switch]$Json
+    [switch]$Json,
+    [string]$Repo,
+    [string]$Ref,
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
@@ -25,6 +28,31 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
 } else {
     $ScriptRoot
 }
+if ($Command -in @('update', 'rollback')) {
+    if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $PurgeData -or $Json) {
+        throw 'update/rollback do not accept -Value, -Follow, -PurgeData or -Json'
+    }
+    if ($Command -eq 'rollback' -and ($Repo -or $Ref)) {
+        throw 'rollback does not accept -Repo or -Ref'
+    }
+    $Installer = Join-Path $InstallRoot 'installer.py'
+    if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
+        throw "stable installer missing: $Installer; run the installer from new source first"
+    }
+    $UpdatePython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $UpdatePython -PathType Leaf)) {
+        $PythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+        if (-not $PythonCommand) { throw 'Python is unavailable; run py -3 installer.py from new source' }
+        $UpdatePython = $PythonCommand.Source
+    }
+    $InstallerArguments = @($Installer, $Command, '--dir', $InstallRoot)
+    if ($Repo) { $InstallerArguments += @('--repo', $Repo) }
+    if ($Ref) { $InstallerArguments += @('--ref', $Ref) }
+    if ($DryRun) { $InstallerArguments += '--dry-run' }
+    & $UpdatePython @InstallerArguments
+    exit $LASTEXITCODE
+}
+if ($Repo -or $Ref -or $DryRun) { throw '-Repo, -Ref and -DryRun are only valid with update/rollback' }
 $Project = $ScriptRoot
 $CurrentFile = Join-Path $InstallRoot 'current'
 $CurrentItem = Get-Item -LiteralPath $CurrentFile -Force -ErrorAction SilentlyContinue
@@ -184,7 +212,7 @@ switch ($Command) {
     'service-start' {
         $task = Get-InstalledTask
         if (-not (Test-Path (Join-Path $StateDir 'account.json'))) {
-            Fail 'WeChat is not bound; run .\codex-wechat.ps1 login first'
+            Fail 'WeChat is not bound; run .\codex-wechat.ps1 start in an interactive terminal first'
         }
         if ($task.State -in @('Running', 'Queued')) {
             Write-Host 'service is already running'

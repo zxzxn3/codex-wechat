@@ -7,12 +7,14 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
+from urllib.parse import urlsplit
 
 sys.dont_write_bytecode = True
 
@@ -26,6 +28,7 @@ RELEASES_DIR = "releases"
 LOCK_FILE = ".install-lock"
 MANIFEST_FILE = ".release.json"
 LEGACY_ID = "legacy"
+UPDATE_SOURCE_FILE = ".update-source.json"
 PRIVATE_NAMES = {
     ".git",
     ".state",
@@ -39,6 +42,7 @@ PRIVATE_NAMES = {
     CURRENT_FILE,
     PREVIOUS_FILE,
     LOCK_FILE,
+    UPDATE_SOURCE_FILE,
 }
 REQUIRED_FILES = {
     Path(".gitignore"),
@@ -57,6 +61,7 @@ STABLE_LINUX_FILES = (
     Path("installer.py"),
 )
 STABLE_WINDOWS_FILES = (
+    Path("installer.py"),
     Path("bootstrap_supervisor.py"),
     Path("codex-wechat.ps1"),
     Path("uninstall.ps1"),
@@ -330,7 +335,7 @@ def _installation_state(target: Path) -> str | None:
 
 
 def check_install_target(
-    source: Path,
+    source: Path | None,
     target: Path,
     *,
     update: bool,
@@ -736,18 +741,18 @@ def next_steps(target: Path, *, update: bool, identifier: str) -> None:
         if update:
             print(f"重启服务: {command} service-restart")
         else:
-            print("安装时会在终端请求微信扫码，并询问登录自启（默认关闭）。")
-            print("若已扫码并启动，可直接在微信发送 /help 或普通消息。")
-            print(f"补做扫码: {command} login")
-            print(f"手动启动: {command} service-start")
+            print("安装时不扫码，登录自启默认关闭。")
+            print(f"首次运行: {command} start")
+            print("尚未绑定微信时会在当前终端显示二维码，绑定后继续启动。")
+            print("然后在微信发送 /help 或普通消息。")
     elif update:
         print("重启已有服务: systemctl --user restart codex-wechat")
         print("若未使用服务，先退出原前台进程，再运行 codex-wechat start。")
         print(f"回滚版本: {target / 'codex-wechat'} rollback")
     else:
         print("1. 确认 Codex 已安装并登录。")
-        print(f"2. 在终端运行 {target / 'codex-wechat'} login，手机微信扫码确认。")
-        print(f"3. 运行 {target / 'codex-wechat'} start，保持此终端打开。")
+        print(f"2. 在终端运行 {target / 'codex-wechat'} start，保持此终端打开。")
+        print("3. 尚未绑定微信时会显示二维码；手机扫码确认后，程序继续启动。")
         print("4. 在微信发送 /help、/status，然后发送普通消息开始交流。")
         print("自启默认关闭；需要时在微信发送 /settings autostart on。")
         print("若提示找不到 codex-wechat，请使用上面的完整路径，或将 ~/.local/bin 加入 PATH。")
@@ -759,6 +764,116 @@ def install(source: Path, target: Path, *, dry_run: bool = False) -> int:
 
 def update(source: Path, target: Path, *, dry_run: bool = False) -> int:
     return _common_install(source, target, dry_run=dry_run, update=True)
+
+
+def update_source(repo: str, ref: str = "main") -> dict:
+    """An explicit public GitHub source, never inferred from the cfg remote."""
+    parsed = urlsplit(repo)
+    path = parsed.path.strip("/").removesuffix(".git")
+    if (parsed.scheme != "https" or parsed.netloc.lower() != "github.com"
+            or parsed.query or parsed.fragment or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*", path)):
+        raise ValueError("更新来源须为公开 GitHub 仓库的 HTTPS 地址，不接受凭据、参数或本地路径。")
+    if (not isinstance(ref, str) or not ref or ref.startswith("-")
+            or any(char.isspace() or ord(char) < 32 for char in ref)):
+        raise ValueError("更新 ref 必须是有效的分支或标签名称。")
+    return {"repo": f"https://github.com/{path}.git", "ref": ref}
+
+
+def saved_update_source(target: Path) -> dict | None:
+    path = target / UPDATE_SOURCE_FILE
+    if path.is_symlink():
+        raise ValueError(f"更新来源不能是符号链接: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as error:
+        raise ValueError(f"无法读取更新来源: {path}") from error
+    if not isinstance(value, dict) or not isinstance(value.get("repo"), str):
+        raise ValueError("保存的更新来源格式无效，请显式指定 --repo。")
+    return update_source(value["repo"], value.get("ref", "main"))
+
+
+def remember_update_source(
+    target: Path, source: Path, choice: dict, *, previous: str | None = None
+) -> None:
+    identifier = release_identifier(project_files(source))
+    # Cancellation returns 0 too; never save a source for a cancelled install.
+    if read_pointer(target, CURRENT_FILE) != identifier:
+        return
+    # A same-version rerun is a no-op (or only repairs stable entry files).
+    # Do not silently change the saved source when one is already recorded.
+    if (previous == identifier
+            and (target / UPDATE_SOURCE_FILE).exists()):
+        return
+    with InstallLock(target):
+        if read_pointer(target, CURRENT_FILE) == identifier:
+            if (previous == identifier
+                    and (target / UPDATE_SOURCE_FILE).exists()):
+                return
+            _atomic_write(target / UPDATE_SOURCE_FILE,
+                          (json.dumps(choice, ensure_ascii=False) + "\n").encode(),
+                          0o600, root=target)
+
+
+def fetch_update_source(choice: dict, destination: Path) -> None:
+    git = shutil.which("git")
+    if not git:
+        raise ValueError("在线更新需要 Git；请安装 Git，或下载新源码后用 update --source {目录}。")
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    # Public updates do not need stored credentials or checkout hooks.
+    subprocess.run([
+        git, "-c", "credential.helper=", "-c", "core.hooksPath=" + os.devnull,
+        "clone", "--depth", "1", "--single-branch", "--branch", choice["ref"],
+        "--", choice["repo"], str(destination),
+    ], env=env, check=True, timeout=180)
+
+
+def remote_update(target: Path, choice: dict, *, dry_run: bool = False) -> int:
+    phase("在线更新")
+    print(f"来源: {choice['repo']}")
+    print(f"分支或标签: {choice['ref']}")
+    if dry_run:
+        detail("因 --dry-run，真实安装目录检查按通过处理；不访问网络或修改文件。")
+        operation_plan(["获取指定来源源码", "校验源码并构建新版本", "切换版本并保存更新来源"])
+        print("演练未获取远程版本，不代表该来源或新版本已通过校验。")
+        return 0
+    _check_target_path(target)
+    if _installation_state(target) is None:
+        raise ValueError("目标尚未安装 codex-wechat；请先使用 install。")
+    previous = read_pointer(target, CURRENT_FILE)
+    with tempfile.TemporaryDirectory(prefix="codex-wechat-update-") as directory:
+        source = Path(directory) / "source"
+        fetch_update_source(choice, source)
+        # Use the installed updater, not an unconfirmed remote installer script.
+        result = update(source, target)
+        remember_update_source(target, source, choice, previous=previous)
+        return result
+
+
+def bootstrap(target: Path, choice: dict, *, dry_run: bool = False) -> int:
+    """One entry for first installation and repeated installation/update."""
+    phase("安装或更新")
+    print(f"来源: {choice['repo']} ({choice['ref']})")
+    if dry_run:
+        detail("因 --dry-run，真实安装目录检查按通过处理；不访问网络或修改文件。")
+        operation_plan(["识别现有安装，自动选择安装或更新", "获取源码并展示确认计划",
+                        "准备完整版本，成功后切换", "保留数据和自启设置，不自动重启"])
+        return 0
+    _check_target_path(target)
+    previous = read_pointer(target, CURRENT_FILE)
+    updating = _installation_state(target) is not None
+    # Reject unrelated files before any network or install side effect.
+    check_install_target(None, target, update=updating)
+    print("检测到已有安装，将执行更新。" if updating else "未检测到已有安装，将执行首次安装。")
+    with tempfile.TemporaryDirectory(prefix="codex-wechat-bootstrap-") as directory:
+        source = Path(directory) / "source"
+        fetch_update_source(choice, source)
+        result = _common_install(source, target, dry_run=False, update=updating)
+        remember_update_source(target, source, choice, previous=previous)
+        return result
 
 
 def rollback(target: Path, *, dry_run: bool = False) -> int:
@@ -803,6 +918,7 @@ def parser() -> argparse.ArgumentParser:
         ("install", "安装 codex-wechat"),
         ("update", "从新源码构建并切换版本"),
         ("rollback", "切换到上一版本"),
+        ("bootstrap", "自动识别首次安装或更新，供一行安装入口调用"),
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument(
@@ -812,6 +928,11 @@ def parser() -> argparse.ArgumentParser:
             help="项目安装目录；默认使用当前平台的标准目录",
         )
         command.add_argument("--dry-run", action="store_true", help="显示计划但不修改文件")
+        if name != "rollback":
+            command.add_argument("--repo", help="公开 GitHub 更新仓库的 HTTPS 地址；安装时记录，更新时获取源码")
+            command.add_argument("--ref", help="更新来源的分支或标签；默认 main 或已保存的值")
+        if name == "update":
+            command.add_argument("--source", type=Path, help="从本地新源码更新，不访问远程仓库")
     return result
 
 
@@ -825,9 +946,37 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError(f"Linux 安装目录必须是 {default_target()}")
     if options.command == "rollback":
         return rollback(target, dry_run=options.dry_run)
+    if options.command == "bootstrap":
+        if not options.repo:
+            raise ValueError("一行安装入口需要 --repo；公开仓库尚未配置，不会使用旧仓库。")
+        return bootstrap(target, update_source(options.repo, options.ref or "main"),
+                         dry_run=options.dry_run)
     if options.command == "update":
+        if options.source is not None:
+            if options.repo or options.ref:
+                raise ValueError("--source 不能与 --repo / --ref 同时使用。")
+            return update(options.source, target, dry_run=options.dry_run)
+        installed_entry = SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents
+        if options.repo or options.ref or installed_entry:
+            previous = None if options.repo else saved_update_source(target)
+            if not options.repo and not previous:
+                if options.dry_run:
+                    detail("尚未配置更新来源；正式更新时需要 --repo，演练不要求来源已经配置。")
+                    return remote_update(target, {"repo": "未配置", "ref": options.ref or "main"}, dry_run=True)
+                raise ValueError("尚未配置更新来源，请运行 update --repo https://github.com/OWNER/REPO --ref main；不会使用旧仓库。")
+            choice = update_source(options.repo or previous["repo"],
+                                   options.ref or (previous["ref"] if previous else "main"))
+            return remote_update(target, choice, dry_run=options.dry_run)
         return update(SOURCE_ROOT, target, dry_run=options.dry_run)
-    return install(SOURCE_ROOT, target, dry_run=options.dry_run)
+    if options.ref and not options.repo:
+        raise ValueError("install --ref 需要同时指定 --repo。")
+    choice = update_source(options.repo, options.ref or "main") if options.repo else None
+    if choice:
+        print(f"安装成功后保存更新来源: {choice['repo']} ({choice['ref']})")
+    result = install(SOURCE_ROOT, target, dry_run=options.dry_run)
+    if choice and not options.dry_run:
+        remember_update_source(target, SOURCE_ROOT, choice)
+    return result
 
 
 if __name__ == "__main__":

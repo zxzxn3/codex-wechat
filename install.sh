@@ -71,7 +71,7 @@ if [ ! -L "$BIN_DIR/codex-wechat" ]; then
     ln -s -- "$(realpath --relative-to="$BIN_DIR" -- "$PROJECT_DIR/codex-wechat")" "$BIN_DIR/codex-wechat"
 fi
 echo '命令入口已安装；本安装器不注册服务、不修改现有自启，也不启动程序。'
-echo '新安装默认不自启。先执行 codex-wechat login 和 codex-wechat start，之后可在微信使用 /settings autostart on。'
+echo '新安装默认不自启。运行 codex-wechat start，未绑定时会在终端引导扫码；之后可在微信使用 /settings autostart on。'
 echo '重新安装不会重置已有服务的自启状态。'
 if [ "${#WARNINGS[@]}" -gt 0 ]; then
     echo "共 ${#WARNINGS[@]} 条依赖提示；补齐后可重新运行安装器检查。"

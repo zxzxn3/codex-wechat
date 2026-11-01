@@ -59,3 +59,7 @@ create_time_ms 是源消息时间戳，未证实等于手机点击发送时间�
 自启依据：systemctl enable/disable 不等同于 start/stop；disable 会删除指向 unit 的链接，link 可保留仅按需启动。Windows [Set-ScheduledTask](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/set-scheduledtask) 明确修改定义不影响当前运行实例；[Trigger.Enabled](https://learn.microsoft.com/en-us/windows/win32/taskschd/trigger-enabled) 控制触发器启用状态。本项目只切换登录触发器，自启不作为进程失败重试开关。
 
 安装依赖边界依据官方 [App Server](https://learn.chatgpt.com/docs/app-server) 的 CLI app-server 入口，以及 [Windows CLI 部署](https://learn.chatgpt.com/docs/enterprise/windows-deployment)。本分支支持范围仅为普通 CLI 和 codex-deepseek；安装软检查不等于运行依赖已满足。
+
+在线更新使用 [Git clone](https://git-scm.com/docs/git-clone) 的 `--depth 1`、`--single-branch`、`--branch`：ref 可为分支或标签。源码进入临时目录，项目私有数据和 `.git` 不进入版本载荷；继续由本地稳定安装器执行源码校验、确认、构建和切换，不直接运行下载仓库的安装脚本。
+
+一行入口的 Windows 下载使用 [Invoke-WebRequest 5.1](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/invoke-webrequest?view=powershell-5.1) 的 `-UseBasicParsing`、`-OutFile` 和超时参数；下载到本次临时文件后调用 Python 安装器。此公开入口本身就是用户明确执行的远程安装代码，不提供来源签名或免信任保证；实际版本化安装逻辑仍只有一份。

@@ -28,7 +28,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 ## 安装
 
-运行依赖采取软检查：缺少 CLI、curl、Python、Python 模块或 pip 暂时失败时只提示，继续可完成的准备，不把缺依赖当成安装参数错误。Python/venv 未准备好时不会注册指向不存在解释器的任务；curl 不可用时跳过扫码；未绑定微信或运行依赖未齐时不请求启动。最后会区分任务是否注册、是否待绑定、是否具备运行条件。补齐后重新执行同一安装命令，不覆盖已有配置和登录。
+可以使用 README 中的一行 PowerShell 入口，不需要 curl。`bootstrap.ps1` 接收显式 `-Repo`（以及可选 `-Ref`），获取安装器后，由同一 Python 安装逻辑识别首次安装或已有安装更新。需要 Python 3.11+ 与 Git；缺失时给出提示，不自行修改系统依赖。公开仓库尚未确定，示例中的 OWNER/REPO 不能当成真实下载地址。
+
+运行依赖采取软检查：缺少 CLI、curl、Python、Python 模块或 pip 暂时失败时只提示，继续可完成的准备，不把缺依赖当成安装参数错误。Python/venv 未准备好时不会注册指向不存在解释器的任务；安装阶段不扫码；未绑定微信或运行依赖未齐时不请求启动。最后会区分任务是否注册、是否待绑定、是否具备运行条件。补齐后重新执行同一安装命令，不覆盖已有配置和登录。
 
 本分支只支持可执行 `app-server` 的原生 Codex CLI；codex-deepseek 可通过自定义启动器配置接入。不发现或调用桌面 App 内置后端，不支持接管 App 活动会话。
 
@@ -40,7 +42,7 @@ py -3 installer.py install
 
 它会显示计划并二次确认，然后把程序安装到
 `%LOCALAPPDATA%\codex-wechat\app`，再调用项目内的原生 Windows
-安装脚本完成 Python 环境、微信扫码和计划任务设置。继续使用已有的手动安装方式也可以：
+安装脚本完成 Python 环境和计划任务设置；微信扫码留到首次前台运行。继续使用已有的手动安装方式也可以：
 
 ```powershell
 .\install.ps1
@@ -53,10 +55,20 @@ py -3 installer.py install
 3. 在 `%LOCALAPPDATA%\codex-wechat` 创建数据目录；
 4. 如果配置不存在，创建只含普通 `codex` 后端的 `config.json`，已有的
    `config.json` 不会被覆盖；
-5. 在交互终端执行 `login`，由手机微信扫码；
-6. 询问登录自启选择（首次默认关闭，已有安装默认保留实际状态），注册当前用户计划任务并另行请求立即启动。
+5. 询问登录自启选择（首次默认关闭，已有安装默认保留实际状态），注册当前用户计划任务；
+6. 已绑定且依赖就绪时可请求启动；未绑定时安装仍可完成，不在安装过程中扫码。
+
+安装后在终端运行 `codex-wechat.ps1 start`。程序发现尚未绑定微信时会显示二维码，手机确认后继续启动。后台任务没有交互终端时不会扫码。
 
 ## 更新
+
+版本化安装后，可直接使用安装目录的稳定入口获取公开仓库更新：
+
+```powershell
+& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" update -Repo https://github.com/OWNER/REPO -Ref main
+```
+
+首次成功后保存来源，以后省略 `-Repo` / `-Ref`。`-DryRun` 不联网、不修改安装；需要 Git。此入口使用稳定安装器和 bootstrap Python，不依赖当前程序版本能够正常启动，也不自动重启任务。OWNER/REPO 是公开仓库占位符，不指向已废弃的私人仓库。
 
 下载或解压新版本到另一份源码目录，在 PowerShell 中运行：
 
@@ -102,7 +114,7 @@ cd "$env:LOCALAPPDATA\codex-wechat\app"
 
 ```powershell
 .\codex-wechat.ps1 login            # 交互终端扫码
-.\codex-wechat.ps1 start            # 前台运行，便于调试
+.\codex-wechat.ps1 start            # 前台运行；未绑定时自动扫码后继续
 .\codex-wechat.ps1 status           # 保存状态 + 计划任务状态
 .\codex-wechat.ps1 service-start
 .\codex-wechat.ps1 service-stop

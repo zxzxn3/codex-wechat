@@ -8,6 +8,7 @@ releases/
 current
 previous
 .install-lock
+.update-source.json
 workspace/
 config.json
 __pycache__/

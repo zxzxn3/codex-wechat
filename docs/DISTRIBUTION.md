@@ -1,6 +1,8 @@
 # 双平台发布方向
 
-当前 cross-platform 分支是一套源码，Windows 尚未完成实机验收。本轮实现登录自启选择、运行时设置和有限崩溃恢复；没有发布独立 exe 或 GitHub Release。
+主分支使用同一套 Linux / Windows CLI 桥接源码。Windows 已有部分安装实机证据，但不能据此认定全部在线路径通过；尚未发布独立 exe 或 GitHub Release，公开项目仓库地址待定。
+
+一行安装入口为 `bootstrap.sh` / `bootstrap.ps1`，通过显式仓库参数获取安装器，自动识别安装或更新。第一次和以后更新重跑相同入口即可，具体项目安装逻辑继续集中在 installer.py。当前入口依赖已有 Python 3.11+ 和 Git，不等于免环境的二进制安装包；入口不自动修改系统依赖，也不在安装时扫码。发布 URL 未确定前，文档保留明确占位符，不引用已退役的私人库。
 
 源码安装和更新由标准库实现的 `installer.py` 负责：Linux 默认部署到
 `~/.local/share/codex-wechat`，Windows 默认部署到

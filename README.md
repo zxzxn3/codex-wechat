@@ -4,7 +4,27 @@
 
 微信私聊 ↔ 本机 Codex App Server。支持普通 Codex、codex-deepseek、已有 CLI 会话、工作中追加消息和图片/文件双向传输。认证、模型配置、工具和权限沿用对应 Codex 启动器。
 
-Windows 11 原生安装见 [Windows 指南](docs/WINDOWS.md)：安装 Python 和原生 Codex CLI 后运行安装器，交互扫码，再选择登录自启。Windows 默认仅启用普通 Codex、使用独立 stdio 后端；接管其他 CLI 活动会话的共享模式为显式实验选项，不等同于 Linux 已有运行证据。
+Windows 11 原生安装见 [Windows 指南](docs/WINDOWS.md)：安装 Python 和原生 Codex CLI 后运行安装器，选择登录自启；安装后首次在终端启动时再扫码。Windows 默认仅启用普通 Codex、使用独立 stdio 后端；接管其他 CLI 活动会话的共享模式为显式实验选项，不等同于 Linux 已有运行证据。
+
+## 一行安装或更新
+
+首次安装和以后更新使用同一条命令，入口自动判断已有安装。公开仓库尚未确定，下面的 OWNER/REPO 仅为占位符；目前需显式指定 `--repo`，不使用旧私人仓库。运行前需要 Python 3.11+ 和 Git，Linux 另需 curl；缺失时提示补齐，再重跑同一命令，不自动安装系统软件。
+
+Linux：
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.sh | bash -s -- --repo https://github.com/OWNER/REPO'
+```
+
+Windows PowerShell（不要求 curl）：
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.ps1))) -Repo https://github.com/OWNER/REPO
+```
+
+入口下载当前来源的安装器，再自动获取完整项目；已有安装会更新，未安装则首次安装。仍会显示确认计划，保留配置、微信登录、待办和原有自启，不在更新后自动重启服务。第一次使用在安装后运行 `start`，需要时才扫码。Linux 的确认从交互终端读取，不会把 curl 管道当成用户输入。
+
+只演练入口、不联网，可在本地源码里运行 `bash bootstrap.sh --repo https://github.com/OWNER/REPO --dry-run`，Windows 使用 `bootstrap.ps1 -Repo https://github.com/OWNER/REPO -DryRun`。若修改分支或标签，入口的下载 URL 与 `--ref` / `-Ref` 应保持一致，默认均为 main。
 
 ## Linux 安装与运行
 
@@ -12,7 +32,6 @@ Windows 11 原生安装见 [Windows 指南](docs/WINDOWS.md)：安装 Python 和
 
 ```bash
 ./codex-wechat install
-codex-wechat login
 codex-wechat start
 ```
 
@@ -30,13 +49,13 @@ codex-wechat start
 
 已有安装也可以用 `install --dry-run` 体验全新安装的交互。演练时真实安装目录、命令入口和回滚版本检查按通过处理，并明确提示原因；仍检查源码是否完整，但不安装依赖、不扫码、不修改服务或版本指针。演练通过不代表机器已具备运行条件。最后显示正式安装成功后的扫码、启动和微信使用步骤；这些步骤不会自动执行。
 
-新用户拿到公开 GitHub URL 后，先克隆或下载并解压源码，再进入源码目录运行 `python3 installer.py install`（Windows 使用 `py -3 installer.py install`）。Linux 安装完成后在终端执行 `codex-wechat login` 扫码、`codex-wechat start` 启动，再到微信发 `/help`、`/status` 和普通消息。Windows 安装器会按条件引导扫码和启动，未完成时按结束提示补做；自启默认关闭。公开仓库地址尚未确定，这里不引用旧私人仓库。
+也可以手动克隆或下载并解压源码，再进入源码目录运行 `python3 installer.py install`（Windows 使用 `py -3 installer.py install`）。安装完成后在终端运行 `codex-wechat start`（Windows 用 `codex-wechat.ps1 start`），尚未绑定微信时自动显示二维码，确认绑定后继续启动，再到微信发 `/help`、`/status` 和普通消息。安装器不扫码；自启默认关闭。
 
-二维码只在手动执行 `./codex-wechat login` 时显示在终端；用手机微信扫描并确认授权，若终端要求验证码则按提示输入。成功后凭据保存到本机 `.state/`。Codex 自身的登录与微信扫码是两件事，使用前需确保对应 Codex 启动器已可正常使用。
+在交互终端运行 `codex-wechat start` 时，如果尚未绑定微信，程序会显示二维码；用手机微信扫描并确认授权，若终端要求验证码则按提示输入。绑定后同一进程继续启动，不必再执行一次 start。显式 `login` 命令仍可单独绑定。后台或重定向输入输出的进程不扫码，而是提示到交互终端完成首次绑定。网络掉线沿用现有登录重连，不会自动重新扫码。成功后凭据保存到本机 `.state/`。Codex 自身的登录与微信扫码是两件事，使用前需确保对应 Codex 启动器已可正常使用。
 
 `./install.sh` 仍可用于直接源码目录的依赖检查和命令入口，不注册服务、不启动程序、不修改已有自启。推荐的公开安装路径是版本化安装器。
 
-首次扫码成功后，用 `codex-wechat start` 在前台运行；微信里执行 `/settings autostart on` 时，程序才会检查并安装缺失的用户服务。第一次移交需要空闲，确认消息发出后前台退出、新服务接管；正在进行任务时会拒绝移交而不打断任务。后台接管只支持默认状态/配置路径和 `~/.local/share/codex-wechat` 目录。
+首次用 `codex-wechat start` 在前台运行并按需完成扫码；微信里执行 `/settings autostart on` 时，程序才会检查并安装缺失的用户服务。第一次移交需要空闲，确认消息发出后前台退出、新服务接管；正在进行任务时会拒绝移交而不打断任务。后台接管只支持默认状态/配置路径和 `~/.local/share/codex-wechat` 目录。
 
 服务随**图形登录**自启，不启用 linger；关闭自启不停止当前进程。已有服务的用户不需要重新扫码，也不会被安装器关闭自启。
 
@@ -47,10 +66,35 @@ journalctl --user -u codex-wechat -f
 
 ### 更新
 
-从另一份新源码运行：
+首次安装时可记录将来的公开更新仓库（下面的 OWNER/REPO 是占位符，不是旧私人仓库）：
 
 ```bash
-./codex-wechat update
+python3 installer.py install --repo https://github.com/OWNER/REPO --ref main
+```
+
+安装完成后，无需自己下载新源码，直接运行：
+
+```bash
+codex-wechat update
+```
+
+也可以直接重跑上面的“一行安装或更新”命令，不需要记住另一条更新命令。
+
+如果此前没有记录来源，第一次更新显式指定，成功后自动保存：
+
+```bash
+codex-wechat update --repo https://github.com/OWNER/REPO --ref main
+```
+
+在线更新需要 Git，只接受公开 GitHub HTTPS 仓库；可跟随分支，也可用 `--ref` 指定标签，不会自动切换来源或读取 cfg/旧仓库的远端配置。先将指定源码获取到临时目录，再由现有安装器展示计划、请求确认、构建和校验；失败不切换旧版，取消不保存新来源。`update --dry-run` 不访问网络，也不安装依赖。
+
+来源保存在安装根目录的 `.update-source.json`，与微信配置/凭据分开；回滚代码不回滚该来源。已有的新源码仍可本地更新：`codex-wechat update --source /path/to/new-source`。直接从独立源码目录执行 `python3 installer.py update` 也保留原来的本地更新方式。
+
+Windows 安装后使用稳定入口（或用 Python 直接运行稳定的 installer.py）：
+
+```powershell
+& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" update -Repo https://github.com/OWNER/REPO -Ref main
+# 后续只需 update；演练用 -DryRun
 ```
 
 安装器会创建新的不可变版本并原子切换，保留 `.state/`、`config.json`、`workspace/` 和未知本地文件。旧版本不会删除，因此代码和环境可以一起回滚：

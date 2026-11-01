@@ -188,7 +188,7 @@ function Get-NativeCodexState {
 function Get-CurlState {
     $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
     if (-not $curl) {
-        Add-Warning 'curl.exe 8.4 or newer was not found; attachment and login stages will be skipped.'
+        Add-Warning 'curl.exe 8.4 or newer was not found; runtime login and messaging will be unavailable.'
         return [pscustomobject]@{ Ready = $false; Version = $null }
     }
     $versionLine = $null
@@ -294,14 +294,14 @@ if (Test-Path $VenvPython) {
         $venvCreated = $false
     }
     if (-not $venvCreated -or -not (Test-Path $VenvPython)) {
-        Add-Warning "Could not create a usable .venv; pip, login and task registration will be skipped."
+        Add-Warning "Could not create a usable .venv; pip and task registration will be skipped."
     } elseif (Test-Python311 $VenvPython) {
         $venvPythonReady = $true
     } else {
         Add-Warning "The new .venv Python is not 3.11+; remove .venv and rerun after installing a supported Python."
     }
 } else {
-    Add-Warning 'Python 3.11+ is unavailable; .venv creation, pip, login and task registration will be skipped.'
+    Add-Warning 'Python 3.11+ is unavailable; .venv creation, pip and task registration will be skipped.'
 }
 
 $pythonDepsReady = $false
@@ -459,45 +459,10 @@ if ($canRegisterTask) {
     }
 }
 
+# Binding belongs to the first interactive foreground launch, never installation.
 $accountPath = Join-Path $StateDir 'account.json'
 $bound = Test-Path $accountPath
-$loginState = if ($bound) { 'already bound' } else { 'not bound' }
-if (-not $bound) {
-    $interactive = -not ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected -or
-        -not [Environment]::UserInteractive)
-    if (-not $venvPythonReady) {
-        $loginState = 'skipped (no usable Python)'
-        Add-Warning 'WeChat login was skipped because no usable Python environment is available.'
-    } elseif (-not $pythonDepsReady) {
-        $loginState = 'skipped (Python dependencies missing)'
-        Add-Warning 'WeChat login was skipped because Python dependencies are missing.'
-    } elseif (-not $curlState.Ready) {
-        $loginState = 'skipped (curl missing or too old)'
-        Add-Warning 'WeChat login was skipped because curl.exe 8.4+ is unavailable.'
-    } elseif (-not $interactive) {
-        $loginState = 'skipped (needs an interactive terminal)'
-        Add-Warning 'WeChat login was skipped because the terminal is not interactive; run .\codex-wechat.ps1 login manually.'
-    } else {
-        $loginTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if ($loginTask -and $loginTask.State -in @('Running', 'Queued')) {
-            $loginState = 'skipped (service is running)'
-            Add-Warning 'WeChat login was skipped because the service is running; stop it manually if a new login is required.'
-        } else {
-            Write-Host 'WeChat login is required. Scan the QR code with the phone now.'
-            try {
-                & $VenvPython -u (Join-Path $Project 'codex_wechat.py') login --state-dir $StateDir --config $ConfigPath
-                $loginExit = $LASTEXITCODE
-            } catch {
-                $loginExit = 1
-            }
-            if ($loginExit -ne 0 -or -not (Test-Path $accountPath)) {
-                Fail 'WeChat login did not complete; the scheduled task remains registered but the service was not started.'
-            }
-            $bound = $true
-            $loginState = 'completed'
-        }
-    }
-}
+$loginState = if ($bound) { 'already bound' } else { 'not bound (scan on first foreground start)' }
 
 $startState = 'not started'
 if ($taskRegistered) {
@@ -532,7 +497,7 @@ if ($taskRegistered) {
     $startState = 'not started (task not registered)'
 }
 
-$pending = (-not $bound) -or (-not $runtimeReady) -or (-not $taskRegistered)
+$pending = (-not $runtimeReady) -or (-not $taskRegistered)
 Write-Host ''
 if ($script:Warnings.Count -gt 0) {
     Write-Host 'Warnings:'
@@ -542,7 +507,7 @@ if ($script:Warnings.Count -gt 0) {
     Write-Host ''
 }
 if ($pending) {
-    Write-Host 'Result: preparation incomplete; dependencies or login are pending.'
+    Write-Host 'Result: preparation incomplete; dependencies or task registration are pending.'
 } elseif ($NoStart) {
     Write-Host 'Result: ready; start was not requested because -NoStart was used.'
 } else {
@@ -568,10 +533,6 @@ Write-Host ("Login: " + $loginState)
 Write-Host ("Start: " + $startState)
 Write-Host ("Data: " + $DataRoot)
 Write-Host ("Log:  " + $LogPath)
-if ($pending) {
-    $nextAutostart = 'on'
-    if ($autostartEnabled -eq $false) {
-        $nextAutostart = 'off'
-    }
-    Write-Host ("Next: fix the warnings, then rerun .\install.ps1 -Autostart " + $nextAutostart)
+if ($pending -or -not $bound) {
+    Write-Host ("Next: fix dependency warnings if any, then run .\codex-wechat.ps1 start in an interactive terminal.")
 }

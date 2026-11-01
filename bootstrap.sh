@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Public one-line entry; the complete project is fetched by installer.py.
+set -euo pipefail
+
+main() {
+    local repo='' source_ref=main dry_run=0 target='' python_command installer_url task_temporary
+    while (($#)); do
+        case "$1" in
+            --repo|--ref|--dir)
+                (($# >= 2)) || { echo "缺少 $1 的参数" >&2; return 2; }
+                case "$1" in
+                    --repo) repo=$2 ;;
+                    --ref) source_ref=$2 ;;
+                    --dir) target=$2 ;;
+                esac
+                shift 2 ;;
+            --dry-run) dry_run=1; shift ;;
+            -h|--help)
+                echo 'bootstrap.sh --repo https://github.com/OWNER/REPO [--ref main] [--dry-run]'
+                return 0 ;;
+            *) echo "未知参数 $1" >&2; return 2 ;;
+        esac
+    done
+    [[ -n "$repo" ]] || { echo '请指定 --repo，公开仓库尚未配置；不会使用旧私人仓库。' >&2; return 2; }
+    python_command=$(command -v python3) || { echo '需要 Python 3.11+，安装后重跑相同命令。' >&2; return 1; }
+    "$python_command" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || {
+        echo '需要 Python 3.11+，安装后重跑相同命令。' >&2; return 1;
+    }
+    installer_url=$("$python_command" -c '
+import re, sys
+from urllib.parse import quote, urlsplit
+url = urlsplit(sys.argv[1]); path = url.path.strip("/").removesuffix(".git")
+ref = sys.argv[2]
+if (url.scheme != "https" or url.netloc.lower() != "github.com" or url.query or url.fragment
+    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*", path)
+    or not ref or ref.startswith("-") or any(c.isspace() or ord(c) < 32 for c in ref)):
+    sys.exit("需要公开 GitHub HTTPS 仓库地址和分支或标签名称。")
+print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe="") + "/installer.py")
+' "$repo" "$source_ref")
+    if ((dry_run)); then
+        printf '演练模式，不下载或修改文件。\n来源 %s\n分支或标签 %s\n' "$repo" "$source_ref"
+        echo '因 --dry-run，真实安装目录检查按通过处理；不代表安装环境已通过检查。'
+        echo '正式执行会自动识别安装或更新，下载项目、确认计划、构建并切换版本。'
+        return 0
+    fi
+    command -v curl >/dev/null || { echo '需要 curl，安装后重跑相同命令。' >&2; return 1; }
+    command -v git >/dev/null || { echo '需要 Git，安装后重跑相同命令。' >&2; return 1; }
+    # curl | bash consumes stdin. Confirmation must read the real terminal.
+    if ! { exec 3<> /dev/tty; } 2>/dev/null; then
+        echo '安装确认需要交互终端；演练可以使用 --dry-run。' >&2
+        return 1
+    fi
+    task_temporary=$(mktemp -d -t codex-wechat-bootstrap.XXXXXXXX)
+    trap "$(printf 'rm -rf -- %q' "$task_temporary")" EXIT
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+        --connect-timeout 15 --max-time 120 "$installer_url" -o "$task_temporary/installer.py"
+    local -a installer_arguments=("$task_temporary/installer.py" bootstrap --repo "$repo" --ref "$source_ref")
+    [[ -z "$target" ]] || installer_arguments+=(--dir "$target")
+    "$python_command" -u "${installer_arguments[@]}" <&3 >&3
+}
+
+# Parse the complete entry before invoking native programs or reading /dev/tty.
+main "$@"
