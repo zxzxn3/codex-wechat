@@ -14,7 +14,7 @@
 - `slicing.py`：纯文本切片及预览。`media.py` 先剥离附件标记并校验快照，正文才进入切片。
 - `wechat.py`、`storage.py`、`profiles.py`、`service_control.py`：微信协议、私有原子 JSON、后端选择、用户服务重启。
 - `platform_support.py`：平台路径、原生可执行文件发现、curl 名称和无窗口子进程选项；Linux 路径与默认行为不变。Windows 数据与代码分离，文件锁用 msvcrt、持久化写 UTF-8，不以 chmod 冒充 Windows ACL。
-- `pipe_websocket.py`：显式 Windows 共享模式的管道适配，复用 websockets Sans-I/O 的握手、掩码、帧校验和控制帧；不开放 TCP 监听、不依赖 asyncio Unix socket。Windows 默认 stdio；共享模式的 CLI/桌面行为待实机确认。
+- `pipe_websocket.py`：显式 Windows 共享模式的管道适配，复用 websockets Sans-I/O 的握手、掩码、帧校验和控制帧；不开放 TCP 监听、不依赖 asyncio Unix socket。Windows 默认 stdio；共享模式的 CLI 客户端行为待实机确认。
 
 输入/输出组件引用同一个运行上下文，由 Bridge 统一保存；不复制当前后端或持久队列。保留 Bridge 薄入口以兼容调用与离线用例。
 
@@ -22,7 +22,7 @@
 
 ## 输入交付
 
-1. 普通输入默认 steer，`/queue` 在接收阶段剥离前缀后作为 queue 输入，与游标和去重 ID 一起保存，不走内存控制队列。队列中的 queue 不阻塞后来的 steer；queue 在桌面轮次抢先启动的竞态下也不得转为 steer。客户端 ID 在入队时生成，重启或明确拒绝后的排队回退不改变 ID。
+1. 普通输入默认 steer，`/queue` 在接收阶段剥离前缀后作为 queue 输入，与游标和去重 ID 一起保存，不走内存控制队列。队列中的 queue 不阻塞后来的 steer；queue 在其他 CLI 轮次抢先启动的竞态下也不得转为 steer。客户端 ID 在入队时生成，重启或明确拒绝后的排队回退不改变 ID。
 2. 从 inbox 取出时，在同一份状态快照转入 currentInput，阶段为 preparing；附件准备完成后保存路径。
 3. 输入预检完成、实际 RPC 之前保存 dispatching、来源及目标轮次。接受响应后保存 accepted。
 4. 最终结果准备完成后，清除 currentInput 与加入整个输出组在一次保存中完成。
@@ -34,7 +34,7 @@ RPC 参数/方法验证拒绝和已识别的轮次前置条件错误可判为未
 
 ## 来源与输出
 
-TurnResult 固定携带 backend、connection ID、selection epoch、thread、turn、cwd、正文和完成状态，桌面和微信发起的轮次使用同一格式。
+TurnResult 固定携带 backend、connection ID、selection epoch、thread、turn、cwd、正文和完成状态，CLI 和微信发起的轮次使用同一格式。
 
 完整的中途 agentMessage（commentary / partial_answer）作为 AgentMessage 携带相同来源身份，在 item/completed 时同步冻结到发件箱，避免独立异步进度队列被最终回答抢先。使用原生 item ID 去重；轮次结束后的迟到 item 不发送。中途回复只入正文，不退休 currentInput、不发结束提示、不处理附件；最终结果保留原有轮次收口契约。无 phase 的旧消息仍等待最终收口。
 

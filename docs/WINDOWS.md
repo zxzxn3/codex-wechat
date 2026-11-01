@@ -30,7 +30,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 运行依赖采取软检查：缺少 CLI、curl、Python、Python 模块或 pip 暂时失败时只提示，继续可完成的准备，不把缺依赖当成安装参数错误。Python/venv 未准备好时不会注册指向不存在解释器的任务；curl 不可用时跳过扫码；未绑定微信或运行依赖未齐时不请求启动。最后会区分任务是否注册、是否待绑定、是否具备运行条件。补齐后重新执行同一安装命令，不覆盖已有配置和登录。
 
-当前后端需要可执行 `app-server` 的 CLI，只有 Codex App 不等同于 CLI 可用；App 本身不是必需依赖，也不自动扫描它的私有安装目录。Windows App 与原生 CLI 默认共享 Codex home，活动桌面接管仍需实机验证。
+本分支只支持可执行 `app-server` 的原生 Codex CLI；codex-deepseek 可通过自定义启动器配置接入。不发现或调用桌面 App 内置后端，不支持接管 App 活动会话。
 
 推荐从解压后的源码目录运行统一安装器：
 
@@ -144,9 +144,9 @@ cd "$env:LOCALAPPDATA\codex-wechat\app"
 `service.log.1`。日志可能包含微信消息摘要、异常和后端状态，不应发给
 不受信任的人。
 
-## Codex 后端与桌面会话
+## Codex 后端与 CLI 会话
 
-默认只启用普通 Codex，通过其原生 `app-server` stdio 接口运行。认证、模型、工具和权限沿用当前用户的 Codex 配置；微信常规指令、已有空闲会话、steer/queue 和附件逻辑与 Linux 共用。工作中桌面会话的接管不属于默认模式的保证。
+默认只启用普通 Codex，通过其原生 `app-server` stdio 接口运行。认证、模型、工具和权限沿用当前用户的 Codex 配置；微信常规指令、已有空闲会话、steer/queue 和附件逻辑与 Linux 共用。工作中其他 CLI 会话的接管不属于默认模式的保证。
 
 共享模式需显式设置，仍是待 Windows 实机确认的实验选项：
 
@@ -208,7 +208,7 @@ $release = (Get-Content "$app\current" -TotalCount 1).Trim()
     -p "test_windows*.py" -v
 ```
 
-主套件还有 POSIX 权限等 Linux 专用断言，不应直接把其在 Windows 的全部结果作为平台验收。真实安装后应逐项检查扫码、重登录自启、文字/图片/文件收发、会话切换和 `/restart`；请使用独立测试会话，不操作正在工作的桌面会话。
+主套件还有 POSIX 权限等 Linux 专用断言，不应直接把其在 Windows 的全部结果作为平台验收。真实安装后应逐项检查扫码、重登录自启、文字/图片/文件收发、会话切换和 `/restart`；请使用独立测试会话，不操作正在工作的 CLI 会话。
 
 以下路径目前只按官方接口和离线 mock 设计，不能当作已通过：
 
@@ -216,14 +216,14 @@ $release = (Get-Content "$app\current" -TotalCount 1).Trim()
 - 计划任务在域策略、企业 AppLocker、已有 Job Object 限制下的实际行为；
 - 原生 Codex exe 自动发现、DeepSeek 启动器和桌面密钥环；
 - 真实 Windows 下停止任务时 Job Object 的清理时序；
-- 真实微信收发、共享桌面会话和附件 CDN。
+- 真实微信收发、共享 CLI 会话和附件 CDN。
 
 如果公司策略禁止 Interactive 计划任务、隐藏任务或 Job Object 分配，
 需要由设备管理员调整策略；本安装器不会绕过限制。
 
 ## 依据
 
-- [部署 Windows app 与 Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment)
+- [部署 Windows Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment)
 - [New-ScheduledTaskSettingsSet](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset)
 - [New-ScheduledTaskPrincipal](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtaskprincipal)
 - [Python asyncio 的 Windows 平台限制](https://docs.python.org/3.14/library/asyncio-platforms.html)

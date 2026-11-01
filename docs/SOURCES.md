@@ -17,7 +17,7 @@
 
 - App Server 提供 thread/start、resume、read、list、turn/start、steer、interrupt、最终消息和审批事件。steer 的 expectedTurnId 必须匹配活动轮次，不接受模型/目录等 turn-level 覆盖。
 - 官方 Items / Events 将 agentMessage 与 reasoning、工具输出分开，phase 可为 commentary、partial_answer、final_answer；item/completed 为该条消息的完整权威文本。中途回复据此逐条转发，不使用 delta 拼接，也不等待 turn/completed。phase 字段可缺失时保留旧收口行为。
-- 原生提问依据官方 `item/tool/requestUserInput`、`serverRequest/resolved` 和本机 0.166.0 的 ToolRequestUserInputParams/Response：回复为以 question ID 为键的 answers 字典，每题值含字符串数组。当前 schema 用 isBlocking，autoResolutionMs 已弃用；桥接不自动选择。桌面请求是否投递到桥接连接尚未在线确认，不根据字段存在宣称请求所有权已转移。
+- 原生提问依据官方 `item/tool/requestUserInput`、`serverRequest/resolved` 和本机 0.166.0 的 ToolRequestUserInputParams/Response：回复为以 question ID 为键的 answers 字典，每题值含字符串数组。当前 schema 用 isBlocking，autoResolutionMs 已弃用；桥接不自动选择。其他客户端请求是否投递到桥接连接尚未在线确认，不根据字段存在宣称请求所有权已转移。
 - 本机 schema 中 turn/start 和 turn/steer 提供 clientUserMessageId，但在线文档没有明确其持久去重保证；本项目仅用它追踪提交，未实现历史接受状态核对。
 - start/resume 响应及 settings/name/tokenUsage 事件提供实际设置和用量。账户限额来自 account/rateLimits/read 和稀疏 updated 事件，缓存独立于会话。没有数据时不推测。
 - 限额窗口的 resetsAt 按官方定义为下一次重置的 Unix 秒时间戳；显示使用运行电脑的本地时区，缺失或无效时省略，不根据窗口长度推算。
@@ -58,4 +58,4 @@ create_time_ms 是源消息时间戳，未证实等于手机点击发送时间�
 
 自启依据：systemctl enable/disable 不等同于 start/stop；disable 会删除指向 unit 的链接，link 可保留仅按需启动。Windows [Set-ScheduledTask](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/set-scheduledtask) 明确修改定义不影响当前运行实例；[Trigger.Enabled](https://learn.microsoft.com/en-us/windows/win32/taskschd/trigger-enabled) 控制触发器启用状态。本项目只切换登录触发器，自启不作为进程失败重试开关。
 
-安装依赖边界依据官方 [App Server](https://learn.chatgpt.com/docs/app-server) 的 CLI app-server 入口，以及 [Windows 部署](https://learn.chatgpt.com/docs/enterprise/windows-deployment) 中独立的 App/CLI 安装流程。[Windows App 文档](https://learn.chatgpt.com/docs/app/windows)说明原生 App 与 CLI 默认使用同一 Codex home；这不是本桥接已验证 App-only 接入的保证。安装软检查不等于运行依赖已满足。
+安装依赖边界依据官方 [App Server](https://learn.chatgpt.com/docs/app-server) 的 CLI app-server 入口，以及 [Windows CLI 部署](https://learn.chatgpt.com/docs/enterprise/windows-deployment)。本分支支持范围仅为普通 CLI 和 codex-deepseek；安装软检查不等于运行依赖已满足。

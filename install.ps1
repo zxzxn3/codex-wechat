@@ -181,7 +181,7 @@ function Get-NativeCodexState {
         }
         Add-Warning "Codex CLI candidate could not run: $candidate"
     }
-    Add-Warning 'Native Codex CLI (codex.exe) was not found or is not runnable. The desktop App alone is not accepted; install the Codex CLI, then rerun.'
+    Add-Warning 'Native Codex CLI (codex.exe) was not found or is not runnable. Install the CLI or configure a native launcher, then rerun.'
     return [pscustomobject]@{ Ready = $false; Path = $null }
 }
 

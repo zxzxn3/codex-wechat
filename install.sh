@@ -34,7 +34,7 @@ else
     fi
 fi
 if ! command -v codex >/dev/null && [ ! -x "$HOME/.local/bin/codex" ]; then
-    warn '未发现 Codex CLI；只安装桌面 App 不代表已有 app-server 命令。'
+    warn '未发现 Codex CLI；请安装原生 Codex CLI，或配置 codex-deepseek 启动器。'
 fi
 command -v qrencode >/dev/null || warn '缺少 qrencode；登录时无法在终端绘制二维码，仍会显示链接。'
 if ! command -v systemctl >/dev/null ||
