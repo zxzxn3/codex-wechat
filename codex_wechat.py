@@ -495,6 +495,21 @@ async def startup_store(args):
             await asyncio.sleep(0.2)
 
 
+async def startup_account(store):
+    """Only an unbound foreground launch may ask the user to scan a QR code."""
+    account = store.load("account")
+    if account:
+        return account
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ConfigurationError("尚未绑定微信，请在交互终端运行 codex-wechat start 完成扫码。")
+    print("尚未绑定微信，请在当前终端扫码；绑定后会继续启动。", flush=True)
+    await login(store, starting=True)
+    account = store.load("account")
+    if not account:
+        raise ConfigurationError("微信绑定未完成，未启动桥接。")
+    return account
+
+
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("login", "start", "status"))
@@ -513,9 +528,7 @@ async def main():
                           "queued": len(state.get("inbox", [])),
                           "unsent": len(state.get("outbox", []))}, ensure_ascii=False, indent=2))
     else:
-        account = store.load("account")
-        if not account:
-            raise ConfigurationError("尚未绑定微信，请先运行 login")
+        account = await startup_account(store)
         try:
             config = json.loads(args.config.read_text(encoding="utf-8-sig")) if args.config.exists() else {}
             if not isinstance(config, dict):

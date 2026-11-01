@@ -107,7 +107,7 @@ class WeChat:
                          [{"type": 1, "text_item": {"text": entry["text"]}}]}})
 
 
-async def login(store):
+async def login(store, *, starting=False):
     client = WeChat()
     qr = await client.request("ilink/bot/get_bot_qrcode?bot_type=3",
                               {"local_token_list": []}, auth=False)
@@ -147,7 +147,8 @@ async def login(store):
             if previous and (previous["bot"], previous["user"]) != (account["bot"], account["user"]):
                 raise RuntimeError("此状态目录已绑定另一个身份；请使用新的 --state-dir")
             store.save("account", account)
-            print("绑定成功。只接受此次扫码用户的私聊；运行 start 启动桥接。")
+            print("绑定成功。只接受此次扫码用户的私聊；" +
+                  ("正在继续启动桥接。" if starting else "运行 start 启动桥接。"))
             return
         if status == "scaned_but_redirect":
             host = data.get("redirect_host", "")
