@@ -10,6 +10,7 @@
 - `records.py`：跨边界的 `Source`、`TurnResult`、输入阶段；不实现通用状态机。
 - `commands.py`、`command_specs.py`：会话操作和唯一指令目录；目录决定别名、帮助、参数约束、后端需求和执行通道，保持无业务依赖；处理函数由 commands 的单一分发表关联，Bridge 只调用 dispatch。语法拒绝先于后端连接。
 - `prompts.py`、`errors.py`、`configuration.py`：展示、错误分类、配置默认值/迁移；不重复模型或权限清单。
+- `questions.py`：原生问题文字展示和选项转换。backend.pending 保存请求及来源、逐题答案；/answer 走 urgent 通道，不进入模型输入队列。每题独立短编号，resolved/切换/断线清理；最终响应写入结果未知时不重试。原生问题与审批互不使用对方的响应格式。
 - `slicing.py`：纯文本切片及预览。`media.py` 先剥离附件标记并校验快照，正文才进入切片。
 - `wechat.py`、`storage.py`、`profiles.py`、`service_control.py`：微信协议、私有原子 JSON、后端选择、用户服务重启。
 

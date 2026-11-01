@@ -15,6 +15,7 @@ import uuid
 from records import Source, TurnResult
 from media import OUTPUT_HINT
 from usage import UsageCache
+from questions import QUESTION_METHOD, question_prompt, question_answer
 from prompts import (
     APPROVAL_TOO_LONG,
     COMPACT_STARTED,
@@ -136,6 +137,22 @@ class CodexBackend:
         if self.shared and params.get("threadId") != self.selected_thread:
             # Other desktop sessions keep their own request owner.
             return
+        if msg["method"] == QUESTION_METHOD and params.get("threadId") == self.selected_thread:
+            questions = params.get("questions", [])
+            if (questions and all(isinstance(q, dict) and isinstance(q.get("id"), str)
+                                  and isinstance(q.get("question"), str) for q in questions)
+                    and len({q["id"] for q in questions}) == len(questions)
+                    and (not self.active or not self.active["turn"]
+                         or params.get("turnId") == self.active["turn"])):
+                # Questions may belong to a desktop turn. Answer only requests actually
+                # delivered to this connection; leave other interaction ownership intact.
+                if any(request["id"] == msg["id"] for request in self.pending.values()):
+                    return
+                token = secrets.token_hex(4)
+                self.pending[token] = dict(msg, _question={
+                    "source": self.source(), "index": 0, "answers": {}})
+                self.notify(question_prompt(questions[0], token, 0, len(questions)))
+                return
         if self.shared and self.active and not self.active.get("owned"):
             # Observing a desktop turn does not transfer its tool/approval request ownership.
             return
@@ -174,7 +191,8 @@ class CodexBackend:
         params = msg.get("params", {})
         if msg.get("method") == "serverRequest/resolved":
             for token, request in list(self.pending.items()):
-                if request["id"] == params.get("requestId"):
+                if (request["id"] == params.get("requestId") and
+                        request.get("params", {}).get("threadId") == params.get("threadId")):
                     self.pending.pop(token, None)
         method = msg.get("method")
         if method == "account/rateLimits/updated":
@@ -611,8 +629,34 @@ class CodexBackend:
         return True
 
     async def answer_approval(self, token, decision):
+        if self.pending.get(token, {}).get("method") == QUESTION_METHOD:
+            return False
         request = self.pending.pop(token, None)
         if not request:
             return False
         await self.write({"id": request["id"], "result": {"decision": decision}})
+        return True
+
+    async def answer_question(self, token, text):
+        request = self.pending.get(token)
+        if not request or request.get("method") != QUESTION_METHOD:
+            return False
+        state = request["_question"]
+        if state["source"] != self.source():
+            self.pending.pop(token, None)
+            return False
+        questions = request["params"]["questions"]
+        index = state["index"]
+        question = questions[index]
+        answer = question_answer(question, text)
+        answers = {**state["answers"], question["id"]: {"answers": [answer]}}
+        # Consume before writing: a transport failure is uncertain, never auto-resend.
+        self.pending.pop(token)
+        if index + 1 == len(questions):
+            await self.write({"id": request["id"], "result": {"answers": answers}})
+        else:
+            state.update(index=index + 1, answers=answers)
+            next_token = secrets.token_hex(4)
+            self.pending[next_token] = request
+            self.notify(question_prompt(questions[index + 1], next_token, index + 1, len(questions)))
         return True

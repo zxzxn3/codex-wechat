@@ -456,6 +456,19 @@ async def command_approval(bridge, command, argument, received=None):
         bridge.reply(APPROVAL_FAILED)
 
 
+async def command_answer(bridge, command, argument, received=None):
+    parts = argument.split(maxsplit=1)
+    if len(parts) != 2:
+        raise UserFacingError(f"用法: `{REGISTRY[command].usage}`")
+    try:
+        ok = await bridge.backend.answer_question(*parts)
+        bridge.reply("已回答。" if ok else "问题已失效或编号无效。")
+    except ValueError as error:
+        bridge.reply(str(error))
+    except (RuntimeError, OSError, asyncio.TimeoutError):
+        bridge.reply("回答投递结果未确认，请查看桌面；未自动重发。")
+
+
 HANDLERS = {spec.name: globals()["command_" + (spec.handler or spec.name.removeprefix("/"))]
             for spec in COMMANDS if spec.route != "input"}
 

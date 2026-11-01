@@ -36,6 +36,7 @@ COMMANDS = (
     Command("/finish", "/finish [text {模板}|fields]", "结束提示；空模板关闭", "managed", "local", section="设置", handler="notice"),
     Command("/approve", "/approve {编号}", "同意审批", lane="urgent", section="审批", handler="approval", required=True),
     Command("/deny", "/deny {编号}", "拒绝审批", lane="urgent", section="审批", handler="approval", required=True),
+    Command("/answer", "/answer {问题编号} {选项或文字}", "回答原生提问", lane="urgent", required=True),
     Command("/send", "/send {路径}", "回传文件或图片", lane="media", section="附件", handler="send"),
     Command("/sendfile", "/sendfile {路径}", "作为文件回传", lane="media", section="附件", handler="send"),
     Command("/sendimage", "/sendimage {路径}", "作为图片回传", lane="media", section="附件", handler="send"),
