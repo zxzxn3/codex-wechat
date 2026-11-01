@@ -1,3 +1,0 @@
-interface:
-  display_name: "WeChat Attachments"
-  short_description: "Return requested local files to WeChat"

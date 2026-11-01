@@ -1,3 +1,0 @@
-# Media encryption and shared-daemon transport.
-cryptography>=38
-websockets>=15,<18
