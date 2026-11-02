@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from errors import WeChatAuthExpired
 from subprocess_io import communicate
-from platform_support import IS_WINDOWS, curl_command, subprocess_options
+from platform_support import curl_command, subprocess_options
 import wechat_auth
 from wechat_auth import identity
 
@@ -72,7 +72,7 @@ class WeChat:
             config.append("data = " + json.dumps(json.dumps(payload)))
         started = time.perf_counter()
         proc = await asyncio.create_subprocess_exec(
-            curl_command(), "--disable", *(["--ipv4"] if IS_WINDOWS else []),
+            curl_command(), "--disable",
             "--silent", "--show-error", "--proto", "=https",
             "--connect-timeout", str(min(timeout, 10)), "--max-time", str(timeout),
             "--max-filesize", str(16 * 1024 * 1024),
