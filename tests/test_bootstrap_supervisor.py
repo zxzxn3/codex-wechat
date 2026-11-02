@@ -1,4 +1,5 @@
 """Release-pointer contracts for the stable Windows supervisor bootstrap."""
+from test_support import requires_symlinks
 import os
 from pathlib import Path
 import tempfile
@@ -34,6 +35,7 @@ class BootstrapSupervisorTests(unittest.TestCase):
                 bootstrap_supervisor.active_release(root)
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symbolic links unavailable")
+    @requires_symlinks
     def test_pointer_and_release_paths_reject_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

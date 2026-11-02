@@ -25,6 +25,7 @@ class DesktopEntryTests(unittest.IsolatedAsyncioTestCase):
     async def test_cli_preserves_arguments_directory_and_exit_status(self):
         cwd = os.getcwd()
         with patch.object(desktop, 'ensure', AsyncMock(return_value=(self.spec, {'PATH': ''}))), \
+                patch.object(ConnectionSpec, 'resolve', return_value=['fake-codex']), \
                 patch.object(desktop.subprocess, 'call', return_value=7) as call:
             code = await desktop.main(['cli', '--', 'resume', '-C', 'space folder'])
         self.assertEqual(code, 7)

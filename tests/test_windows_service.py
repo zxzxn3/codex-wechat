@@ -70,6 +70,9 @@ class ServiceControlTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.enterContext(patch.object(windows_service, "ChildJob"))
+
     def test_bridge_command_and_environment_keep_token_out_of_argv(self):
         command = windows_service.bridge_command(
             Path("C:/codex-wechat"), Path("C:/data/.state"),

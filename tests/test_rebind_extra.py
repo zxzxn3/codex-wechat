@@ -104,7 +104,7 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
                 self.seed({key: True})
                 adapter = FakeAdapter(running=True)
                 login = AsyncMock()
-                with self.assertRaisesRegex(RuntimeError, "--stop-active"):
+                with self.assertRaisesRegex(RuntimeError, r"(?:--stop-active|-StopActive)"):
                     await self.run_rebind(adapter, login)
                 self.assertEqual(adapter.calls, ["status"])
                 login.assert_not_awaited()

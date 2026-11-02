@@ -13,7 +13,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Store(Path(self.temp.name) / "state")
-        self.bridge = Bridge(self.store, {"user": "owner"}, {})
+        self.bridge = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         self.bridge.state["context"] = "context"
 
     def tearDown(self):
@@ -61,7 +61,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         restore(bridge.state, {"thread": "other"})
         bridge.backend_name = "deepseek"
         bridge.save()
-        restarted = Bridge(self.store, {"user": "owner"}, {})
+        restarted = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         self.assertEqual(restarted.prompt_fields()["发送失败数"], 25)
         self.assertEqual(len(restarted.state["failedOutbox"]), 20)
 
@@ -70,6 +70,6 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         state.pop("consecutiveSendFailures")
         state["failedOutbox"] = [{"id": "historical"}]
         self.store.save("bridge", state)
-        restored = Bridge(self.store, {"user": "owner"}, {})
+        restored = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         self.assertEqual(restored.prompt_fields()["发送失败数"], 0)
         self.assertEqual(restored.state["failedOutbox"], [{"id": "historical"}])

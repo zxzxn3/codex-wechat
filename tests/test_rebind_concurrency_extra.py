@@ -78,7 +78,7 @@ class ScanRaceTests(unittest.IsolatedAsyncioTestCase):
                    "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}}, old)
         job = {"id": "started-during-scan", "phase": "accepted", "clientId": "c"}
         adapter = FakeAdapter()
-        with self.assertRaisesRegex(RuntimeError, "--stop-active"):
+        with self.assertRaisesRegex(RuntimeError, r"(?:--stop-active|-StopActive)"):
             await self.run_rebind(self.login_that_starts(
                 old, {"token": "new", "user": "u", "bot": "b2"}, job), adapter)
         self.assertEqual(adapter.calls, ["status", "status"])
@@ -95,7 +95,7 @@ class ScanRaceTests(unittest.IsolatedAsyncioTestCase):
                    "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}}, old)
         job = {"id": "started-during-scan", "phase": "accepted"}
         adapter = FakeAdapter()
-        with self.assertRaisesRegex(RuntimeError, "--stop-active"):
+        with self.assertRaisesRegex(RuntimeError, r"(?:--stop-active|-StopActive)"):
             await self.run_rebind(self.login_that_starts(
                 old, {"token": "new", "user": "u2", "bot": "b2"}, job), adapter)
         self.assertEqual(adapter.calls, ["status", "status"])

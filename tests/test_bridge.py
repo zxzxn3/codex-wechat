@@ -31,7 +31,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Store(self.temp.name)
-        self.bridge = Bridge(self.store, {"user": "owner"}, {})
+        self.bridge = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
 
     def tearDown(self):
         self.store.lock.close()
@@ -50,7 +50,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         saved = self.store.load("bridge")
         self.assertEqual([x["id"] for x in saved["inbox"]], ["1"])
         self.assertEqual(saved["cursor"], "next")
-        restarted = Bridge(self.store, {"user": "owner"}, {})
+        restarted = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         await restarted.receive({"msgs": [self.message()]})
         self.assertEqual(len(restarted.state["inbox"]), 1)
 
@@ -76,7 +76,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         entries = self.store.load("bridge")["outbox"]
         self.assertEqual("".join(x["text"] for x in entries), "汉" * 2500)
         self.assertTrue(all(len(x["text"].encode()) <= 3000 for x in entries))
-        self.assertEqual(os.stat(Path(self.temp.name) / "bridge.json").st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(os.stat(Path(self.temp.name) / "bridge.json").st_mode & 0o777, 0o600)
 
     async def test_empty_completion_notice_is_disabled(self):
         self.bridge.state["context"] = "context"

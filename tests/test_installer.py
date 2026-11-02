@@ -1,4 +1,5 @@
 """Offline contracts for immutable release installation without rollback."""
+from test_support import requires_symlinks
 import contextlib
 import io
 import os
@@ -24,7 +25,12 @@ class InstallerTests(unittest.TestCase):
         self.enterContext(patch.object(installer, "introduction", return_value=True))
         self.enterContext(patch.object(installer, "prepare_runtime"))
         self.enterContext(patch.object(installer, "report_dependencies"))
-        self.enterContext(patch.object(installer, "prepare_bootstrap_runtime"))
+        def bootstrap(target):
+            if installer.IS_WINDOWS:
+                executable = target / ".bootstrap-venv/Scripts/python.exe"
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.write_bytes(b"fake interpreter")
+        self.enterContext(patch.object(installer, "prepare_bootstrap_runtime", side_effect=bootstrap))
         self.enterContext(patch.object(installer, "preflight_command_link"))
         self.enterContext(patch.object(installer, "install_command_link"))
         self.enterContext(patch.object(installer, "configure_windows"))
@@ -85,6 +91,7 @@ class InstallerTests(unittest.TestCase):
         ):
             self.assertNotIn(relative, files)
 
+    @requires_symlinks
     def test_payload_refuses_file_source_and_directory_symlinks(self):
         link = self.source / "link.py"
         link.symlink_to(self.source / "extra.py")
@@ -108,9 +115,10 @@ class InstallerTests(unittest.TestCase):
         release = self.target / installer.RELEASES_DIR / identifier
         self.assertTrue((release / "extra.py").is_file())
         self.assertTrue((release / "docs/guide.md").is_file())
-        self.assertTrue((release / "codex-wechat").stat().st_mode & stat.S_IXUSR)
+        if not installer.IS_WINDOWS:
+            self.assertTrue((release / "codex-wechat").stat().st_mode & stat.S_IXUSR)
         self.assertTrue(installer.release_matches(self.target, identifier))
-        self.assertTrue((self.target / "codex-wechat").is_file())
+        self.assertTrue((self.target / installer._stable_files()[0]).is_file())
         self.assertTrue((self.target / "installer.py").is_file())
         self.assertFalse((self.target / "config.json").exists())
         self.assertFalse((self.target / ".state").exists())
@@ -175,6 +183,7 @@ class InstallerTests(unittest.TestCase):
                 ]), 0)
         self.assertEqual(self.target.read_text(), "keep")
 
+    @requires_symlinks
     def test_target_root_symlink_is_rejected(self):
         real_target = self.base / "real-target"
         real_target.mkdir()
@@ -271,11 +280,11 @@ class InstallerTests(unittest.TestCase):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
         current = self.current()
-        (self.target / "codex-wechat").unlink()
+        (self.target / installer._stable_files()[0]).unlink()
         with patch.object(installer, "introduction", return_value=True), patch("builtins.input", return_value="y"):
             self.assertEqual(installer.update(self.source, self.target), 0)
         self.assertEqual(self.current(), current)
-        self.assertTrue((self.target / "codex-wechat").is_file())
+        self.assertTrue((self.target / installer._stable_files()[0]).is_file())
 
     def test_update_rejects_same_versioned_root_as_source(self):
         with patch("builtins.input", return_value="y"):
@@ -299,6 +308,7 @@ class InstallerTests(unittest.TestCase):
             installer.logo_banner(self.source)
         self.assertIn("future art", output.getvalue())
 
+    @requires_symlinks
     def test_optional_logo_does_not_follow_symlinks(self):
         secret = self.base / "secret.txt"
         secret.write_text("do not print\n", encoding="utf-8")

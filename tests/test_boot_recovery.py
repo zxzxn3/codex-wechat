@@ -1,5 +1,6 @@
 """Shutdown recovery contracts using only temporary state and mocked services."""
 import asyncio
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -108,6 +109,7 @@ class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(task, return_exceptions=True)
 
 
+@unittest.skipIf(os.name == "nt", "Linux systemd/keyring contract")
 class DaemonRecoveryTests(unittest.IsolatedAsyncioTestCase):
     def transport(self):
         return CodexTransport({"command": ["codex-deepseek", "app-server"]}, "/tmp",

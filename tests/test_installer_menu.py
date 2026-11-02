@@ -1,4 +1,5 @@
 """User-approved installer flow; all mutations stay inside temporary fixtures."""
+from test_support import requires_symlinks
 import contextlib
 import io
 from pathlib import Path
@@ -87,6 +88,7 @@ class InstallerMenuTests(unittest.TestCase):
             installer.declaration(root, 'start')
             self.assertEqual(out.getvalue().strip(), 'Project notice')
 
+    @requires_symlinks
     def test_assets_do_not_follow_symlinked_parent_directories(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -98,6 +100,7 @@ class InstallerMenuTests(unittest.TestCase):
             (source/'assets').symlink_to(outside, target_is_directory=True)
             self.assertIsNone(installer.asset_path(source, Path('assets/notice.txt')))
 
+    @requires_symlinks
     def test_declarations_do_not_follow_symlinks(self):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()) as out:
             root = Path(directory)
