@@ -18,6 +18,9 @@ from codex_transport import CodexRpcError, CodexTransport
 
 
 class ConfigLoaderExtraTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch("configuration.log_event"))
+
     def test_group_validation_retention_deletion_and_override_scope(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "config.json"

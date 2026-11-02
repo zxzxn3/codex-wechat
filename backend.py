@@ -215,28 +215,10 @@ class CodexBackend:
                     self.pending.pop(token, None)
         method = msg.get("method")
         if method == "account/rateLimits/updated":
-            update = params.get("rateLimits")
-            if isinstance(update, dict):
-                current = self.account_limits
-                if not isinstance(current, dict):
-                    current = {}
-                current["rateLimits"] = self.merge_available(
-                    current.get("rateLimits"), update)
-                self.account_limits = current
-                self.on_limits(current)
+            self._update_rate_limits(params)
             return
         if method == "thread/tokenUsage/updated":
-            thread_id, usage = params.get("threadId"), params.get("tokenUsage")
-            if isinstance(thread_id, str) and isinstance(usage, dict):
-                # Resume can publish usage before its response selects the thread.
-                # Cache counters by thread rather than discarding that early event.
-                self.live_usage_threads.add(thread_id)
-                self.usage_by_thread.pop(thread_id, None)
-                self.usage_by_thread[thread_id] = usage
-                while len(self.usage_by_thread) > 20:
-                    self.usage_by_thread.pop(next(iter(self.usage_by_thread)))
-                if thread_id == self.selected_thread:
-                    self.info["usage"] = usage
+            self._update_token_usage(params)
             return
         if params.get("threadId") != self.selected_thread:
             return
@@ -274,16 +256,7 @@ class CodexBackend:
                     self.notify(self.prompt("COMPACT_INTERRUPTED") if turn.get("status") != "completed"
                                 else self.prompt("COMPACT_UNCONFIRMED"))
         if method == "thread/settings/updated":
-            # Native settings are authoritative; no replay of previously observed defaults.
-            self.runtime_generation += 1
-            settings = params.get("threadSettings", {})
-            for source, target in (("model", "model"), ("effort", "effort"), ("cwd", "cwd"),
-                    ("modelProvider", "provider"), ("approvalPolicy", "approval"),
-                    ("approvalsReviewer", "reviewer"), ("sandboxPolicy", "sandbox"),
-                    ("activePermissionProfile", "profile"), ("collaborationMode", "collaboration")):
-                if source in settings:
-                    self.info[target] = settings[source]
-            self.on_activity()
+            self._update_thread_settings(params)
             return
         if method == "thread/name/updated":
             self.info["name"] = params.get("threadName")
@@ -317,66 +290,107 @@ class CodexBackend:
         if params.get("turnId") and current["turn"] != params["turnId"]:
             return
         if method == "item/completed":
-            if item.get("type") == "agentMessage":
-                identity = item.get("id")
-                if identity and any(message.get("id") == identity for message in current["messages"]):
-                    return
-                current["messages"].append(item)
-                questions = async_questions(item)
-                if questions is not None:
-                    token = self._new_token()
-                    self.pending[token] = {
-                        "method": ASYNC_QUESTION_METHOD,
-                        "_async": {
-                            "source": current["source"],
-                            "thread": current["thread"],
-                            "turn": current["turn"],
-                            "item": identity,
-                            "questions": questions,
-                            "index": 0,
-                            "answers": [],
-                        },
-                    }
-                    self.notify(question_prompt(questions[0], token, 0, len(questions),
-                                                text=self.prompt))
-                elif item.get("phase") in ("commentary", "partial_answer") and item.get("text"):
-                    self.on_message(AgentMessage(current["source"], current["turn"],
-                        identity, item["text"], current["cwd"], item["phase"],
-                        tuple(current.get("requestIds", ()))))
+            self._record_agent_message(current, item)
         elif method == "turn/completed" and not current["done"].done():
-            turn = params["turn"]
-            if current["turn"] and turn["id"] != current["turn"]:
+            self._complete_turn(current, params["turn"])
+
+    def _update_rate_limits(self, params):
+        update = params.get("rateLimits")
+        if isinstance(update, dict):
+            current = self.account_limits
+            if not isinstance(current, dict):
+                current = {}
+            current["rateLimits"] = self.merge_available(
+                current.get("rateLimits"), update)
+            self.account_limits = current
+            self.on_limits(current)
+
+    def _update_token_usage(self, params):
+        thread_id, usage = params.get("threadId"), params.get("tokenUsage")
+        if isinstance(thread_id, str) and isinstance(usage, dict):
+            # Resume can publish usage before its response selects the thread.
+            # Cache counters by thread rather than discarding that early event.
+            self.live_usage_threads.add(thread_id)
+            self.usage_by_thread.pop(thread_id, None)
+            self.usage_by_thread[thread_id] = usage
+            while len(self.usage_by_thread) > 20:
+                self.usage_by_thread.pop(next(iter(self.usage_by_thread)))
+            if thread_id == self.selected_thread:
+                self.info["usage"] = usage
+
+    def _update_thread_settings(self, params):
+        # Native settings are authoritative; no replay of previously observed defaults.
+        self.runtime_generation += 1
+        settings = params.get("threadSettings", {})
+        for source, target in (("model", "model"), ("effort", "effort"), ("cwd", "cwd"),
+                ("modelProvider", "provider"), ("approvalPolicy", "approval"),
+                ("approvalsReviewer", "reviewer"), ("sandboxPolicy", "sandbox"),
+                ("activePermissionProfile", "profile"), ("collaborationMode", "collaboration")):
+            if source in settings:
+                self.info[target] = settings[source]
+        self.on_activity()
+
+    def _record_agent_message(self, current, item):
+        if item.get("type") == "agentMessage":
+            identity = item.get("id")
+            if identity and any(message.get("id") == identity for message in current["messages"]):
                 return
-            messages = current["messages"]
-            finals = [m["text"] for m in messages
-                      if async_questions(m) is None and m.get("phase") == "final_answer"]
-            legacy = [m["text"] for m in messages
-                      if async_questions(m) is None and not m.get("phase")]
-            text = "\n\n".join(finals or legacy)
-            has_partial_answer = any(async_questions(m) is None
-                                     and m.get("phase") == "partial_answer" and m.get("text")
-                                     for m in messages)
-            status = turn["status"]
-            if status != "completed":
-                status_text = {
-                    "failed": self.prompt("TURN_FAILED"),
-                    "interrupted": self.prompt("TURN_INTERRUPTED"),
-                }.get(status, self.prompt("TURN_ENDED_UNEXPECTEDLY"))
-                text = (text + "\n\n" if text else "") + status_text
-            result = TurnResult(current["source"], current["turn"],
-                                text if text or has_partial_answer else self.prompt("TURN_COMPLETED_EMPTY"),
-                                current["cwd"], status, tuple(current.get("requestIds", ())))
-            current["done"].set_result(result)
-            self.pending.clear()
-            compact_turn = any(key[:3] == (self.selection_epoch, self.selected_thread, turn["id"])
-                               for key in self.compactions)
-            self.manual_compactions.discard((self.selection_epoch, self.selected_thread))
-            if not current.get("owned"):
-                if text or not compact_turn:
-                    self.on_external_result(result)
-                if self.active is current:
-                    self.active = None
-            self.on_activity()
+            current["messages"].append(item)
+            questions = async_questions(item)
+            if questions is not None:
+                token = self._new_token()
+                self.pending[token] = {
+                    "method": ASYNC_QUESTION_METHOD,
+                    "_async": {
+                        "source": current["source"],
+                        "thread": current["thread"],
+                        "turn": current["turn"],
+                        "item": identity,
+                        "questions": questions,
+                        "index": 0,
+                        "answers": [],
+                    },
+                }
+                self.notify(question_prompt(questions[0], token, 0, len(questions),
+                                            text=self.prompt))
+            elif item.get("phase") in ("commentary", "partial_answer") and item.get("text"):
+                self.on_message(AgentMessage(current["source"], current["turn"],
+                    identity, item["text"], current["cwd"], item["phase"],
+                    tuple(current.get("requestIds", ()))))
+
+    def _complete_turn(self, current, turn):
+        if current["turn"] and turn["id"] != current["turn"]:
+            return
+        messages = current["messages"]
+        finals = [m["text"] for m in messages
+                  if async_questions(m) is None and m.get("phase") == "final_answer"]
+        legacy = [m["text"] for m in messages
+                  if async_questions(m) is None and not m.get("phase")]
+        text = "\n\n".join(finals or legacy)
+        has_partial_answer = any(async_questions(m) is None
+                                 and m.get("phase") == "partial_answer" and m.get("text")
+                                 for m in messages)
+        status = turn["status"]
+        if status != "completed":
+            status_text = {
+                "failed": self.prompt("TURN_FAILED"),
+                "interrupted": self.prompt("TURN_INTERRUPTED"),
+            }.get(status, self.prompt("TURN_ENDED_UNEXPECTEDLY"))
+            text = (text + "\n\n" if text else "") + status_text
+        result = TurnResult(current["source"], current["turn"],
+                            text if text or has_partial_answer else self.prompt("TURN_COMPLETED_EMPTY"),
+                            current["cwd"], status, tuple(current.get("requestIds", ())))
+        current["done"].set_result(result)
+        self.pending.clear()
+        compact_turn = any(key[:3] == (self.selection_epoch, self.selected_thread, turn["id"])
+                           for key in self.compactions)
+        self.manual_compactions.discard((self.selection_epoch, self.selected_thread))
+        if not current.get("owned"):
+            if text or not compact_turn:
+                self.on_external_result(result)
+            if self.active is current:
+                self.active = None
+        self.on_activity()
 
     def new_turn(self, thread_id, turn_id=None, *, owned):
         return {"thread": thread_id, "turn": turn_id, "messages": [], "owned": owned,

@@ -8,6 +8,7 @@
 - wechat / media：微信和CDN协议；wechat_auth / rebind：认证状态、身份与重绑编排。
 - input_delivery / output_delivery：输入提交和有序输出；Bridge是组合根和持久化入口。
 - commands / command_specs / prompts / configuration：唯一命令目录、展示快照和配置；不重复业务状态。
+- diagnostics 写入安全事件，log_viewer 读取和跟随日志；命令行入口只负责调用。
 - platform_ui / platform_support / service_adapter：二维码、通知、平台路径与原生服务操作。
 - subprocess_io / storage：有界子进程收尾、私有JSON与原生单实例锁。
 - installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。
@@ -15,6 +16,8 @@
 共享后台与微信服务是两种所有权：前者可以被 App/CLI 继续使用，后者只管理桥接。
 连接失败不删除写入锁、不抢停桌面、不静默另开独立写入后台。App 的共享WS仅回环，
 原生daemon优先；平台缺口不通过伪造跨平台实现隐藏。
+backend 的事件入口保留来源过滤、早到事件缓冲和轮次检查；用量、设置、消息及轮次收口
+分开处理，仍共用同一 Backend 状态，不增加事件总线或第二份会话状态。
 Linux App 启动复用同一原生 daemon；显式 WebSocket 和 Windows 接入保持原路径。
 可选用户桌面入口只转交稳定的 desktop 控制器；后台与代理职责仍各自独立。
 
@@ -54,7 +57,9 @@ App async 问题只在结构化 `agentMessage.questions` 上识别；多题依�
 ## 配置与资源
 
 热配置从同一JSON按inode/mtime/size变化读取，整组校验后应用；无效文件保留旧值。
-校验失败目前写入 stderr；是否同时写入默认结构化诊断并在微信提示，仍在考虑中，尚未实现。
+校验失败保留 stderr 提示，并写 config.reload_failed 安全事件（仅失败类别与异常类型）；
+Bridge 将一次失败提示入发件箱。同一文件签名不重复报告，无微信上下文时暂存提示标记；
+有效配置重新加载后清除该标记。失败提示使用最后生效的文案快照，不递归触发配置读取。
 实际文件键变化才清对应微信模板覆盖。显示快照不成为原生设置的隐式写入来源。
 运行期文案唯一目录为prompts.py的DEFAULT_PROMPTS，config.prompts仅存覆盖；不重载代码模块。
 HotSettings在应用前统一验证键、文本类型、字节上限及简单占位符语法；删除键恢复默认。

@@ -17,7 +17,9 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(check(80), [])
         self.assertEqual(len(check(49)), 1)
         self.assertEqual(check(45), [])
-        self.assertIn("阈值 5%", check(4)[0])
+        warning = check(4)[0]
+        self.assertIn("剩余 4%", warning)
+        self.assertNotIn("阈值", warning)
         self.assertEqual(check(3), [])
         self.assertEqual(check(30), [])
         self.assertEqual(check(20), [])
@@ -57,7 +59,8 @@ class QuotaTests(unittest.TestCase):
         warnings = quota_warnings(records, self.snapshot(9), "backend",
                                   thresholds, now=10)
         self.assertEqual(len(warnings), 1)
-        self.assertIn("阈值 10%", warnings[0])
+        self.assertIn("剩余 9%", warnings[0])
+        self.assertNotIn("阈值", warnings[0])
 
     def test_default_threshold_includes_one_percent(self):
         records = {}
@@ -67,4 +70,4 @@ class QuotaTests(unittest.TestCase):
         warnings = quota_warnings(records, self.snapshot(1), "backend",
                                   thresholds, now=10)
         self.assertEqual(len(warnings), 1)
-        self.assertIn("阈值 1%", warnings[0])
+        self.assertIn("剩余 1%", warnings[0])

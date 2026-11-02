@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import sys
 from prompts import validate_prompt_overrides
+from diagnostics import error_fields, log_event
 
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
@@ -99,6 +100,7 @@ class ConfigLoader:
         self.path = Path(path) if path else None
         self.hot = HotSettings.from_config(config)
         self.signature = self.file_signature()
+        self.failure_pending = False
 
     def file_signature(self):
         try:
@@ -122,7 +124,12 @@ class ConfigLoader:
             if self.file_signature() != signature:
                 self.signature = None
                 return False
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
+            self.failure_pending = True
+            kind = ("json" if isinstance(error, json.JSONDecodeError) else
+                    "read" if isinstance(error, OSError) else "values")
+            log_event("config.reload_failed", level="warning", component="config",
+                      kind=kind, **error_fields(error))
             print("热配置未加载，保留原设置，请检查 JSON 和配置值。", file=sys.stderr)
             return False
         changed = False
@@ -136,4 +143,5 @@ class ConfigLoader:
                 else:
                     self.config.pop(key, None)
         self.hot = hot
+        self.failure_pending = False
         return changed

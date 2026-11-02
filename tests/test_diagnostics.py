@@ -10,7 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import diagnostics
-from codex_wechat import Bridge, _log_files, _read_log_updates, _tail_lines, show_logs
+from codex_wechat import Bridge
+from log_viewer import _log_files, _read_log_updates, _tail_lines, show_logs
 from commands import dispatch
 from storage import Store
 from wechat import WeChat
@@ -151,7 +152,7 @@ class DiagnosticsTests(unittest.TestCase):
             if args == ("old",):
                 with self.path.open("a", encoding="utf-8") as stream:
                     stream.write("raced append\n")
-        with patch("codex_wechat.print", side_effect=print_and_append):
+        with patch("log_viewer.print", side_effect=print_and_append):
             _read_log_updates([self.path], positions, initial=True)
         output = StringIO()
         with redirect_stdout(output):

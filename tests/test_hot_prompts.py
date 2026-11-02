@@ -51,6 +51,7 @@ class PromptCatalogueTests(unittest.TestCase):
 class HotPromptTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.config_log = self.enterContext(patch("configuration.log_event"))
         root = Path(self.temp.name)
         self.path = root / "config.json"
         self.config = {"prompts": {"STOP_IDLE": "idle {model}"}}
@@ -97,6 +98,53 @@ class HotPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bridge.prompt('STOP_IDLE'), 'idle model-x')
         self.assertEqual(self.bridge.state['processingNotice'], 'wechat override')
         self.assertNotEqual(self.bridge.source_hint, 'changed')
+
+    async def test_invalid_config_notifies_and_logs_once_without_exposing_content(self):
+        temporary = self.path.with_suffix('.tmp')
+        temporary.write_text('{"sourceHint":"PRIVATE-SENTINEL",', encoding='utf-8')
+        temporary.replace(self.path)
+        for _ in range(3):
+            self.assertEqual(self.bridge.prompt('STOP_IDLE'), 'idle model-x')
+        notices = self.bridge.state['outbox']
+        self.assertEqual([entry['text'] for entry in notices],
+                         ['热配置未生效，保留原设置。请检查配置文件。'])
+        self.config_log.assert_called_once_with('config.reload_failed', level='warning',
+            component='config', kind='json', error_type='JSONDecodeError')
+        self.assertNotIn('PRIVATE-SENTINEL', str(self.config_log.call_args))
+        self.assertEqual(self.store.load('bridge')['outbox'], notices)
+
+    async def test_fixed_config_applies_and_later_failure_can_notify_again(self):
+        self.write({'slicing': {'targetChars': 1}})
+        self.bridge.reload_config()
+        self.write({'sourceHint': 'fixed'})
+        self.bridge.reload_config()
+        self.assertEqual(self.bridge.source_hint, 'fixed')
+        self.assertFalse(self.bridge.settings.failure_pending)
+        self.write({'slicing': {'targetChars': 1}})
+        self.bridge.reload_config()
+        self.assertEqual(len(self.bridge.state['outbox']), 2)
+        self.assertEqual(self.config_log.call_count, 2)
+        self.assertEqual(self.bridge.source_hint, 'fixed')
+
+    async def test_config_error_notice_uses_last_valid_copy_without_recursive_reload(self):
+        self.write({'prompts': {'CONFIG_RELOAD_FAILED': 'config rejected {model}'}})
+        self.bridge.reload_config()
+        self.write({'prompts': {'CONFIG_RELOAD_FAILED': '{model.__class__}'}})
+        with patch.object(self.bridge.backend, 'rpc', side_effect=AssertionError('unexpected RPC')):
+            self.bridge.reload_config()
+        self.assertEqual(self.bridge.state['outbox'][-1]['text'], 'config rejected model-x')
+        self.config_log.assert_called_once()
+
+    async def test_config_notice_waits_for_chat_context(self):
+        self.bridge.state.pop('context')
+        self.write({'slicing': {'targetChars': 1}})
+        self.bridge.reload_config()
+        self.assertEqual(self.bridge.state['outbox'], [])
+        self.assertTrue(self.bridge.settings.failure_pending)
+        self.bridge.state['context'] = 'new-context'
+        self.bridge.reload_config()
+        self.assertEqual(len(self.bridge.state['outbox']), 1)
+        self.assertFalse(self.bridge.settings.failure_pending)
 
     async def test_prompt_changes_do_not_clear_existing_notice_override(self):
         self.bridge.state['processingNotice'] = 'wechat override'
