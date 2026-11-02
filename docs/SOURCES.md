@@ -31,7 +31,7 @@ binded_redirect保留已有凭据，但重绑流程若此前已失效，会用ge
 同微信号重绑沿用同一聊天，按用户实测确认为项目行为；[腾讯微信渠道文档](https://cloud.tencent.cn/document/product/1759/132562)
 佐证单一有效绑定、新连接使旧连接失效，但未承诺bot ID不变。旧游标与context_token跨绑定有效性
 无保证；[官方插件](https://github.com/Tencent/openclaw-weixin/blob/main/src/auth/accounts.ts)换账号时清理它们。
-本项目同用户保留交付和去重，bot变化时重取协议状态；换微信用户先确认再隔离旧交付。
+本项目同用户保留交付和去重，bot变化时重取协议状态；换微信用户以扫码授权为准，自动隔离旧交付。
 媒体沿用上游AES-128-ECB/PKCS7与MD5；API token不发给CDN，不跟随重定向。
 
 /ping使用当前原生配置决定目标，curl time_connect/time_appconnect用于TCP/TLS建连；

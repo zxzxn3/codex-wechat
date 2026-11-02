@@ -124,10 +124,9 @@ async def login(store, *, starting=False, rebind=False,
     qr = await client.request("ilink/bot/get_bot_qrcode?bot_type=3",
                               {"local_token_list": local_tokens[-10:]}, auth=False)
     url = qr["qrcode_img_content"]
-    print("用手机微信扫描二维码并确认授权：", flush=True)
-    if rebind and previous:
-        print("同号再次扫码可能直接进入原聊天，终端仍会等待。\n"
-              "仅确认现有连接无需重绑；可按 Ctrl+C 取消，不影响原服务。", flush=True)
+    print("用微信扫描二维码绑定账号并确认授权，二维码时效120s。\n"
+          "已绑定Clawbot的微信会在微信端确认后被替换。\n"
+          "同号再次扫码无效，使用ctrl+c取消等待。", flush=True)
     print_qr(url)
     print(url, flush=True)
     deadline = time.monotonic() + 300
@@ -153,14 +152,6 @@ async def login(store, *, starting=False, rebind=False,
             if identity_changed and not rebind:
                 raise RuntimeError(
                     "已有微信绑定；请运行 codex-wechat rebind 重新绑定。")
-            if identity_changed and str(previous.get("user") or "") != str(account["user"]):
-                try:
-                    answer = await asyncio.to_thread(
-                        input, "微信用户已变化，旧待办和回复将隔离。继续绑定？[y/N] ")
-                except EOFError:
-                    answer = ""
-                if answer.strip().casefold() not in ("y", "yes"):
-                    raise RuntimeError("已取消重新绑定。")
             if persist and identity_changed and before_identity_change is not None:
                 before_identity_change(previous, account)
             if persist:

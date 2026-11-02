@@ -106,26 +106,23 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
         before.assert_called_once()
         self.assertEqual(self.store.load("account")["bot"], "bot-b")
 
-    async def test_different_user_requires_terminal_confirmation_before_any_change(self):
+    async def test_different_user_needs_no_terminal_confirmation(self):
         changed = {"token": "new", "bot": "bot-b", "user": "user-b"}
         before = Mock()
-        with patch("builtins.input", return_value="n") as confirm:
-            with self.assertRaisesRegex(RuntimeError, "已取消"):
-                await self.login(changed, rebind=True, before_identity_change=before)
-        confirm.assert_called_once()
-        before.assert_not_called()
-        self.assertEqual(self.store.load("account"), self.old)
-        with patch("builtins.input", return_value="y"):
+        with patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
             result = await self.login(changed, rebind=True, before_identity_change=before)
         self.assertTrue(result.identity_changed)
         before.assert_called_once()
         self.assertEqual(self.store.load("account")["user"], "user-b")
 
-    async def test_missing_terminal_input_cannot_accept_another_user(self):
+    async def test_deferred_different_user_login_does_not_write_before_commit(self):
         changed = {"token": "new", "bot": "bot-b", "user": "user-b"}
-        with patch("builtins.input", side_effect=EOFError()):
-            with self.assertRaisesRegex(RuntimeError, "已取消"):
-                await self.login(changed, rebind=True, before_identity_change=Mock())
+        before = Mock()
+        with patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
+            result = await self.login(changed, rebind=True, persist=False,
+                                      before_identity_change=before)
+        self.assertEqual(result.account["user"], "user-b")
+        before.assert_not_called()
         self.assertEqual(self.store.load("account"), self.old)
 
     async def test_binded_redirect_reuses_existing_local_credentials(self):
