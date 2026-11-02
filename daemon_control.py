@@ -36,5 +36,5 @@ def failure(state, command):
         return None
     if (state.get("ExecMainStatus") == str(os.EX_CONFIG) and state.get("Result") == "exit-code"
             and Path(command[0]).name == "codex-deepseek"):
-        return BackendStartupError("DeepSeek 密钥环未就绪，请在桌面解锁密钥环后重试。", retry_after=60)
+        return BackendStartupError("DeepSeek 密钥环未就绪，请在桌面解锁密钥环后重试。", retry_after=30)
     return BackendStartupError("Codex 后台启动失败，请检查启动器和用户服务日志。")

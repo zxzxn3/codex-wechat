@@ -135,7 +135,7 @@ class DaemonRecoveryTests(unittest.IsolatedAsyncioTestCase):
         with patch("daemon_control.status", AsyncMock(return_value=state)):
             with self.assertRaises(BackendStartupError) as caught:
                 await transport.start()
-        self.assertEqual(caught.exception.retry_after, 60)
+        self.assertEqual(caught.exception.retry_after, 30)
         self.assertIn("密钥环", backend_reason(caught.exception))
         other = daemon_control.failure(state, ["codex", "app-server"])
         self.assertNotIn("DeepSeek", str(other))

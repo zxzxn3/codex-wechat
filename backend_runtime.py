@@ -100,7 +100,7 @@ class BackendRuntime:
         unit = await self._systemd_start([*command, "app-server", "--listen", endpoint], env)
         parsed = urlsplit(endpoint)
         health = "http://" + parsed.netloc + "/readyz"
-        deadline = asyncio.get_running_loop().time() + 15
+        deadline = asyncio.get_running_loop().time() + 10
         while asyncio.get_running_loop().time() < deadline:
             state = await daemon_control.status(unit)
             failure = daemon_control.failure(state, command)
