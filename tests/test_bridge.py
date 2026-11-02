@@ -54,6 +54,12 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await restarted.receive({"msgs": [self.message()]})
         self.assertEqual(len(restarted.state["inbox"]), 1)
 
+    async def test_item_timestamp_supplies_missing_message_timestamp(self):
+        message = self.message("latency")
+        message["item_list"][0]["create_time_ms"] = self.bridge.latency.started_ms
+        await self.bridge.receive({"msgs": [message]})
+        self.assertIn("ingress_ms", self.bridge.state["inbox"][0])
+
     async def test_no_context_no_execution_and_stop_clears_queue(self):
         message = self.message()
         del message["context_token"]

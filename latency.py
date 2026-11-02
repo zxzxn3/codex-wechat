@@ -10,6 +10,36 @@ import time
 from platform_support import curl_command, subprocess_options
 
 
+def _timestamp(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError:
+            return None
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return value
+    return None
+
+
+def message_timestamps(msg):
+    """Return usable message timestamps in preference order.
+
+    The protocol documents create_time_ms as optional; some messages only
+    carry update_time_ms or item timestamps. Keep the fallback local and do
+    not invent a timestamp when every field is absent.
+    """
+    if not isinstance(msg, dict):
+        return ()
+    values = [msg.get("create_time_ms"), msg.get("update_time_ms")]
+    for item in msg.get("item_list") or ():
+        if isinstance(item, dict):
+            values.extend((item.get("create_time_ms"), item.get("update_time_ms")))
+    return tuple(value for value in (_timestamp(source) for source in values)
+                 if value is not None)
+
+
 class Latency:
     def __init__(self):
         self.sends = deque(maxlen=20)
@@ -17,12 +47,19 @@ class Latency:
         self.started_ms = time.time() * 1000
 
     def received(self, source_ms=None):
+        return self.received_any((source_ms,))
+
+    def received_any(self, sources):
         result = {"received": time.perf_counter()}
-        if (isinstance(source_ms, (int, float)) and math.isfinite(source_ms)
-                and source_ms >= self.started_ms):
-            estimate = time.time() * 1000 - source_ms
+        now = time.time() * 1000
+        for source in sources:
+            source_ms = _timestamp(source)
+            if source_ms is None or source_ms < self.started_ms:
+                continue
+            estimate = now - source_ms
             if 0 <= estimate < 24 * 60 * 60 * 1000:
                 result["ingress_ms"] = estimate
+                break
         return result
 
     @staticmethod

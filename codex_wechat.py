@@ -32,7 +32,7 @@ from records import InputPhase
 from profiles import backend_label, definitions, snapshot
 from rebind import run_rebind
 from media import Media, MAX_ATTACHMENTS
-from latency import Latency
+from latency import Latency, message_timestamps
 from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, backend_reason
 from platform_support import IS_WINDOWS, data_root
 from prompts import (
@@ -306,6 +306,7 @@ class Bridge:
             command, argument = parse_control(text)
             spec = REGISTRY.get(command)
             queued = bool(spec and spec.route == "input")
+            received = self.latency.received_any(message_timestamps(msg))
             if queued:
                 text = argument
             if queued and not text and not attachments:
@@ -313,7 +314,6 @@ class Bridge:
             elif len(attachments) > MAX_ATTACHMENTS:
                 self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}))
             elif text.startswith("/") and not attachments and not queued:
-                received = self.latency.received(msg.get("create_time_ms"))
                 if spec and spec.lane == "media":
                     received["media"] = self.media_origin()
                 controls.append((text, received))
@@ -324,7 +324,7 @@ class Bridge:
                     self.state["inbox"].append({"id": identity, "text": text,
                                                "attachments": attachments, "mode": "queue" if queued else "steer",
                                                "clientId": str(uuid.uuid4()), "phase": InputPhase.PREPARING,
-                                               "ingress_ms": self.latency.received(msg.get("create_time_ms")).get("ingress_ms")})
+                                               "ingress_ms": received.get("ingress_ms")})
                     if queued:
                         self.reply("已排队", persist=False)
             else:

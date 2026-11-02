@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from latency import connection_probe, provider_latency
+from latency import Latency, connection_probe, message_timestamps, provider_latency
 
 
 class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
@@ -56,3 +56,32 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await task
         process.wait.assert_awaited()
+
+
+class MessageTimestampTests(unittest.TestCase):
+    def test_falls_back_to_update_and_item_timestamps(self):
+        message = {
+            "update_time_ms": "1000500",
+            "item_list": [{"create_time_ms": 1000600}],
+        }
+        self.assertEqual(message_timestamps(message), (1000500.0, 1000600))
+
+    def test_latency_uses_first_usable_timestamp(self):
+        with patch("latency.time.time", return_value=1000):
+            latency = Latency()
+        with patch("latency.time.time", return_value=1001), \
+             patch("latency.time.perf_counter", return_value=1):
+            received = latency.received_any(message_timestamps({
+                "create_time_ms": 999000,
+                "update_time_ms": 1000500,
+                "item_list": [{"create_time_ms": 1000600}],
+            }))
+        self.assertEqual(received["ingress_ms"], 500)
+
+    def test_missing_timestamps_do_not_create_a_sample(self):
+        with patch("latency.time.time", return_value=1000):
+            latency = Latency()
+        with patch("latency.time.time", return_value=1001):
+            self.assertNotIn("ingress_ms", latency.received_any(message_timestamps({
+                "item_list": [{"type": 1}],
+            })))
