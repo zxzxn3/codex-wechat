@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Local WeChat ↔ Codex bridge. Media transport uses cryptography."""
 import argparse
+from binding import REBIND_HINT
+from codex_transport import CodexRpcError
 import asyncio
 import hashlib
 import json
@@ -10,9 +12,6 @@ import signal
 import sys
 import uuid
 
-import service_adapter
-import service_control
-import wechat_auth
 from backend import CodexBackend
 from output_delivery import OutputDelivery
 from input_delivery import InputDelivery
@@ -29,10 +28,10 @@ from configuration import ConfigLoader, ConfigurationError
 from quota import quota_warnings
 from records import InputPhase
 from profiles import backend_label, definitions, snapshot
-from relink import run_relink
+import service_control
 from media import Media, MAX_ATTACHMENTS
 from latency import Latency
-from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, backend_reason
+from errors import UserFacingError, BackendStartupError, backend_reason
 from platform_support import IS_WINDOWS, data_root
 from prompts import (
     BACKEND_CONNECT_FAILED,
@@ -59,8 +58,6 @@ class Bridge:
         self.state = store.load("bridge", {"cursor": "", "thread": None,
             "inbox": [], "outbox": [], "seen": [], "running": False})
         self.state.setdefault("consecutiveSendFailures", 0)
-        self.wechat_paused = wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED
-        self.auth_wake = asyncio.Event()
         self.channel = channel or WeChat(account)
         self.media = Media(store, self.channel, config.get("media"))
         self.backend_factory = backend_factory
@@ -136,27 +133,6 @@ class Bridge:
     def current_input_hint(self):
         self.reload_config()
         return "\n\n" + self.source_hint if self.source_hint else ""
-
-    def mark_wechat_valid(self):
-        # Once relink is required, only the stopped-service relink flow may
-        # clear it. A request already in flight must not silently resume polling.
-        if wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED:
-            return
-        changed = wechat_auth.mark_valid(self.state, self.account)
-        if changed:
-            self.save()
-
-    async def require_wechat_relink(self):
-        changed = wechat_auth.require_relink(
-            self.state, pending=len(self.state.get("outbox", []))
-        )
-        self.wechat_paused = True
-        if changed:
-            self.save()
-            await service_adapter.notify(
-                "微信绑定已失效",
-                "运行 codex-wechat relink 重新扫码；待办和发件箱已保留。",
-            )
 
     def check_quota(self, backend, payload):
         if backend is not self.backend or not self.state.get("context"):
@@ -447,7 +423,8 @@ class Bridge:
                         reported = reason
                     if isinstance(error, BackendStartupError):
                         delay = error.retry_after
-                    print(f"后端恢复失败：{type(error).__name__}", file=sys.stderr, flush=True)
+                    detail = str(error) if isinstance(error, CodexRpcError) else f"{reason}（{type(error).__name__}）"
+                    print(f"后端恢复失败：{detail}", file=sys.stderr, flush=True)
             # Account reads are independent of the active model turn.
             if not self.restarting and self.backend_started and self.backend.connected:
                 await self.backend.refresh_usage()
@@ -472,19 +449,10 @@ class Bridge:
     async def poller(self):
         delay = 2
         while True:
-            if self.wechat_paused:
-                self.auth_wake.clear()
-                await self.auth_wake.wait()
-                continue
             try:
                 batch = await self.channel.poll(self.state["cursor"])
-                if self.wechat_paused:
-                    continue
-                self.mark_wechat_valid()
                 await self.receive(batch)
                 delay = 2
-            except WeChatAuthExpired:
-                await self.require_wechat_relink()
             except Exception as error:
                 print(f"接收失败：{error}", file=sys.stderr, flush=True)
                 await asyncio.sleep(delay)
@@ -504,7 +472,8 @@ class Bridge:
             await asyncio.gather(*tasks)
         finally:
             for task in tasks:
-                task.cancel()
+                if not task.done() and not task.cancelling():
+                    task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await self.backend.close()
 
@@ -533,6 +502,8 @@ async def startup_store(args):
 async def startup_account(store):
     """Only an unbound foreground launch may ask the user to scan a QR code."""
     account = store.load("account")
+    if account and account.get("bindingPending"):
+        raise ConfigurationError("上次重新绑定未完成；" + REBIND_HINT)
     if account:
         return account
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -545,60 +516,29 @@ async def startup_account(store):
     return account
 
 
-def status_payload(store):
-    state = store.load("bridge", {})
-    auth = wechat_auth.state(state)
-    payload = {
-        "bound": bool(store.load("account")),
-        "auth": auth,
-        "available": (True if auth == wechat_auth.AUTH_VALID else
-                      False if auth == wechat_auth.AUTH_REQUIRED else None),
-        "relink_required": auth == wechat_auth.AUTH_REQUIRED,
-        "relink_command": "codex-wechat relink",
-        "thread": state.get("thread"),
-        "backend": state.get("backendName", "codex"),
-        "unfinished_at_last_save": bool(
-            state.get("currentInput") or state.get("running", False)
-        ),
-        "queued": len(state.get("inbox", [])),
-        "unsent": len(state.get("outbox", [])),
-    }
-    auth_details = state.get("wechatAuth")
-    if isinstance(auth_details, dict):
-        if "detectedAt" in auth_details:
-            payload["auth_detected_at"] = auth_details["detectedAt"]
-        if "unsent" in auth_details:
-            payload["auth_unsent_at_detection"] = auth_details["unsent"]
-    return payload
-
-
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("login", "start", "status", "relink"))
+    parser.add_argument("action", choices=("login", "start", "status"))
     parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
-    parser.add_argument("--replace-identity", action="store_true")
-    parser.add_argument("--stop-active", action="store_true")
+    parser.add_argument("--rebind", action="store_true", help="重新绑定微信并清空旧身份的交付状态")
     args = parser.parse_args()
-    if args.action != "relink" and (args.replace_identity or args.stop_active):
-        parser.error("--replace-identity 和 --stop-active 只能与 relink 一起使用")
+    if args.rebind and args.action != "login":
+        parser.error("--rebind 仅用于 login")
     os.umask(0o077)
-    if args.action == "relink":
-        await run_relink(
-            args.state_dir,
-            args.config,
-            replace_identity=args.replace_identity,
-            stop_active=args.stop_active,
-        )
-        return
     store = await startup_store(args)
     if args.action == "login":
-        result = await login(store)
-        state = store.load("bridge", {})
-        if wechat_auth.mark_valid(state, result.account):
-            store.save("bridge", state)
+        if args.rebind:
+            await login(store, rebind=True)
+        else:
+            await login(store)
     elif args.action == "status":
-        print(json.dumps(status_payload(store), ensure_ascii=False, indent=2))
+        state = store.load("bridge", {})
+        print(json.dumps({"bound": bool(store.load("account")) and not store.load("account", {}).get("bindingPending", False), "thread": state.get("thread"),
+                          "backend": state.get("backendName", "codex"),
+                          "unfinished_at_last_save": bool(state.get("currentInput") or state.get("running", False)),
+                          "queued": len(state.get("inbox", [])),
+                          "unsent": len(state.get("outbox", []))}, ensure_ascii=False, indent=2))
     else:
         account = await startup_account(store)
         try:

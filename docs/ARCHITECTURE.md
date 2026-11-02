@@ -2,7 +2,10 @@
 
 ## 职责
 
-- `codex_transport.py`：启动器、共享 daemon 接入、WebSocket/stdio、RPC 配对与连接关闭。
+- `codex_transport.py`：WebSocket/stdio 连接、RPC 配对与连接关闭；共享连接退出不停止后台。
+- `backend_runtime.py`：集中处理原生 daemon 和外部共享后台的启动准备；不处理会话、轮次和 RPC。
+- `subprocess_io.py`：文字、附件和测速共用的 curl I/O、超时、取消与管道回收。
+- `binding.py`：显式身份替换及部分写入隔离，不实现扫码协议。
 - `backend.py`：会话、原生事件、轮次与审批；通过 transport 访问 Codex。恢复已有会话与普通 turn/start 不重放缓存的 model/effort/cwd，只有显式设置命令传覆盖；设置事件更新显示缓存。Codex 保存的设置和轮次状态是权威；限额属于账户缓存，模型目录属于连接缓存，不随切换会话丢失。
 - `codex_wechat.py`：组合根、微信接收、控制调度与共享运行上下文。
 - `input_delivery.py`：输入准备/提交状态转换、恢复、steer 和 queue 协调。
@@ -12,9 +15,7 @@
 - `prompts.py`、`errors.py`、`configuration.py`：展示、错误分类、配置默认值/迁移；不重复模型或权限清单。
 - `questions.py`：原生问题文字展示和选项转换。backend.pending 保存请求及来源、逐题答案；/answer 走 urgent 通道，不进入模型输入队列。每题独立短编号，resolved/切换/断线清理；最终响应写入结果未知时不重试。原生问题与审批互不使用对方的响应格式。
 - `slicing.py`：纯文本切片及预览。`media.py` 先剥离附件标记并校验快照，正文才进入切片。
-- `wechat.py`、`wechat_auth.py`、`storage.py`：微信协议、凭据失效状态、同身份刷新与异身份隔离、私有原子 JSON。
-- `relink.py`、`service_adapter.py`：交互式重新绑定的共享编排及 Linux/Windows 服务状态、停止和启动边界；二维码、身份判断和数据迁移不按平台复制。
-- `profiles.py`、`service_control.py`：后端选择和运行中桥接的 `/restart` 所有权控制。
+- `wechat.py`、`storage.py`、`profiles.py`、`service_control.py`：微信协议、私有原子 JSON、后端选择、用户服务重启。
 - `platform_support.py`：平台路径、原生可执行文件发现、curl 名称和无窗口子进程选项；Linux 路径与默认行为不变。Windows 数据与代码分离，文件锁用 msvcrt、持久化写 UTF-8，不以 chmod 冒充 Windows ACL。
 - `pipe_websocket.py`：显式 Windows 共享模式的管道适配，复用 websockets Sans-I/O 的握手、掩码、帧校验和控制帧；不开放 TCP 监听、不依赖 asyncio Unix socket。Windows 默认 stdio；共享模式的 CLI 客户端行为待实机确认。
 
@@ -64,14 +65,6 @@ Windows 使用当前交互用户的计划任务和 `windows_service.py` supervis
 
 监督器用 Local mutex 防重复实例，以短期 token 和父子 PID 确认重启归属。桥接加入 KILL_ON_JOB_CLOSE + SILENT_BREAKAWAY_OK 的 Job Object：停止监督器可清理桥接，同时其后代可脱离该 Job，避免将共享 Codex daemon 一并结束；后代退出仍依赖桥接与原生 CLI 的生命周期，实际进程树行为待 Windows 验证。此机制不保证清理任意外部工具进程。
 
-## 微信认证恢复
-
-`wechat.py` 将 `getUpdates` / `sendMessage` 返回的 `-14` 转为专用 `WeChatAuthExpired`。运行中的桥接在保存 `wechatAuth.state=reauth_required` 后暂停轮询与发件箱发送；已排队输入、输出和当前任务不因认证失效被删除。认证错误不增加普通发送重试次数。检测状态的保存先于桌面通知，重复失败不再覆盖首次时间或重复通知。
-
-客户端 `status` 从持久状态给出 `auth`、`available`、`relink_required` 和恢复命令，不把“account.json 仍存在”误写成“token 仍有效”。恢复只从交互终端的 `relink` 进入；共享流程检查未完成工作、管理安装服务、等待状态锁、扫码并刷新认证状态。平台适配器只提供 `status`、`stop_and_wait`、`start` 和尽力通知，不解释二维码或迁移聊天数据。
-
-同一 bot/user 身份刷新 token 时保留 cursor、seen、context、inbox、outbox、inputRecords 和当前任务。身份变化默认拒绝；显式授权后旧输出进入 failedOutbox 并标记 `identity_changed`，旧输入进入 inputRecords，随后清空旧 cursor、seen、context、会话选择及微信覆盖。迁移发生在保存新 account 之前；新聊天不会继承旧消息游标、旧任务结果或旧聊天待办。登录失败时尽力恢复原本运行的服务，原本未运行则不自动启动。
-
 ## 安装与更新
 
 installer.py 维护菜单、依赖检查、安装/更新、演练及组件安装，两个平台的网络入口和本地脚本只负责启动它。正式交互流程为安装/更新、附加组件、退出；显式 --non-interactive 执行保守默认，不启动服务或安装额外组件。
@@ -114,4 +107,12 @@ Linux 前台进程首次开启自启时，默认路径、空闲和无审批是�
 
 故障注入只替换本地模拟方法。新增针对性用例可在 tests 中编写；不以“测试需要”为由接入当前用户会话或向微信发消息。测试报告区分静态检查、离线覆盖和未验证的在线路径。
 
-首次绑定属于运行层：安装器不执行微信 login；交互终端的 start 若没有 account，持有原状态锁完成扫码并继续启动同一桥接进程。已绑定时直接运行；网络重连不重新扫码，账号会话失效使用独立 `relink`。非交互后台或重定向输入输出时不调用 login，而是返回配置错误，避免不可见的二维码和后台等待。终端二维码优先调用可用的 `qrencode`，失败或缺失时回退到 Python `qrcode`；两者都不可用时仍打印扫码链接。
+首次绑定属于运行层：安装器不执行微信 login；交互终端的 start 若没有 account，持有原状态锁完成扫码并继续启动同一桥接进程。已绑定时直接运行；网络重连不重新扫码。非交互后台或重定向输入输出时不调用 login，而是返回配置错误，避免不可见的二维码和后台等待。
+
+## 本轮补充契约
+
+- runtime-capabilities.json 声明可交付的连接能力。更新前核对运行配置所需能力，构建阶段额外导入主模块，均在版本切换前完成；实验脚本快照不进入程序载荷。
+- 重新绑定先在 account 中写入 bindingPending 标记，再重置交付状态，最后提交新账户。中断时 startup_account 拒绝启动；同身份普通续登只更新凭据，不清队列。
+- Runtime preparation 与连接职责分开，保留原有快连、expectedTurnId、uncertain 和来源过滤规则。
+- Windows 本机共享后台只有一份身份、就绪和启动实现；App 与微信入口复用。后台升级不由任一客户端关闭连接触发。
+- 新增离线用例尚未执行，静态语法检查不是功能验收。

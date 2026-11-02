@@ -1,5 +1,6 @@
 """Channel samples and on-demand connection timing; no model calls."""
 import asyncio
+from subprocess_io import communicate
 from collections import deque
 import json
 import os
@@ -50,19 +51,7 @@ async def connection_probe(endpoint, env):
         "--write-out", "%{json}", "--config", "-", env=env,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
-    try:
-        output, _ = await asyncio.wait_for(proc.communicate(config), 8)
-    finally:
-        if proc.returncode is None:
-            try:
-                proc.terminate()
-            except ProcessLookupError:
-                pass
-            try:
-                await asyncio.wait_for(proc.wait(), 1)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+    output, _ = await communicate(proc, config, timeout=8, grace=1)
     data = json.loads(output)
     elapsed = data.get("time_appconnect" if url.scheme == "https" else "time_connect", 0)
     # curl can time out waiting for HEAD even after successful setup. Keep the

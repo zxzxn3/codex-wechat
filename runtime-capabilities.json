@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "transports": [
+    "stdio",
+    "native-daemon",
+    "loopback-websocket"
+  ],
+  "desktopSharedIntegration": "experimental"
+}

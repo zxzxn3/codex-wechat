@@ -18,6 +18,7 @@ class InstallerTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
+        self.enterContext(patch.dict(os.environ, {"LOCALAPPDATA": str(self.base / "local"), "CODEX_WECHAT_DATA_ROOT": str(self.base / "data")}))
         self.source = self.base / "source"
         self.target = self.base / "target"
         self.make_project(self.source)

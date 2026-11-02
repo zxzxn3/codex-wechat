@@ -1,6 +1,6 @@
 # codex-wechat
 
-微信私聊连接本机 Codex CLI，支持普通 Codex、codex-deepseek、已有会话、工作中追加消息及图片/文件收发。Linux / Windows 共用安装与桥接逻辑；桌面 App 适配不在此分支。
+微信私聊连接本机 Codex CLI，支持普通 Codex、codex-deepseek、已有会话、工作中追加消息及图片/文件收发。Linux / Windows 共用安装与桥接逻辑。本副本额外包含 Windows 共享后台实验，接入范围与限制见 [WINDOWS-SHARED.md](WINDOWS-SHARED.md)。
 
 ## 安装 / 更新
 
@@ -67,27 +67,6 @@ systemctl --user restart codex-wechat
 
 Windows 的入口与服务命令见 [Windows 指南](docs/WINDOWS.md)。
 
-### 微信绑定失效
-
-腾讯接口以 `-14` 表示当前账号会话失效。桥接不会退出或进入异常重启循环，而是保存失效状态、停止继续轮询和发送，并保留游标、待办、发件箱及任务状态。处理提示只记录一次；`codex-wechat status` 会显示：
-
-```text
-"auth": "reauth_required"
-"available": false
-"relink_required": true
-"relink_command": "codex-wechat relink"
-```
-
-在电脑的交互终端运行：
-
-```bash
-codex-wechat relink
-```
-
-命令会按需停止原本运行的服务，等待状态锁释放后显示二维码。扫码得到同一身份时只刷新 token，原游标、待办和发件箱全部保留，成功后自动恢复原本运行的服务。当前存在未完成任务时默认拒绝；确认允许停止桥接后使用 `--stop-active`。它停止的是微信网关，不保证中断共享 Codex daemon 中已经提交的轮次。扫码得到另一个身份时默认拒绝；明确要更换机器人及聊天时必须使用 `--replace-identity`，旧聊天输入和未发送输出会移入隔离记录，游标、去重与会话选择清空，新聊天绝不会继承旧待办或旧任务结果。
-
-`relink` 只接受默认状态与配置路径以及交互终端；自定义路径或前台手动管理的进程需自行运行 `login` 并管理服务。
-
 ### 安装边界
 
 Python 包声明在 requirements.txt，平台依赖检查集中在 installer.py 的 DEPENDENCIES；缺失的运行依赖提示后可稍后补齐，程序环境构建失败则停止安装。构建使用独立版本目录；稳定入口及当前版本在准备完成后集中更新，不提供 rollback 命令或失败后的自动回滚。失败发生在版本切换后时，如实报错并保留当时状态，不谎称回到旧版。
@@ -109,9 +88,9 @@ python3 installer.py components --component wechat-attachments
 
 ## 支持的后端
 
-本分支只支持普通 Codex CLI 和 codex-deepseek，不提供 Codex 桌面 App 适配。需安装可执行 `app-server` 的原生 CLI，并完成对应启动器的登录；不会发现或调用 App 内置后端，也不支持接管 App 正在使用的会话。
+通用模式支持普通 Codex CLI 和 codex-deepseek，使用原生认证。实验模式允许桌面和微信连接同一个本机 WebSocket 后台；App 的默认私有 stdio 后台不能直接被微信接入。实验的连接成功不代表桌面工具、审批和配置覆盖已完整验收。
 
-App Server 是 CLI 提供的原生协议名称，不表示本分支支持桌面 App。两平台都允许先安装本项目，之后再补齐 CLI 和登录；不会自动安装 Codex 或复制其他用户的凭据。
+App Server 是原生协议名称；本副本对桌面共享连接的实验支持范围见 WINDOWS-SHARED.md。两平台都允许先安装本项目，之后再补齐运行条件；不会自动安装 Codex 或复制其他用户的凭据。
 
 ## 登录自启与异常恢复
 
@@ -235,7 +214,7 @@ Provider 从已连接后端的原生 `config/read` 取得当前供应商地址�
 
 ## 状态、安全与验证
 
-`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/`、`releases/`、版本指针和各版本 `.venv/` 都不入库。媒体目前不会自动清理。`./codex-wechat status` 只读取最后保存的摘要和微信认证状态，不是完整健康检查。
+`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/`、`releases/`、版本指针和各版本 `.venv/` 都不入库。媒体目前不会自动清理。`./codex-wechat status` 只读取最后保存的摘要，不是健康检查。
 
 保留 Codex 原生沙箱和审批，不自动提高权限。控制消息保存游标后进入内存队列，崩溃时可能丢失，**不会自动重放控制命令**。微信发送接口响应丢失仍可能导致重试重复送达，不承诺恰好一次。
 
@@ -250,3 +229,11 @@ Provider 从已连接后端的原生 `config/read` 取得当前供应商地址�
 `/restart` 允许保留待办及正在准备但尚未提交的输入，后台连接恢复也不挡重启；已提交/提交不确定、steering、活动模型轮次和会话设置操作仍须先处理或停止。重启确认发出前关闭提交入口，启动失败则重新开放，未提交消息不丢弃。
 
 DeepSeek 本地 proxy 不再读取密钥；真正启动后台仍需解锁桌面密钥环。不可用时显示明确原因，每 60 秒重试。同一启动配置使用稳定的 systemd transient unit，复用进行中的启动；不会修改密钥保存方式或绕过解锁。
+
+### 本轮设计收口
+
+后台启动准备集中在 backend_runtime.py，JSON-RPC 传输仍由 codex_transport.py 处理。已启动的共享后台不归客户端连接关闭管理。更新通过 runtime-capabilities.json 核对现有共享配置所需能力；不支持时在构建和切换前拒绝，--dry-run 只提示。
+
+本机重新绑定使用 `codex-wechat login --rebind`；Windows PowerShell 入口使用 `login -Rebind`。此操作保留 Agent 会话选择和提示设置，清空旧微信身份的交付状态；部分提交会阻止启动，需重新执行绑定。
+
+/ping 的供应商段是桥接进程发起的独立连接探测，不是后台真实模型请求的 RTT，也不包含模型生成时间。共享后台的代理环境可能与桥接不同。

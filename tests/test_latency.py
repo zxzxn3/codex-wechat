@@ -10,7 +10,7 @@ from latency import connection_probe, provider_latency
 
 class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
     async def test_tls_measurement_excludes_response_wait(self):
-        process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(
+        process = SimpleNamespace(stdin=None, returncode=0, communicate=AsyncMock(return_value=(
             json.dumps({"time_appconnect": .185, "time_starttransfer": 2,
                         "time_total": 3}).encode(), None)))
         with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as spawn:
@@ -22,13 +22,13 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--head", spawn.call_args.args)
 
     async def test_completed_handshake_survives_http_timeout(self):
-        process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
+        process = SimpleNamespace(stdin=None, returncode=28, communicate=AsyncMock(return_value=(
             b'{"time_appconnect":0.2}', None)))
         with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
             self.assertEqual(await connection_probe("https://api.example", {}), "200ms")
 
     async def test_connection_timeout_is_not_reported_as_zero(self):
-        process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
+        process = SimpleNamespace(stdin=None, returncode=28, communicate=AsyncMock(return_value=(
             b'{"time_appconnect":0}', None)))
         with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
             self.assertEqual(await connection_probe("https://api.example", {}), "timeout")
@@ -41,13 +41,18 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancellation_reaps_probe(self):
         entered = asyncio.Event()
+        exited = asyncio.Event()
 
         async def communicate(_):
             entered.set()
-            await asyncio.Event().wait()
+            await exited.wait()
+            return b"", None
 
-        process = SimpleNamespace(returncode=None, communicate=communicate, wait=AsyncMock())
-        process.terminate = lambda: setattr(process, "returncode", -15)
+        process = SimpleNamespace(stdin=None, returncode=None, communicate=communicate, wait=AsyncMock())
+        def terminate():
+            process.returncode = -15
+            exited.set()
+        process.terminate = terminate
         with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
             task = asyncio.create_task(connection_probe("https://api.example", {}))
             await entered.wait()
