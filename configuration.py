@@ -20,7 +20,7 @@ class ConfigurationError(ValueError):
 @dataclass(frozen=True)
 class Notifications:
     compaction: bool = False
-    quota_thresholds: tuple[int, ...] = (50, 25, 5, 1)
+    quota_thresholds: tuple[int, ...] = (50, 25, 10, 5, 1)
 
     @classmethod
     def from_config(cls, config):
