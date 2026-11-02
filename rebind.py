@@ -71,6 +71,17 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
     was_running = service.running
     store = None
     counts = {}
+    # The scan can take minutes while the bridge keeps working. Re-read the
+    # live state before stopping the service so work started during the scan
+    # still needs the explicit --stop-active acknowledgement.
+    latest = preview.load("bridge", {})
+    if not isinstance(latest, dict):
+        raise RuntimeError("消息桥状态格式无效")
+    if active_work(latest) and not stop_active:
+        raise RuntimeError(
+            "当前有尚未完成的任务；确认停止桥接后使用 "
+            + wechat_auth.rebind_command(stop_active=True)
+        )
     try:
         if was_running:
             await adapter.stop_and_wait()
@@ -78,6 +89,11 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
         state = store.load("bridge", {})
         if not isinstance(state, dict):
             raise RuntimeError("消息桥状态格式无效")
+        if active_work(state) and not stop_active:
+            raise RuntimeError(
+                "当前有尚未完成的任务；确认停止桥接后使用 "
+                + wechat_auth.rebind_command(stop_active=True)
+            )
         if store.load("account") != previous:
             raise RuntimeError("扫码期间本地绑定已变化，请重新运行 rebind。")
         if result.identity_changed:
