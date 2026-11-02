@@ -62,7 +62,7 @@ class ConfigLoaderExtraTests(unittest.TestCase):
             self.assertNotIn("completionNotice", config)
             self.assertNotIn("processingNotice", state)
             self.assertNotIn("completionNotice", state)
-            self.assertEqual(processing_template(config, state), "`IN: {输入Token}`")
+            self.assertEqual(processing_template(config, state), "`IN < {输入Token}`")
             self.assertEqual(completion_template(config, state), DEFAULT_COMPLETION_TEMPLATE)
 
             state["processingNotice"] = "new chat override"

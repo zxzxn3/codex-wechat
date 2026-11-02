@@ -90,7 +90,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await self.bridge.deliver_answer("answer", notify_completion=True)
         texts = [entry.get("text") for entry in self.store.load("bridge")["outbox"]]
         self.assertEqual(texts[0], "answer")
-        self.assertTrue(texts[1].startswith("`OUT: "))
+        self.assertTrue(texts[1].startswith("`OUT > "))
 
     async def test_output_hint_is_concise_origin_marker(self):
         self.assertEqual(OUTPUT_HINT, "\n\n[User from WeChat.]")
@@ -138,7 +138,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         values = stats.values(120)
         self.assertEqual(values, {"发送延迟": "120", "接收延迟": "50"})
         self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, {"输入Token": "12.3K"}),
-                         "`IN: 12.3K`")
+                         "`IN < 12.3K`")
         self.assertEqual(render_ack(PING_REPLY, values), "WeChat ─120/50ms")
         self.assertEqual(stats.values(), {"发送延迟": "-", "接收延迟": "50"})
 
@@ -159,6 +159,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for legacy in ("{latency}", "::{发送延迟}/{接收延迟}ms::"):
             config = {"processingNotice": {"enabled": False, "text": legacy}}
             self.assertEqual(processing_template(config, {}), DEFAULT_ACK_TEMPLATE)
+        self.assertEqual(processing_template({"processingNotice": "`IN: {输入Token}`"}, {}),
+                         DEFAULT_ACK_TEMPLATE)
+        self.assertEqual(completion_template({}, {"completionNotice": "`OUT: {输出Token}`"}),
+                         DEFAULT_COMPLETION_TEMPLATE)
         self.assertEqual(processing_template({}, {"processingNotice": ""}), "")
 
     async def test_user_prompt_formats(self):
@@ -174,8 +178,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE,
                                           completion_notice=DEFAULT_COMPLETION_TEMPLATE,
                                           attachment_mib=20),
-                         "```\n接收提示: `IN: {输入Token}`\n"
-                         "结束提示: `OUT: {输出Token}`\n附件上限: 20 MiB\n```")
+                         "```\n接收提示: `IN < {输入Token}`\n"
+                         "结束提示: `OUT > {输出Token}`\n附件上限: 20 MiB\n```")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",

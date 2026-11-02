@@ -7,8 +7,10 @@ import sys
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
                    "compactionNotice", "quotaWarningThresholds")
-DEFAULT_COMPLETION_TEMPLATE = "`OUT: {输出Token}`"
-DEFAULT_ACK_TEMPLATE = "`IN: {输入Token}`"
+DEFAULT_COMPLETION_TEMPLATE = "`OUT > {输出Token}`"
+DEFAULT_ACK_TEMPLATE = "`IN < {输入Token}`"
+LEGACY_COMPLETION_TEMPLATE = "`OUT: {输出Token}`"
+LEGACY_ACK_TEMPLATES = ("{latency}", "::{发送延迟}/{接收延迟}ms::", "`IN: {输入Token}`")
 TEXT_LIMIT_BYTES = 3000
 
 
@@ -76,16 +78,18 @@ def processing_template(config, state):
             text = source
         elif isinstance(source, dict) and source.get("text") is not None:
             text = source["text"]
-    if text in ("{latency}", "::{发送延迟}/{接收延迟}ms::"):
+    if text in LEGACY_ACK_TEMPLATES:
         return DEFAULT_ACK_TEMPLATE
     return str(text)
 
 
 def completion_template(config, state):
+    text = DEFAULT_COMPLETION_TEMPLATE
     for source in (state.get("completionNotice"), config.get("completionNotice")):
         if isinstance(source, str):
-            return source
-    return DEFAULT_COMPLETION_TEMPLATE
+            text = source
+            break
+    return DEFAULT_COMPLETION_TEMPLATE if text == LEGACY_COMPLETION_TEMPLATE else text
 
 
 class ConfigLoader:

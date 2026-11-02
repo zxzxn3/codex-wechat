@@ -1,6 +1,6 @@
 {
   "sourceHint": "[User from WeChat.]",
-  "processingNotice": "{发送延迟}/{接收延迟}ms",
+  "processingNotice": "`IN < {输入Token}`",
   "backends": {
     "codex": {
       "env": {},
