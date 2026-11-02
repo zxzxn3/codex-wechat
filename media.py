@@ -1,5 +1,6 @@
 """iLink image/file CDN transport. Cipher format is prescribed by Tencent."""
 import asyncio
+from subprocess_io import communicate
 import base64
 import hashlib
 import json
@@ -156,18 +157,10 @@ class Media:
             except FileNotFoundError:
                 raise MediaError("附件传输需要 curl。") from None
             try:
-                output, _ = await asyncio.wait_for(process.communicate(
-                    ("url = " + json.dumps(url, ensure_ascii=False) + "\n").encode()), 65)
+                output, _ = await communicate(process,
+                    ("url = " + json.dumps(url, ensure_ascii=False) + "\n").encode(), timeout=65)
             except asyncio.TimeoutError:
-                if process.returncode is None:
-                    process.kill()
-                await process.wait()
                 raise MediaError("附件传输达到总超时限制。") from None
-            except BaseException:
-                if process.returncode is None:
-                    process.kill()
-                await process.wait()
-                raise
             if process.returncode:
                 if process.returncode == 63:
                     raise MediaError("附件超过本地大小限制。")

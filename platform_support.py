@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from native_codex import discover_codex
 
 IS_WINDOWS = os.name == "nt"
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -34,18 +35,19 @@ def resolve_command(command, env):
             or not all(isinstance(value, str) and value for value in command)):
         raise ValueError("后端 command 必须是非空字符串数组")
     if not IS_WINDOWS:
+        if command[0] == "codex" and not shutil.which("codex", path=env.get("PATH")):
+            native = discover_codex(env, windows=False)
+            if native:
+                return [native, *command[1:]]
         return list(command)
     name = command[0]
     executable = shutil.which(name, path=env.get("PATH"))
     # Official standalone installer adds this path for new terminals; the
     # scheduled task may have inherited PATH from before that installation.
     if name.casefold() in ("codex", "codex.exe"):
-        native = shutil.which("codex.exe", path=env.get("PATH"))
-        local = env.get("LOCALAPPDATA")
-        installed = (Path(local) / "Programs/OpenAI/Codex/bin/codex.exe") if local else None
-        executable = native or (str(installed) if installed and installed.is_file() else executable)
+        executable = discover_codex(env, windows=True) or executable
     if not executable:
-        raise RuntimeError("找不到 Codex 启动器，请安装原生 Codex CLI 或配置 command 的绝对路径")
+        raise RuntimeError("找不到 Codex 启动器，请安装 Codex CLI / App，或配置原生 command 的绝对路径")
     if Path(executable).suffix.casefold() in (".cmd", ".bat", ".ps1"):
         raise ValueError("Windows 后端请使用原生 codex.exe，或在 command 中显式指定解释器与脚本参数；不自动执行批处理")
     return [executable, *command[1:]]

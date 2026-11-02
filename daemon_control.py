@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from errors import BackendStartupError
+from subprocess_io import communicate
 
 
 def unit_name(command, cwd, env):
@@ -19,13 +20,8 @@ async def systemctl(*args):
     proc = await asyncio.create_subprocess_exec(
         "systemctl", "--user", *args, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL)
-    try:
-        output, _ = await asyncio.wait_for(proc.communicate(), 4)
-        return proc.returncode, output.decode(errors="replace")
-    finally:
-        if proc.returncode is None:
-            proc.kill()
-            await proc.wait()
+    output, _ = await communicate(proc, timeout=4)
+    return proc.returncode, output.decode(errors="replace")
 
 
 async def status(unit):

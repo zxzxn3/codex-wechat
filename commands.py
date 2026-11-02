@@ -7,6 +7,7 @@ import autostart
 
 from profiles import backend_argument, backend_label, switch
 from errors import UserFacingError, attachment_reason, backend_reason
+from codex_transport import CodexRpcError
 from media import MediaError
 from records import InputPhase
 from latency import provider_latency
@@ -534,5 +535,5 @@ async def dispatch(bridge, text, *, received=None):
         bridge.reply(str(error))
     except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
         label = COMMAND_FAILURE_LABELS.get(spec.name if spec else command, "操作失败")
-        bridge.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": backend_reason(error)}))
-        print(f"{command}失败：{type(error).__name__}", file=sys.stderr, flush=True)
+        bridge.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": str(error) if isinstance(error, CodexRpcError) else backend_reason(error)}))
+        print(f"{command}失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)

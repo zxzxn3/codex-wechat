@@ -1,0 +1,56 @@
+"""Native executable discovery; no model calls, credentials or user history."""
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+
+def discover_app_codex(env=None, *, windows=None):
+    env = os.environ if env is None else env
+    windows = os.name == "nt" if windows is None else windows
+    if not windows:
+        bundled = Path("/usr/lib/chatgpt/resources/codex")
+        return str(bundled) if bundled.is_file() else None
+    if not env.get("LOCALAPPDATA"):
+        return None
+    # Query the registered App, never guess a hashed package version or choose
+    # the newest file in an arbitrary cache. This query does not launch the App.
+    script = ("[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); "
+              "$p=Get-AppxPackage OpenAI.Codex | Select-Object -First 1; "
+              "if($p){ConvertTo-Json -Compress -InputObject "
+              "(Join-Path $p.InstallLocation 'app\\resources\\codex.exe')}")
+    try:
+        result = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+                                 "-Command", script], capture_output=True, timeout=5, env=env,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        path = json.loads(result.stdout.decode("utf-8-sig")) if result.returncode == 0 else None
+        if isinstance(path, str) and Path(path).is_file() and Path(path).suffix.lower() == ".exe":
+            return path
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def discover_codex(env=None, *, windows=None):
+    env = os.environ if env is None else env
+    windows = os.name == "nt" if windows is None else windows
+    native = shutil.which("codex.exe" if windows else "codex", path=env.get("PATH"))
+    if native and (not windows or Path(native).suffix.lower() == ".exe"):
+        return native
+    local = env.get("LOCALAPPDATA")
+    standalone = Path(local) / "Programs/OpenAI/Codex/bin/codex.exe" if windows and local else None
+    if standalone and standalone.is_file():
+        return str(standalone)
+    return discover_app_codex(env, windows=windows)
+
+
+def discover_app(env=None, *, windows=None):
+    env = os.environ if env is None else env
+    windows = os.name == "nt" if windows is None else windows
+    if windows:
+        local = env.get("LOCALAPPDATA")
+        alias = Path(local) / "Microsoft/WindowsApps/chatgpt-desktop.exe" if local else None
+        return [str(alias)] if alias and alias.is_file() else None
+    app = shutil.which("chatgpt", path=env.get("PATH"))
+    return [app] if app else None

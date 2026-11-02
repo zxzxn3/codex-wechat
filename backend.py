@@ -391,7 +391,7 @@ class CodexBackend:
         cached = self.account_limits
         if self.rate_limits_checked_at and now - self.rate_limits_checked_at < max_age:
             return cached
-        if not self.proc or self.proc.returncode is not None:
+        if not self.connected:
             return cached
         self.rate_limits_checked_at = now
         try:
@@ -470,12 +470,13 @@ class CodexBackend:
         config = result.get("config", {})
         provider = self.info.get("provider") or config.get("model_provider") or "openai"
         settings = (config.get("model_providers") or {}).get(provider, {})
-        # The launcher has already applied its environment before exec. Select
-        # network variables only; never copy API keys into the probe process.
+        # This is a bridge-originated connection probe, not model-request RTT.
+        # Attached servers may have a different environment; never inspect their
+        # credentials or claim that a local HEAD reproduces their network path.
         keys = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "OPENAI_BASE_URL"}
         keys |= {key.lower() for key in keys}
         selected = {}
-        if IS_WINDOWS:
+        if IS_WINDOWS or self.transport.websocket_url:
             selected = dict(self.transport.launch_env)
         elif self.proc and self.proc.returncode is None:
             for entry in Path(f"/proc/{self.proc.pid}/environ").read_bytes().split(b"\0"):

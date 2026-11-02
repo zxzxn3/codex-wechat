@@ -4,10 +4,12 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import socket
 
 import daemon_control
+from backend_runtime import BackendRuntime
+from codex_connection import ConnectionSpec
+from subprocess_io import communicate
 from platform_support import IS_WINDOWS, resolve_command, subprocess_options
 
 SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
@@ -39,30 +41,33 @@ class CodexRpcError(RuntimeError):
 class CodexTransport:
     def __init__(self, config, cwd, *, on_request, on_event, on_connect, on_disconnect):
         self.config, self.cwd = config, cwd
+        self.runtime = BackendRuntime(config, cwd)
         self.on_request, self.on_event = on_request, on_event
         self.on_connect, self.on_disconnect = on_connect, on_disconnect
         self.proc = self.reader = self.websocket = None
         self.requests = {}
         self.serial = 0
         self.launch_env = {}
-        self.command = config.get("command", ["codex", "app-server"])
-        self.shared = config.get("sharedDaemon", not IS_WINDOWS and (
-            self.command[-1:] == ["app-server"] or self.command[-2:] == ["app-server", "proxy"]))
+        self.spec = ConnectionSpec.from_config(config)
+        self.websocket_url = self.spec.endpoint
+        self.command = list(self.spec.command)
+        self.shared = self.spec.shared
 
     async def start(self):
-        env = dict(os.environ)
-        for key in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_HOME"):
-            env.pop(key, None)
-        env.update(self.config.get("env", {}))
-        command = resolve_command(self.command, env)
+        env = self.spec.environment(self.config)
+        command = self.command if self.websocket_url else self.spec.resolve(env)
         # Only network settings are retained for probes, never launcher credentials.
         network = {"http_proxy", "https_proxy", "all_proxy", "no_proxy", "openai_base_url"}
         self.launch_env = {k: v for k, v in env.items() if k.lower() in network}
+        if self.websocket_url:
+            await self.runtime.ensure_external(env)
+            try:
+                await asyncio.wait_for(self.connect(command, env), 15)
+            except BaseException:
+                await self.close()
+                raise
+            return
         if self.shared:
-            if command[-1:] == ["app-server"]:
-                command.append("proxy")
-            elif command[-2:] != ["app-server", "proxy"]:
-                raise ValueError("sharedDaemon 模式的 command 须以 app-server 结尾")
             try:
                 await asyncio.wait_for(self.connect(command, env), 5)
                 return
@@ -92,77 +97,22 @@ class CodexTransport:
         await self.connect(command, env)
 
     async def start_shared_daemon(self, command, env):
-        if IS_WINDOWS:
-            # Native CLI owns daemon discovery and startup. No systemd, shell,
-            # network listener, or bridge-owned daemon termination on Windows.
-            proc = await asyncio.create_subprocess_exec(
-                *command, "daemon", "start", cwd=self.cwd, env=env,
-                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
-            try:
-                code = await asyncio.wait_for(proc.wait(), 15)
-            finally:
-                if proc.returncode is None:
-                    proc.kill()
-                    await proc.wait()
-            if code:
-                raise RuntimeError("原生 Codex 共享后台启动失败；可配置 sharedDaemon=false 使用独立后端")
-            return None
-        # Let systemd own the daemon's cgroup, independently of the gateway.
-        # Native `daemon start` reuses a running daemon; it never requests a restart.
-        executable = shutil.which(command[0], path=env.get("PATH"))
-        if not executable:
-            raise RuntimeError("找不到 Codex 启动器，无法自动启动共享后台")
-        command = [executable, *command[1:]]
-        unit = daemon_control.unit_name(command, self.cwd, env)
-        state = await daemon_control.status(unit)
-        if state.get("ActiveState") in ("active", "activating", "reloading"):
-            return unit  # Reuse the existing startup; never stack keyring prompts.
-        if state.get("ActiveState") == "failed":
-            code, _ = await daemon_control.systemctl("reset-failed", unit)
-            if code:
-                raise RuntimeError("无法清理消息桥后台启动失败状态")
-        managed = {"INVOCATION_ID", "JOURNAL_STREAM", "NOTIFY_SOCKET", "MAINPID",
-                   "MANAGERPID", "SYSTEMD_EXEC_PID", "WATCHDOG_PID", "WATCHDOG_USEC"}
-        args = ["systemd-run", "--user", "--quiet", "--no-ask-password",
-                "--service-type=exec", "--property=ExitType=cgroup", "--property=UMask=0077",
-                "--expand-environment=no", "--unit=" + unit,
-                "--working-directory=" + self.cwd]
-        # Copy values from the caller's environment, never put secret values in argv.
-        args.extend("--setenv=" + key for key in env
-                    if key not in managed and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key))
-        absent = [key for key in ("CODEX_HOME", "CODEX_THREAD_ID", "CODEX_SESSION_ID")
-                  if key not in env]
-        if absent:
-            args.append("--property=UnsetEnvironment=" + " ".join(absent))
-        proc = await asyncio.create_subprocess_exec(
-            *args, "--", *command, "daemon", "start", env=env,
-            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL)
-        try:
-            code = await asyncio.wait_for(proc.wait(), 10)
-        finally:
-            if proc.returncode is None:
-                proc.kill()
-                await proc.wait()
-        if code:
-            # Another client may have started the same native launcher concurrently.
-            state = await daemon_control.status(unit)
-            if state.get("ActiveState") not in ("active", "activating", "reloading"):
-                failure = daemon_control.failure(state, command)
-                if failure:
-                    raise failure
-                raise RuntimeError("无法自动启动共享后台，请检查用户 systemd 和 systemd-run；微信控制仍可用")
-        return unit
+        return await self.runtime.ensure_native(command, env, is_windows=IS_WINDOWS)
 
     @property
     def connected(self):
-        return bool(self.reader and not self.reader.done() and self.proc
-                    and self.proc.returncode is None)
+        return bool(self.reader and not self.reader.done() and (
+            self.websocket is not None if self.websocket_url else
+            self.proc and self.proc.returncode is None))
 
     async def connect(self, command, env):
         self.on_connect()
-        if self.shared and IS_WINDOWS:
+        if self.websocket_url:
+            from websockets.asyncio.client import connect
+            self.websocket = await connect(
+                self.websocket_url, proxy=None, open_timeout=5, close_timeout=1,
+                compression=None, max_size=16 * 1024 * 1024)
+        elif self.shared and IS_WINDOWS:
             from pipe_websocket import PipeWebSocket
             self.proc = await asyncio.create_subprocess_exec(
                 *command, cwd=self.cwd, env=env, stdin=asyncio.subprocess.PIPE,
@@ -213,7 +163,7 @@ class CodexTransport:
         await self.rpc("skills/extraRoots/set", {"extraRoots": [str(SKILLS_ROOT)]})
 
     async def write(self, message):
-        if not self.proc or self.proc.returncode is not None:
+        if self.websocket is None and (not self.proc or self.proc.returncode is not None):
             raise RuntimeError("Codex 后端已退出，请重启消息桥")
         payload = json.dumps(message)
         if self.websocket is not None:
@@ -276,15 +226,20 @@ class CodexTransport:
             self.on_disconnect(error)
 
     async def close(self):
-        if self.websocket is not None:
-            await self.websocket.close()
-            self.websocket = None
-        if self.proc and self.proc.returncode is None:
-            self.proc.terminate()
-            try:
-                await asyncio.wait_for(self.proc.wait(), 8)
-            except asyncio.TimeoutError:
-                self.proc.kill()
-                await self.proc.wait()
-        if self.reader:
-            await self.reader
+        reader, self.reader = self.reader, None
+        if reader and reader is not asyncio.current_task():
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
+        websocket, self.websocket = self.websocket, None
+        proc, self.proc = self.proc, None
+        try:
+            if websocket is not None:
+                await websocket.close()
+        finally:
+            if proc is not None:
+                if proc.returncode is None:
+                    try:
+                        proc.terminate()
+                    except ProcessLookupError:
+                        pass
+                await communicate(proc, timeout=8)

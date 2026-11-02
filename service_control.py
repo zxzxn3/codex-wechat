@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import signal
+from subprocess_io import communicate
 from pathlib import Path
 
 UNIT = "codex-wechat.service"
@@ -16,13 +17,7 @@ async def systemctl(*args):
     process = await asyncio.create_subprocess_exec(
         "systemctl", "--user", *args,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-    try:
-        output, _ = await asyncio.wait_for(process.communicate(), 5)
-    except BaseException:
-        if process.returncode is None:
-            process.kill()
-        await process.wait()
-        raise
+    output, _ = await communicate(process, timeout=5)
     if process.returncode:
         raise RuntimeError("无法控制 systemd 用户服务，请在电脑端查看服务状态。")
     return output.decode().strip()
