@@ -12,6 +12,7 @@ from media import Media, split_answer
 from storage import Store
 from wechat import SEND_TIMEOUT, TYPING_TIMEOUT, WeChat
 from wechat_content import remember_quote
+from errors import WeChatAuthExpired
 
 
 class FakeChannel:
@@ -105,6 +106,37 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         await bridge.typing.stop()
         self.assertEqual(channel.statuses,
                          [("owner", "ticket", 1), ("owner", "ticket", 2)])
+
+    async def test_typing_auth_failure_pauses_instead_of_starting_model_work(self):
+        channel = FakeChannel()
+        channel.typing_ticket = AsyncMock(side_effect=WeChatAuthExpired())
+        bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
+        bridge.state.update(context="context", thread="thread")
+        bridge.state["inbox"].append({"id": "job", "text": "work", "phase": "preparing"})
+        bridge.ensure_backend = AsyncMock()
+        bridge.backend.run = AsyncMock()
+        paused = asyncio.Event()
+        async def pause():
+            bridge.wechat_paused = True
+            paused.set()
+        bridge.require_wechat_rebind = AsyncMock(side_effect=pause)
+        self.tasks.append(asyncio.create_task(bridge.worker()))
+        await asyncio.wait_for(paused.wait(), 1)
+        await asyncio.sleep(0)
+        bridge.backend.run.assert_not_awaited()
+        bridge.ensure_backend.assert_not_awaited()
+        self.assertEqual(bridge.state["inbox"][0]["id"], "job")
+
+    async def test_keepalive_auth_failure_uses_the_same_pause(self):
+        channel = FakeChannel()
+        channel.set_typing = AsyncMock(side_effect=WeChatAuthExpired())
+        bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
+        bridge.require_wechat_rebind = AsyncMock()
+        bridge.typing.user, bridge.typing.context = "owner", "context"
+        with patch("typing_indicator.KEEPALIVE_SECONDS", 0):
+            await asyncio.wait_for(bridge.typing._keepalive(), 1)
+        bridge.require_wechat_rebind.assert_awaited_once()
+        self.assertEqual(bridge.typing.ticket, "")
 
     async def test_typing_api_contract(self):
         client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})

@@ -40,9 +40,10 @@ class OutputDelivery:
                  **({"requestId": request_id} if request_id else {})}
                 for chunk in split_text(text, bridge.slicing, semantic=semantic)]
 
-    def enqueue(self, entries, *, persist=True, request_id=None):
+    def enqueue(self, entries, *, persist=True, request_id=None, request_ids=()):
         bridge = self.bridge
-        request_id = request_id or current_request_id()
+        related = tuple(dict.fromkeys(request_ids))
+        request_id = request_id or (related[0] if related else current_request_id())
         if request_id:
             for entry in entries:
                 entry.setdefault("requestId", request_id)
@@ -54,6 +55,10 @@ class OutputDelivery:
                       parts=len(entries), queued=len(bridge.state["outbox"]),
                       role=entries[0].get("role", "body"), job_id=entries[0].get("group"),
                       request_id=entries[0].get("requestId"))
+            for identity in related:
+                if identity != entries[0].get("requestId"):
+                    log_event("output.related", component="output",
+                              job_id=entries[0].get("group"), request_id=identity)
         if entries:
             bridge.outbox_drained.clear()
         if persist:
@@ -85,7 +90,8 @@ class OutputDelivery:
         text, _ = split_answer(message.text)  # Attachments are processed only in the final answer.
         if text.strip():
             bridge.enqueue(bridge.text_entries(text, group=str(uuid.uuid4()), context=context,
-                                               semantic=True, source=message.source))
+                                               semantic=True, source=message.source),
+                           request_ids=message.request_ids)
 
     def asset_entry(self, asset, *, group=None, context=None, source=None, request_id=None):
         bridge = self.bridge
@@ -107,7 +113,9 @@ class OutputDelivery:
                              request_id=None):
         bridge = self.bridge
         bridge.reload_config()
+        request_ids = ()
         if isinstance(answer, TurnResult):
+            request_ids = answer.request_ids
             source, cwd, notify_completion = answer.source, answer.cwd, answer.completed
             answer = answer.text
         text, specs = split_answer(answer)
@@ -150,7 +158,7 @@ class OutputDelivery:
         if finish_running:
             bridge.state.pop("currentInput", None)
         # The input is retired in the same snapshot as its frozen output group.
-        bridge.enqueue(entries, request_id=request_id)
+        bridge.enqueue(entries, request_id=request_id, request_ids=request_ids)
 
     async def external_result_worker(self):
         bridge = self.bridge

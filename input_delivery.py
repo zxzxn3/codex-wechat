@@ -47,6 +47,13 @@ class InputDelivery:
                       request_id=job.get("requestId"))
             return False
         job.update(phase=phase, turn=turn_id, source=asdict(backend.source(bridge.state["thread"])))
+        current = backend.active
+        request_id = job.get("requestId")
+        if (phase in (InputPhase.DISPATCHING, InputPhase.ACCEPTED) and request_id and current
+                and current["thread"] == bridge.state["thread"] and current["turn"] == turn_id):
+            related = current.setdefault("requestIds", [])
+            if request_id not in related:
+                related.append(request_id)
         bridge.save()
         log_event("input.dispatch", component="input", phase=phase,
                   mode=job.get("mode", "steer"), backend=bridge.backend_name,
@@ -128,6 +135,9 @@ class InputDelivery:
             try:
                 typing_started = await bridge.typing.start(
                     bridge.account["user"], bridge.state.get("context"))
+                if bridge.wechat_paused:
+                    self.defer_restart(job)
+                    continue
                 try:
                     await ensure_session(bridge)
                 except Exception:
@@ -251,6 +261,8 @@ class InputDelivery:
                 try:
                     typing_started = await bridge.typing.start(
                         bridge.account["user"], bridge.state.get("context"))
+                    if bridge.wechat_paused:
+                        break
                     log_event("input.steer_start", component="input",
                               phase=job.get("phase", InputPhase.PREPARING),
                               mode=job.get("mode", "steer"),

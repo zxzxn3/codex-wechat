@@ -302,7 +302,8 @@ class CodexBackend:
                 current["messages"].append(item)
                 if item.get("phase") in ("commentary", "partial_answer") and item.get("text"):
                     self.on_message(AgentMessage(current["source"], current["turn"],
-                        identity, item["text"], current["cwd"], item["phase"]))
+                        identity, item["text"], current["cwd"], item["phase"],
+                        tuple(current.get("requestIds", ()))))
         elif method == "turn/completed" and not current["done"].done():
             turn = params["turn"]
             if current["turn"] and turn["id"] != current["turn"]:
@@ -322,7 +323,7 @@ class CodexBackend:
                 text = (text + "\n\n" if text else "") + status_text
             result = TurnResult(current["source"], current["turn"],
                                 text if text or has_partial_answer else TURN_COMPLETED_EMPTY,
-                                current["cwd"], status)
+                                current["cwd"], status, tuple(current.get("requestIds", ())))
             current["done"].set_result(result)
             self.pending.clear()
             compact_turn = any(key[:3] == (self.selection_epoch, self.selected_thread, turn["id"])

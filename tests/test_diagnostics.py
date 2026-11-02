@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import diagnostics
-from codex_wechat import Bridge, _log_files, _tail_lines, show_logs
+from codex_wechat import Bridge, _log_files, _read_log_updates, _tail_lines, show_logs
 from commands import dispatch
 from storage import Store
 from wechat import WeChat
@@ -110,6 +110,54 @@ class DiagnosticsTests(unittest.TestCase):
         with patch("diagnostics.os.open", side_effect=OSError("disk full")):
             diagnostics.log_event("test.write_failed", component="bridge")
 
+    def test_busy_process_lock_drops_diagnostic_without_writing(self):
+        with patch("storage._lock_descriptor", side_effect=BlockingIOError()):
+            diagnostics.log_event("test.lock_busy", component="bridge")
+        self.assertFalse(self.path.exists())
+        diagnostics.log_event("test.lock_available", component="bridge")
+        self.assertEqual([record["event"] for record in self.records()],
+                         ["test.lock_available"])
+
+    def test_endpoint_schema_rejects_paths_and_unknown_routes(self):
+        for endpoint in ("/etc/passwd", r"C:\private\file.txt", "report.txt",
+                         "ilink/bot/private_file", "ilink/bot/getconfig?token=secret"):
+            diagnostics.log_event("test.endpoint", endpoint=endpoint)
+        self.assertTrue(all("endpoint" not in record for record in self.records()))
+
+    def test_follow_reads_rotated_tail_once_and_replacement_from_start(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("first\n", encoding="utf-8")
+        positions = {}
+        with redirect_stdout(StringIO()):
+            _read_log_updates([self.path], positions, initial=True)
+        with self.path.open("a", encoding="utf-8") as stream:
+            stream.write("before rotation\n")
+        backup = self.path.with_name(self.path.name + ".1")
+        self.path.replace(backup)
+        self.path.write_text("replacement longer than the original file\n", encoding="utf-8")
+        output = StringIO()
+        with redirect_stdout(output):
+            _read_log_updates([self.path, backup], positions)
+            _read_log_updates([self.path, backup], positions)
+        self.assertNotIn("first\n", output.getvalue())
+        self.assertEqual(output.getvalue().count("before rotation\n"), 1)
+        self.assertEqual(output.getvalue().count("replacement longer than the original file\n"), 1)
+
+    def test_follow_does_not_skip_append_while_initial_tail_is_printed(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("old\n", encoding="utf-8")
+        positions = {}
+        def print_and_append(*args, **kwargs):
+            if args == ("old",):
+                with self.path.open("a", encoding="utf-8") as stream:
+                    stream.write("raced append\n")
+        with patch("codex_wechat.print", side_effect=print_and_append):
+            _read_log_updates([self.path], positions, initial=True)
+        output = StringIO()
+        with redirect_stdout(output):
+            _read_log_updates([self.path], positions)
+        self.assertEqual(output.getvalue(), "raced append\n")
+
     def test_error_fields_exclude_exception_message(self):
         fields = diagnostics.error_fields(CodedError("PROMPT_SENTINEL_7f935"))
         self.assertEqual(fields, {"error_type": "CodedError", "error_code": "-32603"})
@@ -197,6 +245,24 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["request_id"], "req-output")
         self.assertEqual(bridge.state["outbox"][0]["requestId"], "req-output")
 
+    async def test_native_progress_links_primary_and_steered_inputs_without_contextvar(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        bridge.state.update(context="context", thread="thread")
+        backend = bridge.backend
+        backend.selected_thread = "thread"
+        backend.active = backend.new_turn("thread", "turn", owned=False)
+        for identity in ("req-original", "req-steered"):
+            bridge.dispatch_input({"requestId": identity}, "accepted", "turn", backend)
+        backend.event({"method": "item/completed", "params": {
+            "threadId": "thread", "turnId": "turn", "item": {
+                "type": "agentMessage", "id": "progress", "phase": "commentary", "text": "working"}}})
+        entry = bridge.state["outbox"][0]
+        self.assertEqual(entry["requestId"], "req-original")
+        linked = {record["request_id"] for record in self.records()
+                  if record["event"] in ("output.enqueued", "output.related")
+                  and record.get("job_id") == entry["group"]}
+        self.assertEqual(linked, {"req-original", "req-steered"})
+
     async def test_rejected_input_and_control_outcomes_are_logged(self):
         bridge = Bridge(self.store, {"user": "owner"}, {})
         message = {"message_id": "queue-empty", "from_user_id": "owner",
@@ -230,9 +296,9 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
                    AsyncMock(return_value=process)), \
              patch("wechat.communicate",
                    AsyncMock(return_value=(b'{"ret":0}\n200', b""))):
-            await client.request("ilink/bot/example?token=" + token)
+            await client.request("ilink/bot/getconfig?token=" + token)
         record = next(item for item in self.records() if item["event"] == "wechat.request")
-        self.assertEqual(record["endpoint"], "ilink/bot/example")
+        self.assertEqual(record["endpoint"], "ilink/bot/getconfig")
         self.assertTrue(record["ok"])
         self.assertEqual(record["http_status"], 200)
         data = self.path.read_text(encoding="utf-8")

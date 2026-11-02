@@ -28,6 +28,7 @@ class AgentMessage:
     text: str
     cwd: str
     phase: str
+    request_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class TurnResult:
     text: str
     cwd: str
     status: str
+    request_ids: tuple[str, ...] = ()
 
     @property
     def completed(self):

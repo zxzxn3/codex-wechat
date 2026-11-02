@@ -2,6 +2,7 @@
 import asyncio
 
 from diagnostics import error_fields, log_event
+from errors import WeChatAuthExpired
 
 KEEPALIVE_SECONDS = 5
 
@@ -37,17 +38,25 @@ class TypingIndicator:
         await sender(self.user, self.ticket, status)
 
     async def _keepalive(self):
-        try:
-            while True:
-                await asyncio.sleep(KEEPALIVE_SECONDS)
+        while True:
+            await asyncio.sleep(KEEPALIVE_SECONDS)
+            try:
+                await self._get_ticket()
                 await self._set_status(1)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            self.ticket = ""
-            self.ticket_key = None
-            log_event("wechat.typing_failed", level="warning", component="wechat",
-                      phase="keepalive", **error_fields(error))
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                await self._failed(error, "keepalive")
+                if isinstance(error, WeChatAuthExpired):
+                    return
+
+    async def _failed(self, error, phase):
+        self.ticket = ""
+        self.ticket_key = None
+        log_event("wechat.typing_failed", level="warning", component="wechat",
+                  phase=phase, **error_fields(error))
+        if isinstance(error, WeChatAuthExpired):
+            await self.bridge.require_wechat_rebind()
 
     async def start(self, user, context):
         async with self.lock:
@@ -64,11 +73,8 @@ class TypingIndicator:
                 self.active = 0
                 raise
             except Exception as error:
-                self.ticket = ""
-                self.ticket_key = None
                 self.active = 0
-                log_event("wechat.typing_failed", level="warning", component="wechat",
-                          phase="start", **error_fields(error))
+                await self._failed(error, "start")
                 return False
             self.task = asyncio.create_task(self._keepalive())
             log_event("wechat.typing_started", component="wechat")
@@ -88,9 +94,6 @@ class TypingIndicator:
             try:
                 await self._set_status(2)
             except Exception as error:
-                self.ticket = ""
-                self.ticket_key = None
-                log_event("wechat.typing_failed", level="warning", component="wechat",
-                          phase="stop", **error_fields(error))
+                await self._failed(error, "stop")
                 return
             log_event("wechat.typing_stopped", component="wechat")

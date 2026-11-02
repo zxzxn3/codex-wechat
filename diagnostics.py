@@ -18,6 +18,7 @@ import sys
 import threading
 
 from platform_support import data_root
+from storage import locked_file
 
 APP_VERSION = "0.1.0"
 MAX_BYTES = 5 * 1024 * 1024
@@ -29,6 +30,10 @@ _lock = threading.Lock()
 _path = None
 _level = None
 _max_bytes = MAX_BYTES
+_ENDPOINTS = frozenset("ilink/bot/" + name for name in (
+    "get_bot_qrcode", "get_qrcode_status", "getupdates", "getuploadurl",
+    "sendmessage", "getconfig", "sendtyping", "msg/notifystart", "msg/notifystop",
+))
 
 _TEXT_FIELDS = {
     "component": r"[a-z][a-z0-9_.-]{0,31}",
@@ -39,7 +44,6 @@ _TEXT_FIELDS = {
     "kind": r"[a-z][a-z0-9_.-]{0,31}",
     "backend": r"[a-z0-9][a-z0-9_.-]{0,31}",
     "provider": r"[a-z0-9][a-z0-9_.-]{0,31}",
-    "endpoint": r"[a-z0-9_./-]{1,80}",
     "operation": r"[a-z][a-z0-9_.-]{0,31}",
     "source": r"[a-z][a-z0-9_.-]{0,31}",
     "service": r"[a-z][a-z0-9_.-]{0,31}",
@@ -133,6 +137,8 @@ def _clean_number(value):
 
 
 def _clean_field(name, value):
+    if name == "endpoint":
+        return value if isinstance(value, str) and value in _ENDPOINTS else None
     if name in _BOOL_FIELDS:
         return bool(value) if isinstance(value, bool) else None
     if name in _NUMBER_FIELDS:
@@ -174,16 +180,22 @@ def _write(record):
                 os.chmod(path.parent, 0o700)
             except OSError:
                 pass
-            try:
-                if path.stat().st_size + len(data) > _max_bytes:
-                    _rotate(path)
-            except OSError:
-                pass
-            descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
-            try:
-                os.write(descriptor, data)
-            finally:
-                os.close(descriptor)
+            with locked_file(path.with_name(path.name + ".lock")):
+                try:
+                    if path.stat().st_size + len(data) > _max_bytes:
+                        _rotate(path)
+                except OSError:
+                    pass
+                descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+                try:
+                    remaining = memoryview(data)
+                    while remaining:
+                        written = os.write(descriptor, remaining)
+                        if written <= 0:
+                            raise OSError("log write made no progress")
+                        remaining = remaining[written:]
+                finally:
+                    os.close(descriptor)
             try:
                 os.chmod(path, 0o600)
             except OSError:

@@ -2,6 +2,7 @@
 """Local WeChat ↔ Codex bridge. Media transport uses cryptography."""
 import argparse
 import asyncio
+import codecs
 import hashlib
 import json
 import os
@@ -281,8 +282,9 @@ class Bridge:
         return self.output.text_entries(text, group=group, context=context, semantic=semantic,
                                         source=source, role=role, request_id=request_id)
 
-    def enqueue(self, entries, *, persist=True, request_id=None):
-        return self.output.enqueue(entries, persist=persist, request_id=request_id)
+    def enqueue(self, entries, *, persist=True, request_id=None, request_ids=()):
+        return self.output.enqueue(entries, persist=persist, request_id=request_id,
+                                   request_ids=request_ids)
 
     def reply(self, text, *, persist=True, request_id=None):
         return self.output.reply(text, persist=persist, request_id=request_id)
@@ -674,22 +676,29 @@ def _log_files(include_service=False):
     return [path for path in candidates if path.is_file()]
 
 
+def _tail_stream(stream, limit=200):
+    stream.seek(0, os.SEEK_END)
+    end = stream.tell()
+    boundary = end
+    data = b""
+    scanned = 0
+    while end > 0 and scanned < 1024 * 1024:
+        size = min(8192, end, 1024 * 1024 - scanned)
+        end -= size
+        scanned += size
+        stream.seek(end)
+        data = stream.read(size) + data
+        if data.count(b"\n") > limit:
+            break
+    # Keep the cursor at the exact boundary whose tail was displayed, not a later stat().
+    stream.seek(boundary)
+    return data.decode("utf-8", errors="replace").splitlines()[-limit:]
+
+
 def _tail_lines(path, limit=200):
     try:
         with path.open("rb") as stream:
-            stream.seek(0, os.SEEK_END)
-            end = stream.tell()
-            data = b""
-            scanned = 0
-            while end > 0 and scanned < 1024 * 1024:
-                size = min(8192, end, 1024 * 1024 - scanned)
-                end -= size
-                scanned += size
-                stream.seek(end)
-                data = stream.read(size) + data
-                if data.count(b"\n") > limit:
-                    break
-        return data.decode("utf-8", errors="replace").splitlines()[-limit:]
+            return _tail_stream(stream, limit)
     except (OSError, ValueError):
         return []
 
@@ -700,6 +709,38 @@ def _print_log_header(path):
     print(f"==> {path} <=={suffix}")
 
 
+def _read_log_updates(files, positions, *, initial=False):
+    # Rotated names are aliases for old file identities, not new streams to replay.
+    for path in reversed(files):
+        try:
+            with path.open("rb") as stream:
+                stat = os.fstat(stream.fileno())
+                identity = (stat.st_dev, stat.st_ino)
+                position = positions.get(identity)
+                if initial:
+                    _print_log_header(path)
+                    print("\n".join(_tail_stream(stream)), flush=True)
+                    position = stream.tell()
+                else:
+                    if position is None:
+                        _print_log_header(path)
+                        position = 0
+                    if stat.st_size < position:
+                        position = 0
+                    stream.seek(position)
+                    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+                    while chunk := stream.read(65536):
+                        print(decoder.decode(chunk), end="", flush=True)
+                    # Retry an incomplete UTF-8 suffix on the next poll.
+                    position = stream.tell() - len(decoder.getstate()[0])
+                positions.pop(identity, None)
+                positions[identity] = position
+                while len(positions) > 2 * (BACKUP_COUNT + 3):
+                    positions.pop(next(iter(positions)))
+        except (OSError, ValueError):
+            continue
+
+
 def show_logs(follow=False, include_service=False):
     files = _log_files(include_service)
     if not files and not follow:
@@ -708,50 +749,16 @@ def show_logs(follow=False, include_service=False):
         if not include_service:
             print("需要 supervisor 控制台输出时使用 --service / -Service。")
         return
-    for path in files:
-        _print_log_header(path)
-        print("\n".join(_tail_lines(path)))
+    positions = {}
+    _read_log_updates(files, positions, initial=True)
     if not follow:
         return
-    positions = {}
-    for path in files:
-        try:
-            positions[path] = path.stat().st_size
-        except OSError:
-            positions[path] = 0
     if not files:
         hint = "" if include_service else "；supervisor 输出请加 --service / -Service"
         print(f"等待诊断日志{hint}；按 Ctrl+C 停止。", flush=True)
     while True:
         time.sleep(0.5)
-        current = _log_files(include_service)
-        known = set(files)
-        for path in current:
-            if path not in known:
-                _print_log_header(path)
-                print("\n".join(_tail_lines(path)), flush=True)
-                try:
-                    positions[path] = path.stat().st_size
-                except OSError:
-                    positions[path] = 0
-                files.append(path)
-        files = [path for path in files if path in current]
-        for path in files:
-            try:
-                size = path.stat().st_size
-            except OSError:
-                continue
-            if size < positions.get(path, 0):
-                positions[path] = 0
-            try:
-                with path.open("r", encoding="utf-8", errors="replace") as stream:
-                    stream.seek(positions.get(path, 0))
-                    chunk = stream.read()
-                    positions[path] = stream.tell()
-                if chunk:
-                    print(chunk, end="", flush=True)
-            except OSError:
-                continue
+        _read_log_updates(_log_files(include_service), positions)
 
 
 async def main():

@@ -104,11 +104,13 @@ Linux 使用 `codex-wechat logs`，Windows 使用 `.\codex-wechat.ps1 logs`；�
 
 `bridge.jsonl` 每行一个 JSON 事件，包含时间、级别、事件名、平台、版本、进程号、随机
 请求号和必要元数据。由微信输入触发的任务会用 `request_id` 关联接收、准备、提交、输出入队、
-发送重试和发送 API；输出组另有 `job_id`，连接/恢复等生命周期事件不强行关联到单条消息。
+发送重试和发送 API；中途回复也携带轮次关联的请求号。同轮多条输入通过 `output.related`
+与输出组 `job_id` 关联，连接/恢复等生命周期事件不强行关联到单条消息。
 字段采用白名单；
 不记录聊天正文、prompt、回复、文件名、账号标识、token、context token、Authorization、
 请求/响应体或绝对路径。错误仅保留异常类型和错误码；URL 只保留 endpoint，不带查询参数。
-日志写失败不会影响收发。默认级别为 `info`，排障可用环境变量
+写入和轮转由原生进程锁保护；锁竞争或写入失败时丢弃本条诊断，不等待、不影响收发。
+默认级别为 `info`，排障可用环境变量
 `CODEX_WECHAT_LOG_LEVEL=debug|info|warning|error` 临时调整。
 
 需要反馈问题时优先提供 `logs/bridge.jsonl`。`logs --service` 显示的内容是原始控制台输出，
