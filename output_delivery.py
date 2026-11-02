@@ -191,6 +191,8 @@ class OutputDelivery:
                     bridge.save()
                 if bridge.wechat_paused:
                     continue
+                print(f"微信发送开始: queued={len(bridge.state['outbox'])} role={entry.get('role', 'body')}",
+                      file=sys.stderr, flush=True)
                 send_started = time.perf_counter()
                 await bridge.channel.send(entry)
                 send_ms = (time.perf_counter() - send_started) * 1000
@@ -208,6 +210,7 @@ class OutputDelivery:
                 continue
             bridge.state["outbox"].pop(0)
             bridge.state["consecutiveSendFailures"] = 0
+            print(f"微信发送完成: elapsed={send_ms:.0f}ms", file=sys.stderr, flush=True)
             bridge.latency.sends.append(send_ms)
             bridge.mark_wechat_valid()
             bridge.save()

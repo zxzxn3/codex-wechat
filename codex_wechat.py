@@ -495,7 +495,8 @@ class Bridge:
             except Exception as error:
                 print(f"接收失败：{error}", file=sys.stderr, flush=True)
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 60)
+                # Long reconnect backoff leaves newly arrived commands unread.
+                delay = min(delay * 2, 5)
 
     async def run(self):
         tasks = []

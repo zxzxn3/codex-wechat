@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import secrets
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -11,7 +12,7 @@ from dataclasses import dataclass
 
 from errors import WeChatAuthExpired
 from subprocess_io import communicate
-from platform_support import curl_command, subprocess_options
+from platform_support import IS_WINDOWS, curl_command, subprocess_options
 import wechat_auth
 from wechat_auth import identity
 
@@ -69,14 +70,21 @@ class WeChat:
                 payload["base_info"] = {"channel_version": VERSION,
                                         "bot_agent": "CodexWechat/" + VERSION}
             config.append("data = " + json.dumps(json.dumps(payload)))
+        started = time.perf_counter()
         proc = await asyncio.create_subprocess_exec(
-            curl_command(), "--disable", "--silent", "--show-error", "--proto", "=https",
+            curl_command(), "--disable", *(["--ipv4"] if IS_WINDOWS else []),
+            "--silent", "--show-error", "--proto", "=https",
             "--connect-timeout", str(min(timeout, 10)), "--max-time", str(timeout),
             "--max-filesize", str(16 * 1024 * 1024),
             "--write-out", "\n%{http_code}", "--config", "-",
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
         output, _ = await communicate(proc, ("\n".join(config) + "\n").encode(), timeout=timeout + 2)
+        elapsed = time.perf_counter() - started
+        # Do not record request bodies, URLs, tokens or response content.
+        if proc.returncode or (endpoint != "ilink/bot/getupdates" and elapsed >= 2):
+            print(f"微信请求 {endpoint.split('?')[0]}: curl={proc.returncode} elapsed={elapsed:.2f}s",
+                  file=sys.stderr, flush=True)
         if proc.returncode:
             raise RuntimeError(f"微信网络请求失败（curl {proc.returncode}）")
         try:
