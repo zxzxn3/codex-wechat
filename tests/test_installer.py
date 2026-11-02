@@ -54,7 +54,7 @@ class InstallerTests(unittest.TestCase):
             ".bootstrap-venv/bin/python": "private",
             ".update-backups/old/file.py": "private",
             "workspace/notes.txt": "private",
-            "config.json": "private",
+            "config.json": "{}",
             "__pycache__/demo.pyc": "private",
             "dist/codex-wechat": "private",
         }
@@ -217,7 +217,7 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((release / "new.py").is_file())
         self.assertFalse((release / "removed-in-v2.py").exists())
         self.assertEqual(unknown.read_text(), "keep")
-        self.assertEqual((self.target / "config.json").read_text(), "private")
+        self.assertEqual((self.target / "config.json").read_text(), "{}")
         self.assertEqual((self.target / ".state/account.json").read_text(), "private")
 
     def test_noop_update_does_not_prompt_for_confirmation(self):

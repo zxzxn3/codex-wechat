@@ -126,7 +126,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_windows_defaults_to_stdio_and_preserves_explicit_shared_choice(self):
         callbacks = dict(on_request=AsyncMock(), on_event=Mock(), on_connect=Mock(),
                          on_disconnect=Mock())
-        with patch("codex_transport.IS_WINDOWS", True):
+        with patch("codex_connection.IS_WINDOWS", True):
             self.assertFalse(CodexTransport({}, "/tmp", **callbacks).shared)
             self.assertTrue(CodexTransport({"sharedDaemon": True}, "/tmp", **callbacks).shared)
 

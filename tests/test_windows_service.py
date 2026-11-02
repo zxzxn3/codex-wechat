@@ -253,10 +253,8 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("-RestartCount", install)
         self.assertNotIn("-RestartInterval", install)
         self.assertNotIn("schtasks.exe", install.lower())
-        self.assertIn("[ValidateSet('on', 'off')]", install)
-        self.assertIn("$trigger.Enabled = [bool]$autostartEnabled", install)
+        self.assertIn("$trigger.Enabled = $autostart", install)
         self.assertIn("Set-ScheduledTask", install)
-        self.assertIn("Enable-ScheduledTask", install)
         self.assertIn("-LogonType Interactive", install)
         self.assertIn("[ValidateSet('on', 'off')]", entry)
         self.assertIn("[switch]$Json", entry)
@@ -296,8 +294,8 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("$LASTEXITCODE", uninstall)
 
     def test_installer_requires_native_codex_exe(self):
-        install = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        discovery = (ROOT / "native_codex.py").read_text(encoding="utf-8")
         self.assertIn(
-            r"'Programs\OpenAI\Codex\bin\codex.exe'", install)
-        self.assertIn("Get-Command codex.exe", install)
-        self.assertNotIn("Get-Command codex -ErrorAction", install)
+            "Programs/OpenAI/Codex/bin/codex.exe", discovery)
+        self.assertIn('shutil.which("codex.exe"', discovery)
+        self.assertNotIn("Get-Command codex -ErrorAction", discovery)

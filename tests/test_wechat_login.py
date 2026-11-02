@@ -69,7 +69,9 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.identity_changed)
         self.assertEqual(observed[0][0], self.old)
         self.assertEqual(observed[0][1], self.old)
-        self.assertEqual(self.store.load("account"), changed)
+        saved = self.store.load("account")
+        self.assertEqual(saved["base_url"], wechat.BASE_URL)
+        self.assertEqual({key: saved[key] for key in changed}, changed)
 
     async def test_same_identity_refreshes_token_without_migration(self):
         refreshed = {**self.old, "token": "new"}
@@ -81,7 +83,9 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(result.identity_changed)
         callback.assert_not_called()
-        self.assertEqual(self.store.load("account"), refreshed)
+        saved = self.store.load("account")
+        self.assertEqual(saved["base_url"], wechat.BASE_URL)
+        self.assertEqual({key: saved[key] for key in refreshed}, refreshed)
 
     async def test_binded_redirect_reuses_existing_local_credentials(self):
         callback = Mock()

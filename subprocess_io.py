@@ -16,6 +16,8 @@ async def _finish(process, exchange, grace):
             except ProcessLookupError:
                 pass
             await process.wait()
+    if not exchange.done():
+        exchange.cancel()
     await asyncio.gather(exchange, return_exceptions=True)
     if process.stdin is not None:
         process.stdin.close()

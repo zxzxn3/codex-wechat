@@ -116,7 +116,7 @@ class DaemonRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_active_launcher_is_reused_without_spawning(self):
         transport = self.transport()
-        with patch("codex_transport.shutil.which", return_value="/bin/codex-deepseek"), \
+        with patch("backend_runtime.shutil.which", return_value="/bin/codex-deepseek"), \
              patch("daemon_control.status", AsyncMock(return_value={"ActiveState": "active"})), \
              patch("codex_transport.asyncio.create_subprocess_exec", AsyncMock()) as spawn:
             one = await transport.start_shared_daemon(["codex-deepseek", "app-server"], {"HOME": "/tmp"})

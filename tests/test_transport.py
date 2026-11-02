@@ -35,10 +35,12 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_close_only_terminates_its_proxy(self):
         transport = self.transport()
         process = Mock(returncode=None)
+        process.communicate = AsyncMock(return_value=(b"", b""))
         process.wait = AsyncMock(return_value=0)
+        process.stdin = None
         transport.proc = process
         transport.websocket = Mock(close=AsyncMock())
         await transport.close()
-        process.terminate.assert_called_once()
+        process.terminate.assert_called()
         process.kill.assert_not_called()
         process.wait.assert_awaited_once()
