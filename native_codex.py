@@ -1,9 +1,22 @@
 """Native executable discovery; no model calls, credentials or user history."""
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
+
+APP_DESKTOP_ID = "chatgpt.desktop"
+MIN_APP_DAEMON_VERSION = (0, 141, 0)
+
+
+def supports_app_daemon(version):
+    """Minimum accepted by the currently supported App's local-daemon path."""
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version) if isinstance(version, str) else None
+    if not match:
+        return False
+    core = tuple(int(part) for part in match.groups()[:3])
+    return core > MIN_APP_DAEMON_VERSION or (core == MIN_APP_DAEMON_VERSION and not match[4])
 
 
 def discover_app_codex(env=None, *, windows=None):

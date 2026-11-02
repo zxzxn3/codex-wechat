@@ -52,15 +52,25 @@ Windows 使用 `.ps1 stop`。命令会先尽力向最近一次微信会话发送
 
 本地共享连接优先复用原生 daemon，仍可显式配置独立连接。桥接退出只关闭自己的连接/代理进程，不结束共享 Codex 后台。
 
-App 共享接入需要一次配置，在空闲且退出原 App 后执行：
+Linux App 可复用 CLI 的原生 daemon。先完全退出已有 App，再执行：
 
 ```bash
-codex-wechat desktop setup
 codex-wechat app
 codex-wechat cli -- resume
 ```
 
-若入口不在 PATH，使用前述完整路径。Windows 对应：
+若希望以后仍从原桌面图标启动，只需配置一次：
+
+```bash
+codex-wechat desktop setup --native --shortcut
+```
+
+这会为当前用户创建 App 桌面入口，保留系统图标和 MIME 关联，并通过稳定入口准备原生
+daemon；不修改系统包或代理启动器。删除它打印的用户桌面文件即可恢复系统入口。
+已有自定义桌面文件不会被覆盖。配置不会改变已打开的 App，首次必须退出重开。
+若原来配置了 WebSocket，`--native` 会切回原生 daemon，需要重启微信桥；已有原生配置无需重启。
+
+若入口不在 PATH，使用前述完整路径。Windows 继续使用显式 WebSocket 共享：
 
 ```powershell
 & "$env:LOCALAPPDATA\codex-wechat\app\codex-desktop.ps1" setup
@@ -68,7 +78,12 @@ codex-wechat cli -- resume
 & "$env:LOCALAPPDATA\codex-wechat\app\codex-desktop.ps1" cli -- resume
 ```
 
-setup 保留其它配置，为选定后端设置本机共享端点，之后需重启微信桥生效。`--backend {名称}` 选择后端，`--executable {绝对路径}` 指定 CLI/App 内置 CLI。端口由系统分配后保存，也可显式指定 `--url ws://127.0.0.1:{端口}`。不能以同一个 CODEX_HOME 代替连接同一个后台，不能通过删除写入锁解决冲突。
+setup 保留其它配置；Linux 默认使用原生 daemon，已有 WebSocket 配置继续沿用，除非显式
+`--native`。`--backend {名称}` 选择后端，`--executable {绝对路径}` 指定 CLI/App 内置 CLI。
+Windows 的端口由系统分配后保存；两平台均可显式指定 `--url ws://127.0.0.1:{端口}`。
+不能以同一个 CODEX_HOME 代替连接同一个后台，不能通过删除写入锁解决冲突。
+Linux 原生 App 不接受强制独立后端的 `CODEX_CLI_PATH` / `CODEX_APP_SERVER_FORCE_CLI=1`；
+自定义启动器须显式提供后端 `env.CODEX_HOME`，避免 App 与启动器选择不同目录。
 
 **代理启动器只负责代理并转交命令。** 项目接入入口不读取系统代理、不维护代理配置；后台管理在运行层，App / CLI / 微信共用连接配置。代理环境在实际后台启动时继承，改变客户端环境不会修改已经运行的后台。
 
