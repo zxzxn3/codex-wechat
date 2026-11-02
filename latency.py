@@ -9,6 +9,60 @@ import math
 import time
 from platform_support import curl_command, subprocess_options
 
+CURL_TIMING_FIELDS = {
+    "time_namelookup": "dns_ms",
+    "time_connect": "connect_ms",
+    "time_appconnect": "appconnect_ms",
+    "time_pretransfer": "pretransfer_ms",
+    "time_starttransfer": "first_byte_ms",
+    "time_total": "curl_total_ms",
+}
+_PHASE_PAIRS = {
+    "tcp_ms": ("dns_ms", "connect_ms"),
+    "tls_ms": ("connect_ms", "appconnect_ms"),
+    "response_wait_ms": ("pretransfer_ms", "first_byte_ms"),
+    "download_ms": ("first_byte_ms", "curl_total_ms"),
+}
+_POST_TLS_PHASES = {"response_wait_ms", "download_ms"}
+NETWORK_TIMING_FIELDS = frozenset(CURL_TIMING_FIELDS.values()) | frozenset(_PHASE_PAIRS)
+# Keep response body + HTTP code on stdout. Only explicitly selected numeric
+# milestones go to stderr; never use curl's broad %{json} diagnostic object.
+CURL_WRITE_OUT = ("%{stderr}\n{" + ",".join(
+    '"' + name + '":%{' + name + '}' for name in CURL_TIMING_FIELDS
+) + "}%{stdout}\n%{http_code}")
+
+
+def curl_timings(stderr):
+    """Read only the numeric write-out trailer; discard curl error text entirely."""
+    try:
+        raw = json.loads(stderr.rsplit(b"\n", 1)[-1])
+    except (ValueError, TypeError, AttributeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    values = {}
+    for name, field in CURL_TIMING_FIELDS.items():
+        value = raw.get(name)
+        if type(value) not in (int, float) or value < 0:
+            continue
+        try:
+            value = float(value) * 1000
+        except OverflowError:
+            continue
+        if math.isfinite(value):
+            values[field] = value
+    for field, (start, end) in _PHASE_PAIRS.items():
+        before, after = values.get(start), values.get(end)
+        if field in _POST_TLS_PHASES and not (
+                values.get("connect_ms", 0) > 0 and values.get("appconnect_ms", 0) > 0):
+            continue
+        # Zero can mean that a milestone was never reached. Do not invent a
+        # completed TLS/wait/download phase after a failed connection.
+        if (before is not None and after is not None and after > 0
+                and (before > 0 or start == "dns_ms") and after >= before):
+            values[field] = after - before
+    return values
+
 
 def _timestamp(value):
     if isinstance(value, bool):
@@ -68,8 +122,8 @@ class Latency:
         return f"{value:.0f}" if value is not None else "-"
 
     def values_in(self, ingress_ms, send_ms):
-        return {"发送延迟": self._display(ingress_ms),
-                "接收延迟": self._display(send_ms)}
+        return {"ingress_ms": self._display(ingress_ms),
+                "egress_ms": self._display(send_ms)}
 
     def values(self, ingress_ms=None):
         return self.values_in(ingress_ms, self.sends[-1] if self.sends else None)

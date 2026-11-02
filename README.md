@@ -68,12 +68,12 @@ App 的 WebSocket 接口属于版本相关实现，公开 App Server WebSocket �
 
 ## 日常行为
 
-- 普通消息默认 steer；`/queue {prompt}` 在空闲后独立执行，且不挡后续 steer。
+- 普通消息默认 steer；`/queue {prompt}` 在空闲后独立执行，且不挡后续 steer。`/unqueue` 撤回最后一条仍在等待的 queue（包括 steer 回退），不影响已开始的任务；剩余数量与 `/queue` 一样只计待办。
 - 可列出/搜索/翻页会话、切换后端、模型、思考强度与目录；控制指令由程序处理。
 - 中途完整回复直接发往微信，不等整轮结束，不发送逐字增量、推理或工具流水。
 - 图片、视频与文件用手机原生附件发送。附件 skill 可从安装菜单单独安装；其它路径可显式 `/send`。
 - 引用文字和局部引用会作为上下文交给 Agent；带转写文本的微信语音可直接作为输入。
-- 原生提问与审批使用专门指令回应；桌面请求只处理实际送到此连接的部分，不冒充已接管全部请求。
+- 原生提问与审批使用专门指令回应；桌面请求只处理实际送到此连接的部分，不冒充已接管全部请求。桌面 async 提问只从结构化 `agentMessage.questions` 识别，不把正文中的类似标记当成题目。
 - `/stop` 中断当前共享轮次并清待办，不能撤销已发生的操作；`/restart` 保留确定未提交输入。
 - 重启后不自动重放已接受或提交结果不确定的输入；当前不补发断线期间的所有历史回答。
 
@@ -85,7 +85,7 @@ App 的 WebSocket 接口属于版本相关实现，公开 App Server WebSocket �
 ```json
 {
   "prompts": {
-    "QUEUE_CONFIRMED": "Queue {数量} {单位}",
+    "QUEUE_CONFIRMED": "Queue {count} {unit}",
     "RESTART_STARTED": "Restarting...",
     "LABEL_MODEL": "Model",
     "HELP_STATUS": "当前状态"
@@ -97,6 +97,10 @@ App 的 WebSocket 接口属于版本相关实现，公开 App Server WebSocket �
 这不是完整翻译层：状态值（如“运行中”）、连接类型、会话标记及少量内置回退文字仍固定；
 可覆盖范围以 `DEFAULT_PROMPTS` 中的名称为准。
 可使用 `/ack fields` 中的快照字段及该模板的局部字段，局部字段优先；替换只执行一次，
+字段名统一为小写英文snake_case，例如 `{input_tokens}`、`{output_tokens}`、
+`{total_tokens}`、`{context_remaining}`、`{model}`、`{ingress_ms}`、`{egress_ms}`。
+完整共享字段以 `/ack fields` 或 `/finish fields` 为准；旧中文字段不再识别，已有自定义模板需改为新名称。
+显示标签及命令用法中的参数说明仍可使用中文，它们不是模板变量。
 未知字段保留原样，字面花括号写成 `{{`、`}}`。每项最多3000 UTF-8字节，未知名称、
 非文本值、损坏JSON或非法格式会拒绝整组热更新并保留旧设置。只支持 `{字段}`，不支持属性、
 下标或格式表达式。修改的是配置覆盖；修改Python默认值仍需重启。
@@ -142,6 +146,10 @@ Linux 使用 `codex-wechat logs`，Windows 使用 `.\codex-wechat.ps1 logs`；�
 写入和轮转由原生进程锁保护；锁竞争或写入失败时丢弃本条诊断，不等待、不影响收发。
 默认级别为 `info`，排障可用环境变量
 `CODEX_WECHAT_LOG_LEVEL=debug|info|warning|error` 临时调整。
+
+微信请求另记DNS、TCP、TLS/隧道、等待首响应及下载的计时，用于区分网络建连和长轮询等待；
+不测模型生成时间，不改变现有 `/ping` 或提示格式。累计时间点、阶段差值及失败时的解释见
+[ARCHITECTURE](docs/ARCHITECTURE.md#诊断与隐私)。
 
 需要反馈问题时优先提供 `logs/bridge.jsonl`。`logs --service` 显示的内容是原始控制台输出，
 不承诺脱敏。日志只保存在本机，不自动上传。

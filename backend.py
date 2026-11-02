@@ -5,6 +5,7 @@ steer(id, turn_id, text, attachments=None), answer_approval(token, decision), cl
 pending contains UI approval data.
 """
 import asyncio
+from collections import deque
 import json
 import os
 from pathlib import Path
@@ -15,12 +16,25 @@ import uuid
 from records import AgentMessage, Source, TurnResult
 from media import OUTPUT_HINT
 from usage import UsageCache
-from questions import QUESTION_METHOD, question_prompt, question_answer
+from questions import (
+    ASYNC_QUESTION_METHOD,
+    QUESTION_METHOD,
+    async_question_reply,
+    async_questions,
+    async_reply_question_ids,
+    question_answer,
+    question_prompt,
+)
 from prompts import (prompt_text)
 from platform_support import IS_WINDOWS
 from prompts import (command_approval, file_approval)
 
 from codex_transport import CodexTransport, CodexRpcError
+
+PENDING_TOKEN_ALPHABET = "023456789abcdefghjkmnpqrstuvwxyz"
+PENDING_TOKEN_LENGTH = 3
+PENDING_TOKEN_RECENT = 128
+
 
 class DeferTurn(RuntimeError):
     """The desktop owns an active turn that did not accept this input."""
@@ -29,6 +43,7 @@ class CodexBackend:
     def __init__(self, config, cwd, notify):
         self.config, self.cwd, self.notify = config, cwd, notify
         self.pending = {}
+        self.recent_tokens = deque(maxlen=PENDING_TOKEN_RECENT)
         self.active = None
         self.stop_requested = False
         self.info = {}
@@ -126,6 +141,14 @@ class CodexBackend:
         return Source(self.source_name, self.connection_id, self.selection_epoch,
                       thread_id or self.selected_thread)
 
+    def _new_token(self):
+        while True:
+            token = "".join(secrets.choice(PENDING_TOKEN_ALPHABET)
+                            for _ in range(PENDING_TOKEN_LENGTH))
+            if token not in self.pending and token not in self.recent_tokens:
+                self.recent_tokens.append(token)
+                return token
+
     async def server_request(self, msg):
         params = msg.get("params", {})
         if self.shared and params.get("threadId") != self.selected_thread:
@@ -140,9 +163,9 @@ class CodexBackend:
                          or params.get("turnId") == self.active["turn"])):
                 # Questions may belong to a desktop turn. Answer only requests actually
                 # delivered to this connection; leave other interaction ownership intact.
-                if any(request["id"] == msg["id"] for request in self.pending.values()):
+                if any(request.get("id") == msg["id"] for request in self.pending.values()):
                     return
-                token = secrets.token_hex(4)
+                token = self._new_token()
                 self.pending[token] = dict(msg, _question={
                     "source": self.source(), "index": 0, "answers": {}})
                 self.notify(question_prompt(questions[0], token, 0, len(questions), text=self.prompt))
@@ -153,7 +176,7 @@ class CodexBackend:
         if (self.active and params.get("threadId") == self.active["thread"]
                 and msg["method"] in ("item/commandExecution/requestApproval",
                                        "item/fileChange/requestApproval")):
-            token = secrets.token_hex(4)
+            token = self._new_token()
             self.pending[token] = msg
             if msg["method"] == "item/commandExecution/requestApproval":
                 summary = command_approval(
@@ -187,7 +210,7 @@ class CodexBackend:
         params = msg.get("params", {})
         if msg.get("method") == "serverRequest/resolved":
             for token, request in list(self.pending.items()):
-                if (request["id"] == params.get("requestId") and
+                if (request.get("id") == params.get("requestId") and
                         request.get("params", {}).get("threadId") == params.get("threadId")):
                     self.pending.pop(token, None)
         method = msg.get("method")
@@ -218,6 +241,14 @@ class CodexBackend:
         if params.get("threadId") != self.selected_thread:
             return
         item = params.get("item", {})
+        if method == "item/completed":
+            answered = async_reply_question_ids(item)
+            if answered:
+                for token, request in list(self.pending.items()):
+                    state = request.get("_async")
+                    if state and any(question["id"] in answered
+                                     for question in state["questions"]):
+                        self.pending.pop(token, None)
         if method in ("item/started", "item/completed") and item.get("type") == "contextCompaction":
             self.refresh_config()
             key = (self.selection_epoch, self.selected_thread, params.get("turnId"), item.get("id"))
@@ -286,13 +317,29 @@ class CodexBackend:
         if params.get("turnId") and current["turn"] != params["turnId"]:
             return
         if method == "item/completed":
-            item = params.get("item", {})
             if item.get("type") == "agentMessage":
                 identity = item.get("id")
                 if identity and any(message.get("id") == identity for message in current["messages"]):
                     return
                 current["messages"].append(item)
-                if item.get("phase") in ("commentary", "partial_answer") and item.get("text"):
+                questions = async_questions(item)
+                if questions is not None:
+                    token = self._new_token()
+                    self.pending[token] = {
+                        "method": ASYNC_QUESTION_METHOD,
+                        "_async": {
+                            "source": current["source"],
+                            "thread": current["thread"],
+                            "turn": current["turn"],
+                            "item": identity,
+                            "questions": questions,
+                            "index": 0,
+                            "answers": [],
+                        },
+                    }
+                    self.notify(question_prompt(questions[0], token, 0, len(questions),
+                                                text=self.prompt))
+                elif item.get("phase") in ("commentary", "partial_answer") and item.get("text"):
                     self.on_message(AgentMessage(current["source"], current["turn"],
                         identity, item["text"], current["cwd"], item["phase"],
                         tuple(current.get("requestIds", ()))))
@@ -301,10 +348,13 @@ class CodexBackend:
             if current["turn"] and turn["id"] != current["turn"]:
                 return
             messages = current["messages"]
-            finals = [m["text"] for m in messages if m.get("phase") == "final_answer"]
-            legacy = [m["text"] for m in messages if not m.get("phase")]
+            finals = [m["text"] for m in messages
+                      if async_questions(m) is None and m.get("phase") == "final_answer"]
+            legacy = [m["text"] for m in messages
+                      if async_questions(m) is None and not m.get("phase")]
             text = "\n\n".join(finals or legacy)
-            has_partial_answer = any(m.get("phase") == "partial_answer" and m.get("text")
+            has_partial_answer = any(async_questions(m) is None
+                                     and m.get("phase") == "partial_answer" and m.get("text")
                                      for m in messages)
             status = turn["status"]
             if status != "completed":
@@ -522,7 +572,7 @@ class CodexBackend:
                 self.models_checked_at = time.monotonic()
                 return data
 
-    async def input_items(self, text, attachments=None):
+    async def input_items(self, text, attachments=None, *, hint=True):
         inputs = [{"type": "text", "text": text}] if text else []
         if attachments:
             images = [asset for asset in attachments if asset["kind"] == "image"]
@@ -539,18 +589,19 @@ class CodexBackend:
             if references:
                 inputs.append({"type": "text", "text": json.dumps(
                     {"attachments": references}, ensure_ascii=False, separators=(",", ":"))})
-        hint = self.input_hint()
         if hint:
-            inputs.append({"type": "text", "text": hint})
+            source_hint = self.input_hint()
+            if source_hint:
+                inputs.append({"type": "text", "text": source_hint})
         return inputs
 
     async def steer(self, thread_id, turn_id, text, attachments=None, *,
-                    client_id=None, dispatch=None):
+                    client_id=None, dispatch=None, hint=True):
         current = self.active
         if (not current or current["thread"] != thread_id or current["turn"] != turn_id
                 or current["done"].done() or self.stop_requested):
             return False
-        inputs = await self.input_items(text, attachments)
+        inputs = await self.input_items(text, attachments, hint=hint)
         if self.active is not current or current["done"].done() or self.stop_requested:
             return False
         if dispatch and not dispatch("dispatching", turn_id):
@@ -645,17 +696,24 @@ class CodexBackend:
         return True
 
     async def answer_approval(self, token, decision):
-        if self.pending.get(token, {}).get("method") == QUESTION_METHOD:
+        if self.pending.get(token, {}).get("method") in (QUESTION_METHOD, ASYNC_QUESTION_METHOD):
             return False
-        request = self.pending.pop(token, None)
+        request = self.pending.get(token)
         if not request:
             return False
+        if "id" not in request:
+            return False
+        self.pending.pop(token, None)
         await self.write({"id": request["id"], "result": {"decision": decision}})
         return True
 
     async def answer_question(self, token, text):
         request = self.pending.get(token)
-        if not request or request.get("method") != QUESTION_METHOD:
+        if not request:
+            return False
+        if request.get("method") == ASYNC_QUESTION_METHOD:
+            return await self.answer_async_question(token, request, text)
+        if request.get("method") != QUESTION_METHOD:
             return False
         state = request["_question"]
         if state["source"] != self.source():
@@ -672,8 +730,37 @@ class CodexBackend:
             await self.write({"id": request["id"], "result": {"answers": answers}})
         else:
             state.update(index=index + 1, answers=answers)
-            next_token = secrets.token_hex(4)
+            next_token = self._new_token()
             self.pending[next_token] = request
             self.notify(question_prompt(questions[index + 1], next_token, index + 1, len(questions),
                                         text=self.prompt))
         return True
+
+    async def answer_async_question(self, token, request, text):
+        state = request["_async"]
+        current = self.active
+        if (state["source"] != self.source() or not current
+                or current["thread"] != state["thread"] or current["turn"] != state["turn"]
+                or current["done"].done()):
+            self.pending.pop(token, None)
+            return False
+        questions = state["questions"]
+        index = state["index"]
+        answer = question_answer(questions[index], text, render=self.prompt)
+        answers = [*state["answers"], {
+            "questionItemId": questions[index]["id"],
+            "question": questions[index]["question"],
+            "answer": answer,
+        }]
+        # Consume before steering: once sent, a transport error is uncertain and
+        # must not replay an answer.
+        self.pending.pop(token)
+        if index + 1 < len(questions):
+            state.update(index=index + 1, answers=answers)
+            next_token = self._new_token()
+            self.pending[next_token] = request
+            self.notify(question_prompt(questions[index + 1], next_token, index + 1,
+                                        len(questions), text=self.prompt))
+            return True
+        return await self.steer(state["thread"], state["turn"],
+                                async_question_reply(answers), hint=False)

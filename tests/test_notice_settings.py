@@ -22,7 +22,7 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 bridge.state["context"] = "ctx"
                 await handle(bridge, "/ack", "text hello")
                 self.assertEqual(notice(bridge), "hello")
-                await handle(bridge, "/finish", "text done {模型}")
+                await handle(bridge, "/finish", "text done {model}")
                 await bridge.deliver_answer("answer", notify_completion=True)
                 self.assertEqual(bridge.state["outbox"][-1]["text"], "done 默认模型")
                 path.write_text(json.dumps({"processingNotice": "new file", "completionNotice": "file done"}))

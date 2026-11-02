@@ -118,7 +118,7 @@ class OutputDelivery:
         group = str(uuid.uuid4())
         assets, errors = [], []
         if len(specs) > MAX_ATTACHMENTS:
-            errors.append(bridge.prompt("AUTO_ATTACHMENT_LIMIT", {"数量": MAX_ATTACHMENTS}))
+            errors.append(bridge.prompt("AUTO_ATTACHMENT_LIMIT", {"count": MAX_ATTACHMENTS}))
         for spec in specs[:MAX_ATTACHMENTS]:
             try:
                 asset = await asyncio.to_thread(bridge.media.snapshot, spec["path"],
@@ -129,8 +129,8 @@ class OutputDelivery:
             except (MediaError, ValueError, OSError) as error:
                 reason = attachment_reason(error)
                 errors.append(bridge.prompt("AUTO_ATTACHMENT_FAILED", {
-                    "原因": reason,
-                    "建议": (bridge.prompt("AUTO_ATTACHMENT_PATH_HINT")
+                    "reason": reason,
+                    "hint": (bridge.prompt("AUTO_ATTACHMENT_PATH_HINT")
                              if reason == "只能自动发送当前会话目录内的文件" else ""),
                 }))
         # Snapshot work may await disk I/O across a session/backend switch.
@@ -193,7 +193,7 @@ class OutputDelivery:
                   request_id=entry.get("requestId"))
         # Never recursively report a failed failure notice.
         if not entry.get("failureNotice"):
-            text = (bridge.prompt("ATTACHMENT_SEND_FAILED", {"名称": entry["asset"]["name"], "次数": SEND_ATTEMPTS})
+            text = (bridge.prompt("ATTACHMENT_SEND_FAILED", {"name": entry["asset"]["name"], "attempts": SEND_ATTEMPTS})
                     if "asset" in entry else bridge.prompt("REPLY_SEND_FAILED"))
             notes = bridge.text_entries(text, group=str(uuid.uuid4()), context=entry["context"],
                                         request_id=entry.get("requestId"))

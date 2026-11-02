@@ -43,8 +43,18 @@ class QuotaTests(unittest.TestCase):
 
     def test_configuration_defaults_and_validation(self):
         self.assertFalse(Notifications.from_config({}).compaction)
-        self.assertEqual(Notifications.from_config({}).quota_thresholds, (50, 25, 5))
+        self.assertEqual(Notifications.from_config({}).quota_thresholds, (50, 25, 5, 1))
         for config in ({"compactionNotice": "on"}, {"quotaWarningThresholds": [True]},
                        {"quotaWarningThresholds": [-1]}):
             with self.assertRaises(ValueError):
                 Notifications.from_config(config)
+
+    def test_default_threshold_includes_one_percent(self):
+        records = {}
+        thresholds = Notifications.from_config({}).quota_thresholds
+        self.assertEqual(quota_warnings(records, self.snapshot(2), "backend",
+                                        thresholds, now=10), [])
+        warnings = quota_warnings(records, self.snapshot(1), "backend",
+                                  thresholds, now=10)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("阈值 1%", warnings[0])

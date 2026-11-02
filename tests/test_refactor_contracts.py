@@ -32,8 +32,8 @@ class StabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command_lane("/send", "file"), "media")
 
     def test_ping_missing_sample_has_no_unit(self):
-        self.assertEqual(ping_channel({"发送延迟": "120", "接收延迟": "-"}), "WeChat ─120ms/-")
-        self.assertEqual(ping_channel({"发送延迟": "-", "接收延迟": "-"}), "WeChat ─-/-")
+        self.assertEqual(ping_channel({"ingress_ms": "120", "egress_ms": "-"}), "WeChat ─120ms/-")
+        self.assertEqual(ping_channel({"ingress_ms": "-", "egress_ms": "-"}), "WeChat ─-/-")
 
     def test_usage_cache_reads_only_changed_files(self):
         with tempfile.TemporaryDirectory() as root:
@@ -59,7 +59,7 @@ class CompletionStateTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as root:
             store = Store(Path(root) / "state")
             try:
-                bridge = Bridge(store, {"user": "owner"}, {"completionNotice": "{状态}"})
+                bridge = Bridge(store, {"user": "owner"}, {"completionNotice": "{status}"})
                 bridge.state["context"] = "context"
                 bridge.backend_started = True
                 bridge.backend.proc = SimpleNamespace(returncode=None)
@@ -68,7 +68,7 @@ class CompletionStateTests(unittest.IsolatedAsyncioTestCase):
                 await bridge.deliver_answer("answer", notify_completion=True)
                 self.assertEqual(bridge.state["outbox"][-1]["text"], "空闲")
                 self.assertTrue(bridge.running)
-                self.assertEqual(bridge.prompt_fields()["状态"], "运行中")
+                self.assertEqual(bridge.prompt_fields()["status"], "运行中")
             finally:
                 store.lock.close()
 

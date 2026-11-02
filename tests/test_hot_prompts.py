@@ -20,14 +20,14 @@ class PromptCatalogueTests(unittest.TestCase):
                          dict(DEFAULT_PROMPTS))
 
     def test_single_pass_preserves_unknown_fields_and_literal_braces(self):
-        self.assertEqual(prompt_text("QUEUE_CONFIRMED", {"数量": "{模型}", "模型": "wrong"},
-            overrides={"QUEUE_CONFIRMED": "{{示例}} {数量} {未知}"}), "{示例} {模型} {未知}")
+        self.assertEqual(prompt_text("QUEUE_CONFIRMED", {"count": "{model}", "model": "wrong"},
+            overrides={"QUEUE_CONFIRMED": "{{example}} {count} {unknown}"}), "{example} {model} {unknown}")
 
     def test_invalid_overrides_cannot_add_expressions_or_unbounded_formatting(self):
         cases = [[], {"UNKNOWN_NAME": "text"}, {"STOP_IDLE": None},
-                 {"STOP_IDLE": "{"}, {"STOP_IDLE": "{模型.name}"},
-                 {"STOP_IDLE": "{模型[0]}"}, {"STOP_IDLE": "{模型!r}"},
-                 {"STOP_IDLE": "{模型:1000000000}"}, {"STOP_IDLE": "界" * 1001}]
+                 {"STOP_IDLE": "{"}, {"STOP_IDLE": "{model.name}"},
+                 {"STOP_IDLE": "{model[0]}"}, {"STOP_IDLE": "{model!r}"},
+                 {"STOP_IDLE": "{model:1000000000}"}, {"STOP_IDLE": "界" * 1001}]
         for value in cases:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_prompt_overrides(value, limit=TEXT_LIMIT_BYTES)
@@ -53,7 +53,7 @@ class HotPromptTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         self.path = root / "config.json"
-        self.config = {"prompts": {"STOP_IDLE": "idle {模型}"}}
+        self.config = {"prompts": {"STOP_IDLE": "idle {model}"}}
         self.write(self.config)
         self.store = Store(root / "state")
         self.bridge = Bridge(self.store, {"user": "owner"}, dict(self.config), config_path=self.path)
@@ -75,25 +75,25 @@ class HotPromptTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.bridge.backend, 'rpc', side_effect=AssertionError('unexpected RPC')):
             await self.bridge.control('/stop')
         self.assertEqual(self.bridge.state['outbox'][-1]['text'], 'idle model-x')
-        self.write({'prompts': {'STOP_IDLE': 'new idle {模型}'}})
+        self.write({'prompts': {'STOP_IDLE': 'new idle {model}'}})
         await self.bridge.control('/stop')
         self.assertEqual(self.bridge.state['outbox'][-1]['text'], 'new idle model-x')
         self.assertEqual(self.bridge.state['outbox'][0]['text'], 'idle model-x')
 
     async def test_queue_locals_override_shared_fields_and_default_returns_after_delete(self):
-        self.write({'prompts': {'QUEUE_CONFIRMED': '{数量} pending {模型}'}})
+        self.write({'prompts': {'QUEUE_CONFIRMED': '{count} pending {model}'}})
         await self.bridge.receive({'msgs': [{'message_id': 'queue', 'from_user_id': 'owner',
             'message_type': 1, 'context_token': 'context',
             'item_list': [{'type': 1, 'text_item': {'text': '/q task'}}]}]})
         self.assertEqual(self.bridge.state['outbox'][-1]['text'], '1 pending model-x')
         self.write({})
-        self.assertEqual(self.bridge.prompt('QUEUE_CONFIRMED', {'数量': 2, '单位': 'tasks'}),
+        self.assertEqual(self.bridge.prompt('QUEUE_CONFIRMED', {'count': 2, 'unit': 'tasks'}),
                          'Queue 2 tasks')
 
     async def test_invalid_file_retains_the_whole_previous_hot_snapshot(self):
         self.bridge.state['processingNotice'] = 'wechat override'
         self.write({'processingNotice': 'new', 'sourceHint': 'changed',
-                    'prompts': {'STOP_IDLE': '{模型.__class__}'}})
+                    'prompts': {'STOP_IDLE': '{model.__class__}'}})
         self.assertEqual(self.bridge.prompt('STOP_IDLE'), 'idle model-x')
         self.assertEqual(self.bridge.state['processingNotice'], 'wechat override')
         self.assertNotEqual(self.bridge.source_hint, 'changed')
@@ -115,7 +115,7 @@ class HotPromptTests(unittest.IsolatedAsyncioTestCase):
         self.write({'prompts': {'LABEL_MODEL': 'Model'}})
         await self.bridge.control('/s')
         self.assertIn('Model: model-x', self.bridge.state['outbox'][-1]['text'])
-        self.assertEqual(self.bridge.prompt_fields()['模型'], 'model-x')
+        self.assertEqual(self.bridge.prompt_fields()['model'], 'model-x')
 
     async def test_agent_text_and_old_output_are_never_reinterpreted_as_templates(self):
         self.write({'prompts': {'STOP_IDLE': 'replacement'}})

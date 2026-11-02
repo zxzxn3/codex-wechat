@@ -38,12 +38,12 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(bridge.sender())
         try:
             await asyncio.wait_for(reached.wait(), 1)
-            self.assertEqual(bridge.prompt_fields()["发送失败数"], 1)
+            self.assertEqual(bridge.prompt_fields()["send_failures"], 1)
             self.assertEqual(self.store.load("bridge")["consecutiveSendFailures"], 1)
             self.assertEqual(len(bridge.state["failedOutbox"]), 1)
             release.set()
             await asyncio.wait_for(bridge.outbox_drained.wait(), 1)
-            self.assertEqual(bridge.prompt_fields()["发送失败数"], 0)
+            self.assertEqual(bridge.prompt_fields()["send_failures"], 0)
             self.assertEqual(self.store.load("bridge")["consecutiveSendFailures"], 0)
             self.assertEqual(len(bridge.state["failedOutbox"]), 1)
         finally:
@@ -82,12 +82,12 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             bridge.enqueue([entry])
             bridge.fail_output(entry)
         self.assertEqual(len(bridge.state["failedOutbox"]), 20)
-        self.assertEqual(bridge.prompt_fields()["发送失败数"], 25)
+        self.assertEqual(bridge.prompt_fields()["send_failures"], 25)
         restore(bridge.state, {"thread": "other"})
         bridge.backend_name = "deepseek"
         bridge.save()
         restarted = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
-        self.assertEqual(restarted.prompt_fields()["发送失败数"], 25)
+        self.assertEqual(restarted.prompt_fields()["send_failures"], 25)
         self.assertEqual(len(restarted.state["failedOutbox"]), 20)
 
     async def test_legacy_history_is_preserved_without_inventing_a_counter(self):
@@ -96,5 +96,5 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         state["failedOutbox"] = [{"id": "historical"}]
         self.store.save("bridge", state)
         restored = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
-        self.assertEqual(restored.prompt_fields()["发送失败数"], 0)
+        self.assertEqual(restored.prompt_fields()["send_failures"], 0)
         self.assertEqual(restored.state["failedOutbox"], [{"id": "historical"}])

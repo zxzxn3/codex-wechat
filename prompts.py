@@ -11,12 +11,12 @@ COMPACT_STARTED = "正在压缩上下文..."
 COMPACT_FINISHED = "上下文压缩已结束。"
 COMPACT_INTERRUPTED = "上下文压缩已中断。"
 
-BACKEND_SUMMARY = "```\n后端: {当前}\n可用: {可用}\n```\n`/backend {{名称}}`"
-EFFORT_SUMMARY = "```\n强度: {当前}\n可选: {可选}\n```\n`/effort {{档位}}`"
-ACK_VIEW = "```\n接收提示: {模板}\n```\n`/ack text {{模板}}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
+BACKEND_SUMMARY = "```\n后端: {current}\n可用: {available}\n```\n`/backend {{名称}}`"
+EFFORT_SUMMARY = "```\n强度: {current}\n可选: {choices}\n```\n`/effort {{档位}}`"
+ACK_VIEW = "```\n接收提示: {template}\n```\n`/ack text {{模板}}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
 ACK_USAGE = "`/ack text {模板}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
-ACK_TOO_LONG = "未更新接收提示: 最多 {字节} 字节"
-WORKING_DIRECTORY = "目录: {目录}"
+ACK_TOO_LONG = "未更新接收提示: 最多 {max_bytes} 字节"
+WORKING_DIRECTORY = "目录: {cwd}"
 MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`\n`/sendvideo {路径}`"
 
 BLOCKED_NOTE = "等待桌面处理"
@@ -26,7 +26,7 @@ BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
 RESTART_STARTED = "正在重启消息桥..."
 RESTART_READY = "消息桥已重启。"
 RESTART_CONFIRM_UNSENT = "确认消息未能及时发送。"
-RESTART_FAILED = "重启未完成: {原因}"
+RESTART_FAILED = "重启未完成: {reason}"
 RESTART_NOT_SERVICE = "当前消息桥不是由用户服务启动。"
 
 STOP_REQUESTED = "已请求停止"
@@ -34,38 +34,40 @@ STOP_DEFERRED = "已请求停止，准备结束后生效"
 STOP_IDLE = "当前无运行任务"
 STOP_UNCONFIRMED = "停止未确认，任务可能仍在运行。请在桌面确认。"
 
-BACKEND_CONNECT_FAILED = "后端连接失败: {原因}\n正在重连，未提交的待办已保留。"
+BACKEND_CONNECT_FAILED = "后端连接失败: {reason}\n正在重连，未提交的待办已保留。"
 TASK_FAILED = "消息未提交: 后端处理失败。查看 `/status`。"
 TURN_FAILED = "任务未完成: Agent 执行失败。"
 TURN_INTERRUPTED = "任务已中断。"
 TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
 TURN_COMPLETED_EMPTY = "任务已完成，但没有文本结果。"
 UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
-QUEUED_STEER = "已排队，当前任务结束后处理。"
-QUEUE_CONFIRMED = "Queue {数量} {单位}"
-PING_REPLY = "WeChat ─{发送延迟}/{接收延迟}ms"
-PING_PARTIAL = "WeChat ─{延迟}"
-PING_ROUTE = "{通道}─ Bridge ─{供应商}─ Provider"
+QUEUED_STEER = "暂时无法追加，已转入排队。"
+QUEUE_CONFIRMED = "Queue {count} {unit}"
+UNQUEUE_CANCELLED = "已撤回。Queue {count} {unit}"
+UNQUEUE_EMPTY = "没有可撤回的排队消息。"
+PING_REPLY = "WeChat ─{ingress_ms}/{egress_ms}ms"
+PING_PARTIAL = "WeChat ─{latency}"
+PING_ROUTE = "{channel}─ Bridge ─{provider_latency}─ Provider"
 PING_USAGE = "用法: `/ping`"
 UNKNOWN_COMMAND = "未知指令，查看 `/help`"
-TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {数量} 个。\n请分开发送。"
-QUEUE_FULL = "拒绝接收: 排队消息已达 {数量} 条。\n请等待完成或使用 `/stop`。"
+TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {count} 个。\n请分开发送。"
+QUEUE_FULL = "拒绝接收: 排队消息已达 {count} 条。\n请等待完成或使用 `/stop`。"
 UNSUPPORTED_MESSAGE = (
     "消息未接收: 仅支持文字、语音转写、图片、视频和文件。\n"
-    "文字每条最多 {数量} 字符。"
+    "文字每条最多 {count} 字符。"
 )
 
 ATTACHMENT_INCOMING_FAILED = (
-    "附件处理失败: {原因}\n"
+    "附件处理失败: {reason}\n"
     "这条消息未交给 Agent。"
 )
 ATTACHMENT_QUEUED = "附件已排队"
 ATTACHMENT_SEND_FAILED = (
-    "附件未发出: {名称}\n"
-    "重试 {次数} 次仍失败，请稍后用 `/send` 重试。"
+    "附件未发出: {name}\n"
+    "重试 {attempts} 次仍失败，请稍后用 `/send` 重试。"
 )
-AUTO_ATTACHMENT_LIMIT = "附件未发送: 自动回传最多 {数量} 个，超出的已跳过。"
-AUTO_ATTACHMENT_FAILED = "附件未发送: {原因}{建议}"
+AUTO_ATTACHMENT_LIMIT = "附件未发送: 自动回传最多 {count} 个，超出的已跳过。"
+AUTO_ATTACHMENT_FAILED = "附件未发送: {reason}{hint}"
 AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 `/send {路径}`。"
 
 APPROVAL_ACCEPTED = "已同意"
@@ -91,10 +93,10 @@ COMMAND_FAILURE_LABELS = {
     "/ack": "未更新接收提示",
     "/finish": "未更新结束提示",
 }
-COMMAND_FAILURE = "{动作}: {原因}"
+COMMAND_FAILURE = "{action}: {reason}"
 
 SETTINGS_USAGE = "用法: `/settings [autostart on|off]`"
-BACKEND_INVALID = "未切换后端: 名称无效\n可用: {可用}"
+BACKEND_INVALID = "未切换后端: 名称无效\n可用: {available}"
 BACKEND_SESSION_BUSY = (
     "未切换后端: 目标后端的上次会话正在工作或等待处理。\n"
     "请先在电脑端处理。"
@@ -116,7 +118,7 @@ SESSION_USAGE = "用法: `/switch {编号或ID}`"
 NEW_USAGE = "用法: `/new`"
 MODEL_INVALID = "未切换模型: 名称无效\n请使用 `/model` 查看可用模型。"
 MODEL_NOT_IN_CATALOG = "未切换强度: 当前模型不在模型列表中。"
-EFFORT_INVALID = "未切换强度: 可选 {可选}"
+EFFORT_INVALID = "未切换强度: 可选 {choices}"
 DIRECTORY_INVALID = "未切换目录: 目录不存在或无法访问\n请检查路径后重试。"
 DIRECTORY_NOT_FOLDER = "未切换目录: 路径不是文件夹\n请选择文件夹。"
 RESTART_USAGE = "用法: `/restart`"
@@ -156,19 +158,19 @@ SESSION_SWITCHED = "已切换会话"
 BACKEND_SWITCHED = "已切换后端"
 NO_SESSIONS = "\n没有匹配的会话。"
 NO_MODELS = "暂无可用模型"
-SESSION_PAGE = "当前{当前页}/{总页数}页"
+SESSION_PAGE = "当前{page}/{total_pages}页"
 PAGE_INVALID = "页码必须大于 0"
-PAGE_RANGE = "页码超出范围: 1–{数量}"
+PAGE_RANGE = "页码超出范围: 1–{count}"
 SESSION_LIST_FAILED = "会话列表读取未完成，请重试。"
 COMPACT_BLOCKED = "暂不能压缩: 当前会话等待处理。"
 COMPACT_REQUESTED = "已请求压缩上下文。"
 AUTOSTART_FAILED = "自启设置未确认，请在电脑检查本项目的服务安装。"
-RESTART_REJECTED = "拒绝重启: {原因}"
-STOP_CLEARED = "\n已清空待办: {数量}"
+RESTART_REJECTED = "拒绝重启: {reason}"
+STOP_CLEARED = "\n已清空待办: {count}"
 ANSWER_ACCEPTED = "已回答。"
 ANSWER_EXPIRED = "问题已失效或编号无效。"
 ANSWER_FAILED = "回答投递结果未确认，请查看桌面；未自动重发。"
-SEND_FILE_FAILED = "附件未发送: {原因}\n请检查路径后重试。"
+SEND_FILE_FAILED = "附件未发送: {reason}\n请检查路径后重试。"
 REPLY_SEND_FAILED = "这条回复未能完整发送，已停止其余部分。请在桌面查看。"
 INPUT_RECOVERED = "上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。"
 INPUT_RESULT_INTERRUPTED = "任务已提交，但结果接收中断，未重新执行。"
@@ -176,17 +178,17 @@ CONTROL_QUEUE_FULL = "指令等待过多，请稍后重试。"
 CONTROL_TIMEOUT = "控制请求未确认，请查看 `/status`；不会自动重发。"
 CONTROL_FAILED = "指令未完成，请查看 `/status` 后重试。"
 GENERIC_FAILURE = "操作失败"
-COMMAND_USAGE = "用法: `{用法}`"
+COMMAND_USAGE = "用法: `{usage}`"
 AUTOSTART_CUSTOM_PATH = "自定义状态或配置路径不能交给默认服务，请自行管理服务。"
 AUTOSTART_BUSY = "首次启用自启需要移交后台服务，请等任务结束或用 /stop 停止后再试。"
 INPUT_SUBMISSION_UNCERTAIN = "消息提交结果未确认，未自动重发。"
 BACKEND_UNREADY = "后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。"
 RESULT_PREPARE_FAILED = "结果准备失败，请在桌面查看该轮回答。"
 PREPARATION_STOPPED = "已停止，未启动模型轮次。"
-QUOTA_WARNING = "限额提醒: {后端}\n{内容}"
-QUOTA_WARNING_BODY = "{标签}{窗口}剩余 {剩余}% (阈值 {阈值}%)"
+QUOTA_WARNING = "限额提醒: {backend}\n{content}"
+QUOTA_WARNING_BODY = "{label}{window}剩余 {remaining}% (阈值 {threshold}%)"
 WECHAT_AUTH_TITLE = "微信绑定已失效"
-WECHAT_REBIND_HINT = "重新绑定\n{命令}"
+WECHAT_REBIND_HINT = "重新绑定\n{command}"
 VALUE_ON = "开启"
 VALUE_OFF = "关闭"
 VALUE_UNAVAILABLE = "不可用"
@@ -198,7 +200,7 @@ LABEL_SCOPE = "范围"
 ACTION_APPROVE = "同意"
 ACTION_DENY = "拒绝"
 ANSWER_ARGUMENT = "选项或文字"
-ANSWER_OPTION_RANGE = "选项编号应为 1–{数量}；也可直接填写文字。"
+ANSWER_OPTION_RANGE = "选项编号应为 1–{count}；也可直接填写文字。"
 FINISH_VIEW = ACK_VIEW.replace("/ack", "/finish").replace("接收提示", "结束提示")
 FINISH_USAGE = ACK_USAGE.replace("/ack", "/finish")
 FINISH_TOO_LONG = ACK_TOO_LONG.replace("接收提示", "结束提示")
@@ -209,6 +211,7 @@ HELP_SESSIONS = '会话'
 HELP_NEW = '新建'
 HELP_COMPACT = '压缩当前会话上下文'
 HELP_QUEUE = '排队到当前任务结束后执行'
+HELP_UNQUEUE = '撤回最后一条尚未开始的排队消息'
 HELP_STOP = '停止并清空待办'
 HELP_PING = '微信与供应商网络延迟'
 HELP_SWITCH = '切换会话'
@@ -234,13 +237,14 @@ DEFAULT_PROMPTS = MappingProxyType({name: value for name, value in tuple(globals
 HELP_DESCRIPTIONS = {"/" + key[5:].lower(): value for key, value in DEFAULT_PROMPTS.items()
                      if key.startswith("HELP_")}
 _FORMATTER = Formatter()
+
 _FIELD_LABELS = {
-    "状态": "LABEL_STATUS", "后端": "LABEL_BACKEND", "会话": "LABEL_SESSION",
-    "模型": "LABEL_MODEL", "强度": "LABEL_EFFORT", "目录": "LABEL_CWD",
-    "提供方": "LABEL_PROVIDER", "权限": "LABEL_PERMISSIONS", "协作": "LABEL_COLLABORATION",
-    "服务": "LABEL_SERVICE", "Token": "LABEL_TOKENS", "上下文": "LABEL_CONTEXT",
-    "限额": "LABEL_LIMITS", "待办数": "LABEL_QUEUED", "审批数": "LABEL_APPROVALS",
-    "发送失败数": "LABEL_SEND_FAILURES",
+    "status": "LABEL_STATUS", "backend": "LABEL_BACKEND", "session": "LABEL_SESSION",
+    "model": "LABEL_MODEL", "effort": "LABEL_EFFORT", "cwd": "LABEL_CWD",
+    "provider": "LABEL_PROVIDER", "permissions": "LABEL_PERMISSIONS", "collaboration": "LABEL_COLLABORATION",
+    "connection": "LABEL_SERVICE", "token_usage": "LABEL_TOKENS", "context_usage": "LABEL_CONTEXT",
+    "rate_limits": "LABEL_LIMITS", "queue_depth": "LABEL_QUEUED", "pending_requests": "LABEL_APPROVALS",
+    "send_failures": "LABEL_SEND_FAILURES",
 }
 
 
@@ -270,18 +274,14 @@ def prompt_text(name, values=None, *, overrides=None):
     return "".join(parts)
 
 
-def fill(template, values):
-    """Fill named prompt fields without evaluating arbitrary expressions."""
-    return template.format_map(values)
-
-
 def render_ack(template, values):
-    """Render only the documented channel-delay placeholders."""
+    """Render documented snake_case fields once; unknown fields remain literal."""
     # One pass prevents a field value containing another placeholder from
     # triggering a second expansion. Unknown fields remain literal text.
-    return re.sub(r"\{([^{}]+)\}",
-                  lambda match: ("-" if values.get(match[1], match[0]) in (None, "暂不可用")
-                                 else str(values.get(match[1], match[0]))), template)
+    def replace(match):
+        value = values.get(match[1], match[0])
+        return "-" if value in (None, "暂不可用") else str(value)
+    return re.sub(r"\{([^{}]+)\}", replace, template)
 
 
 def effort_label(value):
@@ -388,11 +388,10 @@ def token_usage(value):
     total = value.get("total", {}) if isinstance(value, dict) else {}
     if not isinstance(total, dict) or total.get("totalTokens") is None:
         return "暂不可用"
-    return "{累计} total\n       {输入} input + {输出} output".format(
-        累计=token_count(total.get("totalTokens")),
-        输入=token_count(total.get("inputTokens")),
-        输出=token_count(total.get("outputTokens")),
-    )
+    total_count = token_count(total.get("totalTokens"))
+    input_count = token_count(total.get("inputTokens"))
+    output_count = token_count(total.get("outputTokens"))
+    return f"{total_count} total\n       {input_count} input + {output_count} output"
 
 
 def limit_duration(minutes):
@@ -508,33 +507,33 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
     context = context_usage(usage)
     remaining = re.match(r"剩余 (\d+%)", context)
     return {
-        "状态": status, "后端": backend, "会话": session_name(name),
-        "模型": model or "默认模型", "强度": effort_label(effort),
-        "目录": display_path(cwd), "提供方": provider_label(provider),
-        "权限": permission_label(sandbox=sandbox, approval=approval, reviewer=reviewer, profile=profile),
-        "协作": collaboration_label(collaboration), "服务": connection,
-        "待办数": queued, "审批数": pending, "发送失败数": failed,
-        "上下文": context, "上下文剩余": remaining[1] if remaining else "暂不可用",
-        "累计Token": token_count(total.get("totalTokens")),
-        "输入Token": token_count(total.get("inputTokens")),
-        "输出Token": token_count(total.get("outputTokens")),
-        "Token": token_usage(usage), "限额": rate_limit_label(rate_limits),
+        "status": status, "backend": backend, "session": session_name(name),
+        "model": model or "默认模型", "effort": effort_label(effort),
+        "cwd": display_path(cwd), "provider": provider_label(provider),
+        "permissions": permission_label(sandbox=sandbox, approval=approval, reviewer=reviewer, profile=profile),
+        "collaboration": collaboration_label(collaboration), "connection": connection,
+        "queue_depth": queued, "pending_requests": pending, "send_failures": failed,
+        "context_usage": context, "context_remaining": remaining[1] if remaining else "暂不可用",
+        "total_tokens": token_count(total.get("totalTokens")),
+        "input_tokens": token_count(total.get("inputTokens")),
+        "output_tokens": token_count(total.get("outputTokens")),
+        "token_usage": token_usage(usage), "rate_limits": rate_limit_label(rate_limits),
     }
 
 
 def status_from_fields(values, *, text=prompt_text):
     label = lambda key: text(_FIELD_LABELS[key])
     counts = "  ".join(f"{label(key)}: {values[key]}" for key in
-                       ("待办数", "审批数", "发送失败数")
+                       ("queue_depth", "pending_requests", "send_failures")
                        if values[key])
-    lines = [f"{label('状态')}: {values['状态']}", counts or None]
-    if values["后端"]:
-        lines.append(f"{label('后端')}: {values['后端']}")
-    lines.extend([f"{label('模型')}: {values['模型']} ({values['强度']})"])
+    lines = [f"{label('status')}: {values['status']}", counts or None]
+    if values["backend"]:
+        lines.append(f"{label('backend')}: {values['backend']}")
+    lines.extend([f"{label('model')}: {values['model']} ({values['effort']})"])
     lines.extend(f"{label(key)}: {values[key]}" for key in
-                 ("提供方", "目录", "权限", "协作", "会话", "服务"))
+                 ("provider", "cwd", "permissions", "collaboration", "session", "connection"))
     lines.append("")
-    lines.extend(f"{label(key)}: {values[key]}" for key in ("Token", "上下文", "限额"))
+    lines.extend(f"{label(key)}: {values[key]}" for key in ("token_usage", "context_usage", "rate_limits"))
     return panel(*lines)
 
 
@@ -599,8 +598,8 @@ def approval_actions(token, *, text=prompt_text):
 
 def ping_channel(fields, *, text=prompt_text):
     """Keep the compact pair; missing samples never acquire a time unit."""
-    inbound, outbound = fields["发送延迟"], fields["接收延迟"]
+    inbound, outbound = fields["ingress_ms"], fields["egress_ms"]
     if inbound != "-" and outbound != "-":
         return text("PING_REPLY", fields)
-    return text("PING_PARTIAL", {"延迟": "/".join(value + "ms" if value != "-" else "-"
+    return text("PING_PARTIAL", {"latency": "/".join(value + "ms" if value != "-" else "-"
                                                    for value in (inbound, outbound))})

@@ -25,6 +25,7 @@ COMMANDS = (
     Command("/new", "/new", HELP_DESCRIPTIONS['/new'], "managed", needs_backend=True, section="会话", handler="session"),
     Command("/compact", "/compact", HELP_DESCRIPTIONS['/compact'], "managed", needs_backend=True, section="会话", handler="session"),
     Command("/queue", "/queue {提示词}", HELP_DESCRIPTIONS['/queue'], route="input", aliases=("/q",)),
+    Command("/unqueue", "/unqueue", HELP_DESCRIPTIONS['/unqueue'], lane="urgent"),
     Command("/stop", "/stop", HELP_DESCRIPTIONS['/stop'], lane="urgent"),
     Command("/ping", "/ping", HELP_DESCRIPTIONS['/ping'], lane="probe", aliases=("/p",)),
     Command("/switch", "/switch {编号或ID}", HELP_DESCRIPTIONS['/switch'], "managed", needs_backend=True, section="会话", handler="session", required=True),

@@ -173,7 +173,7 @@ class Bridge:
         if notify:
             try:
                 await service_adapter.notify(self.prompt("WECHAT_AUTH_TITLE"),
-                                             self.prompt("WECHAT_REBIND_HINT", {"命令": command}))
+                                             self.prompt("WECHAT_REBIND_HINT", {"command": command}))
             except Exception:
                 print("微信绑定已失效；重新绑定\n" + wechat_auth.rebind_command(), file=sys.stderr)
 
@@ -187,8 +187,8 @@ class Bridge:
         messages = quota_warnings(records, payload, scope, self.notifications.quota_thresholds,
                                   text=self.prompt)
         for message in messages:
-            self.reply(self.prompt("QUOTA_WARNING", {"后端": backend_label(self.backend_name),
-                                                     "内容": message}), persist=False)
+            self.reply(self.prompt("QUOTA_WARNING", {"backend": backend_label(self.backend_name),
+                                                     "content": message}), persist=False)
         if messages or before != json.dumps(records, sort_keys=True):
             self.save()
 
@@ -251,7 +251,7 @@ class Bridge:
         )
         values.update(self.latency.values(ingress_ms))
         sample = self.latency.provider_sample
-        values["供应商延迟"] = (sample[1].removesuffix("ms")
+        values["provider_latency_ms"] = (sample[1].removesuffix("ms")
                               if sample and sample[0] == self.backend.connection_id
                               and sample[1].endswith("ms") else "-")
         return values
@@ -370,11 +370,11 @@ class Bridge:
                       kind=kind, chars=len(text), count=len(attachments))
             if queued and not text and not attachments:
                 self.reject_input(request_id, kind, "missing_argument")
-                self.reply(self.prompt("COMMAND_USAGE", {"用法": REGISTRY['/queue'].usage}),
+                self.reply(self.prompt("COMMAND_USAGE", {"usage": REGISTRY['/queue'].usage}),
                            request_id=request_id)
             elif len(attachments) > MAX_ATTACHMENTS:
                 self.reject_input(request_id, kind, "too_many_attachments")
-                self.reply(self.prompt("TOO_MANY_ATTACHMENTS", {"数量": MAX_ATTACHMENTS}),
+                self.reply(self.prompt("TOO_MANY_ATTACHMENTS", {"count": MAX_ATTACHMENTS}),
                            request_id=request_id)
             elif body_text.startswith("/") and not attachments and not queued:
                 received["request_id"] = request_id
@@ -384,7 +384,7 @@ class Bridge:
             elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
                     self.reject_input(request_id, kind, "queue_full")
-                    self.reply(self.prompt("QUEUE_FULL", {"数量": 20}), request_id=request_id)
+                    self.reply(self.prompt("QUEUE_FULL", {"count": 20}), request_id=request_id)
                 else:
                     self.state["inbox"].append({"id": identity, "text": text,
                                                "attachments": attachments, "mode": "queue" if queued else "steer",
@@ -393,13 +393,13 @@ class Bridge:
                                                "requestId": request_id})
                     if queued:
                         count = len(self.state["inbox"])
-                        self.reply(self.prompt("QUEUE_CONFIRMED", {"数量": count,
-                                                         "单位": "task" if count == 1 else "tasks"}),
+                        self.reply(self.prompt("QUEUE_CONFIRMED", {"count": count,
+                                                         "unit": "task" if count == 1 else "tasks"}),
                                    persist=False, request_id=request_id)
             else:
                 status = "too_long" if len(text) > 20000 else "unsupported"
                 self.reject_input(request_id, kind, status)
-                self.reply(self.prompt("UNSUPPORTED_MESSAGE", {"数量": 20000}),
+                self.reply(self.prompt("UNSUPPORTED_MESSAGE", {"count": 20000}),
                            request_id=request_id)
         self.state["seen"] = self.state["seen"][-2000:]
         if batch.get("get_updates_buf"):
@@ -530,7 +530,7 @@ class Bridge:
                     self.input_paused = True
                     reason = backend_reason(error)
                     if reason != reported:
-                        self.reply(self.prompt("BACKEND_CONNECT_FAILED", {"原因": reason}))
+                        self.reply(self.prompt("BACKEND_CONNECT_FAILED", {"reason": reason}))
                         reported = reason
                     if isinstance(error, BackendStartupError):
                         delay = error.retry_after

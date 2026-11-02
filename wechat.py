@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from errors import WeChatAuthExpired
 from diagnostics import error_fields, log_event
 from subprocess_io import communicate
+from latency import CURL_WRITE_OUT, curl_timings
 from platform_support import curl_command, subprocess_options
 import wechat_auth
 from wechat_auth import identity
@@ -76,10 +77,11 @@ class WeChat:
                 "--silent", "--show-error", "--proto", "=https",
                 "--connect-timeout", str(min(timeout, 10)), "--max-time", str(timeout),
                 "--max-filesize", str(16 * 1024 * 1024),
-                "--write-out", "\n%{http_code}", "--config", "-",
+                "--write-out", CURL_WRITE_OUT, "--config", "-",
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
-            output, _ = await communicate(proc, ("\n".join(config) + "\n").encode(), timeout=timeout + 2)
+                stderr=asyncio.subprocess.PIPE, **subprocess_options())
+            output, stderr = await communicate(proc, ("\n".join(config) + "\n").encode(), timeout=timeout + 2)
+            metadata.update(curl_timings(stderr))
             metadata["curl_code"] = proc.returncode
             if proc.returncode:
                 raise RuntimeError(f"微信网络请求失败（curl {proc.returncode}）")

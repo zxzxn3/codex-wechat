@@ -19,17 +19,12 @@ PID、创建时间、exe和回环监听归属；不抢占未知端口，不因Ap
 Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致不可见。源码和Linux mock
 不能证明Windows 5.1、任务、Job Object、App/CLI三端与真实微信都通过，具体覆盖以验收报告为准。
 
-## 本机延迟排查（2026-11-02）
+## 诊断与实机验证
 
-Windows 实机出现 curl 56/28，某次发送卡约 19.5 秒、重试约 534ms，后续正文因此排队。
-接收重试间隔上限改为 5 秒，保留 TLS 校验和系统默认的 IPv4/IPv6 自动选择。
-当时进程连接 IPv6 Fake-IP，但 IPv4/IPv6 的短请求都成功，不能据此认定 IPv6 是根因。
-用户随后表示卡顿暂未再出现；因无法证明因果，已撤销临时强制 IPv4，继续观察默认连接路径。
+结构化诊断位于 `%LOCALAPPDATA%\codex-wechat\logs\bridge.jsonl`，使用
+`codex-wechat.ps1 logs [-Follow]`；默认不显示原始控制台输出。加 `-Service` 才显示
+`service.log`，该文件未承诺脱敏。日志字段与网络计时定义见 [ARCHITECTURE](ARCHITECTURE.md)。
 
-结构化诊断写入`%LOCALAPPDATA%\codex-wechat\logs\bridge.jsonl`，可用
-`.\codex-wechat.ps1 logs [-Follow]`查看；字段白名单不记录正文、prompt、令牌、
-context token、文件名或绝对路径。supervisor和子进程控制台输出另存为`service.log`，
-需要时用`-Service`显式加入，且该输出未承诺脱敏；反馈问题时优先提供`bridge.jsonl`。
-发送延迟已补 create_time_ms 缺失时回退 update_time_ms/item 时间戳，但回退值只是估计，
-不能证明手机端真实发送时刻；Windows 需更新到该源码后生效，尚未实机验证。
-仅有语法、安装及上述实机观察，未执行单元测试。
+曾观察到curl56/28和发送积压，但尚无充分证据将根因归于IPv6；保留TLS校验、系统默认IP选择及现有代理入口。
+需要核对真实PowerShell5.1、字节锁、日志轮转、子进程取消、计划任务、Job Object、NotifyIcon及App/CLI共享；
+再由用户确认手机回复、语音/附件、重绑和重启。源码审查、Linux/mock测试及一次成功样本不能替代这些实机证据。

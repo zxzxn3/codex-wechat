@@ -45,7 +45,7 @@ async def switch(bridge, name):
                      if key.casefold() == str(name).casefold()), None)
     if resolved is None:
         available = " | ".join(backend_argument(key) for key in bridge.backend_configs)
-        raise UserFacingError(bridge.prompt("BACKEND_INVALID", {"可用": available}))
+        raise UserFacingError(bridge.prompt("BACKEND_INVALID", {"available": available}))
     name = resolved
     if name == bridge.backend_name and bridge.backend_started and bridge.loaded and bridge.backend.connected:
         return

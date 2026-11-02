@@ -137,15 +137,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         stats = Latency()
         stats.sends.append(50)
         values = stats.values(120)
-        self.assertEqual(values, {"发送延迟": "120", "接收延迟": "50"})
-        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, {"输入Token": "12.3K"}),
+        self.assertEqual(values, {"ingress_ms": "120", "egress_ms": "50"})
+        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, {"input_tokens": "12.3K"}),
                          "`IN < 12.3K`")
         self.assertEqual(render_ack(PING_REPLY, values), "WeChat ─120/50ms")
-        self.assertEqual(stats.values(), {"发送延迟": "-", "接收延迟": "50"})
+        self.assertEqual(stats.values(), {"ingress_ms": "-", "egress_ms": "50"})
 
     async def test_ack_text_controls_notice_without_switch(self):
         self.bridge.state["context"] = "context"
-        self.bridge.state["processingNotice"] = "{发送延迟}|{接收延迟}ms"
+        self.bridge.state["processingNotice"] = "{ingress_ms}|{egress_ms}ms"
         self.bridge.latency.sends.append(80)
         self.bridge.acknowledge({"ingress_ms": 120})
         self.assertEqual(self.store.load("bridge")["outbox"][-1]["text"], "120|80ms")
@@ -156,14 +156,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.acknowledge({"ingress_ms": 120})
         self.assertEqual(len(self.bridge.state["outbox"]), before)
 
-    async def test_legacy_latency_template_uses_split_default(self):
-        for legacy in ("{latency}", "::{发送延迟}/{接收延迟}ms::"):
-            config = {"processingNotice": {"enabled": False, "text": legacy}}
-            self.assertEqual(processing_template(config, {}), DEFAULT_ACK_TEMPLATE)
-        self.assertEqual(processing_template({"processingNotice": "`IN: {输入Token}`"}, {}),
-                         DEFAULT_ACK_TEMPLATE)
-        self.assertEqual(completion_template({}, {"completionNotice": "`OUT: {输出Token}`"}),
-                         DEFAULT_COMPLETION_TEMPLATE)
+    async def test_notice_templates_are_not_silently_rewritten(self):
+        self.assertEqual(processing_template({"processingNotice": "{model}"}, {}), "{model}")
+        self.assertEqual(completion_template({}, {"completionNotice": "{output_tokens}"}),
+                         "{output_tokens}")
         self.assertEqual(processing_template({}, {"processingNotice": ""}), "")
 
     async def test_user_prompt_formats(self):
@@ -180,8 +176,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE,
                                           completion_notice=DEFAULT_COMPLETION_TEMPLATE,
                                           attachment_mib=20),
-                         "```\n接收提示: `IN < {输入Token}`\n"
-                         "结束提示: `OUT > {输出Token}`\n附件上限: 20 MiB\n```")
+                         "```\n接收提示: `IN < {input_tokens}`\n"
+                         "结束提示: `OUT > {output_tokens}`\n附件上限: 20 MiB\n```")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",
@@ -211,7 +207,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         }
         self.bridge.backend.active = self.bridge.backend.new_turn(
             "thread", "turn", owned=False)
-        self.bridge.prompt_fields = lambda: {"状态": "运行中"}
+        self.bridge.prompt_fields = lambda: {"status": "运行中"}
 
         text = info(self.bridge, "已连接桌面会话")
 

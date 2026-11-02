@@ -19,6 +19,7 @@ import threading
 
 from platform_support import data_root
 from storage import locked_file
+from latency import NETWORK_TIMING_FIELDS
 
 APP_VERSION = "0.1.0"
 MAX_BYTES = 5 * 1024 * 1024
@@ -60,7 +61,7 @@ _NUMBER_FIELDS = {
     "bytes", "chars", "parts", "part", "http_status", "curl_code",
     "exit_code", "retry_in_ms", "threshold", "sample_ms", "pid",
     "message_type", "message_state",
-}
+} | NETWORK_TIMING_FIELDS
 _BOOL_FIELDS = {"ok", "connected"}
 
 

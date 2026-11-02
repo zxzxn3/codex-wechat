@@ -199,7 +199,7 @@ class InputDelivery:
                     bridge.state.pop("currentInput", None)
                     bridge.reply(bridge.prompt("INPUT_SUBMISSION_UNCERTAIN") if uncertain else
                                bridge.prompt("INPUT_RESULT_INTERRUPTED") if phase == InputPhase.ACCEPTED else
-                               bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"原因": attachment_reason(error)})
+                               bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"reason": attachment_reason(error)})
                                if isinstance(error, MediaError) else bridge.prompt("TASK_FAILED"),
                                request_id=job.get("requestId"))
                     log_event("input.failed", level="warning", component="input",
@@ -299,7 +299,7 @@ class InputDelivery:
                     bridge.state["inbox"] = [item for item in bridge.state["inbox"] if item is not job]
                     bridge.save()
                     bridge.reply(bridge.prompt("UNCERTAIN_STEER") if uncertain else
-                               bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"原因": attachment_reason(error)})
+                               bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"reason": attachment_reason(error)})
                                if isinstance(error, MediaError) else bridge.prompt("TASK_FAILED"),
                                request_id=job.get("requestId"))
                     log_event("input.steer_failed", level="warning", component="input",

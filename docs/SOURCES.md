@@ -20,6 +20,11 @@ App 共享路径明确配置，不能在失败时静默换为独立后台。
 
 item/completed 提供完整 agentMessage；commentary/partial_answer 可即时转发，final_answer
 在轮次收口，reasoning/工具输出不混入聊天。原生请求仅回答本连接收到的部分。
+CLI 0.166.0 的公开schema确认 agentMessage 可带 `delivery=async` 与结构化 `questions`
+（`title`、字符串 `options`）；本机 App 26.1027.51404 用
+`<send_user_message_question_reply>` 包裹逐题答案并通过当前轮次补充输入提交。
+该包装和字段组合是版本相关客户端约定，未作为稳定公开协议承诺；桥接不从Agent正文
+推断题目。连接/会话/轮次变化或桌面已提交答案时，内存中的未答提示失效。
 clientUserMessageId、原生queue、settings字段存在不构成持久幂等、跨客户端所有权或工具隔离保证；
 未证明等价前不替换微信交付层。现有显式设置仍使用已采用的resume覆盖，不做隐式重放。
 

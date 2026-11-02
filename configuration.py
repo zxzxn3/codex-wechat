@@ -1,4 +1,4 @@
-"""Local settings and legacy migrations, independent of presentation."""
+"""Local configuration and atomic hot-setting reloads."""
 from dataclasses import dataclass
 from pathlib import Path
 import json
@@ -8,10 +8,8 @@ from prompts import validate_prompt_overrides
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
                    "compactionNotice", "quotaWarningThresholds", "prompts")
-DEFAULT_COMPLETION_TEMPLATE = "`OUT > {输出Token}`"
-DEFAULT_ACK_TEMPLATE = "`IN < {输入Token}`"
-LEGACY_COMPLETION_TEMPLATE = "`OUT: {输出Token}`"
-LEGACY_ACK_TEMPLATES = ("{latency}", "::{发送延迟}/{接收延迟}ms::", "`IN: {输入Token}`")
+DEFAULT_COMPLETION_TEMPLATE = "`OUT > {output_tokens}`"
+DEFAULT_ACK_TEMPLATE = "`IN < {input_tokens}`"
 TEXT_LIMIT_BYTES = 3000
 
 
@@ -22,7 +20,7 @@ class ConfigurationError(ValueError):
 @dataclass(frozen=True)
 class Notifications:
     compaction: bool = False
-    quota_thresholds: tuple[int, ...] = (50, 25, 5)
+    quota_thresholds: tuple[int, ...] = (50, 25, 5, 1)
 
     @classmethod
     def from_config(cls, config):
@@ -82,8 +80,6 @@ def processing_template(config, state):
             text = source
         elif isinstance(source, dict) and source.get("text") is not None:
             text = source["text"]
-    if text in LEGACY_ACK_TEMPLATES:
-        return DEFAULT_ACK_TEMPLATE
     return str(text)
 
 
@@ -93,7 +89,7 @@ def completion_template(config, state):
         if isinstance(source, str):
             text = source
             break
-    return DEFAULT_COMPLETION_TEMPLATE if text == LEGACY_COMPLETION_TEMPLATE else text
+    return text
 
 
 class ConfigLoader:

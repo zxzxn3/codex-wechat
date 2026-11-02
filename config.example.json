@@ -1,7 +1,7 @@
 {
   "sourceHint": "[User from WeChat.]",
   "prompts": {},
-  "processingNotice": "`IN < {输入Token}`",
+  "processingNotice": "`IN < {input_tokens}`",
   "backends": {
     "codex": {
       "env": {},
@@ -16,6 +16,7 @@
   "quotaWarningThresholds": [
     50,
     25,
-    5
+    5,
+    1
   ]
 }

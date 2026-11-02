@@ -50,8 +50,8 @@ def quota_warnings(records, payload, scope, thresholds, *, now=None, text=prompt
                     warned.update(crossed)
                     duration = limit_duration(value.get("windowDurationMins")) or window
                     label = f"{snapshot.get('limitName') or bucket} " if len(buckets) > 1 else ""
-                    messages.append(text("QUOTA_WARNING_BODY", {"标签": label, "窗口": duration,
-                                    "剩余": f"{remaining:g}", "阈值": min(crossed)}))
+                    messages.append(text("QUOTA_WARNING_BODY", {"label": label, "window": duration,
+                                    "remaining": f"{remaining:g}", "threshold": min(crossed)}))
             # First available sample is a baseline, not a replay of past warnings.
             records[key] = {"remaining": remaining, "reset": reset, "warned": sorted(warned)}
     while len(records) > 64:
