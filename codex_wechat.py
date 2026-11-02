@@ -329,12 +329,25 @@ class Bridge:
         controls = []
         for msg in batch.get("msgs", []):
             request_id = new_request_id()
-            if (msg.get("from_user_id") != self.account["user"] or msg.get("group_id")
-                    or msg.get("message_type") != 1):
+            if msg.get("from_user_id") != self.account["user"] or msg.get("group_id"):
                 continue
             # Use item IDs as the protocol fallback; hash only when every ID is absent.
             identity = message_key(msg) or hashlib.sha256(
                 json.dumps(msg, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            # Describe transport shape only, including messages skipped before routing.
+            # No body, IDs, context tokens or media references enter diagnostics.
+            kinds = {item.get("type") for item in msg.get("item_list", [])
+                     if isinstance(item, dict) and isinstance(item.get("type"), int)}
+            skip = ("unsupported_type" if msg.get("message_type") != 1 else
+                    "missing_context" if not msg.get("context_token") else
+                    "duplicate" if identity in self.state["seen"] else "eligible")
+            log_event("input.observed", component="input", request_id=request_id,
+                      status=skip, message_type=msg.get("message_type"),
+                      message_state=msg.get("message_state"),
+                      kind="voice" if 3 in kinds else "text" if 1 in kinds else "other",
+                      chars=len(message_text(msg)), count=len(msg.get("item_list", [])))
+            if msg.get("message_type") != 1:
+                continue
             if not msg.get("context_token"):
                 # Cannot safely reply without a context token; don't execute.
                 continue
