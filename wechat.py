@@ -19,6 +19,8 @@ from wechat_auth import identity
 
 BASE_URL = "https://ilinkai.weixin.qq.com"
 VERSION = "0.1.0"
+SEND_TIMEOUT = 5
+TYPING_TIMEOUT = 2
 
 
 @dataclass(frozen=True)
@@ -139,13 +141,13 @@ class WeChat:
             "context_token": entry["context"],
             "item_list": [entry["item"]] if "item" in entry else
                          [{"type": 1, "text_item": {"text": entry["text"]}}]}},
-            request_id=entry.get("requestId"))
+            timeout=SEND_TIMEOUT, request_id=entry.get("requestId"))
 
     async def typing_ticket(self, user, context=None):
         body = {"ilink_user_id": user}
         if context:
             body["context_token"] = context
-        result = await self.request("ilink/bot/getconfig", body, timeout=10)
+        result = await self.request("ilink/bot/getconfig", body, timeout=TYPING_TIMEOUT)
         ticket = result.get("typing_ticket")
         return ticket if isinstance(ticket, str) else ""
 
@@ -154,7 +156,7 @@ class WeChat:
             "ilink_user_id": user,
             "typing_ticket": ticket,
             "status": status,
-        }, timeout=10)
+        }, timeout=TYPING_TIMEOUT)
 
 
 def print_qr(url):

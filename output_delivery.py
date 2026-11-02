@@ -25,6 +25,7 @@ from prompts import (
 )
 
 SEND_ATTEMPTS = 3
+SEND_RETRY_SECONDS = 1
 
 class OutputDelivery:
     def __init__(self, bridge):
@@ -243,11 +244,11 @@ class OutputDelivery:
                 bridge.save()
                 log_event("output.send_failed", level="warning", component="output",
                           role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
-                          retry_in_ms=5000, job_id=entry.get("group"),
+                          retry_in_ms=SEND_RETRY_SECONDS * 1000, job_id=entry.get("group"),
                           request_id=entry.get("requestId"),
                           **error_fields(error))
                 print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
-                await asyncio.sleep(5)
+                await asyncio.sleep(SEND_RETRY_SECONDS)
                 continue
             bridge.state["outbox"].pop(0)
             bridge.state["consecutiveSendFailures"] = 0

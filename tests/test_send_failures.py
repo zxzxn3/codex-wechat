@@ -3,6 +3,7 @@ import asyncio
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from codex_wechat import Bridge
 from profiles import restore
@@ -48,6 +49,30 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+    async def test_retry_diagnostic_matches_configured_wait(self):
+        bridge = self.bridge
+        bridge.reply("answer")
+        calls = 0
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("simulated channel failure")
+
+        bridge.channel.send = send
+        with (patch("output_delivery.log_event") as log_event,
+              patch("output_delivery.SEND_RETRY_SECONDS", 0)):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                await asyncio.wait_for(bridge.outbox_drained.wait(), 1)
+                failed = next(call for call in log_event.call_args_list
+                              if call.args and call.args[0] == "output.send_failed")
+                self.assertEqual(failed.kwargs["retry_in_ms"], 0)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     async def test_failure_count_is_not_capped_or_reset_by_session_or_restart(self):
         bridge = self.bridge

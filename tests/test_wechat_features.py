@@ -10,7 +10,7 @@ from codex_wechat import Bridge
 from command_specs import REGISTRY
 from media import Media, split_answer
 from storage import Store
-from wechat import WeChat
+from wechat import SEND_TIMEOUT, TYPING_TIMEOUT, WeChat
 from wechat_content import remember_quote
 
 
@@ -115,9 +115,19 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.args[0], "ilink/bot/getconfig")
         self.assertEqual(first.args[1],
                          {"ilink_user_id": "owner", "context_token": "context"})
+        self.assertEqual(first.kwargs["timeout"], TYPING_TIMEOUT)
         self.assertEqual(second.args[0], "ilink/bot/sendtyping")
         self.assertEqual(second.args[1],
                          {"ilink_user_id": "owner", "typing_ticket": "ticket", "status": 1})
+        self.assertEqual(second.kwargs["timeout"], TYPING_TIMEOUT)
+
+    async def test_send_message_uses_short_timeout(self):
+        client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
+        client.request = AsyncMock(return_value={"ret": 0})
+        await client.send({
+            "id": "client", "user": "owner", "context": "context", "text": "answer",
+        })
+        self.assertEqual(client.request.await_args.kwargs["timeout"], SEND_TIMEOUT)
 
     async def test_video_snapshot_and_upload_item(self):
         with tempfile.TemporaryDirectory() as source:
