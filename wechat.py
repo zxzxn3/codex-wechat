@@ -17,6 +17,7 @@ from wechat_auth import identity
 
 BASE_URL = "https://ilinkai.weixin.qq.com"
 VERSION = "0.1.0"
+POLL_TIMEOUT = 10
 SEND_TIMEOUT = 5
 TYPING_TIMEOUT = 2
 
@@ -122,7 +123,8 @@ class WeChat:
                       file=sys.stderr, flush=True)
 
     async def poll(self, cursor):
-        return await self.request("ilink/bot/getupdates", {"get_updates_buf": cursor})
+        return await self.request("ilink/bot/getupdates", {"get_updates_buf": cursor},
+                                  timeout=POLL_TIMEOUT)
 
     async def send(self, entry):
         return await self.request("ilink/bot/sendmessage", {"msg": {
