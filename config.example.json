@@ -1,5 +1,6 @@
 {
   "sourceHint": "[User from WeChat.]",
+  "prompts": {},
   "processingNotice": "`IN < {输入Token}`",
   "backends": {
     "codex": {

@@ -1,5 +1,6 @@
 """One catalog for command routing, scheduling, aliases and help."""
 from dataclasses import dataclass
+from prompts import HELP_DESCRIPTIONS, prompt_text
 
 
 @dataclass(frozen=True)
@@ -18,31 +19,31 @@ class Command:
 
 
 COMMANDS = (
-    Command("/status", "/status", "当前状态", lane="local", aliases=("/s",)),
-    Command("/settings", "/settings [autostart on|off]", "查看设置或修改登录自启", "managed", "local", section="设置"),
-    Command("/sessions", "/sessions {页码}", "会话", "managed", needs_backend=True, section="会话"),
-    Command("/new", "/new", "新建", "managed", needs_backend=True, section="会话", handler="session"),
-    Command("/compact", "/compact", "压缩当前会话上下文", "managed", needs_backend=True, section="会话", handler="session"),
-    Command("/queue", "/queue {提示词}", "排队到当前任务结束后执行", route="input", aliases=("/q",)),
-    Command("/stop", "/stop", "停止并清空待办", lane="urgent"),
-    Command("/ping", "/ping", "微信与供应商网络延迟", lane="probe", aliases=("/p",)),
-    Command("/switch", "/switch {编号或ID}", "切换会话", "managed", needs_backend=True, section="会话", handler="session", required=True),
-    Command("/backend", "/backend {名称}", "查看或切换后端", "managed", section="会话", query_local=True),
-    Command("/model", "/model {编号或名称}", "查看或切换模型", "managed",
+    Command("/status", "/status", HELP_DESCRIPTIONS['/status'], lane="local", aliases=("/s",)),
+    Command("/settings", "/settings [autostart on|off]", HELP_DESCRIPTIONS['/settings'], "managed", "local", section="设置"),
+    Command("/sessions", "/sessions {页码}", HELP_DESCRIPTIONS['/sessions'], "managed", needs_backend=True, section="会话"),
+    Command("/new", "/new", HELP_DESCRIPTIONS['/new'], "managed", needs_backend=True, section="会话", handler="session"),
+    Command("/compact", "/compact", HELP_DESCRIPTIONS['/compact'], "managed", needs_backend=True, section="会话", handler="session"),
+    Command("/queue", "/queue {提示词}", HELP_DESCRIPTIONS['/queue'], route="input", aliases=("/q",)),
+    Command("/stop", "/stop", HELP_DESCRIPTIONS['/stop'], lane="urgent"),
+    Command("/ping", "/ping", HELP_DESCRIPTIONS['/ping'], lane="probe", aliases=("/p",)),
+    Command("/switch", "/switch {编号或ID}", HELP_DESCRIPTIONS['/switch'], "managed", needs_backend=True, section="会话", handler="session", required=True),
+    Command("/backend", "/backend {名称}", HELP_DESCRIPTIONS['/backend'], "managed", section="会话", query_local=True),
+    Command("/model", "/model {编号或名称}", HELP_DESCRIPTIONS['/model'], "managed",
             needs_backend=True, aliases=("/m",), section="设置"),
-    Command("/effort", "/effort {档位}", "查看或切换强度", "managed", needs_backend=True, section="设置", handler="session", aliases=("/e",)),
-    Command("/cwd", "/cwd {路径}", "查看或切换目录", "managed", needs_backend=True, section="设置", query_local=True),
-    Command("/ack", "/ack [text {模板}|fields]", "接收提示；空模板关闭", "managed", "local", section="设置", handler="notice"),
-    Command("/finish", "/finish [text {模板}|fields]", "结束提示；空模板关闭", "managed", "local", section="设置", handler="notice"),
-    Command("/approve", "/approve {编号}", "同意审批", lane="urgent", section="审批", handler="approval", required=True),
-    Command("/deny", "/deny {编号}", "拒绝审批", lane="urgent", section="审批", handler="approval", required=True),
-    Command("/answer", "/answer {问题编号} {选项或文字}", "回答原生提问", lane="urgent", required=True),
-    Command("/send", "/send {路径}", "回传文件、图片或视频", lane="media", section="附件", handler="send"),
-    Command("/sendfile", "/sendfile {路径}", "作为文件回传", lane="media", section="附件", handler="send"),
-    Command("/sendimage", "/sendimage {路径}", "作为图片回传", lane="media", section="附件", handler="send"),
-    Command("/sendvideo", "/sendvideo {路径}", "作为视频回传", lane="media", section="附件", handler="send"),
-    Command("/restart", "/restart", "重启消息桥", lane="local"),
-    Command("/help", "/help", "命令说明", lane="local", aliases=("/h",)),
+    Command("/effort", "/effort {档位}", HELP_DESCRIPTIONS['/effort'], "managed", needs_backend=True, section="设置", handler="session", aliases=("/e",)),
+    Command("/cwd", "/cwd {路径}", HELP_DESCRIPTIONS['/cwd'], "managed", needs_backend=True, section="设置", query_local=True),
+    Command("/ack", "/ack [text {模板}|fields]", HELP_DESCRIPTIONS['/ack'], "managed", "local", section="设置", handler="notice"),
+    Command("/finish", "/finish [text {模板}|fields]", HELP_DESCRIPTIONS['/finish'], "managed", "local", section="设置", handler="notice"),
+    Command("/approve", "/approve {编号}", HELP_DESCRIPTIONS['/approve'], lane="urgent", section="审批", handler="approval", required=True),
+    Command("/deny", "/deny {编号}", HELP_DESCRIPTIONS['/deny'], lane="urgent", section="审批", handler="approval", required=True),
+    Command("/answer", "/answer {问题编号} {选项或文字}", HELP_DESCRIPTIONS['/answer'], lane="urgent", required=True),
+    Command("/send", "/send {路径}", HELP_DESCRIPTIONS['/send'], lane="media", section="附件", handler="send"),
+    Command("/sendfile", "/sendfile {路径}", HELP_DESCRIPTIONS['/sendfile'], lane="media", section="附件", handler="send"),
+    Command("/sendimage", "/sendimage {路径}", HELP_DESCRIPTIONS['/sendimage'], lane="media", section="附件", handler="send"),
+    Command("/sendvideo", "/sendvideo {路径}", HELP_DESCRIPTIONS['/sendvideo'], lane="media", section="附件", handler="send"),
+    Command("/restart", "/restart", HELP_DESCRIPTIONS['/restart'], lane="local"),
+    Command("/help", "/help", HELP_DESCRIPTIONS['/help'], lane="local", aliases=("/h",)),
 )
 CONTROL_LANES = tuple(dict.fromkeys(spec.lane for spec in COMMANDS if spec.route != "input"))
 REGISTRY = {}
@@ -53,8 +54,8 @@ for spec in COMMANDS:
         REGISTRY[name] = spec
 
 
-def help_text():
-    return "\n".join(f"`{spec.usage}` {spec.description}" +
+def help_text(*, text=prompt_text):
+    return "\n".join(f"`{spec.usage}` {text('HELP_' + spec.name[1:].upper())}" +
                      (" " + " ".join(f"`{alias}`" for alias in spec.aliases) if spec.aliases else "")
                      for spec in COMMANDS)
 

@@ -3,10 +3,10 @@ import json
 import math
 import time
 
-from prompts import limit_duration
+from prompts import limit_duration, prompt_text
 
 
-def quota_warnings(records, payload, scope, thresholds, *, now=None):
+def quota_warnings(records, payload, scope, thresholds, *, now=None, text=prompt_text):
     if not thresholds or not isinstance(payload, dict):
         return []
     now = time.time() if now is None else now
@@ -50,7 +50,8 @@ def quota_warnings(records, payload, scope, thresholds, *, now=None):
                     warned.update(crossed)
                     duration = limit_duration(value.get("windowDurationMins")) or window
                     label = f"{snapshot.get('limitName') or bucket} " if len(buckets) > 1 else ""
-                    messages.append(f"{label}{duration}剩余 {remaining:g}% (阈值 {min(crossed)}%)")
+                    messages.append(text("QUOTA_WARNING_BODY", {"标签": label, "窗口": duration,
+                                    "剩余": f"{remaining:g}", "阈值": min(crossed)}))
             # First available sample is a baseline, not a replay of past warnings.
             records[key] = {"remaining": remaining, "reset": reset, "warned": sorted(warned)}
     while len(records) > 64:

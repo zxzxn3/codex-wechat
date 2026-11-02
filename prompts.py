@@ -2,6 +2,8 @@
 from datetime import datetime
 import os
 import re
+from string import Formatter
+from types import MappingProxyType
 
 
 MAX_NOTICE_BYTES = 1000
@@ -33,24 +35,17 @@ STOP_IDLE = "当前无运行任务"
 STOP_UNCONFIRMED = "停止未确认，任务可能仍在运行。请在桌面确认。"
 
 BACKEND_CONNECT_FAILED = "后端连接失败: {原因}\n正在重连，未提交的待办已保留。"
-SESSION_RESTORE_FAILED = (
-    "会话恢复失败: {原因}\n"
-    "使用 `/backend` 切换后端，或稍后重试。"
-)
 TASK_FAILED = "消息未提交: 后端处理失败。查看 `/status`。"
 TURN_FAILED = "任务未完成: Agent 执行失败。"
 TURN_INTERRUPTED = "任务已中断。"
 TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
 TURN_COMPLETED_EMPTY = "任务已完成，但没有文本结果。"
-INTERRUPTED_TASK = (
-    "上次任务在等待结果时中断。\n"
-    "没有自动重放，电脑端可能仍在执行。\n"
-    "请使用 `/status` 确认。"
-)
 UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
 QUEUED_STEER = "已排队，当前任务结束后处理。"
 QUEUE_CONFIRMED = "Queue {数量} {单位}"
 PING_REPLY = "WeChat ─{发送延迟}/{接收延迟}ms"
+PING_PARTIAL = "WeChat ─{延迟}"
+PING_ROUTE = "{通道}─ Bridge ─{供应商}─ Provider"
 PING_USAGE = "用法: `/ping`"
 UNKNOWN_COMMAND = "未知指令，查看 `/help`"
 TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {数量} 个。\n请分开发送。"
@@ -125,6 +120,154 @@ EFFORT_INVALID = "未切换强度: 可选 {可选}"
 DIRECTORY_INVALID = "未切换目录: 目录不存在或无法访问\n请检查路径后重试。"
 DIRECTORY_NOT_FOLDER = "未切换目录: 路径不是文件夹\n请选择文件夹。"
 RESTART_USAGE = "用法: `/restart`"
+
+# All uppercase string constants in this module are overrideable presentation text.
+# Protocol identifiers, command routing and user/model content do not belong here.
+LABEL_STATUS = "状态"
+LABEL_BACKEND = "后端"
+LABEL_SESSION = "会话"
+LABEL_MODEL = "模型"
+LABEL_EFFORT = "强度"
+LABEL_CWD = "目录"
+LABEL_PROVIDER = "提供方"
+LABEL_PERMISSIONS = "权限"
+LABEL_COLLABORATION = "协作"
+LABEL_SERVICE = "服务"
+LABEL_TOKENS = "Token"
+LABEL_CONTEXT = "上下文"
+LABEL_LIMITS = "限额"
+LABEL_QUEUED = "待办"
+LABEL_APPROVALS = "审批"
+LABEL_SEND_FAILURES = "发送失败"
+LABEL_ACK = "接收提示"
+LABEL_FINISH = "结束提示"
+LABEL_AUTOSTART = "自启"
+LABEL_ATTACHMENTS = "附件上限"
+LABEL_SLICING = "切片"
+LABEL_TARGET_LENGTH = "目标长度"
+LABEL_SOURCE = "来源说明"
+LABEL_COMPACTION = "压缩提示"
+LABEL_QUOTA_WARNING = "限额警告"
+CURRENT_SESSION = "当前会话"
+SESSION_DESKTOP = "已连接桌面会话"
+SESSION_RESTORED = "已恢复会话"
+SESSION_CREATED = "已新建会话"
+SESSION_SWITCHED = "已切换会话"
+BACKEND_SWITCHED = "已切换后端"
+NO_SESSIONS = "\n没有匹配的会话。"
+NO_MODELS = "暂无可用模型"
+SESSION_PAGE = "当前{当前页}/{总页数}页"
+PAGE_INVALID = "页码必须大于 0"
+PAGE_RANGE = "页码超出范围: 1–{数量}"
+SESSION_LIST_FAILED = "会话列表读取未完成，请重试。"
+COMPACT_BLOCKED = "暂不能压缩: 当前会话等待处理。"
+COMPACT_REQUESTED = "已请求压缩上下文。"
+AUTOSTART_FAILED = "自启设置未确认，请在电脑检查本项目的服务安装。"
+RESTART_REJECTED = "拒绝重启: {原因}"
+STOP_CLEARED = "\n已清空待办: {数量}"
+ANSWER_ACCEPTED = "已回答。"
+ANSWER_EXPIRED = "问题已失效或编号无效。"
+ANSWER_FAILED = "回答投递结果未确认，请查看桌面；未自动重发。"
+SEND_FILE_FAILED = "附件未发送: {原因}\n请检查路径后重试。"
+REPLY_SEND_FAILED = "这条回复未能完整发送，已停止其余部分。请在桌面查看。"
+INPUT_RECOVERED = "上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。"
+INPUT_RESULT_INTERRUPTED = "任务已提交，但结果接收中断，未重新执行。"
+CONTROL_QUEUE_FULL = "指令等待过多，请稍后重试。"
+CONTROL_TIMEOUT = "控制请求未确认，请查看 `/status`；不会自动重发。"
+CONTROL_FAILED = "指令未完成，请查看 `/status` 后重试。"
+GENERIC_FAILURE = "操作失败"
+COMMAND_USAGE = "用法: `{用法}`"
+AUTOSTART_CUSTOM_PATH = "自定义状态或配置路径不能交给默认服务，请自行管理服务。"
+AUTOSTART_BUSY = "首次启用自启需要移交后台服务，请等任务结束或用 /stop 停止后再试。"
+INPUT_SUBMISSION_UNCERTAIN = "消息提交结果未确认，未自动重发。"
+BACKEND_UNREADY = "后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。"
+RESULT_PREPARE_FAILED = "结果准备失败，请在桌面查看该轮回答。"
+PREPARATION_STOPPED = "已停止，未启动模型轮次。"
+QUOTA_WARNING = "限额提醒: {后端}\n{内容}"
+QUOTA_WARNING_BODY = "{标签}{窗口}剩余 {剩余}% (阈值 {阈值}%)"
+WECHAT_AUTH_TITLE = "微信绑定已失效"
+WECHAT_REBIND_HINT = "重新绑定\n{命令}"
+VALUE_ON = "开启"
+VALUE_OFF = "关闭"
+VALUE_UNAVAILABLE = "不可用"
+APPROVAL_COMMAND_TITLE = "审批: 执行命令"
+APPROVAL_FILE_TITLE = "审批: 修改文件"
+LABEL_COMMAND = "命令"
+LABEL_REASON = "原因"
+LABEL_SCOPE = "范围"
+ACTION_APPROVE = "同意"
+ACTION_DENY = "拒绝"
+ANSWER_ARGUMENT = "选项或文字"
+ANSWER_OPTION_RANGE = "选项编号应为 1–{数量}；也可直接填写文字。"
+FINISH_VIEW = ACK_VIEW.replace("/ack", "/finish").replace("接收提示", "结束提示")
+FINISH_USAGE = ACK_USAGE.replace("/ack", "/finish")
+FINISH_TOO_LONG = ACK_TOO_LONG.replace("接收提示", "结束提示")
+
+HELP_STATUS = '当前状态'
+HELP_SETTINGS = '查看设置或修改登录自启'
+HELP_SESSIONS = '会话'
+HELP_NEW = '新建'
+HELP_COMPACT = '压缩当前会话上下文'
+HELP_QUEUE = '排队到当前任务结束后执行'
+HELP_STOP = '停止并清空待办'
+HELP_PING = '微信与供应商网络延迟'
+HELP_SWITCH = '切换会话'
+HELP_BACKEND = '查看或切换后端'
+HELP_MODEL = '查看或切换模型'
+HELP_EFFORT = '查看或切换强度'
+HELP_CWD = '查看或切换目录'
+HELP_ACK = '接收提示；空模板关闭'
+HELP_FINISH = '结束提示；空模板关闭'
+HELP_APPROVE = '同意审批'
+HELP_DENY = '拒绝审批'
+HELP_ANSWER = '回答原生提问'
+HELP_SEND = '回传文件、图片或视频'
+HELP_SENDFILE = '作为文件回传'
+HELP_SENDIMAGE = '作为图片回传'
+HELP_SENDVIDEO = '作为视频回传'
+HELP_RESTART = '重启消息桥'
+HELP_HELP = '命令说明'
+
+DEFAULT_PROMPTS = MappingProxyType({name: value for name, value in tuple(globals().items())
+                                  if name.isupper() and isinstance(value, str)} |
+    {"FAILURE_" + command[1:].upper(): message for command, message in COMMAND_FAILURE_LABELS.items()})
+HELP_DESCRIPTIONS = {"/" + key[5:].lower(): value for key, value in DEFAULT_PROMPTS.items()
+                     if key.startswith("HELP_")}
+_FORMATTER = Formatter()
+_FIELD_LABELS = {
+    "状态": "LABEL_STATUS", "后端": "LABEL_BACKEND", "会话": "LABEL_SESSION",
+    "模型": "LABEL_MODEL", "强度": "LABEL_EFFORT", "目录": "LABEL_CWD",
+    "提供方": "LABEL_PROVIDER", "权限": "LABEL_PERMISSIONS", "协作": "LABEL_COLLABORATION",
+    "服务": "LABEL_SERVICE", "Token": "LABEL_TOKENS", "上下文": "LABEL_CONTEXT",
+    "限额": "LABEL_LIMITS", "待办数": "LABEL_QUEUED", "审批数": "LABEL_APPROVALS",
+    "发送失败数": "LABEL_SEND_FAILURES",
+}
+
+
+def validate_prompt_overrides(value, *, limit):
+    if not isinstance(value, dict):
+        raise ValueError("prompts 必须是对象")
+    for name, template in value.items():
+        if name not in DEFAULT_PROMPTS or not isinstance(template, str):
+            raise ValueError("prompts 包含未知名称或非文本值")
+        if len(template.encode("utf-8")) > limit:
+            raise ValueError("prompts 模板过长")
+        for _, field, spec, conversion in _FORMATTER.parse(template):
+            if field is not None and (not field.isidentifier() or spec or conversion):
+                raise ValueError("prompts 仅支持简单的 {字段} 替换")
+    return dict(value)
+
+
+def prompt_text(name, values=None, *, overrides=None):
+    """Render once; preserve unknown fields and never traverse attributes or indices."""
+    template = (overrides or {}).get(name, DEFAULT_PROMPTS[name])
+    values = values or {}
+    parts = []
+    for literal, field, _, _ in _FORMATTER.parse(template):
+        parts.append(literal)
+        if field is not None:
+            parts.append(str(values[field]) if field in values else "{" + field + "}")
+    return "".join(parts)
 
 
 def fill(template, values):
@@ -336,22 +479,25 @@ def panel(*lines):
     return f"{fence}\n{text}\n{fence}"
 
 
-def session_summary(action, *, name, model, effort, cwd, backend=None, status=None):
-    return action + "\n" + panel(f"后端: {backend}" if backend else None,
-                 f"会话: {session_name(name)}", f"状态: {status}" if status else None,
-                 f"模型: {model_label(model, effort)}",
-                 f"目录: {display_path(cwd)}")
+def session_summary(action, *, name, model, effort, cwd, backend=None, status=None,
+                    text=prompt_text):
+    return action + "\n" + panel(f"{text('LABEL_BACKEND')}: {backend}" if backend else None,
+                 f"{text('LABEL_SESSION')}: {session_name(name)}",
+                 f"{text('LABEL_STATUS')}: {status}" if status else None,
+                 f"{text('LABEL_MODEL')}: {model_label(model, effort)}",
+                 f"{text('LABEL_CWD')}: {display_path(cwd)}")
 
 
-def setting_summary(action=None, *, model, effort, cwd, field=None):
+def setting_summary(action=None, *, model, effort, cwd, field=None, text=prompt_text):
     # Display only effective values. Never compare with previous state.
     if field == "effort":
-        return f"强度: {effort_label(effort)}"
+        return f"{text('LABEL_EFFORT')}: {effort_label(effort)}"
     if field == "cwd":
-        return f"目录: {display_path(cwd)}"
+        return f"{text('LABEL_CWD')}: {display_path(cwd)}"
     if field == "model":
-        return f"模型: {model_label(model, effort)}"
-    return panel(f"模型: {model_label(model, effort)}", f"目录: {display_path(cwd)}")
+        return f"{text('LABEL_MODEL')}: {model_label(model, effort)}"
+    return panel(f"{text('LABEL_MODEL')}: {model_label(model, effort)}",
+                 f"{text('LABEL_CWD')}: {display_path(cwd)}")
 
 
 def status_fields(*, status, queued, pending, failed, name, model, effort,
@@ -376,18 +522,19 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
     }
 
 
-def status_from_fields(values):
-    counts = "  ".join(f"{label}: {values[key]}" for label, key in
-                       (("待办", "待办数"), ("审批", "审批数"), ("发送失败", "发送失败数"))
+def status_from_fields(values, *, text=prompt_text):
+    label = lambda key: text(_FIELD_LABELS[key])
+    counts = "  ".join(f"{label(key)}: {values[key]}" for key in
+                       ("待办数", "审批数", "发送失败数")
                        if values[key])
-    lines = [f"状态: {values['状态']}", counts or None]
+    lines = [f"{label('状态')}: {values['状态']}", counts or None]
     if values["后端"]:
-        lines.append(f"后端: {values['后端']}")
-    lines.extend([f"模型: {values['模型']} ({values['强度']})"])
-    lines.extend(f"{label}: {values[label]}" for label in
+        lines.append(f"{label('后端')}: {values['后端']}")
+    lines.extend([f"{label('模型')}: {values['模型']} ({values['强度']})"])
+    lines.extend(f"{label(key)}: {values[key]}" for key in
                  ("提供方", "目录", "权限", "协作", "会话", "服务"))
     lines.append("")
-    lines.extend(f"{label}: {values[label]}" for label in ("Token", "上下文", "限额"))
+    lines.extend(f"{label(key)}: {values[key]}" for key in ("Token", "上下文", "限额"))
     return panel(*lines)
 
 
@@ -395,19 +542,23 @@ def status_summary(**kwargs):
     return status_from_fields(status_fields(**kwargs))
 
 
-def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None, completion_notice="", source_hint=None, autostart=None):
-    lines = [f"接收提示: {notice or '关闭'}", f"结束提示: {completion_notice or '关闭'}",
-             f"附件上限: {attachment_mib} MiB"]
+def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None,
+                     completion_notice="", source_hint=None, autostart=None, text=prompt_text):
+    off = text('VALUE_OFF')
+    lines = [f"{text('LABEL_ACK')}: {notice or off}",
+             f"{text('LABEL_FINISH')}: {completion_notice or off}",
+             f"{text('LABEL_ATTACHMENTS')}: {attachment_mib} MiB"]
     if autostart is not None:
-        lines.append(f"自启: {autostart}")
+        lines.append(f"{text('LABEL_AUTOSTART')}: {autostart}")
     if slicing is not None:
-        lines.extend([f"切片: {slicing.mode}", f"目标长度: {slicing.target_chars} 字符"])
+        lines.extend([f"{text('LABEL_SLICING')}: {slicing.mode}",
+                      f"{text('LABEL_TARGET_LENGTH')}: {slicing.target_chars} 字符"])
     if source_hint is not None:
-        lines.append(f"来源说明: {source_hint or '关闭'}")
+        lines.append(f"{text('LABEL_SOURCE')}: {source_hint or off}")
     if notifications is not None:
-        thresholds = "/".join(f"{value}%" for value in notifications.quota_thresholds) or "关闭"
-        lines.extend([f"压缩提示: {'开启' if notifications.compaction else '关闭'}",
-                      f"限额警告: {thresholds}"])
+        thresholds = "/".join(f"{value}%" for value in notifications.quota_thresholds) or off
+        lines.extend([f"{text('LABEL_COMPACTION')}: {text('VALUE_ON') if notifications.compaction else off}",
+                      f"{text('LABEL_QUOTA_WARNING')}: {thresholds}"])
     return panel(*lines)
 
 
@@ -431,24 +582,25 @@ def session_age(timestamp, *, now=None):
     return f"{then.year}年{then.month}月{then.day}日"
 
 
-def command_approval(*, command, cwd, reason, token):
-    return "审批: 执行命令\n" + panel(f"命令: {command}", f"目录: {display_path(cwd)}",
-                 f"原因: {reason}" if reason else None) + approval_actions(token)
+def command_approval(*, command, cwd, reason, token, text=prompt_text):
+    return text('APPROVAL_COMMAND_TITLE') + "\n" + panel(
+        f"{text('LABEL_COMMAND')}: {command}", f"{text('LABEL_CWD')}: {display_path(cwd)}",
+        f"{text('LABEL_REASON')}: {reason}" if reason else None) + approval_actions(token, text=text)
 
 
-def file_approval(*, scope, reason, token):
-    return "审批: 修改文件\n" + panel(f"范围: {scope}",
-                 f"原因: {reason}" if reason else None) + approval_actions(token)
+def file_approval(*, scope, reason, token, text=prompt_text):
+    return text('APPROVAL_FILE_TITLE') + "\n" + panel(f"{text('LABEL_SCOPE')}: {scope}",
+        f"{text('LABEL_REASON')}: {reason}" if reason else None) + approval_actions(token, text=text)
 
 
-def approval_actions(token):
-    return f"\n`/approve {token}` 同意\n`/deny {token}` 拒绝"
+def approval_actions(token, *, text=prompt_text):
+    return f"\n`/approve {token}` {text('ACTION_APPROVE')}\n`/deny {token}` {text('ACTION_DENY')}"
 
 
-def ping_channel(fields):
+def ping_channel(fields, *, text=prompt_text):
     """Keep the compact pair; missing samples never acquire a time unit."""
     inbound, outbound = fields["发送延迟"], fields["接收延迟"]
     if inbound != "-" and outbound != "-":
-        return render_ack(PING_REPLY, fields)
-    return "WeChat ─" + "/".join(value + "ms" if value != "-" else "-"
-                                    for value in (inbound, outbound))
+        return text("PING_REPLY", fields)
+    return text("PING_PARTIAL", {"延迟": "/".join(value + "ms" if value != "-" else "-"
+                                                   for value in (inbound, outbound))})

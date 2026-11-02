@@ -3,10 +3,11 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import sys
+from prompts import validate_prompt_overrides
 
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
-                   "compactionNotice", "quotaWarningThresholds")
+                   "compactionNotice", "quotaWarningThresholds", "prompts")
 DEFAULT_COMPLETION_TEMPLATE = "`OUT > {输出Token}`"
 DEFAULT_ACK_TEMPLATE = "`IN < {输入Token}`"
 LEGACY_COMPLETION_TEMPLATE = "`OUT: {输出Token}`"
@@ -59,6 +60,7 @@ class HotSettings:
     slicing: Slicing
     notifications: Notifications
     source_hint: str
+    prompts: dict[str, str]
 
     @classmethod
     def from_config(cls, config):
@@ -68,7 +70,9 @@ class HotSettings:
         hint = config.get("sourceHint", DEFAULT_SOURCE_HINT)
         if not isinstance(hint, str) or len(hint.encode()) > 4000:
             raise ValueError("sourceHint 必须是最多 4000 字节的文本")
-        return cls(Slicing.from_config(config.get("slicing")), Notifications.from_config(config), hint)
+        templates = validate_prompt_overrides(config.get("prompts", {}), limit=TEXT_LIMIT_BYTES)
+        return cls(Slicing.from_config(config.get("slicing")), Notifications.from_config(config), hint,
+                   templates)
 
 
 def processing_template(config, state):

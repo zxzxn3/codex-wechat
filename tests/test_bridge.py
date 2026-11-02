@@ -13,7 +13,8 @@ from media import OUTPUT_HINT, MediaError
 from latency import Latency
 from command_specs import HELP
 from commands import handle, info
-from configuration import DEFAULT_ACK_TEMPLATE, DEFAULT_COMPLETION_TEMPLATE, processing_template
+from configuration import (DEFAULT_ACK_TEMPLATE, DEFAULT_COMPLETION_TEMPLATE,
+                           completion_template, processing_template)
 from prompts import (
     PING_REPLY,
     RESTART_NOT_SERVICE,

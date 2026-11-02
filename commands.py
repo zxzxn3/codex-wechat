@@ -14,55 +14,11 @@ from latency import provider_latency
 from diagnostics import error_fields, log_event, request_context
 
 from prompts import (
-    ACK_USAGE,
-    ACK_VIEW,
-    ACK_TOO_LONG,
-    BACKEND_SUMMARY,
-    BLOCKED_NOTE,
-    BUSY_CHANGE,
-    DIRECTORY_INVALID,
-    DIRECTORY_NOT_FOLDER,
-    EFFORT_INVALID,
-    EFFORT_SUMMARY,
-    MAX_NOTICE_BYTES,
-    MODEL_INVALID,
-    MODEL_NOT_IN_CATALOG,
-    NEW_USAGE,
-    SESSION_INDEX_INVALID,
-    SESSION_TARGET_ACTIVE,
-    SESSION_TARGET_BLOCKED,
-    SESSION_USAGE,
-    SETTINGS_USAGE,
-    WORKING_DIRECTORY,
-    panel,
-    display_path,
-    effort_label,
-    fill,
-    session_age,
-    session_name,
-    session_summary,
-    setting_summary,
-    settings_summary,
-    APPROVAL_ACCEPTED,
-    APPROVAL_DECLINED,
-    APPROVAL_EXPIRED,
-    APPROVAL_FAILED,
-    ATTACHMENT_QUEUED,
-    COMMAND_FAILURE,
-    COMMAND_FAILURE_LABELS,
-    MEDIA_USAGE,
-    ping_channel,
-    PING_USAGE,
-    RESTART_FAILED,
-    RESTART_USAGE,
-    STOP_DEFERRED,
-    STOP_IDLE,
-    STOP_REQUESTED,
-    STOP_UNCONFIRMED,
-    UNKNOWN_COMMAND,
-    status_from_fields,
+    MAX_NOTICE_BYTES, COMMAND_FAILURE_LABELS, panel, display_path, effort_label,
+    session_age, session_name, session_summary, setting_summary, settings_summary,
+    ping_channel, status_from_fields, prompt_text,
 )
-from command_specs import HELP, REGISTRY, COMMANDS
+from command_specs import REGISTRY, COMMANDS, help_text
 from configuration import processing_template, completion_template
 
 
@@ -70,15 +26,16 @@ def notice(bridge):
     return processing_template(bridge.reload_config(), bridge.state)
 
 
-def info(bridge, action="当前会话", *, include_backend=False):
+def info(bridge, action=None, *, include_backend=False):
+    action = bridge.prompt("CURRENT_SESSION") if action is None else action
     details = bridge.backend.info
     status = bridge.prompt_fields()["状态"]
     text = session_summary(action, name=details.get("name"), model=details.get("model"),
                            effort=details.get("effort"), cwd=details.get("cwd") or bridge.backend.cwd,
                            backend=backend_label(bridge.backend_name) if include_backend else None,
-                           status=status)
+                           status=status, text=bridge.prompt)
     if bridge.backend.blocked:
-        return text + "\n" + BLOCKED_NOTE
+        return text + "\n" + bridge.prompt("BLOCKED_NOTE")
     return text
 
 
@@ -90,13 +47,13 @@ async def activate(bridge, thread_id=None, overrides=None):
         thread = await bridge.backend.read_thread(thread_id)
         status = thread.get("status", {}).get("type")
         if status == "systemError":
-            raise UserFacingError(SESSION_TARGET_BLOCKED)
+            raise UserFacingError(bridge.prompt("SESSION_TARGET_BLOCKED"))
         if status == "active":
             desktop = True
             if not bridge.backend.shared:
-                raise UserFacingError(SESSION_TARGET_ACTIVE)
+                raise UserFacingError(bridge.prompt("SESSION_TARGET_ACTIVE"))
             if overrides:
-                raise UserFacingError(BUSY_CHANGE)
+                raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
             # Adopt the desktop's current settings instead of applying stale mobile overrides.
             saved = {}
     bridge.loaded = False
@@ -114,11 +71,11 @@ async def ensure_session(bridge):
         had_thread = bool(bridge.state["thread"])
         desktop = await activate(bridge, bridge.state["thread"])
         if desktop:
-            action = "已连接桌面会话"
+            action = bridge.prompt("SESSION_DESKTOP")
         elif had_thread:
-            action = "已恢复会话"
+            action = bridge.prompt("SESSION_RESTORED")
         else:
-            action = "已新建会话"
+            action = bridge.prompt("SESSION_CREATED")
         bridge.reply(info(bridge, action))
 
 
@@ -134,7 +91,7 @@ async def command_settings(bridge, command, argument, received=None):
     if argument:
         parts = argument.split()
         if len(parts) != 2 or parts[0] != "autostart" or parts[1] not in ("on", "off"):
-            bridge.reply(SETTINGS_USAGE)
+            bridge.reply(bridge.prompt("SETTINGS_USAGE"))
             return
         try:
             if (parts[1] == "on" and not autostart.IS_WINDOWS
@@ -145,13 +102,14 @@ async def command_settings(bridge, command, argument, received=None):
         except UserFacingError:
             raise
         except (ValueError, RuntimeError, OSError, asyncio.TimeoutError):
-            raise UserFacingError("自启设置未确认，请在电脑检查本项目的服务安装。") from None
-        bridge.reply(f"自启: {'开启' if enabled else '关闭'}")
+            raise UserFacingError(bridge.prompt("AUTOSTART_FAILED")) from None
+        bridge.reply(bridge.prompt("LABEL_AUTOSTART") + ": " +
+                     bridge.prompt("VALUE_ON" if enabled else "VALUE_OFF"))
         return
     try:
-        autostart_text = "开启" if await autostart.status() else "关闭"
+        autostart_text = bridge.prompt("VALUE_ON" if await autostart.status() else "VALUE_OFF")
     except (ValueError, RuntimeError, OSError, asyncio.TimeoutError):
-        autostart_text = "不可用"
+        autostart_text = bridge.prompt("VALUE_UNAVAILABLE")
     bridge.reply(settings_summary(
         notice=notice(bridge),
         completion_notice=completion_template(bridge.reload_config(), bridge.state),
@@ -160,6 +118,7 @@ async def command_settings(bridge, command, argument, received=None):
         slicing=bridge.slicing,
         notifications=bridge.notifications,
         autostart=autostart_text,
+        text=bridge.prompt,
     ))
     return
 
@@ -168,7 +127,7 @@ async def command_backend_view(bridge, command, argument, received=None):
     current = backend_argument(bridge.backend_name)
     names = list(bridge.backend_configs)
     available = " | ".join(backend_argument(name) for name in names)
-    bridge.reply(fill(BACKEND_SUMMARY, {
+    bridge.reply(bridge.prompt("BACKEND_SUMMARY", {
         "当前": current,
         "可用": available,
     }))
@@ -176,17 +135,17 @@ async def command_backend_view(bridge, command, argument, received=None):
 
 
 async def command_notice(bridge, command, argument, received=None):
-    label = "接收提示" if command == "/ack" else "结束提示"
+    label = bridge.prompt("LABEL_ACK" if command == "/ack" else "LABEL_FINISH")
     key = "processingNotice" if command == "/ack" else "completionNotice"
-    usage = ACK_USAGE.replace("/ack", command)
+    prefix = "ACK" if command == "/ack" else "FINISH"
+    usage = bridge.prompt(prefix + "_USAGE")
     if argument == "fields":
         bridge.reply(panel(*(f"{{{name}}}" for name in bridge.prompt_fields())))
         return
     template = (notice(bridge) if command == "/ack" else
                 completion_template(bridge.reload_config(), bridge.state))
     if not argument:
-        bridge.reply(fill(ACK_VIEW.replace("/ack", command).replace("接收提示", label),
-                          {"模板": template or "关闭"}))
+        bridge.reply(bridge.prompt(prefix + "_VIEW", {"模板": template or bridge.prompt("VALUE_OFF")}))
         return
     if argument == "text":
         value = ""
@@ -197,20 +156,20 @@ async def command_notice(bridge, command, argument, received=None):
     else:
         raise UserFacingError(usage)
     if len(value.encode()) > MAX_NOTICE_BYTES:
-        raise UserFacingError(fill(ACK_TOO_LONG.replace("接收提示", label), {"字节": MAX_NOTICE_BYTES}))
+        raise UserFacingError(bridge.prompt(prefix + "_TOO_LONG", {"字节": MAX_NOTICE_BYTES}))
     bridge.state[key] = value
     bridge.save()
-    bridge.reply(panel(label + ": " + (value or "关闭")))
+    bridge.reply(panel(label + ": " + (value or bridge.prompt("VALUE_OFF"))))
     return
 
 
 async def command_sessions(bridge, command, argument, received=None):
     if argument == "next":
-        raise UserFacingError(f"用法: `{REGISTRY['/sessions'].usage}`")
+        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"用法": REGISTRY['/sessions'].usage}))
     page = int(argument) if argument.isdecimal() else 1
     search = bridge.state.get("sessionSearch") if argument.isdecimal() else argument or None
     if page < 1:
-        raise UserFacingError("页码必须大于 0")
+        raise UserFacingError(bridge.prompt("PAGE_INVALID"))
     cache = bridge.session_catalog
     key = (bridge.backend.connection_id, search)
     if (not argument.isdecimal() or cache is None or cache[0] != key
@@ -226,14 +185,14 @@ async def command_sessions(bridge, command, argument, received=None):
             if not cursor:
                 break
             if cursor in cursors:
-                raise UserFacingError("会话列表读取未完成，请重试。")
+                raise UserFacingError(bridge.prompt("SESSION_LIST_FAILED"))
             cursors.add(cursor)
         bridge.session_catalog = (key, time.monotonic(), catalog)
     else:
         catalog = cache[2]
     total = max(1, (len(catalog) + 9) // 10)
     if page > total:
-        raise UserFacingError(f"页码超出范围: 1–{total}")
+        raise UserFacingError(bridge.prompt("PAGE_RANGE", {"数量": total}))
     threads = catalog[(page - 1) * 10:page * 10]
     bridge.state["sessionChoices"] = [thread["id"] for thread in threads]
     bridge.state.pop("sessionCursor", None)
@@ -258,9 +217,10 @@ async def command_sessions(bridge, command, argument, received=None):
         state = "  ".join(labels)
         lines.append(f"{index}. {title}" + (f"  [{state}]" if state else ""))
     if not threads:
-        lines.append("\n没有匹配的会话。")
+        lines.append(bridge.prompt("NO_SESSIONS"))
     hints = [f"`{REGISTRY['/switch'].usage}`",
-             f"`{REGISTRY['/sessions'].usage}` 当前{page}/{total}页"]
+             f"`{REGISTRY['/sessions'].usage}` " +
+             bridge.prompt("SESSION_PAGE", {"当前页": page, "总页数": total})]
     bridge.reply(panel(*lines) + "\n" + "\n".join(hints))
     return
 
@@ -273,36 +233,36 @@ async def command_model_view(bridge, command, argument, received=None):
         model_name = model["model"]
         lines.append(f"{index}. {model_name}")
     if not models:
-        lines.append("暂无可用模型")
+        lines.append(bridge.prompt("NO_MODELS"))
     bridge.reply(panel(*lines) + f"\n`{REGISTRY['/model'].usage}`")
     return
 
 
 async def command_cwd_view(bridge, command, argument, received=None):
-    bridge.reply(fill(WORKING_DIRECTORY, {
+    bridge.reply(bridge.prompt("WORKING_DIRECTORY", {
         "目录": display_path(bridge.backend.info.get("cwd") or bridge.backend.cwd)}))
     return
 
 
 async def command_session(bridge, command, argument, received=None):
     if command == "/compact" and argument:
-        raise UserFacingError("用法: `/compact`")
+        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"用法": REGISTRY['/compact'].usage}))
     if command == "/new" and argument:
-        raise UserFacingError(NEW_USAGE)
+        raise UserFacingError(bridge.prompt("NEW_USAGE"))
     if command == "/switch" and not argument:
-        raise UserFacingError(SESSION_USAGE)
+        raise UserFacingError(bridge.prompt("SESSION_USAGE"))
     # All state-changing session controls use one lock; incoming work waits until done.
     if (bridge.restarting or bridge.running or bridge.steering or bridge.active_turn()
             or bridge.state["inbox"] or bridge.session_lock.locked()):
-        raise UserFacingError(BUSY_CHANGE)
+        raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
     async with bridge.session_lock:
         if command == "/backend":
             await switch(bridge, argument)
-            bridge.reply(info(bridge, "已切换后端", include_backend=True))
+            bridge.reply(info(bridge, bridge.prompt("BACKEND_SWITCHED"), include_backend=True))
             return
         if command == "/new":
             await activate(bridge)
-            bridge.reply(info(bridge, "已新建会话"))
+            bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED")))
             return
         if command == "/switch":
             target = argument
@@ -310,17 +270,17 @@ async def command_session(bridge, command, argument, received=None):
                 choices = bridge.state.get("sessionChoices", [])
                 index = int(argument) - 1
                 if not 0 <= index < len(choices):
-                    raise UserFacingError(SESSION_INDEX_INVALID)
+                    raise UserFacingError(bridge.prompt("SESSION_INDEX_INVALID"))
                 target = choices[index]
             desktop = await activate(bridge, target)
-            bridge.reply(info(bridge, "已连接桌面会话" if desktop else "已切换会话"))
+            bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop else bridge.prompt("SESSION_SWITCHED")))
             return
         await ensure_session(bridge)
         if command == "/compact":
             if bridge.backend.blocked:
-                raise UserFacingError("暂不能压缩: 当前会话等待处理。")
+                raise UserFacingError(bridge.prompt("COMPACT_BLOCKED"))
             await bridge.backend.compact(bridge.state["thread"])
-            bridge.reply("已请求压缩上下文。")
+            bridge.reply(bridge.prompt("COMPACT_REQUESTED"))
             return
         overrides = {}
         if command in ("/model", "/effort"):
@@ -330,11 +290,11 @@ async def command_session(bridge, command, argument, received=None):
                 current = next((m for m in models
                                 if m["model"] == bridge.backend.info.get("model")), None)
                 if current is None:
-                    raise UserFacingError(MODEL_NOT_IN_CATALOG)
+                    raise UserFacingError(bridge.prompt("MODEL_NOT_IN_CATALOG"))
                 choices = effort_choices(current)
                 if not argument:
                     current_effort = bridge.backend.info.get("effort")
-                    bridge.reply(fill(EFFORT_SUMMARY, {
+                    bridge.reply(bridge.prompt("EFFORT_SUMMARY", {
                         "当前": effort_label(current_effort),
                         "可选": " | ".join(effort_label(value) for value in choices) or "无",
                     }))
@@ -343,7 +303,7 @@ async def command_session(bridge, command, argument, received=None):
                     (value for value in choices
                      if value.casefold() == argument.casefold()), None)
                 if selected_effort is None:
-                    raise UserFacingError(fill(EFFORT_INVALID, {
+                    raise UserFacingError(bridge.prompt("EFFORT_INVALID", {
                         "可选": " | ".join(effort_label(value) for value in choices) or "无"}))
                 overrides["effort"] = selected_effort
             else:
@@ -355,7 +315,7 @@ async def command_session(bridge, command, argument, received=None):
                 else:
                     selected = next((m for m in models if m["model"] == argument), None)
                 if selected is None:
-                    raise UserFacingError(MODEL_INVALID)
+                    raise UserFacingError(bridge.prompt("MODEL_INVALID"))
                 overrides["model"] = selected["model"]
                 # Model-specific defaults prevent carrying an unsupported effort to another model.
                 overrides["effort"] = selected.get("defaultReasoningEffort")
@@ -367,15 +327,15 @@ async def command_session(bridge, command, argument, received=None):
             try:
                 path = path.resolve(strict=True)
             except OSError:
-                raise UserFacingError(DIRECTORY_INVALID) from None
+                raise UserFacingError(bridge.prompt("DIRECTORY_INVALID")) from None
             if not path.is_dir():
-                raise UserFacingError(DIRECTORY_NOT_FOLDER)
+                raise UserFacingError(bridge.prompt("DIRECTORY_NOT_FOLDER"))
             overrides["cwd"] = str(path)
         await activate(bridge, bridge.state["thread"], overrides)
         details = bridge.backend.info
         bridge.reply(setting_summary(model=details.get("model"), effort=details.get("effort"),
                                      cwd=details.get("cwd") or bridge.backend.cwd,
-                                     field=command.removeprefix("/")))
+                                     field=command.removeprefix("/"), text=bridge.prompt))
 
 
 async def command_backend(bridge, command, argument, received=None):
@@ -397,58 +357,58 @@ async def command_cwd(bridge, command, argument, received=None):
 
 
 async def command_help(bridge, command, argument, received=None):
-    bridge.reply(HELP)
+    bridge.reply(help_text(text=bridge.prompt))
 
 
 async def command_ping(bridge, command, argument, received=None):
     if argument:
-        bridge.reply(PING_USAGE)
+        bridge.reply(bridge.prompt("PING_USAGE"))
     else:
         ingress = received.get("ingress_ms") if received else None
-        channel = ping_channel(bridge.latency.values(ingress))
+        channel = ping_channel(bridge.latency.values(ingress), text=bridge.prompt)
         backend = bridge.backend
         connection = backend.connection_id
         provider = await provider_latency(backend)
         if backend is bridge.backend and connection == backend.connection_id:
             bridge.latency.provider_sample = (connection, provider)
-        bridge.reply(channel + "─ Bridge ─" + provider + "─ Provider")
+        bridge.reply(bridge.prompt("PING_ROUTE", {"通道": channel, "供应商": provider}))
 
 
 async def command_send(bridge, command, argument, received=None):
     try:
         if not argument:
-            bridge.reply(MEDIA_USAGE)
+            bridge.reply(bridge.prompt("MEDIA_USAGE"))
             return
         if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
             argument = argument[1:-1]
         await bridge.queue_file(argument, {"/sendfile": "file", "/sendimage": "image",
                                            "/sendvideo": "video"}.get(command, "auto"),
                               origin=(received or {}).get("media"))
-        bridge.reply(ATTACHMENT_QUEUED)
+        bridge.reply(bridge.prompt("ATTACHMENT_QUEUED"))
     except (MediaError, ValueError, OSError) as error:
-        bridge.reply(f"附件未发送: {attachment_reason(error)}\n请检查路径后重试。")
+        bridge.reply(bridge.prompt("SEND_FILE_FAILED", {"原因": attachment_reason(error)}))
 
 
 async def command_restart(bridge, command, argument, received=None):
     if argument:
-        bridge.reply(RESTART_USAGE)
+        bridge.reply(bridge.prompt("RESTART_USAGE"))
         return
     try:
         await bridge.restart_service()
     except UserFacingError as error:
-        bridge.reply("拒绝重启: " + str(error))
+        bridge.reply(bridge.prompt("RESTART_REJECTED", {"原因": str(error)}))
     except (RuntimeError, OSError, asyncio.TimeoutError) as error:
-        bridge.reply(fill(RESTART_FAILED, {"原因": backend_reason(error)}))
+        bridge.reply(bridge.prompt("RESTART_FAILED", {"原因": backend_reason(error)}))
 
 
 async def command_status(bridge, command, argument, received=None):
-    bridge.reply(status_from_fields(bridge.prompt_fields()))
+    bridge.reply(status_from_fields(bridge.prompt_fields(), text=bridge.prompt))
 
 
 async def command_stop(bridge, command, argument, received=None):
     bridge.stopping = True
     cleared = len(bridge.state["inbox"])
-    cleared_note = f"\n已清空待办: {cleared}" if cleared else ""
+    cleared_note = bridge.prompt("STOP_CLEARED", {"数量": cleared}) if cleared else ""
     for job in bridge.state["inbox"]:
         if job.get("phase") in (InputPhase.DISPATCHING, InputPhase.ACCEPTED):
             bridge.record_input(job, InputPhase.UNCERTAIN if job["phase"] == InputPhase.DISPATCHING
@@ -458,13 +418,13 @@ async def command_stop(bridge, command, argument, received=None):
     try:
         stopped = await bridge.backend.stop()
         if stopped:
-            bridge.reply(STOP_REQUESTED + cleared_note)
+            bridge.reply(bridge.prompt("STOP_REQUESTED") + cleared_note)
         elif bridge.running or bridge.active_turn():
-            bridge.reply(STOP_DEFERRED + cleared_note)
+            bridge.reply(bridge.prompt("STOP_DEFERRED") + cleared_note)
         else:
-            bridge.reply(STOP_IDLE + cleared_note)
+            bridge.reply(bridge.prompt("STOP_IDLE") + cleared_note)
     except (RuntimeError, OSError, asyncio.TimeoutError):
-        bridge.reply(STOP_UNCONFIRMED + cleared_note)
+        bridge.reply(bridge.prompt("STOP_UNCONFIRMED") + cleared_note)
 
 
 async def command_approval(bridge, command, argument, received=None):
@@ -472,23 +432,23 @@ async def command_approval(bridge, command, argument, received=None):
         accept = command == "/approve"
         ok = await bridge.backend.answer_approval(
             argument, "accept" if accept else "decline")
-        bridge.reply(APPROVAL_ACCEPTED if ok and accept else
-                   APPROVAL_DECLINED if ok else APPROVAL_EXPIRED)
+        bridge.reply(bridge.prompt("APPROVAL_ACCEPTED") if ok and accept else
+                   bridge.prompt("APPROVAL_DECLINED") if ok else bridge.prompt("APPROVAL_EXPIRED"))
     except (RuntimeError, OSError, asyncio.TimeoutError):
-        bridge.reply(APPROVAL_FAILED)
+        bridge.reply(bridge.prompt("APPROVAL_FAILED"))
 
 
 async def command_answer(bridge, command, argument, received=None):
     parts = argument.split(maxsplit=1)
     if len(parts) != 2:
-        raise UserFacingError(f"用法: `{REGISTRY[command].usage}`")
+        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"用法": REGISTRY[command].usage}))
     try:
         ok = await bridge.backend.answer_question(*parts)
-        bridge.reply("已回答。" if ok else "问题已失效或编号无效。")
+        bridge.reply(bridge.prompt("ANSWER_ACCEPTED") if ok else bridge.prompt("ANSWER_EXPIRED"))
     except ValueError as error:
         bridge.reply(str(error))
     except (RuntimeError, OSError, asyncio.TimeoutError):
-        bridge.reply("回答投递结果未确认，请查看桌面；未自动重发。")
+        bridge.reply(bridge.prompt("ANSWER_FAILED"))
 
 
 HANDLERS = {spec.name: globals()["command_" + (spec.handler or spec.name.removeprefix("/"))]
@@ -501,23 +461,23 @@ def parse_control(text):
     return (parts[0], parts[1].strip() if len(parts) > 1 else "") if parts else ("", "")
 
 
-def validate(spec, argument):
+def validate(spec, argument, *, text=prompt_text):
     if (spec.usage == spec.name and argument) or (spec.required and not argument):
-        raise UserFacingError(f"用法: `{spec.usage}`")
+        raise UserFacingError(text("COMMAND_USAGE", {"用法": spec.usage}))
     if spec.name == "/sessions":
         if argument == "next":
-            raise UserFacingError(f"用法: `{spec.usage}`")
+            raise UserFacingError(text("COMMAND_USAGE", {"用法": spec.usage}))
         if argument.isdecimal() and int(argument) < 1:
-            raise UserFacingError("页码必须大于 0")
+            raise UserFacingError(text("PAGE_INVALID"))
 
 
 async def handle(bridge, command, argument, received=None):
     """Invoke a registered handler; also usable with injected backends in offline tests."""
     spec = REGISTRY.get(command)
     if spec is None or spec.route == "input":
-        bridge.reply(UNKNOWN_COMMAND)
+        bridge.reply(bridge.prompt("UNKNOWN_COMMAND"))
         return
-    validate(spec, argument)
+    validate(spec, argument, text=bridge.prompt)
     await HANDLERS[spec.name](bridge, spec.name, argument, received)
 
 
@@ -530,9 +490,9 @@ async def dispatch(bridge, text, *, received=None):
             if spec is None or spec.route == "input":
                 log_event("control.rejected", component="input", kind="command",
                           status="unknown", request_id=request_id)
-                bridge.reply(UNKNOWN_COMMAND)
+                bridge.reply(bridge.prompt("UNKNOWN_COMMAND"))
                 return
-            validate(spec, argument)  # Reject syntax before opening a backend connection.
+            validate(spec, argument, text=bridge.prompt)  # Reject syntax before opening a backend connection.
             if spec.needs_backend and not (spec.query_local and not argument):
                 await bridge.ensure_backend()
             await handle(bridge, spec.name, argument, received)
@@ -543,8 +503,10 @@ async def dispatch(bridge, text, *, received=None):
                       status="invalid", request_id=request_id)
             bridge.reply(str(error))
         except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
-            label = COMMAND_FAILURE_LABELS.get(spec.name if spec else command, "操作失败")
-            bridge.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": str(error) if isinstance(error, CodexRpcError) else backend_reason(error)}))
+            failed_command = spec.name if spec else command
+            label = (bridge.prompt("FAILURE_" + failed_command[1:].upper())
+                     if failed_command in COMMAND_FAILURE_LABELS else bridge.prompt("GENERIC_FAILURE"))
+            bridge.reply(bridge.prompt("COMMAND_FAILURE", {"动作": label, "原因": str(error) if isinstance(error, CodexRpcError) else backend_reason(error)}))
             log_event("control.failed", level="warning", component="input",
                       kind="command", request_id=request_id, **error_fields(error))
             print(f"{command}失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)

@@ -14,13 +14,6 @@ from records import InputPhase
 from media import MediaError
 from errors import attachment_reason
 from diagnostics import error_fields, log_event
-from prompts import (
-    ATTACHMENT_INCOMING_FAILED,
-    QUEUED_STEER,
-    TASK_FAILED,
-    UNCERTAIN_STEER,
-    fill,
-)
 
 class InputDelivery:
     def __init__(self, bridge):
@@ -86,7 +79,7 @@ class InputDelivery:
                 job.setdefault("clientId", str(uuid.uuid4()))
                 bridge.state["inbox"].append(job)
         if uncertain or legacy_running:
-            bridge.reply("上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。")
+            bridge.reply(bridge.prompt("INPUT_RECOVERED"))
         bridge.save()
         log_event("input.recovered", component="input", count=len(jobs),
                   pending=len(bridge.state["inbox"]),
@@ -190,7 +183,7 @@ class InputDelivery:
                 if not bridge.stopping:
                     job.update(mode="queue", phase=InputPhase.PREPARING)
                     bridge.state["inbox"].insert(0, job)
-                    bridge.reply(QUEUED_STEER, request_id=job.get("requestId"))
+                    bridge.reply(bridge.prompt("QUEUED_STEER"), request_id=job.get("requestId"))
                     log_event("input.deferred", component="input", status="queue",
                               phase=job["phase"], mode="queue",
                               request_id=job.get("requestId"))
@@ -204,10 +197,10 @@ class InputDelivery:
                     bridge.record_input(job, InputPhase.UNCERTAIN if uncertain else
                                       InputPhase.ACCEPTED if phase == InputPhase.ACCEPTED else InputPhase.FAILED)
                     bridge.state.pop("currentInput", None)
-                    bridge.reply("消息提交结果未确认，未自动重发。" if uncertain else
-                               "任务已提交，但结果接收中断，未重新执行。" if phase == InputPhase.ACCEPTED else
-                               fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
-                               if isinstance(error, MediaError) else TASK_FAILED,
+                    bridge.reply(bridge.prompt("INPUT_SUBMISSION_UNCERTAIN") if uncertain else
+                               bridge.prompt("INPUT_RESULT_INTERRUPTED") if phase == InputPhase.ACCEPTED else
+                               bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"原因": attachment_reason(error)})
+                               if isinstance(error, MediaError) else bridge.prompt("TASK_FAILED"),
                                request_id=job.get("requestId"))
                     log_event("input.failed", level="warning", component="input",
                               status=("uncertain" if uncertain else
@@ -216,7 +209,7 @@ class InputDelivery:
                               backend=bridge.backend_name,
                               request_id=job.get("requestId"), **error_fields(error))
                 else:
-                    bridge.reply("后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。",
+                    bridge.reply(bridge.prompt("BACKEND_UNREADY"),
                                  request_id=job.get("requestId"))
                     log_event("input.failed", level="warning", component="input",
                               status="backend_unavailable", phase=job.get("phase"),
@@ -293,7 +286,7 @@ class InputDelivery:
                         job.pop("restartDeferred", None)
                         job.update(mode="queue", phase=InputPhase.PREPARING)
                         bridge.save()
-                        bridge.reply(QUEUED_STEER, request_id=job.get("requestId"))
+                        bridge.reply(bridge.prompt("QUEUED_STEER"), request_id=job.get("requestId"))
                         log_event("input.deferred", component="input", status="queue",
                                   phase=job["phase"], mode="queue",
                                   request_id=job.get("requestId"))
@@ -305,9 +298,9 @@ class InputDelivery:
                     bridge.record_input(job, InputPhase.UNCERTAIN if uncertain else InputPhase.FAILED)
                     bridge.state["inbox"] = [item for item in bridge.state["inbox"] if item is not job]
                     bridge.save()
-                    bridge.reply(UNCERTAIN_STEER if uncertain else
-                               fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
-                               if isinstance(error, MediaError) else TASK_FAILED,
+                    bridge.reply(bridge.prompt("UNCERTAIN_STEER") if uncertain else
+                               bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"原因": attachment_reason(error)})
+                               if isinstance(error, MediaError) else bridge.prompt("TASK_FAILED"),
                                request_id=job.get("requestId"))
                     log_event("input.steer_failed", level="warning", component="input",
                               status="uncertain" if uncertain else "failed",

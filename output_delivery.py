@@ -15,14 +15,7 @@ from media import MediaError, MAX_ATTACHMENTS, split_answer
 from wechat_content import entry_summary, remember_quote
 from errors import WeChatAuthExpired, attachment_reason
 from diagnostics import current_request_id, error_fields, log_event
-from prompts import (
-    ATTACHMENT_SEND_FAILED,
-    AUTO_ATTACHMENT_FAILED,
-    AUTO_ATTACHMENT_LIMIT,
-    AUTO_ATTACHMENT_PATH_HINT,
-    fill,
-    render_ack,
-)
+from prompts import render_ack
 
 SEND_ATTEMPTS = 3
 SEND_RETRY_SECONDS = 1
@@ -125,7 +118,7 @@ class OutputDelivery:
         group = str(uuid.uuid4())
         assets, errors = [], []
         if len(specs) > MAX_ATTACHMENTS:
-            errors.append(fill(AUTO_ATTACHMENT_LIMIT, {"数量": MAX_ATTACHMENTS}))
+            errors.append(bridge.prompt("AUTO_ATTACHMENT_LIMIT", {"数量": MAX_ATTACHMENTS}))
         for spec in specs[:MAX_ATTACHMENTS]:
             try:
                 asset = await asyncio.to_thread(bridge.media.snapshot, spec["path"],
@@ -135,9 +128,9 @@ class OutputDelivery:
                                                  source=source, request_id=request_id))
             except (MediaError, ValueError, OSError) as error:
                 reason = attachment_reason(error)
-                errors.append(fill(AUTO_ATTACHMENT_FAILED, {
+                errors.append(bridge.prompt("AUTO_ATTACHMENT_FAILED", {
                     "原因": reason,
-                    "建议": (AUTO_ATTACHMENT_PATH_HINT
+                    "建议": (bridge.prompt("AUTO_ATTACHMENT_PATH_HINT")
                              if reason == "只能自动发送当前会话目录内的文件" else ""),
                 }))
         # Snapshot work may await disk I/O across a session/backend switch.
@@ -168,7 +161,7 @@ class OutputDelivery:
                 if bridge.current_source(result.source):
                     await bridge.deliver_answer(result, finish_running=False, require_current=True)
             except Exception as error:
-                bridge.reply("结果准备失败，请在桌面查看该轮回答。")
+                bridge.reply(bridge.prompt("RESULT_PREPARE_FAILED"))
                 log_event("output.prepare_failed", level="warning", component="output",
                           **error_fields(error))
                 print(f"外部结果失败：{type(error).__name__}", file=sys.stderr, flush=True)
@@ -200,8 +193,8 @@ class OutputDelivery:
                   request_id=entry.get("requestId"))
         # Never recursively report a failed failure notice.
         if not entry.get("failureNotice"):
-            text = (fill(ATTACHMENT_SEND_FAILED, {"名称": entry["asset"]["name"], "次数": SEND_ATTEMPTS})
-                    if "asset" in entry else "这条回复未能完整发送，已停止其余部分。请在桌面查看。")
+            text = (bridge.prompt("ATTACHMENT_SEND_FAILED", {"名称": entry["asset"]["name"], "次数": SEND_ATTEMPTS})
+                    if "asset" in entry else bridge.prompt("REPLY_SEND_FAILED"))
             notes = bridge.text_entries(text, group=str(uuid.uuid4()), context=entry["context"],
                                         request_id=entry.get("requestId"))
             for note in notes:

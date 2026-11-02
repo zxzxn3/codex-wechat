@@ -28,6 +28,7 @@ from commands import (
 )
 from command_specs import REGISTRY, CONTROL_LANES, command_lane
 from configuration import ConfigLoader, ConfigurationError
+from prompts import (prompt_text)
 from quota import quota_warnings
 from records import InputPhase
 from profiles import backend_label, definitions, snapshot
@@ -46,21 +47,7 @@ from wechat_content import (
 from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, backend_reason
 from platform_support import IS_WINDOWS, data_root
 from diagnostics import BACKUP_COUNT, error_fields, log_event, log_path, new_request_id
-from prompts import (
-    BACKEND_CONNECT_FAILED,
-    BUSY_RESTART,
-    QUEUE_CONFIRMED,
-    QUEUE_FULL,
-    RESTART_CONFIRM_UNSENT,
-    RESTART_NOT_SERVICE,
-    RESTART_READY,
-    RESTART_STARTED,
-    TOO_MANY_ATTACHMENTS,
-    UNSUPPORTED_MESSAGE,
-    fill,
-    render_ack,
-    status_fields,
-)
+from prompts import (render_ack, status_fields)
 
 ROOT = Path(__file__).resolve().parent
 
@@ -128,6 +115,12 @@ class Bridge:
             self.save()
         return self.config
 
+    def prompt(self, name, values=None):
+        self.reload_config()
+        fields = self.prompt_fields() if name in self.settings.hot.prompts else {}
+        return prompt_text(name, {**fields, **(values or {})},
+                           overrides=self.settings.hot.prompts)
+
     def save(self):
         self.state["backendName"] = self.backend_name
         self.state.setdefault("backendSessions", {})[self.backend_name] = snapshot(self.state)
@@ -142,6 +135,7 @@ class Bridge:
             backend, connected, error)
         backend.source_name = name
         backend.refresh_config = self.reload_config
+        backend.prompt = self.prompt
         backend.input_hint = self.current_input_hint
         backend.compaction_notice = self.notifications.compaction
         backend.on_limits = lambda payload: self.check_quota(backend, payload)
@@ -178,7 +172,8 @@ class Bridge:
                   queued=len(self.state.get("outbox", [])))
         if notify:
             try:
-                await service_adapter.notify("微信绑定已失效", "重新绑定\n" + command)
+                await service_adapter.notify(self.prompt("WECHAT_AUTH_TITLE"),
+                                             self.prompt("WECHAT_REBIND_HINT", {"命令": command}))
             except Exception:
                 print("微信绑定已失效；重新绑定\n" + wechat_auth.rebind_command(), file=sys.stderr)
 
@@ -189,9 +184,11 @@ class Bridge:
         records = self.state.setdefault("quotaWarnings", {})
         scope = (self.backend_name, backend.info.get("provider"))
         before = json.dumps(records, sort_keys=True)
-        messages = quota_warnings(records, payload, scope, self.notifications.quota_thresholds)
+        messages = quota_warnings(records, payload, scope, self.notifications.quota_thresholds,
+                                  text=self.prompt)
         for message in messages:
-            self.reply(f"限额提醒: {backend_label(self.backend_name)}\n{message}", persist=False)
+            self.reply(self.prompt("QUOTA_WARNING", {"后端": backend_label(self.backend_name),
+                                                     "内容": message}), persist=False)
         if messages or before != json.dumps(records, sort_keys=True):
             self.save()
 
@@ -373,10 +370,11 @@ class Bridge:
                       kind=kind, chars=len(text), count=len(attachments))
             if queued and not text and not attachments:
                 self.reject_input(request_id, kind, "missing_argument")
-                self.reply(f"用法: `{REGISTRY['/queue'].usage}`", request_id=request_id)
+                self.reply(self.prompt("COMMAND_USAGE", {"用法": REGISTRY['/queue'].usage}),
+                           request_id=request_id)
             elif len(attachments) > MAX_ATTACHMENTS:
                 self.reject_input(request_id, kind, "too_many_attachments")
-                self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}),
+                self.reply(self.prompt("TOO_MANY_ATTACHMENTS", {"数量": MAX_ATTACHMENTS}),
                            request_id=request_id)
             elif body_text.startswith("/") and not attachments and not queued:
                 received["request_id"] = request_id
@@ -386,7 +384,7 @@ class Bridge:
             elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
                     self.reject_input(request_id, kind, "queue_full")
-                    self.reply(fill(QUEUE_FULL, {"数量": 20}), request_id=request_id)
+                    self.reply(self.prompt("QUEUE_FULL", {"数量": 20}), request_id=request_id)
                 else:
                     self.state["inbox"].append({"id": identity, "text": text,
                                                "attachments": attachments, "mode": "queue" if queued else "steer",
@@ -395,13 +393,13 @@ class Bridge:
                                                "requestId": request_id})
                     if queued:
                         count = len(self.state["inbox"])
-                        self.reply(fill(QUEUE_CONFIRMED, {"数量": count,
+                        self.reply(self.prompt("QUEUE_CONFIRMED", {"数量": count,
                                                          "单位": "task" if count == 1 else "tasks"}),
                                    persist=False, request_id=request_id)
             else:
                 status = "too_long" if len(text) > 20000 else "unsupported"
                 self.reject_input(request_id, kind, status)
-                self.reply(fill(UNSUPPORTED_MESSAGE, {"数量": 20000}),
+                self.reply(self.prompt("UNSUPPORTED_MESSAGE", {"数量": 20000}),
                            request_id=request_id)
         self.state["seen"] = self.state["seen"][-2000:]
         if batch.get("get_updates_buf"):
@@ -418,7 +416,7 @@ class Bridge:
                 request_id = received.get("request_id")
                 log_event("control.rejected", component="input", kind="command",
                           status="queue_full", request_id=request_id)
-                self.reply("指令等待过多，请稍后重试。", request_id=request_id)
+                self.reply(self.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
         self.wake.set()
         self.steer_wake.set()
 
@@ -433,15 +431,15 @@ class Bridge:
         if (self.store.root.resolve() != (default / ".state").resolve() or
                 (self.settings.path is not None and
                  self.settings.path.resolve() != (default / "config.json").resolve())):
-            raise UserFacingError("自定义状态或配置路径不能交给默认服务，请自行管理服务。")
+            raise UserFacingError(self.prompt("AUTOSTART_CUSTOM_PATH"))
         if (self.restarting or self.running or self.steering or self.active_turn()
                 or (self.session_lock.locked() and not self.backend_recovering)
                 or self.backend.pending):
-            raise UserFacingError("首次启用自启需要移交后台服务，请等任务结束或用 /stop 停止后再试。")
+            raise UserFacingError(self.prompt("AUTOSTART_BUSY"))
         self.restarting = True
         try:
             await autostart.set_enabled(True, start_if_missing=False)
-            self.reply("自启: 开启")
+            self.reply(self.prompt("LABEL_AUTOSTART") + ": " + self.prompt("VALUE_ON"))
             await asyncio.wait_for(self.outbox_drained.wait(), 20)
             await service_control.systemctl("--no-block", "start", service_control.UNIT)
             self.shutdown_requested()
@@ -459,7 +457,7 @@ class Bridge:
         if (self.restarting or self.steering or self.active_turn() or submitted
                 or (self.running and not current)
                 or (self.session_lock.locked() and not self.backend_recovering)):
-            raise UserFacingError(BUSY_RESTART)
+            raise UserFacingError(self.prompt("BUSY_RESTART"))
         # No await before closing the dispatch barrier. Preparing work is recoverable;
         # queued work must not make a disconnected bridge impossible to restart.
         self.restarting = True
@@ -467,12 +465,12 @@ class Bridge:
             try:
                 await service_control.require_service_owner()
             except ValueError:
-                raise UserFacingError(RESTART_NOT_SERVICE) from None
-            self.reply(RESTART_STARTED)
+                raise UserFacingError(self.prompt("RESTART_NOT_SERVICE")) from None
+            self.reply(self.prompt("RESTART_STARTED"))
             try:
                 await asyncio.wait_for(self.outbox_drained.wait(), 20)
             except asyncio.TimeoutError:
-                raise UserFacingError(RESTART_CONFIRM_UNSENT) from None
+                raise UserFacingError(self.prompt("RESTART_CONFIRM_UNSENT")) from None
             self.state["restartRequested"] = True
             self.save()
             await service_control.restart()
@@ -496,11 +494,11 @@ class Bridge:
                 else:
                     await self.control(text, received=received)
             except asyncio.TimeoutError:
-                self.reply("控制请求未确认，请查看 `/status`；不会自动重发。")
+                self.reply(self.prompt("CONTROL_TIMEOUT"))
                 log_event("control.timeout", level="warning", component="input",
                           kind=lane, request_id=received.get("request_id"))
             except Exception as error:
-                self.reply("指令未完成，请查看 `/status` 后重试。")
+                self.reply(self.prompt("CONTROL_FAILED"))
                 log_event("control.failed", level="warning", component="input",
                           kind=lane, request_id=received.get("request_id"),
                           **error_fields(error))
@@ -532,7 +530,7 @@ class Bridge:
                     self.input_paused = True
                     reason = backend_reason(error)
                     if reason != reported:
-                        self.reply(fill(BACKEND_CONNECT_FAILED, {"原因": reason}))
+                        self.reply(self.prompt("BACKEND_CONNECT_FAILED", {"原因": reason}))
                         reported = reason
                     if isinstance(error, BackendStartupError):
                         delay = error.retry_after
@@ -588,7 +586,7 @@ class Bridge:
         tasks = []
         try:
             if self.state.pop("restartRequested", False):
-                self.reply(RESTART_READY)
+                self.reply(self.prompt("RESTART_READY"))
             self.recover_inputs()
             if self.wechat_paused:
                 await self.require_wechat_rebind()

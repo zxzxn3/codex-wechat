@@ -16,20 +16,9 @@ from records import AgentMessage, Source, TurnResult
 from media import OUTPUT_HINT
 from usage import UsageCache
 from questions import QUESTION_METHOD, question_prompt, question_answer
+from prompts import (prompt_text)
 from platform_support import IS_WINDOWS
-from prompts import (
-    APPROVAL_TOO_LONG,
-    COMPACT_STARTED,
-    COMPACT_FINISHED,
-    COMPACT_INTERRUPTED,
-    TURN_COMPLETED_EMPTY,
-    TURN_ENDED_UNEXPECTEDLY,
-    TURN_FAILED,
-    TURN_INTERRUPTED,
-    UNSUPPORTED_INTERACTION,
-    command_approval,
-    file_approval,
-)
+from prompts import (command_approval, file_approval)
 
 from codex_transport import CodexTransport, CodexRpcError
 
@@ -50,6 +39,7 @@ class CodexBackend:
         self.manual_compactions = set()
         self.compaction_notice = False
         self.refresh_config = lambda: None
+        self.prompt = prompt_text
         self.input_hint = lambda: OUTPUT_HINT
         self.on_limits = lambda payload: None
         self.selected_thread = None
@@ -155,7 +145,7 @@ class CodexBackend:
                 token = secrets.token_hex(4)
                 self.pending[token] = dict(msg, _question={
                     "source": self.source(), "index": 0, "answers": {}})
-                self.notify(question_prompt(questions[0], token, 0, len(questions)))
+                self.notify(question_prompt(questions[0], token, 0, len(questions), text=self.prompt))
                 return
         if self.shared and self.active and not self.active.get("owned"):
             # Observing a desktop turn does not transfer its tool/approval request ownership.
@@ -171,12 +161,14 @@ class CodexBackend:
                     cwd=params.get("cwd") or self.cwd,
                     reason=params.get("reason"),
                     token=token,
+                    text=self.prompt,
                 )
             else:
                 summary = file_approval(
                     scope=params.get("grantRoot") or params.get("cwd") or self.cwd,
                     reason=params.get("reason"),
                     token=token,
+                    text=self.prompt,
                 )
             # Keep the preview complete: reject very large approval requests rather than truncate.
             if len(summary) <= 1200:
@@ -185,11 +177,11 @@ class CodexBackend:
             self.pending.pop(token)
             await self.write({"id": msg["id"], "error": {
                 "code": -32601, "message": "This bridge does not support this request"}})
-            self.notify(APPROVAL_TOO_LONG)
+            self.notify(self.prompt("APPROVAL_TOO_LONG"))
             return
         await self.write({"id": msg["id"], "error": {
             "code": -32601, "message": "This bridge does not support this request"}})
-        self.notify(UNSUPPORTED_INTERACTION)
+        self.notify(self.prompt("UNSUPPORTED_INTERACTION"))
 
     def event(self, msg):
         params = msg.get("params", {})
@@ -235,7 +227,7 @@ class CodexBackend:
                 self.compactions[key] = phase
                 manual = (self.selection_epoch, self.selected_thread) in self.manual_compactions
                 if self.compaction_notice or (manual and phase == "completed"):
-                    self.notify(COMPACT_STARTED if phase == "started" else COMPACT_FINISHED)
+                    self.notify(self.prompt("COMPACT_STARTED") if phase == "started" else self.prompt("COMPACT_FINISHED"))
                 while len(self.compactions) > 64:
                     self.compactions.pop(next(iter(self.compactions)))
             return
@@ -248,7 +240,7 @@ class CodexBackend:
                 for key in unfinished:
                     self.compactions[key] = "interrupted"
                 if self.compaction_notice or (self.selection_epoch, self.selected_thread) in self.manual_compactions:
-                    self.notify(COMPACT_INTERRUPTED if turn.get("status") != "completed"
+                    self.notify(self.prompt("COMPACT_INTERRUPTED") if turn.get("status") != "completed"
                                 else "上下文压缩结果未确认。")
         if method == "thread/settings/updated":
             # Native settings are authoritative; no replay of previously observed defaults.
@@ -317,12 +309,12 @@ class CodexBackend:
             status = turn["status"]
             if status != "completed":
                 status_text = {
-                    "failed": TURN_FAILED,
-                    "interrupted": TURN_INTERRUPTED,
-                }.get(status, TURN_ENDED_UNEXPECTEDLY)
+                    "failed": self.prompt("TURN_FAILED"),
+                    "interrupted": self.prompt("TURN_INTERRUPTED"),
+                }.get(status, self.prompt("TURN_ENDED_UNEXPECTEDLY"))
                 text = (text + "\n\n" if text else "") + status_text
             result = TurnResult(current["source"], current["turn"],
-                                text if text or has_partial_answer else TURN_COMPLETED_EMPTY,
+                                text if text or has_partial_answer else self.prompt("TURN_COMPLETED_EMPTY"),
                                 current["cwd"], status, tuple(current.get("requestIds", ())))
             current["done"].set_result(result)
             self.pending.clear()
@@ -595,7 +587,7 @@ class CodexBackend:
             current["cwd"] = self.info.get("cwd") or self.cwd
             inputs = await self.input_items(text, attachments)
             if self.stop_requested:
-                return TurnResult(current["source"], None, "已停止，未启动模型轮次。",
+                return TurnResult(current["source"], None, self.prompt("PREPARATION_STOPPED"),
                                   current["cwd"], "interrupted")
             if self.active is not current:
                 if not allow_steer:
@@ -605,7 +597,7 @@ class CodexBackend:
                     return None
                 raise DeferTurn("桌面会话状态已改变")
             if dispatch and not dispatch("dispatching", None):
-                return TurnResult(current["source"], None, "已停止，未启动模型轮次。",
+                return TurnResult(current["source"], None, self.prompt("PREPARATION_STOPPED"),
                                   current["cwd"], "interrupted")
             current["starting"] = True
             response = await self.rpc("turn/start", {"threadId": thread_id,
@@ -672,7 +664,7 @@ class CodexBackend:
         questions = request["params"]["questions"]
         index = state["index"]
         question = questions[index]
-        answer = question_answer(question, text)
+        answer = question_answer(question, text, render=self.prompt)
         answers = {**state["answers"], question["id"]: {"answers": [answer]}}
         # Consume before writing: a transport failure is uncertain, never auto-resend.
         self.pending.pop(token)
@@ -682,5 +674,6 @@ class CodexBackend:
             state.update(index=index + 1, answers=answers)
             next_token = secrets.token_hex(4)
             self.pending[next_token] = request
-            self.notify(question_prompt(questions[index + 1], next_token, index + 1, len(questions)))
+            self.notify(question_prompt(questions[index + 1], next_token, index + 1, len(questions),
+                                        text=self.prompt))
         return True

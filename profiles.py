@@ -2,12 +2,6 @@
 from copy import deepcopy
 from platform_support import IS_WINDOWS
 from errors import UserFacingError
-from prompts import (
-    BACKEND_CLEANUP_FAILED,
-    BACKEND_INVALID,
-    BACKEND_SESSION_BUSY,
-    fill,
-)
 
 # An empty codex definition uses CodexBackend's existing default command.
 DEFAULT_BACKENDS = {"codex": {}, "deepseek": {"command": ["codex-deepseek", "app-server"]}}
@@ -51,7 +45,7 @@ async def switch(bridge, name):
                      if key.casefold() == str(name).casefold()), None)
     if resolved is None:
         available = " | ".join(backend_argument(key) for key in bridge.backend_configs)
-        raise UserFacingError(fill(BACKEND_INVALID, {"可用": available}))
+        raise UserFacingError(bridge.prompt("BACKEND_INVALID", {"可用": available}))
     name = resolved
     if name == bridge.backend_name and bridge.backend_started and bridge.loaded and bridge.backend.connected:
         return
@@ -65,7 +59,7 @@ async def switch(bridge, name):
             thread = await candidate.read_thread(thread_id)
             status = thread.get("status", {}).get("type")
             if status == "systemError" or (status == "active" and not candidate.shared):
-                raise UserFacingError(BACKEND_SESSION_BUSY)
+                raise UserFacingError(bridge.prompt("BACKEND_SESSION_BUSY"))
         selected = await candidate.thread(thread_id)
     except BaseException:
         await candidate.close()
@@ -86,4 +80,4 @@ async def switch(bridge, name):
     try:
         await previous.close()
     except Exception:
-        bridge.reply(BACKEND_CLEANUP_FAILED)
+        bridge.reply(bridge.prompt("BACKEND_CLEANUP_FAILED"))
