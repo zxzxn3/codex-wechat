@@ -92,6 +92,23 @@ Windows 使用 `.ps1 rebind`。等待扫码时服务继续运行，仅提交绑�
 
 系统通知是尽力投递，通知被关闭或无桌面时仍可从本机 status 和日志查看重绑状态。
 
+## 诊断日志
+
+Linux 使用 `codex-wechat logs`，Windows 使用 `.\codex-wechat.ps1 logs`；追加 `--follow` /
+`-Follow` 持续查看。结构化日志写入数据目录的 `logs/bridge.jsonl`，按 5 MiB 轮转并保留
+3 份备份。Windows 的 `logs/service.log` 仍保存后台 supervisor 和子进程的控制台输出；
+Linux 的 systemd 控制台输出仍在 `journalctl --user -u codex-wechat`。
+
+`bridge.jsonl` 每行一个 JSON 事件，包含时间、级别、事件名、平台、版本、进程号、随机
+请求号和必要元数据，用于关联收信、提交、API 请求、发送重试与后台恢复。字段采用白名单；
+不记录聊天正文、prompt、回复、文件名、账号标识、token、context token、Authorization、
+请求/响应体或绝对路径。错误仅保留异常类型和错误码；URL 只保留 endpoint，不带查询参数。
+日志写失败不会影响收发。默认级别为 `info`，排障可用环境变量
+`CODEX_WECHAT_LOG_LEVEL=debug|info|warning|error` 临时调整。
+
+需要反馈问题时优先提供 `logs/bridge.jsonl`；`service.log` 是底层进程输出，可能比结构化
+日志更杂。日志只保存在本机，不自动上传。
+
 ## 配置与数据
 
 示例见 config.example.json；实际 config.json、账户和交付状态不入库。Linux 默认数据在安装目录；Windows 在 `%LOCALAPPDATA%\codex-wechat`，程序在其中 app 目录。可用 CODEX_WECHAT_DATA_ROOT / CODEX_WECHAT_INSTALL_ROOT 明确分离位置。

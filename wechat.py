@@ -11,6 +11,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from errors import WeChatAuthExpired
+from diagnostics import log_event
 from subprocess_io import communicate
 from platform_support import curl_command, subprocess_options
 import wechat_auth
@@ -86,22 +87,39 @@ class WeChat:
             print(f"微信请求 {endpoint.split('?')[0]}: curl={proc.returncode} elapsed={elapsed:.2f}s",
                   file=sys.stderr, flush=True)
         if proc.returncode:
+            log_event("wechat.request", level="warning", component="wechat",
+                      endpoint=endpoint.split("?")[0], ok=False,
+                      curl_code=proc.returncode, duration_ms=elapsed * 1000)
             raise RuntimeError(f"微信网络请求失败（curl {proc.returncode}）")
+        http_status = None
         try:
             raw, status = output.rsplit(b"\n", 1)
             status = int(status)
+            http_status = status
             if not 200 <= status < 300:
+                log_event("wechat.request", level="warning", component="wechat",
+                          endpoint=endpoint.split("?")[0], ok=False,
+                          http_status=status, duration_ms=elapsed * 1000)
                 raise RuntimeError(f"微信 HTTP {status}")
             result = json.loads(raw)
             if not isinstance(result, dict):
                 raise ValueError()
         except (ValueError, TypeError):
+            log_event("wechat.request", level="warning", component="wechat",
+                      endpoint=endpoint.split("?")[0], ok=False,
+                      http_status=http_status, duration_ms=elapsed * 1000)
             raise RuntimeError("微信响应无法解析") from None
         if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
             code = result.get("errcode") or result.get("ret")
+            log_event("wechat.request", level="warning", component="wechat",
+                      endpoint=endpoint.split("?")[0], ok=False,
+                      http_status=http_status, error_code=code,
+                      duration_ms=elapsed * 1000)
             if auth and str(code) == "-14":
                 raise WeChatAuthExpired()
             raise RuntimeError(f"微信 API 错误 {code}")
+        log_event("wechat.request", component="wechat", endpoint=endpoint.split("?")[0],
+                  ok=True, http_status=http_status, duration_ms=elapsed * 1000)
         return result
 
     async def poll(self, cursor):

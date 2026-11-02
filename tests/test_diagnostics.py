@@ -1,0 +1,192 @@
+"""Structured diagnostics stay bounded and never record message content."""
+import json
+import os
+from pathlib import Path
+from contextlib import redirect_stdout
+from io import StringIO
+import tempfile
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import diagnostics
+from codex_wechat import Bridge, _log_files, show_logs
+from storage import Store
+from wechat import WeChat
+
+
+class CodedError(RuntimeError):
+    code = -32603
+
+
+class DiagnosticsTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "logs" / "bridge.jsonl"
+        diagnostics.configure(path=self.path, level="debug", max_bytes=5 * 1024 * 1024)
+
+    def tearDown(self):
+        diagnostics.reset()
+        self.temp.cleanup()
+
+    def records(self):
+        if not self.path.exists():
+            return []
+        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+
+    def test_jsonl_record_has_only_declared_metadata(self):
+        diagnostics.log_event("input.received", component="input", kind="input",
+                              chars=12, count=2, ok=True, status="preparing")
+        records = self.records()
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["event"], "input.received")
+        self.assertEqual(record["component"], "input")
+        self.assertEqual(record["chars"], 12)
+        self.assertTrue(record["ok"])
+        self.assertTrue(record["ts"].endswith("Z"))
+        self.assertNotIn("timezone", record)
+        self.assertFalse(self.path.read_text(encoding="utf-8").endswith("\n\n"))
+        if os.name != "nt":
+            self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    def test_message_prompt_credentials_and_paths_never_reach_log(self):
+        sentinels = (
+            "PROMPT_SENTINEL_7f935",
+            "TOKEN_SENTINEL_7f935",
+            "CONTEXT_SENTINEL_7f935",
+            "AUTH_SENTINEL_7f935",
+            "PATH_SENTINEL_7f935",
+            "FILE_SENTINEL_7f935",
+        )
+        diagnostics.log_event(
+            "input.received", component="input",
+            text=sentinels[0], prompt=sentinels[0], token=sentinels[1],
+            context_token=sentinels[2], Authorization=sentinels[3],
+            file_name=sentinels[5], absolute_path="/home/private/" + sentinels[4],
+            status="secret " + sentinels[0],
+            endpoint="https://example.invalid/?token=" + sentinels[1])
+        diagnostics.log_event(
+            "startup.failed", component="startup",
+            **diagnostics.error_fields(RuntimeError(
+                "prompt=" + sentinels[0] + " token=" + sentinels[1])))
+        data = self.path.read_text(encoding="utf-8")
+        for sentinel in sentinels:
+            self.assertNotIn(sentinel, data)
+        self.assertNotIn("/home/private/", data)
+
+    def test_request_id_correlates_events_and_unknown_fields_are_dropped(self):
+        with diagnostics.request_context("req-abc123"):
+            diagnostics.log_event("input.prepare", component="input", count=1,
+                                  text="PROMPT_SENTINEL")
+            diagnostics.log_event("input.completed", component="input", duration_ms=1.23456)
+        records = self.records()
+        self.assertEqual([record["request_id"] for record in records],
+                         ["req-abc123", "req-abc123"])
+        self.assertEqual(records[1]["duration_ms"], 1.235)
+        self.assertNotIn("text", records[0])
+
+    def test_invalid_event_and_field_types_are_ignored(self):
+        diagnostics.log_event("bad event name", component="input")
+        diagnostics.log_event("test.types", count=True, ok="yes", attempt=float("nan"),
+                              parts=2.5, status="not a slug")
+        records = self.records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["parts"], 2.5)
+        for field in ("count", "ok", "attempt", "status"):
+            self.assertNotIn(field, records[0])
+
+    def test_rotation_is_bounded(self):
+        diagnostics.configure(path=self.path, max_bytes=350)
+        for index in range(30):
+            diagnostics.log_event("test.rotation", count=index, job_id=f"job-{index}")
+        for number in range(1, diagnostics.BACKUP_COUNT + 1):
+            self.assertTrue(self.path.with_name(f"{self.path.name}.{number}").exists())
+        self.assertFalse(self.path.with_name(
+            f"{self.path.name}.{diagnostics.BACKUP_COUNT + 1}").exists())
+
+    def test_log_write_failure_is_silent(self):
+        with patch("diagnostics.os.open", side_effect=OSError("disk full")):
+            diagnostics.log_event("test.write_failed", component="bridge")
+
+    def test_error_fields_exclude_exception_message(self):
+        fields = diagnostics.error_fields(CodedError("PROMPT_SENTINEL_7f935"))
+        self.assertEqual(fields, {"error_type": "CodedError", "error_code": "-32603"})
+        self.assertNotIn("PROMPT_SENTINEL_7f935", json.dumps(fields))
+
+    def test_log_files_include_rotations_and_legacy_service_log(self):
+        diagnostics.log_event("bridge.start", component="bridge")
+        for number in range(1, diagnostics.BACKUP_COUNT + 1):
+            self.path.with_name(f"{self.path.name}.{number}").write_text("", encoding="utf-8")
+        (self.path.parent / "service.log").write_text("console\n", encoding="utf-8")
+        names = [path.name for path in _log_files()]
+        self.assertEqual(names, ["bridge.jsonl", "bridge.jsonl.1", "bridge.jsonl.2",
+                                 "bridge.jsonl.3", "service.log"])
+
+    def test_logs_command_shows_structured_and_supervisor_output(self):
+        diagnostics.log_event("bridge.start", component="bridge")
+        (self.path.parent / "service.log").write_text("supervisor started\n", encoding="utf-8")
+        output = StringIO()
+        with redirect_stdout(output):
+            show_logs()
+        text = output.getvalue()
+        self.assertIn('"event":"bridge.start"', text)
+        self.assertIn("supervisor started", text)
+
+    def test_windows_logs_command_uses_the_shared_viewer(self):
+        script = (Path(__file__).parents[1] / "codex-wechat.ps1").read_text(encoding="utf-8")
+        branch = script.split("'logs' {", 1)[1].split("'uninstall' {", 1)[0]
+        self.assertIn("@($Agent, 'logs')", branch)
+        self.assertIn("--follow", branch)
+        self.assertNotIn("Get-Content", branch)
+
+
+class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "data" / "logs" / "bridge.jsonl"
+        diagnostics.configure(path=self.path, level="debug")
+        self.store = Store(str(Path(self.temp.name) / "state"))
+
+    def tearDown(self):
+        self.store.lock.close()
+        diagnostics.reset()
+        self.temp.cleanup()
+
+    def records(self):
+        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+
+    async def test_received_prompt_is_represented_by_counts_only(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        sentinel = "PROMPT_SENTINEL_7f935"
+        message = {"message_id": "1", "from_user_id": "owner", "message_type": 1,
+                   "context_token": "CONTEXT_SENTINEL_7f935",
+                   "item_list": [{"type": 1, "text_item": {"text": sentinel}}]}
+        await bridge.receive({"msgs": [message]})
+        record = next(item for item in self.records() if item["event"] == "input.received")
+        self.assertEqual(record["chars"], len(sentinel))
+        data = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(sentinel, data)
+        self.assertNotIn("CONTEXT_SENTINEL_7f935", data)
+        self.assertIn("request_id", record)
+
+    async def test_wechat_logs_endpoint_without_query_or_credentials(self):
+        token = "TOKEN_SENTINEL_7f935"
+        process = SimpleNamespace(returncode=0, stdin=None)
+        client = WeChat({"token": token, "base_url": "https://ilinkai.weixin.qq.com"})
+        with patch("wechat.asyncio.create_subprocess_exec",
+                   AsyncMock(return_value=process)), \
+             patch("wechat.communicate",
+                   AsyncMock(return_value=(b'{"ret":0}\n200', b""))):
+            await client.request("ilink/bot/example?token=" + token)
+        record = next(item for item in self.records() if item["event"] == "wechat.request")
+        self.assertEqual(record["endpoint"], "ilink/bot/example")
+        self.assertTrue(record["ok"])
+        self.assertEqual(record["http_status"], 200)
+        data = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(token, data)
+        self.assertNotIn("?token=", data)
+
+
+if __name__ == "__main__":
+    unittest.main()

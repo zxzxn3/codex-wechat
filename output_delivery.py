@@ -13,6 +13,7 @@ from records import TurnResult
 from slicing import split_text
 from media import MediaError, MAX_ATTACHMENTS, split_answer
 from errors import WeChatAuthExpired, attachment_reason
+from diagnostics import error_fields, log_event
 from prompts import (
     ATTACHMENT_SEND_FAILED,
     AUTO_ATTACHMENT_FAILED,
@@ -40,6 +41,10 @@ class OutputDelivery:
         for index, entry in enumerate(entries, 1):
             entry.update(part=index, parts=len(entries))
         bridge.state["outbox"].extend(entries)
+        if entries:
+            log_event("output.enqueued", component="output", count=len(entries),
+                      parts=len(entries), queued=len(bridge.state["outbox"]),
+                      role=entries[0].get("role", "body"), job_id=entries[0].get("group"))
         if entries:
             bridge.outbox_drained.clear()
         if persist:
@@ -139,6 +144,8 @@ class OutputDelivery:
                     await bridge.deliver_answer(result, finish_running=False, require_current=True)
             except Exception as error:
                 bridge.reply("结果准备失败，请在桌面查看该轮回答。")
+                log_event("output.prepare_failed", level="warning", component="output",
+                          **error_fields(error))
                 print(f"外部结果失败：{type(error).__name__}", file=sys.stderr, flush=True)
             finally:
                 bridge.external_results.task_done()
@@ -161,6 +168,10 @@ class OutputDelivery:
         failed = {**entry, "status": "partial", "skipped": skipped}
         bridge.state["failedOutbox"] = (bridge.state.get("failedOutbox", []) + [failed])[-20:]
         bridge.state["consecutiveSendFailures"] += 1
+        log_event("output.failed", level="warning", component="output",
+                  role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
+                  parts=entry.get("parts"), part=entry.get("part"),
+                  count=len(skipped), job_id=entry.get("group"))
         # Never recursively report a failed failure notice.
         if not entry.get("failureNotice"):
             text = (fill(ATTACHMENT_SEND_FAILED, {"名称": entry["asset"]["name"], "次数": SEND_ATTEMPTS})
@@ -191,6 +202,10 @@ class OutputDelivery:
                     bridge.save()
                 if bridge.wechat_paused:
                     continue
+                log_event("output.send_start", component="output",
+                          queued=len(bridge.state["outbox"]), role=entry.get("role", "body"),
+                          attempt=entry.get("attempts", 0), part=entry.get("part"),
+                          parts=entry.get("parts"), job_id=entry.get("group"))
                 print(f"微信发送开始: queued={len(bridge.state['outbox'])} role={entry.get('role', 'body')}",
                       file=sys.stderr, flush=True)
                 send_started = time.perf_counter()
@@ -205,11 +220,18 @@ class OutputDelivery:
                     bridge.fail_output(entry)
                     continue
                 bridge.save()
+                log_event("output.send_failed", level="warning", component="output",
+                          role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
+                          retry_in_ms=5000, job_id=entry.get("group"),
+                          **error_fields(error))
                 print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
                 await asyncio.sleep(5)
                 continue
             bridge.state["outbox"].pop(0)
             bridge.state["consecutiveSendFailures"] = 0
+            log_event("output.sent", component="output", role=entry.get("role", "body"),
+                      attempt=entry.get("attempts", 0), duration_ms=send_ms,
+                      queued=len(bridge.state["outbox"]), job_id=entry.get("group"))
             print(f"微信发送完成: elapsed={send_ms:.0f}ms", file=sys.stderr, flush=True)
             bridge.latency.sends.append(send_ms)
             bridge.mark_wechat_valid()

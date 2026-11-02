@@ -11,6 +11,7 @@
 | 微信 | [Tencent openclaw-weixin 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)及项目此前使用的2.4.10实现；认证、媒体参数以该协议为准 |
 | 网络与媒体 | [curl](https://curl.se/docs/manpage.html)、[websockets](https://websockets.readthedocs.io/en/stable/reference/asyncio/client.html)、[cryptography](https://cryptography.io/en/latest/hazmat/primitives/symmetric-encryption/)；采用成熟传输和密码实现 |
 | 原生服务与 UI | systemd 用户服务、Windows ScheduledTasks；二维码/通知的具体官方依据见 [PLATFORM-CAPABILITIES](PLATFORM-CAPABILITIES.md) |
+| 诊断日志 | Python 标准库 `os.open`/`os.replace`/`contextvars`；仅写本机文件，不上传 |
 
 公开协议提供 stdio、WebSocket 和 Unix socket；CLI --remote 可接指定共享后台。
 WebSocket 仍为实验性；App 连接环境变量是版本相关内部接口，不是公开稳定承诺。

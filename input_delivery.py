@@ -6,12 +6,14 @@ never copies backend selection or persistent queues across an await.
 from dataclasses import asdict
 import asyncio
 import sys
+import time
 import uuid
 from backend import CodexRpcError, DeferTurn
 from commands import ensure_session
 from records import InputPhase
 from media import MediaError
 from errors import attachment_reason
+from diagnostics import error_fields, log_event
 from prompts import (
     ATTACHMENT_INCOMING_FAILED,
     QUEUED_STEER,
@@ -28,14 +30,27 @@ class InputDelivery:
         bridge = self.bridge
         if phase == InputPhase.DISPATCHING and bridge.wechat_paused:
             job["authDeferred"] = True
+            log_event("input.deferred", component="input", status="auth",
+                      phase=phase, mode=job.get("mode", "steer"),
+                      request_id=job.get("requestId"))
             return False
         if phase == InputPhase.DISPATCHING and bridge.restarting:
             job["restartDeferred"] = True
+            log_event("input.deferred", component="input", status="restart",
+                      phase=phase, mode=job.get("mode", "steer"),
+                      request_id=job.get("requestId"))
             return False
         if phase == InputPhase.DISPATCHING and (bridge.stopping or backend is not bridge.backend):
+            log_event("input.deferred", component="input",
+                      status="stopping" if bridge.stopping else "backend_changed",
+                      phase=phase, mode=job.get("mode", "steer"),
+                      request_id=job.get("requestId"))
             return False
         job.update(phase=phase, turn=turn_id, source=asdict(backend.source(bridge.state["thread"])))
         bridge.save()
+        log_event("input.dispatch", component="input", phase=phase,
+                  mode=job.get("mode", "steer"), backend=bridge.backend_name,
+                  request_id=job.get("requestId"))
         return True
 
     def record_input(self, job, phase):
@@ -66,6 +81,9 @@ class InputDelivery:
         if uncertain or legacy_running:
             bridge.reply("上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。")
         bridge.save()
+        log_event("input.recovered", component="input", count=len(jobs),
+                  pending=len(bridge.state["inbox"]),
+                  kind="with_uncertain" if uncertain or legacy_running else "restart")
 
     def defer_restart(self, job):
         bridge = self.bridge
@@ -99,6 +117,13 @@ class InputDelivery:
             bridge.state["currentInput"] = job
             bridge.save()
             backend = bridge.backend
+            started = time.perf_counter()
+            log_event("input.prepare", component="input", phase=job["phase"],
+                      mode=job.get("mode", "steer"), chars=len(job.get("text", "")),
+                      count=len(job.get("attachments", [])),
+                      queued=len(bridge.state["inbox"]),
+                      ingress_ms=job.get("ingress_ms"),
+                      request_id=job.get("requestId"))
             try:
                 try:
                     await ensure_session(bridge)
@@ -120,6 +145,9 @@ class InputDelivery:
                 if "preparedAttachments" not in job:
                     job["preparedAttachments"] = await bridge.media.incoming(job.get("attachments", []))
                     bridge.save()
+                    log_event("input.prepared", component="input", count=len(job["preparedAttachments"]),
+                              duration_ms=(time.perf_counter() - started) * 1000,
+                              request_id=job.get("requestId"))
                 if bridge.stopping:
                     continue
                 if bridge.restarting or bridge.wechat_paused:
@@ -136,6 +164,10 @@ class InputDelivery:
                     continue
                 if answer is not None:
                     await bridge.deliver_answer(answer)
+                    log_event("input.completed", component="input",
+                              duration_ms=(time.perf_counter() - started) * 1000,
+                              queued=len(bridge.state["inbox"]),
+                              request_id=job.get("requestId"))
                 else:
                     bridge.state.pop("currentInput", None)
                     bridge.save()
@@ -146,6 +178,9 @@ class InputDelivery:
                     job.update(mode="queue", phase=InputPhase.PREPARING)
                     bridge.state["inbox"].insert(0, job)
                     bridge.reply(QUEUED_STEER)
+                    log_event("input.deferred", component="input", status="queue",
+                              phase=job["phase"], mode="queue",
+                              request_id=job.get("requestId"))
                 bridge.state.pop("currentInput", None)
                 bridge.save()
             except Exception as error:
@@ -160,8 +195,18 @@ class InputDelivery:
                                "任务已提交，但结果接收中断，未重新执行。" if phase == InputPhase.ACCEPTED else
                                fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
                                if isinstance(error, MediaError) else TASK_FAILED)
+                    log_event("input.failed", level="warning", component="input",
+                              status=("uncertain" if uncertain else
+                                      "accepted" if phase == InputPhase.ACCEPTED else "failed"),
+                              phase=phase, mode=job.get("mode", "steer"),
+                              backend=bridge.backend_name,
+                              request_id=job.get("requestId"), **error_fields(error))
                 else:
                     bridge.reply("后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。")
+                    log_event("input.failed", level="warning", component="input",
+                              status="backend_unavailable", phase=job.get("phase"),
+                              mode=job.get("mode", "steer"), backend=bridge.backend_name,
+                              request_id=job.get("requestId"), **error_fields(error))
                 print(f"Agent backend error: {type(error).__name__}", file=sys.stderr, flush=True)
             finally:
                 if bridge.stopping and bridge.state.get("currentInput") is job:
@@ -169,6 +214,8 @@ class InputDelivery:
                                       else job["phase"])
                     bridge.state.pop("currentInput", None)
                     bridge.save()
+                    log_event("input.cancelled", component="input", phase=job.get("phase"),
+                              request_id=job.get("requestId"))
                 bridge.running = False
                 bridge.wake.set()
 
@@ -194,6 +241,10 @@ class InputDelivery:
                 turn_id, thread_id = active["turn"], active["thread"]
                 bridge.steering = True
                 try:
+                    log_event("input.steer_start", component="input",
+                              phase=job.get("phase", InputPhase.PREPARING),
+                              mode=job.get("mode", "steer"),
+                              request_id=job.get("requestId"))
                     if "preparedAttachments" not in job:
                         job["preparedAttachments"] = await bridge.media.incoming(job.get("attachments", []))
                         bridge.save()
@@ -208,14 +259,22 @@ class InputDelivery:
                         bridge.state["inbox"] = [item for item in bridge.state["inbox"] if item is not job]
                         bridge.save()
                         bridge.acknowledge(job)
+                        log_event("input.steer_accepted", component="input",
+                                  request_id=job.get("requestId"))
                     elif job.pop("authDeferred", False):
                         bridge.save()
+                        log_event("input.deferred", component="input", status="auth",
+                                  phase=job.get("phase"), mode=job.get("mode", "steer"),
+                                  request_id=job.get("requestId"))
                         break
                     elif not bridge.stopping:
                         job.pop("restartDeferred", None)
                         job.update(mode="queue", phase=InputPhase.PREPARING)
                         bridge.save()
                         bridge.reply(QUEUED_STEER)
+                        log_event("input.deferred", component="input", status="queue",
+                                  phase=job["phase"], mode="queue",
+                                  request_id=job.get("requestId"))
                         break
                 except asyncio.CancelledError:
                     raise
@@ -227,6 +286,10 @@ class InputDelivery:
                     bridge.reply(UNCERTAIN_STEER if uncertain else
                                fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
                                if isinstance(error, MediaError) else TASK_FAILED)
+                    log_event("input.steer_failed", level="warning", component="input",
+                              status="uncertain" if uncertain else "failed",
+                              phase=job.get("phase"), mode=job.get("mode", "steer"),
+                              request_id=job.get("requestId"), **error_fields(error))
                     print(f"追加消息失败：{type(error).__name__}", file=sys.stderr, flush=True)
                 finally:
                     bridge.steering = False

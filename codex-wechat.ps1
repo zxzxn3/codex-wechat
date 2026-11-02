@@ -90,7 +90,7 @@ $env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot
 $DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
-$LogPath = Join-Path $DataRoot 'logs\service.log'
+$LogRoot = Join-Path $DataRoot 'logs'
 $VenvPython = Join-Path $Project '.venv\Scripts\python.exe'
 $Agent = Join-Path $Project 'codex_wechat.py'
 $ServiceScript = Join-Path $Project 'windows_service.py'
@@ -247,7 +247,7 @@ switch ($Command) {
             exit 0
         }
         Start-ScheduledTask -TaskName $TaskName
-        Write-Host "start requested; log: $LogPath"
+        Write-Host "start requested; logs: $LogRoot"
     }
     'service-stop' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -274,7 +274,7 @@ switch ($Command) {
             Wait-TaskStopped
         }
         Start-ScheduledTask -TaskName $TaskName
-        Write-Host "restart requested; log: $LogPath"
+        Write-Host "restart requested; logs: $LogRoot"
     }
     'service-status' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -299,7 +299,7 @@ switch ($Command) {
         Write-Host "task=$($task.State)"
         Write-Host "last_run=$($info.LastRunTime)"
         Write-Host "last_result=$($info.LastTaskResult)"
-        Write-Host "log=$LogPath"
+        Write-Host "logs=$LogRoot"
     }
     'autostart' {
         $info = Get-AutostartTask
@@ -321,15 +321,12 @@ switch ($Command) {
         Write-AutostartResult (Get-AutostartEnabled $info.Task $info.LoginTriggers)
     }
     'logs' {
-        if (-not (Test-Path $LogPath)) {
-            Write-Host "log does not exist yet: $LogPath"
-            exit 1
-        }
+        $logArguments = @($Agent, 'logs')
         if ($Follow) {
-            Get-Content -Path $LogPath -Tail 100 -Wait -Encoding UTF8
-        } else {
-            Get-Content -Path $LogPath -Tail 100 -Encoding UTF8
+            $logArguments += '--follow'
         }
+        & $VenvPython -u @logArguments
+        exit $LASTEXITCODE
     }
     'uninstall' {
         & (Join-Path $Project 'uninstall.ps1') -PurgeData:$PurgeData

@@ -8,13 +8,13 @@ import os
 from pathlib import Path
 import signal
 import sys
+import time
 import uuid
 
 import service_adapter
 import service_control
 import wechat_auth
 from backend import CodexBackend
-from codex_transport import CodexRpcError
 from output_delivery import OutputDelivery
 from input_delivery import InputDelivery
 from storage import Store
@@ -35,6 +35,7 @@ from media import Media, MAX_ATTACHMENTS
 from latency import Latency, message_timestamps
 from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, backend_reason
 from platform_support import IS_WINDOWS, data_root
+from diagnostics import BACKUP_COUNT, error_fields, log_event, log_path, new_request_id
 from prompts import (
     BACKEND_CONNECT_FAILED,
     BUSY_RESTART,
@@ -158,6 +159,8 @@ class Bridge:
             details["notificationAttempted"] = True
             details["notificationCommand"] = command
         self.save()
+        log_event("wechat.auth_required", level="warning", component="wechat",
+                  queued=len(self.state.get("outbox", [])))
         if notify:
             try:
                 await service_adapter.notify("微信绑定已失效", "重新绑定\n" + command)
@@ -286,6 +289,7 @@ class Bridge:
         self.reload_config()
         controls = []
         for msg in batch.get("msgs", []):
+            request_id = new_request_id()
             if (msg.get("from_user_id") != self.account["user"] or msg.get("group_id")
                     or msg.get("message_type") != 1):
                 continue
@@ -309,11 +313,16 @@ class Bridge:
             received = self.latency.received_any(message_timestamps(msg))
             if queued:
                 text = argument
+            kind = ("queued" if queued else "command" if text.startswith("/") and not attachments
+                    else "input" if text or attachments else "unsupported")
+            log_event("input.received", component="input", request_id=request_id,
+                      kind=kind, chars=len(text), count=len(attachments))
             if queued and not text and not attachments:
                 self.reply(f"用法: `{REGISTRY['/queue'].usage}`")
             elif len(attachments) > MAX_ATTACHMENTS:
                 self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}))
             elif text.startswith("/") and not attachments and not queued:
+                received["request_id"] = request_id
                 if spec and spec.lane == "media":
                     received["media"] = self.media_origin()
                 controls.append((text, received))
@@ -324,7 +333,8 @@ class Bridge:
                     self.state["inbox"].append({"id": identity, "text": text,
                                                "attachments": attachments, "mode": "queue" if queued else "steer",
                                                "clientId": str(uuid.uuid4()), "phase": InputPhase.PREPARING,
-                                               "ingress_ms": received.get("ingress_ms")})
+                                               "ingress_ms": received.get("ingress_ms"),
+                                               "requestId": request_id})
                     if queued:
                         self.reply("已排队", persist=False)
             else:
@@ -420,8 +430,13 @@ class Bridge:
                     await self.control(text, received=received)
             except asyncio.TimeoutError:
                 self.reply("控制请求未确认，请查看 `/status`；不会自动重发。")
+                log_event("control.timeout", level="warning", component="input",
+                          kind=lane, request_id=received.get("request_id"))
             except Exception as error:
                 self.reply("指令未完成，请查看 `/status` 后重试。")
+                log_event("control.failed", level="warning", component="input",
+                          kind=lane, request_id=received.get("request_id"),
+                          **error_fields(error))
                 print(f"控制失败：{type(error).__name__}", file=sys.stderr, flush=True)
             finally:
                 queue.task_done()
@@ -454,7 +469,9 @@ class Bridge:
                         reported = reason
                     if isinstance(error, BackendStartupError):
                         delay = error.retry_after
-                    print(f"后端恢复失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)
+                    log_event("backend.recover_failed", level="warning", component="backend",
+                              retry_in_ms=int(delay * 1000), **error_fields(error))
+                    print(f"后端恢复失败：{type(error).__name__}", file=sys.stderr, flush=True)
             # Account reads are independent of the active model turn.
             if not self.restarting and self.backend_started and self.backend.connected:
                 await self.backend.refresh_usage()
@@ -493,6 +510,8 @@ class Bridge:
             except WeChatAuthExpired:
                 await self.require_wechat_rebind()
             except Exception as error:
+                log_event("wechat.poll_failed", level="warning", component="wechat",
+                          retry_in_ms=int(delay * 1000), **error_fields(error))
                 print(f"接收失败：{error}", file=sys.stderr, flush=True)
                 await asyncio.sleep(delay)
                 # Long reconnect backoff leaves newly arrived commands unread.
@@ -510,6 +529,8 @@ class Bridge:
                      (self.poller, self.worker, self.steering_worker,
                       self.external_result_worker, self.sender, self.maintain_backend)]
             tasks.extend(asyncio.create_task(self.control_worker(lane)) for lane in self.controls)
+            log_event("bridge.start", component="bridge", backend=self.backend_name,
+                      connected=self.backend.connected)
             print("微信消息桥已启动；Ctrl+C 停止。", flush=True)
             await asyncio.gather(*tasks)
         finally:
@@ -518,6 +539,7 @@ class Bridge:
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await self.backend.close()
+            log_event("bridge.stop", component="bridge")
 
 
 async def startup_store(args):
@@ -588,16 +610,73 @@ def status_payload(store):
     return payload
 
 
+def _log_files():
+    try:
+        primary = log_path()
+    except (OSError, RuntimeError):
+        return []
+    candidates = [primary]
+    candidates.extend(primary.with_name(f"{primary.name}.{number}")
+                      for number in range(1, BACKUP_COUNT + 1))
+    candidates.append(primary.parent / "service.log")
+    return [path for path in candidates if path.is_file()]
+
+
+def _tail_lines(path, limit=200):
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as stream:
+            return stream.read().splitlines()[-limit:]
+    except OSError:
+        return []
+
+
+def show_logs(follow=False):
+    files = _log_files()
+    if not files:
+        print("暂无诊断日志；运行 start 或 service-start 后生成。")
+        return
+    for path in files:
+        print(f"==> {path} <==")
+        print("\n".join(_tail_lines(path)))
+    if not follow:
+        return
+    positions = {path: path.stat().st_size for path in files}
+    while True:
+        time.sleep(0.5)
+        for path in files:
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            if size < positions.get(path, 0):
+                positions[path] = 0
+            try:
+                with path.open("r", encoding="utf-8", errors="replace") as stream:
+                    stream.seek(positions.get(path, 0))
+                    chunk = stream.read()
+                    positions[path] = stream.tell()
+                if chunk:
+                    print(chunk, end="", flush=True)
+            except OSError:
+                continue
+
+
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("login", "start", "status", "rebind"))
+    parser.add_argument("action", choices=("login", "start", "status", "rebind", "logs"))
     parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
     parser.add_argument("--stop-active", action="store_true")
+    parser.add_argument("--follow", action="store_true")
     args = parser.parse_args()
     if args.action != "rebind" and args.stop_active:
         parser.error("--stop-active 只能与 rebind 一起使用")
+    if args.action != "logs" and args.follow:
+        parser.error("--follow 只能与 logs 一起使用")
     os.umask(0o077)
+    if args.action == "logs":
+        show_logs(args.follow)
+        return
     if args.action == "rebind":
         await run_rebind(
             args.state_dir,
@@ -645,9 +724,13 @@ if __name__ == "__main__":
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     except ConfigurationError as error:
+        log_event("startup.failed", level="error", component="startup",
+                  status="configuration", **error_fields(error))
         print(str(error), file=sys.stderr)
         sys.exit(78)  # Persistent setup/configuration errors need user correction.
     except Exception as error:
+        log_event("startup.failed", level="error", component="startup",
+                  status="exception", **error_fields(error))
         print(str(error), file=sys.stderr)
         sys.exit(1)
     sys.exit(service_control.exit_code())

@@ -26,6 +26,9 @@ Windows 实机出现 curl 56/28，某次发送卡约 19.5 秒、重试约 534ms�
 当时进程连接 IPv6 Fake-IP，但 IPv4/IPv6 的短请求都成功，不能据此认定 IPv6 是根因。
 用户随后表示卡顿暂未再出现；因无法证明因果，已撤销临时强制 IPv4，继续观察默认连接路径。
 
-新增请求失败/慢请求耗时、发送耗时和队列长度日志，不记录正文、令牌或响应内容。
-发送延迟已补 create_time_ms 缺失时回退 update_time_ms/item 时间戳；Windows 需更新到
-该源码后生效，尚未实机验证。仅有语法、安装及上述实机观察，未执行单元测试。
+结构化诊断写入`%LOCALAPPDATA%\codex-wechat\logs\bridge.jsonl`，可用
+`.\codex-wechat.ps1 logs [-Follow]`查看；字段白名单不记录正文、prompt、令牌、
+context token、文件名或绝对路径。`service.log`仍记录supervisor和子进程控制台输出，
+反馈问题时优先提供`bridge.jsonl`。发送延迟已补 create_time_ms 缺失时回退
+update_time_ms/item 时间戳；Windows 需更新到该源码后生效，尚未实机验证。
+仅有语法、安装及上述实机观察，未执行单元测试。
