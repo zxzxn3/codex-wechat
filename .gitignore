@@ -1,3 +1,5 @@
+# Source is tracked by the HOME dotfiles repository; exclude runtime data.
+!*
 .venv/
 .bootstrap-venv/
 .state/
