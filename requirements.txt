@@ -1,4 +1,3 @@
-# Media encryption, shared-daemon transport and terminal QR output.
+# Media encryption and mature WebSocket transport.
 cryptography>=38
 websockets>=15,<18
-qrcode>=7.4,<9

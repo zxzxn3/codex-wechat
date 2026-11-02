@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -16,6 +17,9 @@ import tempfile
 import textwrap
 from urllib.parse import urlsplit
 
+from dependencies import tools, PYTHON_REQUIREMENTS, QR_FALLBACK_REQUIREMENTS
+from native_codex import discover_codex
+
 sys.dont_write_bytecode = True
 
 SOURCE_ROOT = Path(__file__).resolve().parent
@@ -26,13 +30,8 @@ DECLARATION_PATHS = {
     "complete": Path("assets/install/after-install.txt"),
 }
 NON_INTERACTIVE = False
-# Requirements for Python packages remain solely in requirements.txt.
-DEPENDENCIES = (
-    ("Codex CLI", "codex.exe" if os.name == "nt" else "codex", None, "微信模型任务", "warn"),
-    ("curl", "curl.exe" if os.name == "nt" else "curl", (8, 4), "微信登录与收发", "warn"),
-    ("qrencode", "qrencode", None, "优先使用终端二维码", "warn"),
-    ("systemd-run", "systemd-run", (254,), "Linux 共享后台", "warn"),
-)
+# Dependency declarations are shared; requirements versions live in their files.
+DEPENDENCIES = tools(IS_WINDOWS)
 COMPONENTS = {
     "wechat-attachments": ("微信附件说明 skill", Path("skills/wechat-attachments/SKILL.md")),
 }
@@ -52,8 +51,11 @@ PRIVATE_NAMES = {
     ".bootstrap-venv",
     "__pycache__",
     "dist",
+    "experiments",
     RELEASES_DIR,
     "workspace",
+    "shared",
+    "logs",
     CURRENT_FILE,
     PREVIOUS_FILE,
     LOCK_FILE,
@@ -71,11 +73,17 @@ REQUIRED_FILES = {
     Path("requirements.txt"),
 }
 STABLE_LINUX_FILES = (
+    Path("codex-desktop"),
+    Path("dependencies.py"),
+    Path("native_codex.py"),
     Path("codex-wechat"),
     Path("codex-wechat.service"),
     Path("installer.py"),
 )
 STABLE_WINDOWS_FILES = (
+    Path("dependencies.py"),
+    Path("native_codex.py"),
+    Path("codex-desktop.ps1"),
     Path("installer.py"),
     Path("bootstrap_supervisor.py"),
     Path("codex-wechat.ps1"),
@@ -180,7 +188,7 @@ def _private(relative: Path) -> bool:
     return relative.suffix.casefold() in (".pyc", ".pyo")
 
 
-def project_files(source: Path) -> dict[Path, tuple[bytes, int]]:
+def project_files(source: Path, *, require_complete=True) -> dict[Path, tuple[bytes, int]]:
     """Read distributable files without following private or public symlinks."""
     source = source.expanduser()
     if source.is_symlink():
@@ -212,9 +220,54 @@ def project_files(source: Path) -> dict[Path, tuple[bytes, int]]:
                 raise ValueError(f"源码中不是普通文件: {relative}")
             files[relative] = (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
     missing = sorted(str(path) for path in REQUIRED_FILES if path not in files)
-    if missing:
+    if missing and require_complete:
         raise ValueError("源码缺少必要文件: " + ", ".join(missing))
     return files
+
+
+def check_runtime_compatibility(files, config):
+    """Validate capability declarations, never import downloaded project code."""
+    backends = config.get("backends", {})
+    if not isinstance(backends, dict):
+        raise ValueError("backends 必须是对象")
+    definitions = [config.get("backend", {})]
+    definitions.extend(backends.values())
+    required = any(isinstance(item, dict) and item.get("websocketUrl")
+                   for item in definitions)
+    if not required:
+        return
+    declaration = files.get(Path("codex_connection.py")) if files else None
+    try:
+        module = ast.parse(declaration[0]) if declaration else None
+        values = [ast.literal_eval(node.value) for node in module.body
+                  if isinstance(node, ast.Assign) and any(
+                      isinstance(target, ast.Name) and target.id == "SUPPORTED_TRANSPORTS"
+                      for target in node.targets)] if module else []
+        capabilities = values[0] if len(values) == 1 else ()
+    except (SyntaxError, ValueError, TypeError):
+        raise ValueError("源码的连接能力声明无效") from None
+    if not isinstance(capabilities, tuple) or "loopback-websocket" not in capabilities:
+        raise ValueError("当前配置使用共享 WebSocket，但待安装版本不支持；未修改安装。")
+
+
+def check_config_compatibility(files, target):
+    override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
+    if override:
+        root = Path(override)
+    elif IS_WINDOWS:
+        local = os.environ.get("LOCALAPPDATA")
+        if not local:
+            raise ValueError("缺少 LOCALAPPDATA，无法核对运行配置")
+        root = Path(local) / "codex-wechat"
+    else:
+        root = target
+    path = root / "config.json"
+    if not path.exists():
+        return
+    config = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(config, dict):
+        raise ValueError("运行配置必须是 JSON 对象")
+    check_runtime_compatibility(files, config)
 
 
 def release_identifier(files: dict[Path, tuple[bytes, int]]) -> str:
@@ -407,6 +460,40 @@ def release_path(target: Path, identifier: str) -> Path:
     return target / RELEASES_DIR / identifier
 
 
+def _manifest_release_files(root: Path, manifest):
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("版本文件清单无效")
+    files = {}
+    seen = set()
+    for name in entries:
+        if not isinstance(name, str) or not name or "\\" in name or ":" in name:
+            raise ValueError("版本文件路径无效")
+        relative = Path(name)
+        if (relative.is_absolute() or ".." in relative.parts
+                or relative.as_posix() != name or name == MANIFEST_FILE):
+            raise ValueError("版本文件路径越界或不规范")
+        identity = name.casefold() if IS_WINDOWS else name
+        if identity in seen:
+            raise ValueError("版本文件清单重复")
+        seen.add(identity)
+        path = root / relative
+        for parent in (path, *path.parents):
+            if parent.is_symlink():
+                raise ValueError("版本文件不能经过符号链接")
+            if parent == root:
+                break
+        if not path.is_file():
+            raise ValueError("版本文件缺失")
+        files[relative] = (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+    # Validate content selected by this version's own manifest. New exclusions
+    # and source requirements cannot redefine an older release's content hash.
+    public = project_files(root, require_complete=False)
+    if set(public) - set(files) or not _legacy_installation(root):
+        raise ValueError("版本含未声明的程序文件或缺少入口")
+    return files
+
+
 def release_matches(target: Path, identifier: str, files=None) -> bool:
     if identifier == LEGACY_ID:
         return _legacy_installation(target)
@@ -418,8 +505,11 @@ def release_matches(target: Path, identifier: str, files=None) -> bool:
     root = release_path(target, identifier)
     if root.is_symlink() or not root.is_dir():
         return False
+    manifest_path = root / MANIFEST_FILE
+    if manifest_path.is_symlink():
+        return False
     try:
-        manifest = json.loads((root / MANIFEST_FILE).read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
     if not isinstance(manifest, dict) or manifest.get("schema") != RELEASE_FORMAT:
@@ -427,7 +517,7 @@ def release_matches(target: Path, identifier: str, files=None) -> bool:
     if manifest.get("id") != identifier or manifest.get("platform") != sys.platform:
         return False
     try:
-        actual = release_identifier(project_files(root))
+        actual = release_identifier(_manifest_release_files(root, manifest))
     except (OSError, ValueError):
         return False
     return actual == identifier and (files is None or actual == release_identifier(files))
@@ -480,12 +570,17 @@ def prepare_runtime(root: Path) -> None:
         "--disable-pip-version-check",
         "--no-cache-dir",
         "-r",
-        str(root / "requirements.txt"),
+        str(root / PYTHON_REQUIREMENTS),
     ], cwd=root)
+    # Keep the fallback out of the base dependency set when a native encoder exists.
+    if not shutil.which("qrencode"):
+        detail("未找到原生二维码编码器，准备轻量二维码回退。")
+        _run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
+              "--no-cache-dir", "-r", str(root / QR_FALLBACK_REQUIREMENTS)], cwd=root)
     _run([
         str(python),
         "-c",
-        "import importlib.metadata; "
+        "import importlib.metadata; import codex_wechat; import desktop; "
         "print(\"Python dependencies installed\")",
     ], cwd=root)
     python_files = [
@@ -669,6 +764,12 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
             raise
         detail(f"源码检查: {error}；因 --dry-run 放行。")
         files = None
+    try:
+        check_config_compatibility(files, target)
+    except (OSError, ValueError) as error:
+        if not dry_run:
+            raise
+        detail(f"运行能力检查: {error}；因 --dry-run 放行。")
     identifier = release_identifier(files) if files is not None else "演示版本"
     if dry_run:
         detail("因 --dry-run，真实安装目录与命令入口检查按通过处理；不代表实际安装条件已满足。")
@@ -888,14 +989,10 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
             raise ValueError("安装需要 Python 3.11+，请补齐后重跑。")
         detail("Python 版本不足 3.11；因 --dry-run 放行。")
     for name, command, minimum, purpose, policy in DEPENDENCIES:
-        if IS_WINDOWS and command in ("qrencode", "systemd-run"):
+        if (IS_WINDOWS and command in ("qrencode", "systemd-run")):
             continue
-        executable = shutil.which(command)
-        if not executable and name == "Codex CLI" and IS_WINDOWS:
-            local = os.environ.get("LOCALAPPDATA")
-            candidate = Path(local) / "Programs/OpenAI/Codex/bin/codex.exe" if local else None
-            if candidate and candidate.is_file():
-                executable = str(candidate)
+        executable = (discover_codex(windows=IS_WINDOWS) if name == "Codex runtime"
+                      else shutil.which(command))
         ready = bool(executable)
         if ready and minimum and not dry_run:
             try:
