@@ -10,7 +10,7 @@
 - commands / command_specs / prompts / configuration：唯一命令目录、展示快照和配置；不重复业务状态。
 - platform_ui / platform_support / service_adapter：二维码、通知、平台路径与原生服务操作。
 - subprocess_io / storage：有界子进程收尾、私有JSON与原生单实例锁。
-- installer / dependencies：安装策略和依赖声明；系统脚本仅适配入口与原生服务。
+- installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。
 
 共享后台与微信服务是两种所有权：前者可以被 App/CLI 继续使用，后者只管理桥接。
 连接失败不删除写入锁、不抢停桌面、不静默另开独立写入后台。App 的共享WS仅回环，

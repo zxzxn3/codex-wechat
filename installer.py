@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,8 +18,6 @@ import tempfile
 import textwrap
 from urllib.parse import urlsplit
 
-from dependencies import tools, PYTHON_REQUIREMENTS, QR_FALLBACK_REQUIREMENTS
-from native_codex import discover_codex
 
 sys.dont_write_bytecode = True
 
@@ -31,7 +30,14 @@ DECLARATION_PATHS = {
 }
 NON_INTERACTIVE = False
 # Dependency declarations are shared; requirements versions live in their files.
-DEPENDENCIES = tools(IS_WINDOWS)
+PYTHON_REQUIREMENTS = Path("requirements.txt")
+QR_FALLBACK_REQUIREMENTS = Path("requirements-qr.txt")
+DEPENDENCIES = (
+    ("Codex runtime", "codex.exe" if IS_WINDOWS else "codex", None, "微信模型任务", "warn"),
+    ("curl", "curl.exe" if IS_WINDOWS else "curl", (8, 4), "微信登录与收发", "warn"),
+    ("qrencode", "qrencode", None, "原生终端二维码（缺少时使用轻量回退）", "warn"),
+    ("systemd-run", "systemd-run", (254,), "Linux 共享后台", "warn"),
+)
 COMPONENTS = {
     "wechat-attachments": ("微信附件说明 skill", Path("skills/wechat-attachments/SKILL.md")),
 }
@@ -74,14 +80,12 @@ REQUIRED_FILES = {
 }
 STABLE_LINUX_FILES = (
     Path("codex-desktop"),
-    Path("dependencies.py"),
     Path("native_codex.py"),
     Path("codex-wechat"),
     Path("codex-wechat.service"),
     Path("installer.py"),
 )
 STABLE_WINDOWS_FILES = (
-    Path("dependencies.py"),
     Path("native_codex.py"),
     Path("codex-desktop.ps1"),
     Path("installer.py"),
@@ -983,6 +987,18 @@ def declaration(source: Path, stage: str) -> None:
             print(text)
 
 
+def _discover_runtime(source: Path, *, dry_run: bool):
+    # The network entry downloads this single stdlib-only installer first.
+    # Once the full source is fetched, reuse its native discovery implementation.
+    helper = source / "native_codex.py"
+    if not dry_run and helper.is_file() and not helper.is_symlink():
+        spec = importlib.util.spec_from_file_location("codex_wechat_native_discovery", helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.discover_codex(windows=IS_WINDOWS)
+    return shutil.which("codex.exe" if IS_WINDOWS else "codex")
+
+
 def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
     if sys.version_info < (3, 11):
         if not dry_run:
@@ -991,7 +1007,7 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
     for name, command, minimum, purpose, policy in DEPENDENCIES:
         if (IS_WINDOWS and command in ("qrencode", "systemd-run")):
             continue
-        executable = (discover_codex(windows=IS_WINDOWS) if name == "Codex runtime"
+        executable = (_discover_runtime(source, dry_run=dry_run) if name == "Codex runtime"
                       else shutil.which(command))
         ready = bool(executable)
         if ready and minimum and not dry_run:

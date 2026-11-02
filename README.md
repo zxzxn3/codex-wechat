@@ -20,7 +20,7 @@ Windows PowerShell：
 
 本地源码运行 `python3 installer.py`；Windows 可用 `py -3 installer.py`。菜单提供安装/更新、附加组件和退出。`--dry-run` 展示流程，不写文件、不联网，环境检查仍提示但不阻断演练；`--non-interactive` 采用保守默认。重复运行原安装命令即可更新，也可从已安装入口执行 `update`。
 
-需要 Python 3.11+。系统工具与缺失策略集中于 dependencies.py，Python 包在 requirements 文件中声明；缺少 Codex 不妨碍安装，但模型任务在补齐前不可用。可使用独立 CLI 或 App 内置原生 CLI。二维码优先用 qrencode，缺少时安装轻量 Python 回退。
+需要 Python 3.11+。系统工具与缺失策略集中于 installer.py，Python 包在 requirements 文件中声明；缺少 Codex 不妨碍安装，但模型任务在补齐前不可用。可使用独立 CLI 或 App 内置原生 CLI。二维码优先用 qrencode，缺少时安装轻量 Python 回退。
 
 安装不扫码、不收集模型密钥、不自动启动程序、不为新用户开启自启。更新保留用户配置和自启状态，不重启正在使用的桥接。新版本先独立准备和检查，危险操作集中在最后激活；不提供安装回滚命令。
 
