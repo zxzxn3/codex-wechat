@@ -57,6 +57,7 @@ class CodexBackend:
         self.runtime_generation = 0
         self.rate_limits_checked_at = 0
         self.on_activity = lambda: None
+        self.on_connection = lambda connected, error=None: None
         self.on_external_result = lambda *args: None
         self.on_message = lambda message: None
         self.source_name = "codex"
@@ -88,6 +89,7 @@ class CodexBackend:
                 self.active["done"].cancel()
         self.pending.clear()
         self.blocked = False
+        self.on_connection(False, error)
         self.on_activity()
 
     @property

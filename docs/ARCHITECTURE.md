@@ -64,11 +64,13 @@ Token优先原生事件，缺失时只读当前Thread.path的有界尾部，按�
 ## 诊断与隐私
 
 结构化诊断写入数据目录的`logs/bridge.jsonl`，按5 MiB轮转并保留3份备份。每行是一个
-JSON对象，用随机`request_id`关联输入接收、准备、提交、失败和输出；微信请求只记录
+JSON对象，用随机`request_id`关联由微信输入触发的接收、准备、提交、输出入队、发送和
+发送API；输出组另有`job_id`，连接/恢复等生命周期事件不强行关联到单条消息。微信请求只记录
 endpoint、HTTP/curl状态和耗时。事件字段由固定白名单校验，正文、prompt、回复、文件名、
 账号、token、context token、Authorization、请求/响应体和绝对路径不会进入结构化日志。
 异常仅保留类型与可选错误码；写盘失败静默降级，不阻断消息收发。`codex-wechat logs`
-同时展示轮转文件和旧的`service.log`；后者是supervisor/控制台输出，不是结构化日志。
+默认展示结构化日志及轮转文件；`--service`才加入supervisor/控制台输出，后者未脱敏，
+不是结构化日志。
 
 ## 验证
 

@@ -9,6 +9,7 @@ param(
     [ValidateSet('on', 'off')]
     [string]$Value,
     [switch]$Follow,
+    [switch]$Service,
     [switch]$PurgeData,
     [switch]$Json,
     [string]$Repo,
@@ -39,7 +40,7 @@ if ($Command -eq 'app') {
     exit $LASTEXITCODE
 }
 if ($Command -in @('update', 'install', 'menu', 'components')) {
-    if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $PurgeData -or $Json -or
+    if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $Service -or $PurgeData -or $Json -or
             $StopActive) {
         throw 'installer commands do not accept service or chat control parameters'
     }
@@ -106,6 +107,9 @@ function Fail([string]$Message) {
 
 if ($Command -ne 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
     Fail '-Value is only valid with the autostart command'
+}
+if ($Command -ne 'logs' -and $Service) {
+    Fail '-Service is only valid with the logs command'
 }
 if ($Command -notin @('autostart', 'service-status') -and $Json.IsPresent) {
     Fail '-Json is only valid with the autostart command or the service-status command'
@@ -324,6 +328,9 @@ switch ($Command) {
         $logArguments = @($Agent, 'logs')
         if ($Follow) {
             $logArguments += '--follow'
+        }
+        if ($Service) {
+            $logArguments += '--service'
         }
         & $VenvPython -u @logArguments
         exit $LASTEXITCODE

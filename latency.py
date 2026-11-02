@@ -27,8 +27,9 @@ def message_timestamps(msg):
     """Return usable message timestamps in preference order.
 
     The protocol documents create_time_ms as optional; some messages only
-    carry update_time_ms or item timestamps. Keep the fallback local and do
-    not invent a timestamp when every field is absent.
+    carry update_time_ms or item timestamps. These fallbacks are estimates,
+    not proof of the original send time. Keep the fallback local and do not
+    invent a timestamp when every field is absent.
     """
     if not isinstance(msg, dict):
         return ()

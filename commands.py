@@ -11,6 +11,7 @@ from codex_transport import CodexRpcError
 from media import MediaError
 from records import InputPhase
 from latency import provider_latency
+from diagnostics import error_fields, log_event, request_context
 
 from prompts import (
     ACK_USAGE,
@@ -523,17 +524,27 @@ async def handle(bridge, command, argument, received=None):
 async def dispatch(bridge, text, *, received=None):
     command, argument = parse_control(text)
     spec = REGISTRY.get(command)
-    try:
-        if spec is None or spec.route == "input":
-            bridge.reply(UNKNOWN_COMMAND)
-            return
-        validate(spec, argument)  # Reject syntax before opening a backend connection.
-        if spec.needs_backend and not (spec.query_local and not argument):
-            await bridge.ensure_backend()
-        await handle(bridge, spec.name, argument, received)
-    except UserFacingError as error:
-        bridge.reply(str(error))
-    except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
-        label = COMMAND_FAILURE_LABELS.get(spec.name if spec else command, "操作失败")
-        bridge.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": str(error) if isinstance(error, CodexRpcError) else backend_reason(error)}))
-        print(f"{command}失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)
+    request_id = received.get("request_id") if isinstance(received, dict) else None
+    with request_context(request_id):
+        try:
+            if spec is None or spec.route == "input":
+                log_event("control.rejected", component="input", kind="command",
+                          status="unknown", request_id=request_id)
+                bridge.reply(UNKNOWN_COMMAND)
+                return
+            validate(spec, argument)  # Reject syntax before opening a backend connection.
+            if spec.needs_backend and not (spec.query_local and not argument):
+                await bridge.ensure_backend()
+            await handle(bridge, spec.name, argument, received)
+            log_event("control.completed", component="input", kind="command",
+                      request_id=request_id)
+        except UserFacingError as error:
+            log_event("control.rejected", component="input", kind="command",
+                      status="invalid", request_id=request_id)
+            bridge.reply(str(error))
+        except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
+            label = COMMAND_FAILURE_LABELS.get(spec.name if spec else command, "操作失败")
+            bridge.reply(fill(COMMAND_FAILURE, {"动作": label, "原因": str(error) if isinstance(error, CodexRpcError) else backend_reason(error)}))
+            log_event("control.failed", level="warning", component="input",
+                      kind="command", request_id=request_id, **error_fields(error))
+            print(f"{command}失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)

@@ -51,7 +51,7 @@ class WeChat:
         self.base = trusted_url(self.account.get("base_url", BASE_URL))
         self.opener = urllib.request.build_opener(NoRedirect)
 
-    async def request(self, endpoint, body=None, *, auth=True, timeout=40):
+    async def request(self, endpoint, body=None, *, auth=True, timeout=40, request_id=None):
         # A thread blocked in urllib survives task cancellation and delays
         # asyncio.run shutdown. A curl child can be terminated immediately.
         headers = {"iLink-App-Id": "bot", "iLink-App-ClientVersion": "256"}
@@ -89,7 +89,8 @@ class WeChat:
         if proc.returncode:
             log_event("wechat.request", level="warning", component="wechat",
                       endpoint=endpoint.split("?")[0], ok=False,
-                      curl_code=proc.returncode, duration_ms=elapsed * 1000)
+                      curl_code=proc.returncode, duration_ms=elapsed * 1000,
+                      request_id=request_id)
             raise RuntimeError(f"微信网络请求失败（curl {proc.returncode}）")
         http_status = None
         try:
@@ -99,7 +100,8 @@ class WeChat:
             if not 200 <= status < 300:
                 log_event("wechat.request", level="warning", component="wechat",
                           endpoint=endpoint.split("?")[0], ok=False,
-                          http_status=status, duration_ms=elapsed * 1000)
+                          http_status=status, duration_ms=elapsed * 1000,
+                          request_id=request_id)
                 raise RuntimeError(f"微信 HTTP {status}")
             result = json.loads(raw)
             if not isinstance(result, dict):
@@ -107,19 +109,24 @@ class WeChat:
         except (ValueError, TypeError):
             log_event("wechat.request", level="warning", component="wechat",
                       endpoint=endpoint.split("?")[0], ok=False,
-                      http_status=http_status, duration_ms=elapsed * 1000)
+                      http_status=http_status, duration_ms=elapsed * 1000,
+                      request_id=request_id)
             raise RuntimeError("微信响应无法解析") from None
         if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
             code = result.get("errcode") or result.get("ret")
             log_event("wechat.request", level="warning", component="wechat",
                       endpoint=endpoint.split("?")[0], ok=False,
                       http_status=http_status, error_code=code,
-                      duration_ms=elapsed * 1000)
+                      duration_ms=elapsed * 1000, request_id=request_id)
             if auth and str(code) == "-14":
                 raise WeChatAuthExpired()
             raise RuntimeError(f"微信 API 错误 {code}")
-        log_event("wechat.request", component="wechat", endpoint=endpoint.split("?")[0],
-                  ok=True, http_status=http_status, duration_ms=elapsed * 1000)
+        # Long-poll requests are routine background traffic. Successful polls
+        # stay at debug even though each one normally waits ~18 seconds.
+        level = "debug" if endpoint.startswith("ilink/bot/getupdates") else "info"
+        log_event("wechat.request", level=level, component="wechat",
+                  endpoint=endpoint.split("?")[0], ok=True, http_status=http_status,
+                  duration_ms=elapsed * 1000, request_id=request_id)
         return result
 
     async def poll(self, cursor):
@@ -131,7 +138,8 @@ class WeChat:
             "client_id": entry["id"], "message_type": 2, "message_state": 2,
             "context_token": entry["context"],
             "item_list": [entry["item"]] if "item" in entry else
-                         [{"type": 1, "text_item": {"text": entry["text"]}}]}})
+                         [{"type": 1, "text_item": {"text": entry["text"]}}]}},
+            request_id=entry.get("requestId"))
 
 
 def print_qr(url):

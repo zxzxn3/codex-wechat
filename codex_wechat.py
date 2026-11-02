@@ -125,6 +125,8 @@ class Bridge:
             str(Path(self.config.get("cwd", data_root() / "workspace")).expanduser().resolve()),
             lambda text: self.reply(text) if getattr(self, "backend", None) is backend else None)
         backend.on_activity = self.backend_activity
+        backend.on_connection = lambda connected, error=None: self.backend_connection(
+            backend, connected, error)
         backend.source_name = name
         backend.refresh_config = self.reload_config
         backend.input_hint = self.current_input_hint
@@ -186,6 +188,16 @@ class Bridge:
             self.wake.set()
             self.steer_wake.set()
 
+    def backend_connection(self, backend, connected, error=None):
+        if getattr(self, "backend", None) is not backend:
+            return
+        fields = {"component": "backend", "backend": self.backend_name,
+                  "connected": connected}
+        if error is not None:
+            fields.update(error_fields(error))
+        log_event("backend.connected" if connected else "backend.disconnected",
+                  **fields)
+
     def active_turn(self):
         active = self.backend.active
         return active if active and not active["done"].done() else None
@@ -193,7 +205,8 @@ class Bridge:
     def acknowledge(self, job):
         template = notice(self)
         if template:
-            self.reply(render_ack(template, self.prompt_fields(job.get("ingress_ms"))))
+            self.reply(render_ack(template, self.prompt_fields(job.get("ingress_ms"))),
+                       request_id=job.get("requestId"))
 
     def prompt_fields(self, ingress_ms=None, *, finishing=False):
         if self.backend.blocked:
@@ -247,20 +260,24 @@ class Bridge:
                 await self.backend.close()
                 raise
             self.backend_started = True
+            self.backend_connection(self.backend, True)
             self.input_paused = False
             self.wake.set()
 
-    def text_entries(self, text, *, group, context, semantic=False, source=None, role="body"):
-        return self.output.text_entries(text, group=group, context=context, semantic=semantic, source=source, role=role)
+    def text_entries(self, text, *, group, context, semantic=False, source=None, role="body",
+                     request_id=None):
+        return self.output.text_entries(text, group=group, context=context, semantic=semantic,
+                                        source=source, role=role, request_id=request_id)
 
-    def enqueue(self, entries, *, persist=True):
-        return self.output.enqueue(entries, persist=persist)
+    def enqueue(self, entries, *, persist=True, request_id=None):
+        return self.output.enqueue(entries, persist=persist, request_id=request_id)
 
-    def reply(self, text, *, persist=True):
-        return self.output.reply(text, persist=persist)
+    def reply(self, text, *, persist=True, request_id=None):
+        return self.output.reply(text, persist=persist, request_id=request_id)
 
-    def asset_entry(self, asset, *, group=None, context=None, source=None):
-        return self.output.asset_entry(asset, group=group, context=context, source=source)
+    def asset_entry(self, asset, *, group=None, context=None, source=None, request_id=None):
+        return self.output.asset_entry(asset, group=group, context=context, source=source,
+                                       request_id=request_id)
 
     async def queue_file(self, path, kind="auto", *, origin=None):
         return await self.output.queue_file(path, kind, origin=origin)
@@ -273,8 +290,12 @@ class Bridge:
         return source == self.backend.source(self.state["thread"])
 
     async def deliver_answer(self, answer, *, finish_running=True, cwd=None,
-                             notify_completion=False, source=None, require_current=False):
-        return await self.output.deliver_answer(answer, finish_running=finish_running, cwd=cwd, notify_completion=notify_completion, source=source, require_current=require_current)
+                             notify_completion=False, source=None, require_current=False,
+                             request_id=None):
+        return await self.output.deliver_answer(answer, finish_running=finish_running, cwd=cwd,
+                                                notify_completion=notify_completion,
+                                                source=source, require_current=require_current,
+                                                request_id=request_id)
 
     def dispatch_input(self, job, phase, turn_id, backend):
         return self.inputs.dispatch_input(job, phase, turn_id, backend)
@@ -284,6 +305,10 @@ class Bridge:
 
     def recover_inputs(self):
         return self.inputs.recover_inputs()
+
+    def reject_input(self, request_id, kind, status):
+        log_event("input.rejected", component="input", request_id=request_id,
+                  kind=kind, status=status)
 
     async def receive(self, batch):
         self.reload_config()
@@ -318,9 +343,12 @@ class Bridge:
             log_event("input.received", component="input", request_id=request_id,
                       kind=kind, chars=len(text), count=len(attachments))
             if queued and not text and not attachments:
-                self.reply(f"用法: `{REGISTRY['/queue'].usage}`")
+                self.reject_input(request_id, kind, "missing_argument")
+                self.reply(f"用法: `{REGISTRY['/queue'].usage}`", request_id=request_id)
             elif len(attachments) > MAX_ATTACHMENTS:
-                self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}))
+                self.reject_input(request_id, kind, "too_many_attachments")
+                self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}),
+                           request_id=request_id)
             elif text.startswith("/") and not attachments and not queued:
                 received["request_id"] = request_id
                 if spec and spec.lane == "media":
@@ -328,7 +356,8 @@ class Bridge:
                 controls.append((text, received))
             elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
-                    self.reply(fill(QUEUE_FULL, {"数量": 20}))
+                    self.reject_input(request_id, kind, "queue_full")
+                    self.reply(fill(QUEUE_FULL, {"数量": 20}), request_id=request_id)
                 else:
                     self.state["inbox"].append({"id": identity, "text": text,
                                                "attachments": attachments, "mode": "queue" if queued else "steer",
@@ -336,9 +365,12 @@ class Bridge:
                                                "ingress_ms": received.get("ingress_ms"),
                                                "requestId": request_id})
                     if queued:
-                        self.reply("已排队", persist=False)
+                        self.reply("已排队", persist=False, request_id=request_id)
             else:
-                self.reply(fill(UNSUPPORTED_MESSAGE, {"数量": 20000}))
+                status = "too_long" if len(text) > 20000 else "unsupported"
+                self.reject_input(request_id, kind, status)
+                self.reply(fill(UNSUPPORTED_MESSAGE, {"数量": 20000}),
+                           request_id=request_id)
         self.state["seen"] = self.state["seen"][-2000:]
         if batch.get("get_updates_buf"):
             self.state["cursor"] = batch["get_updates_buf"]
@@ -351,7 +383,10 @@ class Bridge:
             try:
                 queue.put_nowait((command, received))
             except asyncio.QueueFull:
-                self.reply("指令等待过多，请稍后重试。")
+                request_id = received.get("request_id")
+                log_event("control.rejected", component="input", kind="command",
+                          status="queue_full", request_id=request_id)
+                self.reply("指令等待过多，请稍后重试。", request_id=request_id)
         self.wake.set()
         self.steer_wake.set()
 
@@ -610,7 +645,7 @@ def status_payload(store):
     return payload
 
 
-def _log_files():
+def _log_files(include_service=False):
     try:
         primary = log_path()
     except (OSError, RuntimeError):
@@ -618,31 +653,74 @@ def _log_files():
     candidates = [primary]
     candidates.extend(primary.with_name(f"{primary.name}.{number}")
                       for number in range(1, BACKUP_COUNT + 1))
-    candidates.append(primary.parent / "service.log")
+    if include_service:
+        candidates.extend((primary.parent / "service.log",
+                           primary.parent / "service.log.1"))
     return [path for path in candidates if path.is_file()]
 
 
 def _tail_lines(path, limit=200):
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as stream:
-            return stream.read().splitlines()[-limit:]
-    except OSError:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            end = stream.tell()
+            data = b""
+            scanned = 0
+            while end > 0 and scanned < 1024 * 1024:
+                size = min(8192, end, 1024 * 1024 - scanned)
+                end -= size
+                scanned += size
+                stream.seek(end)
+                data = stream.read(size) + data
+                if data.count(b"\n") > limit:
+                    break
+        return data.decode("utf-8", errors="replace").splitlines()[-limit:]
+    except (OSError, ValueError):
         return []
 
 
-def show_logs(follow=False):
-    files = _log_files()
-    if not files:
-        print("暂无诊断日志；运行 start 或 service-start 后生成。")
+def _print_log_header(path):
+    suffix = "（原始控制台输出，可能包含路径或错误文本）" \
+        if path.name.startswith("service.log") else ""
+    print(f"==> {path} <=={suffix}")
+
+
+def show_logs(follow=False, include_service=False):
+    files = _log_files(include_service)
+    if not files and not follow:
+        label = "诊断日志" if include_service else "结构化诊断日志"
+        print(f"暂无{label}；运行 start 或 service-start 后生成。")
+        if not include_service:
+            print("需要 supervisor 控制台输出时使用 --service / -Service。")
         return
     for path in files:
-        print(f"==> {path} <==")
+        _print_log_header(path)
         print("\n".join(_tail_lines(path)))
     if not follow:
         return
-    positions = {path: path.stat().st_size for path in files}
+    positions = {}
+    for path in files:
+        try:
+            positions[path] = path.stat().st_size
+        except OSError:
+            positions[path] = 0
+    if not files:
+        hint = "" if include_service else "；supervisor 输出请加 --service / -Service"
+        print(f"等待诊断日志{hint}；按 Ctrl+C 停止。", flush=True)
     while True:
         time.sleep(0.5)
+        current = _log_files(include_service)
+        known = set(files)
+        for path in current:
+            if path not in known:
+                _print_log_header(path)
+                print("\n".join(_tail_lines(path)), flush=True)
+                try:
+                    positions[path] = path.stat().st_size
+                except OSError:
+                    positions[path] = 0
+                files.append(path)
+        files = [path for path in files if path in current]
         for path in files:
             try:
                 size = path.stat().st_size
@@ -668,14 +746,18 @@ async def main():
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
     parser.add_argument("--stop-active", action="store_true")
     parser.add_argument("--follow", action="store_true")
+    parser.add_argument("--service", action="store_true",
+                        help="同时查看未脱敏的 supervisor/service.log")
     args = parser.parse_args()
     if args.action != "rebind" and args.stop_active:
         parser.error("--stop-active 只能与 rebind 一起使用")
     if args.action != "logs" and args.follow:
         parser.error("--follow 只能与 logs 一起使用")
+    if args.action != "logs" and args.service:
+        parser.error("--service 只能与 logs 一起使用")
     os.umask(0o077)
     if args.action == "logs":
-        show_logs(args.follow)
+        show_logs(args.follow, args.service)
         return
     if args.action == "rebind":
         await run_rebind(

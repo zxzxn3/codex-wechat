@@ -163,7 +163,7 @@ class InputDelivery:
                         self.defer_restart(job)
                     continue
                 if answer is not None:
-                    await bridge.deliver_answer(answer)
+                    await bridge.deliver_answer(answer, request_id=job.get("requestId"))
                     log_event("input.completed", component="input",
                               duration_ms=(time.perf_counter() - started) * 1000,
                               queued=len(bridge.state["inbox"]),
@@ -177,7 +177,7 @@ class InputDelivery:
                 if not bridge.stopping:
                     job.update(mode="queue", phase=InputPhase.PREPARING)
                     bridge.state["inbox"].insert(0, job)
-                    bridge.reply(QUEUED_STEER)
+                    bridge.reply(QUEUED_STEER, request_id=job.get("requestId"))
                     log_event("input.deferred", component="input", status="queue",
                               phase=job["phase"], mode="queue",
                               request_id=job.get("requestId"))
@@ -194,7 +194,8 @@ class InputDelivery:
                     bridge.reply("消息提交结果未确认，未自动重发。" if uncertain else
                                "任务已提交，但结果接收中断，未重新执行。" if phase == InputPhase.ACCEPTED else
                                fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
-                               if isinstance(error, MediaError) else TASK_FAILED)
+                               if isinstance(error, MediaError) else TASK_FAILED,
+                               request_id=job.get("requestId"))
                     log_event("input.failed", level="warning", component="input",
                               status=("uncertain" if uncertain else
                                       "accepted" if phase == InputPhase.ACCEPTED else "failed"),
@@ -202,7 +203,8 @@ class InputDelivery:
                               backend=bridge.backend_name,
                               request_id=job.get("requestId"), **error_fields(error))
                 else:
-                    bridge.reply("后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。")
+                    bridge.reply("后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。",
+                                 request_id=job.get("requestId"))
                     log_event("input.failed", level="warning", component="input",
                               status="backend_unavailable", phase=job.get("phase"),
                               mode=job.get("mode", "steer"), backend=bridge.backend_name,
@@ -271,7 +273,7 @@ class InputDelivery:
                         job.pop("restartDeferred", None)
                         job.update(mode="queue", phase=InputPhase.PREPARING)
                         bridge.save()
-                        bridge.reply(QUEUED_STEER)
+                        bridge.reply(QUEUED_STEER, request_id=job.get("requestId"))
                         log_event("input.deferred", component="input", status="queue",
                                   phase=job["phase"], mode="queue",
                                   request_id=job.get("requestId"))
@@ -285,7 +287,8 @@ class InputDelivery:
                     bridge.save()
                     bridge.reply(UNCERTAIN_STEER if uncertain else
                                fill(ATTACHMENT_INCOMING_FAILED, {"原因": attachment_reason(error)})
-                               if isinstance(error, MediaError) else TASK_FAILED)
+                               if isinstance(error, MediaError) else TASK_FAILED,
+                               request_id=job.get("requestId"))
                     log_event("input.steer_failed", level="warning", component="input",
                               status="uncertain" if uncertain else "failed",
                               phase=job.get("phase"), mode=job.get("mode", "steer"),

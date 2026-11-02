@@ -37,5 +37,6 @@ binded_redirect保留已有凭据，但重绑流程若此前已失效，会用ge
 
 /ping使用当前原生配置决定目标，curl time_connect/time_appconnect用于TCP/TLS建连；
 HEAD不携带模型密钥，不测生成速度。微信create_time_ms不是已证明的手机点击时间，发送API成功
-也不是手机显示回执；该字段缺失时按update_time_ms、item时间戳回退，全部缺失仍显示`-`。
+也不是手机显示回执；该字段缺失时按update_time_ms、item时间戳回退，但这些回退值只是
+估计，不保证等于首次发送时刻；全部缺失仍显示`-`。
 WS场景探测使用桥接环境，不能冒充另一个后台进程的实际代理路径。

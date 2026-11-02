@@ -10,7 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import diagnostics
-from codex_wechat import Bridge, _log_files, show_logs
+from codex_wechat import Bridge, _log_files, _tail_lines, show_logs
+from commands import dispatch
 from storage import Store
 from wechat import WeChat
 
@@ -119,11 +120,15 @@ class DiagnosticsTests(unittest.TestCase):
         for number in range(1, diagnostics.BACKUP_COUNT + 1):
             self.path.with_name(f"{self.path.name}.{number}").write_text("", encoding="utf-8")
         (self.path.parent / "service.log").write_text("console\n", encoding="utf-8")
-        names = [path.name for path in _log_files()]
+        (self.path.parent / "service.log.1").write_text("old console\n", encoding="utf-8")
+        names = [path.name for path in _log_files(include_service=True)]
         self.assertEqual(names, ["bridge.jsonl", "bridge.jsonl.1", "bridge.jsonl.2",
-                                 "bridge.jsonl.3", "service.log"])
+                                 "bridge.jsonl.3", "service.log", "service.log.1"])
+        self.assertEqual([path.name for path in _log_files()],
+                         ["bridge.jsonl", "bridge.jsonl.1", "bridge.jsonl.2",
+                          "bridge.jsonl.3"])
 
-    def test_logs_command_shows_structured_and_supervisor_output(self):
+    def test_logs_command_shows_service_output_only_when_requested(self):
         diagnostics.log_event("bridge.start", component="bridge")
         (self.path.parent / "service.log").write_text("supervisor started\n", encoding="utf-8")
         output = StringIO()
@@ -131,13 +136,23 @@ class DiagnosticsTests(unittest.TestCase):
             show_logs()
         text = output.getvalue()
         self.assertIn('"event":"bridge.start"', text)
-        self.assertIn("supervisor started", text)
+        self.assertNotIn("supervisor started", text)
+        output = StringIO()
+        with redirect_stdout(output):
+            show_logs(include_service=True)
+        self.assertIn("supervisor started", output.getvalue())
+
+    def test_tail_reads_only_the_bounded_tail(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("old\n" * 1000 + "recent\n", encoding="utf-8")
+        self.assertEqual(_tail_lines(self.path, limit=1), ["recent"])
 
     def test_windows_logs_command_uses_the_shared_viewer(self):
         script = (Path(__file__).parents[1] / "codex-wechat.ps1").read_text(encoding="utf-8")
         branch = script.split("'logs' {", 1)[1].split("'uninstall' {", 1)[0]
         self.assertIn("@($Agent, 'logs')", branch)
         self.assertIn("--follow", branch)
+        self.assertIn("--service", branch)
         self.assertNotIn("Get-Content", branch)
 
 
@@ -154,6 +169,8 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     def records(self):
+        if not self.path.exists():
+            return []
         return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
 
     async def test_received_prompt_is_represented_by_counts_only(self):
@@ -169,6 +186,41 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(sentinel, data)
         self.assertNotIn("CONTEXT_SENTINEL_7f935", data)
         self.assertIn("request_id", record)
+
+    async def test_output_uses_the_input_request_id(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        bridge.state["context"] = "context"
+        with diagnostics.request_context("req-output"):
+            await bridge.deliver_answer("answer")
+        record = next(item for item in self.records()
+                      if item["event"] == "output.enqueued")
+        self.assertEqual(record["request_id"], "req-output")
+        self.assertEqual(bridge.state["outbox"][0]["requestId"], "req-output")
+
+    async def test_rejected_input_and_control_outcomes_are_logged(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        message = {"message_id": "queue-empty", "from_user_id": "owner",
+                   "message_type": 1, "context_token": "ctx",
+                   "item_list": [{"type": 1, "text_item": {"text": "/queue"}}]}
+        await bridge.receive({"msgs": [message]})
+        rejected = next(item for item in self.records()
+                        if item["event"] == "input.rejected")
+        self.assertEqual(rejected["status"], "missing_argument")
+        await dispatch(bridge, "/help", received={"request_id": "req-help"})
+        await dispatch(bridge, "/not-a-command", received={"request_id": "req-unknown"})
+        records = self.records()
+        self.assertTrue(any(item["event"] == "control.completed" and
+                            item["request_id"] == "req-help" for item in records))
+        self.assertTrue(any(item["event"] == "control.rejected" and
+                            item["request_id"] == "req-unknown" for item in records))
+
+    async def test_backend_disconnect_is_logged(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        bridge.backend.connection_lost(RuntimeError("disconnect"))
+        record = next(item for item in self.records()
+                      if item["event"] == "backend.disconnected")
+        self.assertEqual(record["error_type"], "RuntimeError")
+        self.assertFalse(record["connected"])
 
     async def test_wechat_logs_endpoint_without_query_or_credentials(self):
         token = "TOKEN_SENTINEL_7f935"
@@ -186,6 +238,37 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         data = self.path.read_text(encoding="utf-8")
         self.assertNotIn(token, data)
         self.assertNotIn("?token=", data)
+
+    async def test_successful_poll_is_debug_only(self):
+        process = SimpleNamespace(returncode=0, stdin=None)
+        client = WeChat({"token": "token",
+                         "base_url": "https://ilinkai.weixin.qq.com"})
+        with patch("wechat.asyncio.create_subprocess_exec",
+                   AsyncMock(return_value=process)), \
+             patch("wechat.communicate",
+                   AsyncMock(return_value=(b'{"ret":0}\n200', b""))):
+            diagnostics.configure(level="info")
+            await client.request("ilink/bot/getupdates")
+            self.assertFalse(any(item["event"] == "wechat.request"
+                                 for item in self.records()))
+            diagnostics.configure(level="debug")
+            await client.request("ilink/bot/getupdates")
+        self.assertTrue(any(item["event"] == "wechat.request"
+                            for item in self.records()))
+
+    async def test_successful_slow_poll_is_debug_only(self):
+        process = SimpleNamespace(returncode=0, stdin=None)
+        client = WeChat({"token": "token",
+                         "base_url": "https://ilinkai.weixin.qq.com"})
+        with patch("wechat.asyncio.create_subprocess_exec",
+                   AsyncMock(return_value=process)), \
+             patch("wechat.communicate",
+                   AsyncMock(return_value=(b'{"ret":0}\n200', b""))), \
+             patch("wechat.time.perf_counter", side_effect=[0, 18]):
+            diagnostics.configure(level="info")
+            await client.request("ilink/bot/getupdates")
+        self.assertFalse(any(item["event"] == "wechat.request"
+                             for item in self.records()))
 
 
 if __name__ == "__main__":

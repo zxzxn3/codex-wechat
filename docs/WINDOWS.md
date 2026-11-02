@@ -28,7 +28,8 @@ Windows 实机出现 curl 56/28，某次发送卡约 19.5 秒、重试约 534ms�
 
 结构化诊断写入`%LOCALAPPDATA%\codex-wechat\logs\bridge.jsonl`，可用
 `.\codex-wechat.ps1 logs [-Follow]`查看；字段白名单不记录正文、prompt、令牌、
-context token、文件名或绝对路径。`service.log`仍记录supervisor和子进程控制台输出，
-反馈问题时优先提供`bridge.jsonl`。发送延迟已补 create_time_ms 缺失时回退
-update_time_ms/item 时间戳；Windows 需更新到该源码后生效，尚未实机验证。
+context token、文件名或绝对路径。supervisor和子进程控制台输出另存为`service.log`，
+需要时用`-Service`显式加入，且该输出未承诺脱敏；反馈问题时优先提供`bridge.jsonl`。
+发送延迟已补 create_time_ms 缺失时回退 update_time_ms/item 时间戳，但回退值只是估计，
+不能证明手机端真实发送时刻；Windows 需更新到该源码后生效，尚未实机验证。
 仅有语法、安装及上述实机观察，未执行单元测试。

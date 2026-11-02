@@ -93,6 +93,10 @@ def new_request_id():
     return "req-" + os.urandom(8).hex()
 
 
+def current_request_id():
+    return _REQUEST_ID.get()
+
+
 @contextmanager
 def request_context(value):
     token = _REQUEST_ID.set(value)
