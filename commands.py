@@ -502,11 +502,16 @@ async def dispatch(bridge, text, *, received=None):
     command, argument = parse_control(text)
     spec = REGISTRY.get(command)
     request_id = received.get("request_id") if isinstance(received, dict) else None
+    started = time.perf_counter()
+    fields = {"request_id": request_id, "command": spec.name if spec else None}
+    arrival = received.get("received") if isinstance(received, dict) else None
+    wait = {"queue_wait_ms": max(0, (started - arrival) * 1000)} if type(arrival) in (int, float) else {}
     with request_context(request_id):
+        log_event("control.started", component="input", kind="command", **fields, **wait)
         try:
             if spec is None or spec.route == "input":
                 log_event("control.rejected", component="input", kind="command",
-                          status="unknown", request_id=request_id)
+                          status="unknown", duration_ms=(time.perf_counter() - started) * 1000, **fields)
                 bridge.reply(bridge.prompt("UNKNOWN_COMMAND"))
                 return
             validate(spec, argument, text=bridge.prompt)  # Reject syntax before opening a backend connection.
@@ -514,10 +519,14 @@ async def dispatch(bridge, text, *, received=None):
                 await bridge.ensure_backend()
             await handle(bridge, spec.name, argument, received)
             log_event("control.completed", component="input", kind="command",
-                      request_id=request_id)
+                      duration_ms=(time.perf_counter() - started) * 1000, **fields)
+        except asyncio.CancelledError:
+            log_event("control.cancelled", level="debug", component="input", kind="command",
+                      duration_ms=(time.perf_counter() - started) * 1000, **fields)
+            raise
         except UserFacingError as error:
             log_event("control.rejected", component="input", kind="command",
-                      status="invalid", request_id=request_id)
+                      status="invalid", duration_ms=(time.perf_counter() - started) * 1000, **fields)
             bridge.reply(str(error))
         except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
             failed_command = spec.name if spec else command
@@ -525,5 +534,6 @@ async def dispatch(bridge, text, *, received=None):
                      if failed_command in COMMAND_FAILURE_LABELS else bridge.prompt("GENERIC_FAILURE"))
             bridge.reply(bridge.prompt("COMMAND_FAILURE", {"action": label, "reason": str(error) if isinstance(error, CodexRpcError) else backend_reason(error)}))
             log_event("control.failed", level="warning", component="input",
-                      kind="command", request_id=request_id, **error_fields(error))
+                      kind="command", duration_ms=(time.perf_counter() - started) * 1000,
+                      **fields, **error_fields(error))
             print(f"{command}失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)

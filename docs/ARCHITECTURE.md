@@ -115,6 +115,18 @@ typing的认证失效进入同一暂停与重绑通知流程；普通typing错�
 单位均为ms；差值只在相关时间点已到达且顺序有效时生成。curl返回0的时间点可能表示尚未到达，
 不能据此断言某阶段没有耗时。时限、代理路径、重试和用户提示格式不因诊断采集改变。
 
+命令名 `command` 经唯一命令目录校验并规范化别名，未知名字和参数不记录。
+`control.started.queue_wait_ms` 是收到命令至进入处理器的单调时钟间隔（含路由/保存/排队）；
+`control.completed/rejected/failed.duration_ms` 是处理器执行耗时，包含后台等待和生成回复。
+`output.send_start.queue_wait_ms` 是本进程中新回复入队至第一次发送的等待，包含附件准备；
+重试不重复记此样本，旧发件箱重启后不补造。计时只存内存，发送/失败时清理。
+
+超时仅按已取得的 HTTPS 时间点记录 `timeout_stage`：connect（含DNS/连接）、
+tls_or_tunnel、request_or_response、response_body 或 unknown。请求发送和服务端等待未拆开，
+这些阶段不等于故障根因。`proxy_used` 仅接受curl报告的0/1，不从代理环境变量推断；
+可选输出独立于计时JSON，curl低于8.7不支持该字段时省略，既有计时仍可读取。
+不记录代理地址、远端IP、原始stderr或响应内容；也不能由此识别透明代理/VPN。
+
 ## 验证
 
 指定测试会话从固定源码副本执行：

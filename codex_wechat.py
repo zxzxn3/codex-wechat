@@ -374,7 +374,8 @@ class Bridge:
                     "command" if body_text.startswith("/") and not attachments
                     else "input" if text or attachments else "unsupported")
             log_event("input.received", component="input", request_id=request_id,
-                      kind=kind, chars=len(text), count=len(attachments))
+                      kind=kind, chars=len(text), count=len(attachments),
+                      command=spec.name if spec and kind in ("command", "queued") else None)
             if queued and not text and not attachments:
                 self.reject_input(request_id, kind, "missing_argument")
                 self.reply(self.prompt("COMMAND_USAGE", {"usage": REGISTRY['/queue'].usage}),
@@ -385,6 +386,7 @@ class Bridge:
                            request_id=request_id)
             elif body_text.startswith("/") and not attachments and not queued:
                 received["request_id"] = request_id
+                received["command"] = spec.name if spec else None
                 if spec and spec.lane == "media":
                     received["media"] = self.media_origin()
                 controls.append((body_text, received))
@@ -422,7 +424,8 @@ class Bridge:
             except asyncio.QueueFull:
                 request_id = received.get("request_id")
                 log_event("control.rejected", component="input", kind="command",
-                          status="queue_full", request_id=request_id)
+                          status="queue_full", request_id=request_id,
+                          command=received.get("command"))
                 self.reply(self.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
         self.wake.set()
         self.steer_wake.set()
@@ -495,6 +498,7 @@ class Bridge:
         queue = self.controls[lane]
         while True:
             text, received = await queue.get()
+            started = time.perf_counter()
             try:
                 if lane == "urgent":
                     await asyncio.wait_for(self.control(text, received=received), 5)
@@ -503,11 +507,13 @@ class Bridge:
             except asyncio.TimeoutError:
                 self.reply(self.prompt("CONTROL_TIMEOUT"))
                 log_event("control.timeout", level="warning", component="input",
-                          kind=lane, request_id=received.get("request_id"))
+                          kind=lane, request_id=received.get("request_id"), command=received.get("command"),
+                          duration_ms=(time.perf_counter() - started) * 1000)
             except Exception as error:
                 self.reply(self.prompt("CONTROL_FAILED"))
                 log_event("control.failed", level="warning", component="input",
-                          kind=lane, request_id=received.get("request_id"),
+                          kind=lane, request_id=received.get("request_id"), command=received.get("command"),
+                          duration_ms=(time.perf_counter() - started) * 1000,
                           **error_fields(error))
                 print(f"控制失败：{type(error).__name__}", file=sys.stderr, flush=True)
             finally:

@@ -165,6 +165,9 @@ Linux 使用 `codex-wechat logs`，Windows 使用 `.\codex-wechat.ps1 logs`；�
 请求号和必要元数据。由微信输入触发的任务会用 `request_id` 关联接收、准备、提交、输出入队、
 发送重试和发送 API；中途回复也携带轮次关联的请求号。同轮多条输入通过 `output.related`
 与输出组 `job_id` 关联，连接/恢复等生命周期事件不强行关联到单条消息。
+控制指令只记录登记的规范名称（例如 `/s` 记为 `/status`），不记录参数。
+`control.started` 记录收到指令到开始处理的等待时间，结束事件记录执行耗时；
+`output.send_start` 可记录回复首次发送前的等待，重启恢复的旧回复不补造该样本。
 字段采用白名单；
 不记录聊天正文、prompt、回复、文件名、账号标识、token、context token、Authorization、
 请求/响应体或绝对路径。错误仅保留异常类型和错误码；URL 只保留 endpoint，不带查询参数。

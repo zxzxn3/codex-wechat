@@ -23,6 +23,7 @@ SEND_RETRY_SECONDS = 1
 class OutputDelivery:
     def __init__(self, bridge):
         self.bridge = bridge
+        self._queued_at = {}  # Monotonic timestamps belong only to this service lifetime.
 
     def text_entries(self, text, *, group, context, semantic=False, source=None, role="body",
                      request_id=None):
@@ -35,6 +36,7 @@ class OutputDelivery:
 
     def enqueue(self, entries, *, persist=True, request_id=None, request_ids=()):
         bridge = self.bridge
+        queued_at = time.perf_counter()
         related = tuple(dict.fromkeys(request_ids))
         request_id = request_id or (related[0] if related else current_request_id())
         if request_id:
@@ -42,6 +44,7 @@ class OutputDelivery:
                 entry.setdefault("requestId", request_id)
         for index, entry in enumerate(entries, 1):
             entry.update(part=index, parts=len(entries))
+            self._queued_at[entry["id"]] = queued_at
         bridge.state["outbox"].extend(entries)
         if entries:
             log_event("output.enqueued", component="output", count=len(entries),
@@ -183,6 +186,8 @@ class OutputDelivery:
                 else:
                     kept.append(queued)
             bridge.state["outbox"] = kept
+        for removed in (entry, *skipped):
+            self._queued_at.pop(removed.get("id"), None)
         failed = {**entry, "status": "partial", "skipped": skipped}
         bridge.state["failedOutbox"] = (bridge.state.get("failedOutbox", []) + [failed])[-20:]
         bridge.state["consecutiveSendFailures"] += 1
@@ -199,6 +204,7 @@ class OutputDelivery:
                                         request_id=entry.get("requestId"))
             for note in notes:
                 note["failureNotice"] = True
+                self._queued_at[note["id"]] = time.perf_counter()
             bridge.state["outbox"][0:0] = notes
         bridge.save()
         if not bridge.state["outbox"]:
@@ -222,11 +228,14 @@ class OutputDelivery:
                     bridge.save()
                 if bridge.wechat_paused:
                     continue
+                queued_at = self._queued_at.get(entry.get("id"))
+                waiting = ({"queue_wait_ms": max(0, (time.perf_counter() - queued_at) * 1000)}
+                           if queued_at is not None and not entry.get("attempts", 0) else {})
                 log_event("output.send_start", component="output",
                           queued=len(bridge.state["outbox"]), role=entry.get("role", "body"),
                           attempt=entry.get("attempts", 0), part=entry.get("part"),
                           parts=entry.get("parts"), job_id=entry.get("group"),
-                          request_id=entry.get("requestId"))
+                          request_id=entry.get("requestId"), **waiting)
                 print(f"微信发送开始: queued={len(bridge.state['outbox'])} role={entry.get('role', 'body')}",
                       file=sys.stderr, flush=True)
                 send_started = time.perf_counter()
@@ -252,6 +261,7 @@ class OutputDelivery:
                 await asyncio.sleep(SEND_RETRY_SECONDS)
                 continue
             bridge.state["outbox"].pop(0)
+            self._queued_at.pop(entry.get("id"), None)
             bridge.state["consecutiveSendFailures"] = 0
             log_event("output.sent", component="output", role=entry.get("role", "body"),
                       attempt=entry.get("attempts", 0), duration_ms=send_ms,

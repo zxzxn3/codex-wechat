@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from errors import WeChatAuthExpired
 from diagnostics import error_fields, log_event
 from subprocess_io import communicate
-from latency import CURL_WRITE_OUT, curl_timings
+from latency import CURL_WRITE_OUT, curl_timings, timeout_stage
 from platform_support import curl_command, subprocess_options
 import wechat_auth
 from wechat_auth import identity
@@ -113,6 +113,8 @@ class WeChat:
             metadata["status"] = "cancelled"
             raise
         except Exception as error:
+            if metadata.get("curl_code") == 28 or isinstance(error, TimeoutError):
+                metadata["timeout_stage"] = timeout_stage(metadata)
             metadata.update(error_fields(error))
             raise
         finally:

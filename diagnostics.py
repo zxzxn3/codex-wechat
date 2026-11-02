@@ -46,6 +46,8 @@ _TEXT_FIELDS = {
     "backend": r"[a-z0-9][a-z0-9_.-]{0,31}",
     "provider": r"[a-z0-9][a-z0-9_.-]{0,31}",
     "operation": r"[a-z][a-z0-9_.-]{0,31}",
+    "command": r"/[a-z][a-z0-9_]{0,31}",
+    "timeout_stage": r"[a-z_]{1,31}",
     "source": r"[a-z][a-z0-9_.-]{0,31}",
     "service": r"[a-z][a-z0-9_.-]{0,31}",
     "endpoint": r"[a-z0-9/_-]{1,64}",
@@ -60,9 +62,9 @@ _NUMBER_FIELDS = {
     "duration_ms", "ingress_ms", "queued", "pending", "attempt", "count",
     "bytes", "chars", "parts", "part", "http_status", "curl_code",
     "exit_code", "retry_in_ms", "threshold", "sample_ms", "pid",
-    "message_type", "message_state",
+    "message_type", "message_state", "queue_wait_ms",
 } | NETWORK_TIMING_FIELDS
-_BOOL_FIELDS = {"ok", "connected"}
+_BOOL_FIELDS = {"ok", "connected", "proxy_used"}
 
 
 def _configured_level():
@@ -140,6 +142,13 @@ def _clean_number(value):
 
 
 def _clean_field(name, value):
+    if name == "command":
+        from command_specs import REGISTRY
+        spec = REGISTRY.get(value) if isinstance(value, str) else None
+        return spec.name if spec else None
+    if name == "timeout_stage":
+        return value if isinstance(value, str) and value in (
+            "unknown", "connect", "tls_or_tunnel", "request_or_response", "response_body") else None
     if name == "endpoint":
         return value if isinstance(value, str) and value in _ENDPOINTS else None
     if name in _BOOL_FIELDS:

@@ -27,7 +27,9 @@ _POST_TLS_PHASES = {"response_wait_ms", "download_ms"}
 NETWORK_TIMING_FIELDS = frozenset(CURL_TIMING_FIELDS.values()) | frozenset(_PHASE_PAIRS)
 # Keep response body + HTTP code on stdout. Only explicitly selected numeric
 # milestones go to stderr; never use curl's broad %{json} diagnostic object.
-CURL_WRITE_OUT = ("%{stderr}\n{" + ",".join(
+# Optional proxy telemetry stays on a separate line: curl <8.7 prints an
+# unknown-variable warning, but still completes the ordinary numeric trailer.
+CURL_WRITE_OUT = ("%{stderr}\ncodex_wechat_proxy_used=%{proxy_used}\n{" + ",".join(
     '"' + name + '":%{' + name + '}' for name in CURL_TIMING_FIELDS
 ) + "}%{stdout}\n%{http_code}")
 
@@ -41,6 +43,9 @@ def curl_timings(stderr):
     if not isinstance(raw, dict):
         return {}
     values = {}
+    for line in stderr.splitlines():
+        if line in (b"codex_wechat_proxy_used=0", b"codex_wechat_proxy_used=1"):
+            values["proxy_used"] = line.endswith(b"1")
     for name, field in CURL_TIMING_FIELDS.items():
         value = raw.get(name)
         if type(value) not in (int, float) or value < 0:
@@ -62,6 +67,19 @@ def curl_timings(stderr):
                 and (before > 0 or start == "dns_ms") and after >= before):
             values[field] = after - before
     return values
+
+
+def timeout_stage(timings):
+    """Classify only reached HTTPS milestones, never infer a remote root cause."""
+    if "connect_ms" not in timings or "appconnect_ms" not in timings:
+        return "unknown"
+    if timings["connect_ms"] <= 0:
+        return "connect"
+    if timings["appconnect_ms"] <= 0:
+        return "tls_or_tunnel"
+    if "first_byte_ms" not in timings:
+        return "unknown"
+    return "response_body" if timings["first_byte_ms"] > 0 else "request_or_response"
 
 
 def _timestamp(value):

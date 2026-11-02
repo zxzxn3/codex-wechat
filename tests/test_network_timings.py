@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import diagnostics
-from latency import CURL_WRITE_OUT, curl_timings
+from latency import CURL_WRITE_OUT, curl_timings, timeout_stage
 from wechat import WeChat
 
 
@@ -56,6 +56,30 @@ class NetworkTimingTests(unittest.TestCase):
         self.assertTrue(CURL_WRITE_OUT.endswith('%{stdout}\n%{http_code}'))
         for forbidden in ('%{json}', '%{url', '%{errormsg}', '%{remote_ip}'):
             self.assertNotIn(forbidden, CURL_WRITE_OUT)
+
+    def test_optional_proxy_marker_does_not_break_older_curl_timings(self):
+        trailer = b'{"time_connect":0.02,"time_appconnect":0.05,"time_total":1}'
+        for value, expected in ((b'0', False), (b'1', True)):
+            result = curl_timings(b'codex_wechat_proxy_used=' + value + b'\n' + trailer)
+            self.assertIs(result['proxy_used'], expected)
+            self.assertEqual(result['connect_ms'], 20)
+        older = b"codex_wechat_proxy_used=curl: unknown --write-out variable: 'proxy_used'\n\n"
+        result = curl_timings(older + trailer)
+        self.assertNotIn('proxy_used', result)
+        self.assertEqual(result['appconnect_ms'], 50)
+        self.assertNotIn('proxy_used', curl_timings(b'codex_wechat_proxy_used=2\n' + trailer))
+
+    def test_timeout_stage_never_claims_to_identify_a_remote_cause(self):
+        for values, expected in (
+            ({}, 'unknown'),
+            ({'connect_ms': 0, 'appconnect_ms': 0, 'first_byte_ms': .1}, 'connect'),
+            ({'connect_ms': 10, 'appconnect_ms': 0}, 'tls_or_tunnel'),
+            ({'connect_ms': 10, 'appconnect_ms': 50}, 'unknown'),
+            ({'connect_ms': 10, 'appconnect_ms': 50, 'first_byte_ms': 0}, 'request_or_response'),
+            ({'connect_ms': 10, 'appconnect_ms': 50, 'first_byte_ms': 100}, 'response_body'),
+        ):
+            with self.subTest(values=values):
+                self.assertEqual(timeout_stage(values), expected)
 
 
 class RequestTimingTests(unittest.IsolatedAsyncioTestCase):

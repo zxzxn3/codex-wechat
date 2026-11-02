@@ -54,3 +54,8 @@ HEAD不携带模型密钥，不测生成速度。微信create_time_ms不是已�
 也不是手机显示回执；该字段缺失时按update_time_ms、item时间戳回退，但这些回退值只是
 估计，不保证等于首次发送时刻；全部缺失仍显示`-`。
 WS场景探测使用桥接环境，不能冒充另一个后台进程的实际代理路径。
+
+请求日志的 `proxy_used` 来自 [curl write-out](https://curl.se/docs/manpage.html#--write-out)
+（8.7新增）；旧版不识别变量时只输出警告、不改变传输结果，依据
+[curl 8.4 tool_writeout.c](https://github.com/curl/curl/blob/curl-8_4_0/src/tool_writeout.c)。
+可选标记单独成行，随后仍输出兼容的计时JSON；原始警告不写日志。未增加每请求版本探测。
