@@ -17,7 +17,6 @@ ACK_TOO_LONG = "未更新接收提示: 最多 {字节} 字节"
 WORKING_DIRECTORY = "目录: {目录}"
 MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`\n`/sendvideo {路径}`"
 
-DESKTOP_NOTE = "补充消息会进入这个任务；`/stop` 也会停止它。"
 BLOCKED_NOTE = "等待桌面处理"
 
 BUSY_CHANGE = "未切换: 任务未结束。等待完成或 `/stop`。"
@@ -337,9 +336,10 @@ def panel(*lines):
     return f"{fence}\n{text}\n{fence}"
 
 
-def session_summary(action, *, name, model, effort, cwd, backend=None):
+def session_summary(action, *, name, model, effort, cwd, backend=None, status=None):
     return action + "\n" + panel(f"后端: {backend}" if backend else None,
-                 f"会话: {session_name(name)}", f"模型: {model_label(model, effort)}",
+                 f"会话: {session_name(name)}", f"状态: {status}" if status else None,
+                 f"模型: {model_label(model, effort)}",
                  f"目录: {display_path(cwd)}")
 
 

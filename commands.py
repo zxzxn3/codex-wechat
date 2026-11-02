@@ -20,7 +20,6 @@ from prompts import (
     BACKEND_SUMMARY,
     BLOCKED_NOTE,
     BUSY_CHANGE,
-    DESKTOP_NOTE,
     DIRECTORY_INVALID,
     DIRECTORY_NOT_FOLDER,
     EFFORT_INVALID,
@@ -73,13 +72,13 @@ def notice(bridge):
 
 def info(bridge, action="当前会话", *, include_backend=False):
     details = bridge.backend.info
+    status = bridge.prompt_fields()["状态"]
     text = session_summary(action, name=details.get("name"), model=details.get("model"),
                            effort=details.get("effort"), cwd=details.get("cwd") or bridge.backend.cwd,
-                           backend=backend_label(bridge.backend_name) if include_backend else None)
+                           backend=backend_label(bridge.backend_name) if include_backend else None,
+                           status=status)
     if bridge.backend.blocked:
         return text + "\n" + BLOCKED_NOTE
-    if bridge.active_turn() and not bridge.active_turn().get("owned"):
-        return text + "\n" + DESKTOP_NOTE
     return text
 
 

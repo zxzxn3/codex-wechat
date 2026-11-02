@@ -12,7 +12,7 @@ from backend import CodexBackend, CodexRpcError
 from media import OUTPUT_HINT, MediaError
 from latency import Latency
 from command_specs import HELP
-from commands import handle
+from commands import handle, info
 from configuration import DEFAULT_ACK_TEMPLATE, DEFAULT_COMPLETION_TEMPLATE, processing_template
 from prompts import (
     PING_REPLY,
@@ -167,8 +167,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_prompt_formats(self):
         self.assertEqual(session_summary(
-            "已切换会话", name="微信附件", model="example", effort="high", cwd="~/project"),
-            "已切换会话\n```\n会话: 微信附件\n模型: example (High)\n目录: ~/project\n```")
+            "已切换会话", name="微信附件", model="example", effort="high", cwd="~/project",
+            status="空闲"),
+            "已切换会话\n```\n会话: 微信附件\n状态: 空闲\n模型: example (High)\n目录: ~/project\n```")
         self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="model"),
                          "模型: example (High)")
         self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="effort"),
@@ -202,6 +203,23 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("```", HELP)
         self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")), "后端连接中断")
         self.assertEqual(attachment_reason(MediaError("附件超过本地大小限制")), "文件超过大小限制")
+
+    async def test_desktop_session_info_uses_status_without_followup_note(self):
+        self.bridge.backend.info = {
+            "name": "微信附件", "model": "example", "effort": "high", "cwd": "/tmp/project"
+        }
+        self.bridge.backend.active = self.bridge.backend.new_turn(
+            "thread", "turn", owned=False)
+        self.bridge.prompt_fields = lambda: {"状态": "运行中"}
+
+        text = info(self.bridge, "已连接桌面会话")
+
+        self.assertEqual(
+            text,
+            "已连接桌面会话\n```\n会话: 微信附件\n状态: 运行中\n"
+            "模型: example (High)\n目录: /tmp/project\n```")
+        self.assertNotIn("/stop", text)
+        self.assertNotIn("补充消息", text)
 
     async def test_restart_refuses_non_service_owner(self):
         owner = AsyncMock(side_effect=ValueError("not service owner"))
