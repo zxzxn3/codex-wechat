@@ -50,6 +50,7 @@ INTERRUPTED_TASK = (
 )
 UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
 QUEUED_STEER = "已排队，当前任务结束后处理。"
+QUEUE_CONFIRMED = "Queue {数量}"
 PING_REPLY = "WeChat ─{发送延迟}/{接收延迟}ms"
 PING_USAGE = "用法: `/ping`"
 UNKNOWN_COMMAND = "未知指令，查看 `/help`"

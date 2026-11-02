@@ -53,4 +53,5 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
                 {"type": 1, "text_item": {"text": "/q /stop is literal"}}]}]})
         jobs = self.store.load("bridge")["inbox"]
         self.assertEqual([(job["text"], job["mode"]) for job in jobs], [("/stop is literal", "queue")])
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], "Queue 1")
         self.assertTrue(all(lane.empty() for lane in self.bridge.controls.values()))

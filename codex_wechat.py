@@ -48,6 +48,7 @@ from diagnostics import BACKUP_COUNT, error_fields, log_event, log_path, new_req
 from prompts import (
     BACKEND_CONNECT_FAILED,
     BUSY_RESTART,
+    QUEUE_CONFIRMED,
     QUEUE_FULL,
     RESTART_CONFIRM_UNSENT,
     RESTART_NOT_SERVICE,
@@ -378,7 +379,8 @@ class Bridge:
                                                "ingress_ms": received.get("ingress_ms"),
                                                "requestId": request_id})
                     if queued:
-                        self.reply("已排队", persist=False, request_id=request_id)
+                        self.reply(fill(QUEUE_CONFIRMED, {"数量": len(self.state["inbox"])}),
+                                   persist=False, request_id=request_id)
             else:
                 status = "too_long" if len(text) > 20000 else "unsupported"
                 self.reject_input(request_id, kind, status)
