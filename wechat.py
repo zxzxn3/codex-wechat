@@ -3,8 +3,6 @@ import asyncio
 import base64
 import json
 import secrets
-import shutil
-import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -12,7 +10,9 @@ import urllib.request
 from dataclasses import dataclass
 
 from errors import WeChatAuthExpired
+from subprocess_io import communicate
 from platform_support import curl_command, subprocess_options
+import wechat_auth
 from wechat_auth import identity
 
 BASE_URL = "https://ilinkai.weixin.qq.com"
@@ -76,22 +76,9 @@ class WeChat:
             "--write-out", "\n%{http_code}", "--config", "-",
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
-        try:
-            output, _ = await asyncio.wait_for(
-                proc.communicate(("\n".join(config) + "\n").encode()), timeout + 2)
-        finally:
-            if proc.returncode is None:
-                try:
-                    proc.terminate()
-                except ProcessLookupError:
-                    pass
-                try:
-                    await asyncio.wait_for(proc.wait(), 2)
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.wait()
+        output, _ = await communicate(proc, ("\n".join(config) + "\n").encode(), timeout=timeout + 2)
         if proc.returncode:
-            raise RuntimeError("微信网络请求失败")
+            raise RuntimeError(f"微信网络请求失败（curl {proc.returncode}）")
         try:
             raw, status = output.rsplit(b"\n", 1)
             status = int(status)
@@ -122,24 +109,8 @@ class WeChat:
 
 
 def print_qr(url):
-    executable = shutil.which("qrencode")
-    if executable:
-        try:
-            subprocess.run(
-                [executable, "-t", "ANSIUTF8", "-o", "-"],
-                input=url.encode(),
-                check=True,
-                **subprocess_options(),
-            )
-            return
-        except (OSError, subprocess.SubprocessError):
-            pass
-    try:
-        import qrcode
-        code = qrcode.QRCode(border=4)
-        code.add_data(url)
-        code.print_ascii(invert=True)
-    except (ImportError, OSError, UnicodeError):
+    from platform_ui import show_qr
+    if not show_qr(url):
         print("未能绘制二维码，可使用二维码工具打开下面的链接。")
 
 
@@ -193,6 +164,12 @@ async def login(store, *, starting=False, allow_identity_change=False,
         elif status == "binded_redirect":
             if not previous or not previous.get("token") or not previous.get("user"):
                 raise RuntimeError("微信报告已绑定，但本机没有可用凭据；请检查状态目录")
+            state = store.load("bridge", {})
+            if (wechat_auth.state(state) == wechat_auth.AUTH_REQUIRED or state.get("bindingPending")):
+                # QR status alone does not prove that a previously rejected token
+                # works. getconfig authenticates without consuming the message cursor.
+                await WeChat(previous).request("ilink/bot/getconfig",
+                                               {"ilink_user_id": previous["user"]}, timeout=10)
             print("服务端确认此微信机器人已绑定；本地凭据保持不变。", flush=True)
             return LoginResult(previous, previous, False, already_connected=True)
         elif status in ("expired", "verify_code_blocked"):

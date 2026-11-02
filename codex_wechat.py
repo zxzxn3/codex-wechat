@@ -14,6 +14,7 @@ import service_adapter
 import service_control
 import wechat_auth
 from backend import CodexBackend
+from codex_transport import CodexRpcError
 from output_delivery import OutputDelivery
 from input_delivery import InputDelivery
 from storage import Store
@@ -147,16 +148,18 @@ class Bridge:
             self.save()
 
     async def require_wechat_relink(self):
-        changed = wechat_auth.require_relink(
-            self.state, pending=len(self.state.get("outbox", []))
-        )
+        wechat_auth.require_relink(self.state, pending=len(self.state.get("outbox", [])))
         self.wechat_paused = True
-        if changed:
-            self.save()
-            await service_adapter.notify(
-                "微信绑定已失效",
-                "运行 codex-wechat relink 重新扫码；待办和发件箱已保留。",
-            )
+        details = self.state["wechatAuth"]
+        notify = not details.get("notificationAttempted", False)
+        if notify:
+            details["notificationAttempted"] = True
+        self.save()
+        if notify:
+            try:
+                await service_adapter.notify("微信绑定已失效", "运行 codex-wechat relink 重新绑定。")
+            except Exception:
+                print("微信绑定已失效；运行 codex-wechat relink 重新绑定。", file=sys.stderr)
 
     def check_quota(self, backend, payload):
         if backend is not self.backend or not self.state.get("context"):
@@ -447,7 +450,7 @@ class Bridge:
                         reported = reason
                     if isinstance(error, BackendStartupError):
                         delay = error.retry_after
-                    print(f"后端恢复失败：{type(error).__name__}", file=sys.stderr, flush=True)
+                    print(f"后端恢复失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)
             # Account reads are independent of the active model turn.
             if not self.restarting and self.backend_started and self.backend.connected:
                 await self.backend.refresh_usage()
@@ -496,6 +499,8 @@ class Bridge:
             if self.state.pop("restartRequested", False):
                 self.reply(RESTART_READY)
             self.recover_inputs()
+            if self.wechat_paused:
+                await self.require_wechat_relink()
             tasks = [asyncio.create_task(fn()) for fn in
                      (self.poller, self.worker, self.steering_worker,
                       self.external_result_worker, self.sender, self.maintain_backend)]
@@ -504,7 +509,8 @@ class Bridge:
             await asyncio.gather(*tasks)
         finally:
             for task in tasks:
-                task.cancel()
+                if not task.done() and not task.cancelling():
+                    task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await self.backend.close()
 
@@ -534,6 +540,11 @@ async def startup_account(store):
     """Only an unbound foreground launch may ask the user to scan a QR code."""
     account = store.load("account")
     if account:
+        state = store.load("bridge", {})
+        if account.get("bindingPending") or isinstance(state, dict) and state.get("bindingPending"):
+            raise ConfigurationError("重新绑定尚未完成；运行 codex-wechat relink --replace-identity 继续。")
+        if not all(account.get(key) for key in ("user", "token")):
+            raise ConfigurationError("微信凭据不完整；运行 codex-wechat relink 重新绑定。")
         return account
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise ConfigurationError("尚未绑定微信，请在交互终端运行 codex-wechat start 完成扫码。")

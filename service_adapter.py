@@ -5,13 +5,13 @@ only reports service state and requests native start/stop operations.
 """
 import asyncio
 import json
-import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from platform_support import INSTALL_ROOT, IS_WINDOWS, subprocess_options
 from service_control import UNIT, systemctl
+from subprocess_io import communicate
 
 
 @dataclass(frozen=True)
@@ -29,13 +29,7 @@ async def _run(command, *, timeout):
         stderr=asyncio.subprocess.PIPE,
         **subprocess_options(),
     )
-    try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
-    except BaseException:
-        if process.returncode is None:
-            process.kill()
-        await process.wait()
-        raise
+    stdout, stderr = await communicate(process, timeout=timeout)
     if process.returncode:
         detail = stderr.decode("utf-8", "replace").strip()
         raise RuntimeError(detail or "本项目的后台服务操作失败")
@@ -127,12 +121,7 @@ async def start():
 
 
 async def notify(title, message):
-    """Best-effort desktop notice; service state is already persisted first."""
+    """Persisted auth state remains authoritative when desktop delivery fails."""
     print(f"{title}: {message}", file=sys.stderr, flush=True)
-    if IS_WINDOWS or not shutil.which("notify-send"):
-        return False
-    try:
-        await _run(["notify-send", "--app-name=Codex WeChat", title, message], timeout=3)
-    except (OSError, RuntimeError, asyncio.TimeoutError):
-        return False
-    return True
+    from platform_ui import notify as desktop_notify
+    return await desktop_notify(title, message)

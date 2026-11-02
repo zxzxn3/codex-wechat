@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import wechat
+import platform_ui
 
 
 class FakeQRCode:
@@ -22,8 +23,8 @@ class FakeQRCode:
 
 class QRCodeTests(unittest.TestCase):
     def test_qrencode_is_preferred_and_receives_url_on_stdin(self):
-        with patch.object(wechat.shutil, "which", return_value="/usr/bin/qrencode"), \
-                patch.object(wechat.subprocess, "run") as run:
+        with patch.object(platform_ui.shutil, "which", return_value="/usr/bin/qrencode"), \
+                patch.object(platform_ui.subprocess, "run") as run:
             wechat.print_qr("https://example.invalid/qr")
         args, kwargs = run.call_args
         self.assertEqual(args[0], [
@@ -41,8 +42,8 @@ class QRCodeTests(unittest.TestCase):
             return code
 
         fake = SimpleNamespace(QRCode=make_code)
-        with patch.object(wechat.shutil, "which", return_value="/usr/bin/qrencode"), \
-                patch.object(wechat.subprocess, "run",
+        with patch.object(platform_ui.shutil, "which", return_value="/usr/bin/qrencode"), \
+                patch.object(platform_ui.subprocess, "run",
                              side_effect=subprocess.CalledProcessError(1, "qrencode")), \
                 patch.dict(sys.modules, {"qrcode": fake}):
             wechat.print_qr("https://example.invalid/qr")
@@ -50,7 +51,7 @@ class QRCodeTests(unittest.TestCase):
 
     def test_link_fallback_when_no_renderer_is_available(self):
         output = io.StringIO()
-        with patch.object(wechat.shutil, "which", return_value=None), \
+        with patch.object(platform_ui.shutil, "which", return_value=None), \
                 patch.dict(sys.modules, {"qrcode": None}), \
                 patch("sys.stdout", output):
             wechat.print_qr("https://example.invalid/qr")

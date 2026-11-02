@@ -84,19 +84,7 @@ def prepare_identity_change(bridge_state, account):
 
     bridge_state["cursor"] = ""
     bridge_state["seen"] = []
-    bridge_state["thread"] = None
-    bridge_state["backendSessions"] = {}
-    for key in (
-        "context",
-        "restartRequested",
-        "running",
-        "phase",
-        "sessionOptions",
-        "processingNotice",
-        "completionNotice",
-        "sessionChoices",
-        "sessionSearch",
-    ):
+    for key in ("restartRequested", "running", "phase"):
         bridge_state.pop(key, None)
     bridge_state["wechatIdentity"] = identity(account)
     mark_valid(bridge_state, account)

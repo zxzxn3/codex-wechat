@@ -26,6 +26,9 @@ class InputDelivery:
 
     def dispatch_input(self, job, phase, turn_id, backend):
         bridge = self.bridge
+        if phase == InputPhase.DISPATCHING and bridge.wechat_paused:
+            job["authDeferred"] = True
+            return False
         if phase == InputPhase.DISPATCHING and bridge.restarting:
             job["restartDeferred"] = True
             return False
@@ -57,6 +60,7 @@ class InputDelivery:
                 job["phase"] = InputPhase.PREPARING
                 job.pop("ingress_ms", None)  # Previous service lifetime is not a network sample.
                 job.pop("restartDeferred", None)
+                job.pop("authDeferred", None)
                 job.setdefault("clientId", str(uuid.uuid4()))
                 bridge.state["inbox"].append(job)
         if uncertain or legacy_running:
@@ -66,6 +70,7 @@ class InputDelivery:
     def defer_restart(self, job):
         bridge = self.bridge
         job.pop("restartDeferred", None)
+        job.pop("authDeferred", None)
         if not any(item is job for item in bridge.state["inbox"]):
             bridge.state["inbox"].insert(0, job)
         if bridge.state.get("currentInput") is job:
@@ -75,6 +80,9 @@ class InputDelivery:
     async def worker(self):
         bridge = self.bridge
         while True:
+            if bridge.wechat_paused:
+                await bridge.auth_wake.wait()
+                continue
             if (bridge.restarting or bridge.steering or bridge.session_lock.locked() or bridge.input_paused):
                 await asyncio.sleep(0.1)
                 continue
@@ -104,7 +112,7 @@ class InputDelivery:
                     raise
                 if bridge.stopping:
                     continue
-                if bridge.restarting:
+                if bridge.restarting or bridge.wechat_paused:
                     self.defer_restart(job)
                     continue
                 bridge.acknowledge(job)
@@ -113,7 +121,7 @@ class InputDelivery:
                     bridge.save()
                 if bridge.stopping:
                     continue
-                if bridge.restarting:
+                if bridge.restarting or bridge.wechat_paused:
                     self.defer_restart(job)
                     continue
                 bridge.steer_wake.set()
@@ -121,7 +129,7 @@ class InputDelivery:
                     attachments=job["preparedAttachments"], client_id=job["clientId"],
                     allow_steer=job.get("mode", "steer") != "queue",
                     dispatch=lambda phase, turn: bridge.dispatch_input(job, phase, turn, backend))
-                if job.get("restartDeferred"):
+                if job.get("restartDeferred") or job.get("authDeferred"):
                     if not bridge.stopping:
                         self.defer_restart(job)
                     continue
@@ -169,7 +177,7 @@ class InputDelivery:
             await bridge.steer_wake.wait()
             bridge.steer_wake.clear()
             while ((bridge.running or bridge.active_turn()) and bridge.state["inbox"]
-                   and not bridge.stopping and not bridge.restarting):
+                   and not bridge.stopping and not bridge.restarting and not bridge.wechat_paused):
                 # Explicitly queued work must not block later live corrections.
                 job = next((item for item in bridge.state["inbox"]
                             if item.get("mode", "steer") != "queue"), None)
@@ -198,6 +206,9 @@ class InputDelivery:
                         bridge.state["inbox"] = [item for item in bridge.state["inbox"] if item is not job]
                         bridge.save()
                         bridge.acknowledge(job)
+                    elif job.pop("authDeferred", False):
+                        bridge.save()
+                        break
                     elif not bridge.stopping:
                         job.pop("restartDeferred", None)
                         job.update(mode="queue", phase=InputPhase.PREPARING)

@@ -22,7 +22,6 @@ def validate_paths(state_dir, config_path):
 def active_work(state):
     return bool(
         state.get("currentInput")
-        or state.get("inbox")
         or state.get("running")
         or state.get("restartRequested")
     )
@@ -79,7 +78,10 @@ async def run_relink(state_dir, config_path, *, replace_identity=False,
             raise RuntimeError("消息桥状态格式无效")
 
         def before_identity_change(previous, account):
+            # Persist a pause before replacing credentials; never resume a half-change.
+            state["bindingPending"] = {"target": wechat_auth.identity(account)}
             counts.update(wechat_auth.prepare_identity_change(state, account))
+            wechat_auth.require_relink(state, pending=0)
             store.save("bridge", state)
 
         result = await login_runner(
@@ -88,7 +90,11 @@ async def run_relink(state_dir, config_path, *, replace_identity=False,
             before_identity_change=before_identity_change,
         )
         state = store.load("bridge", {})
-        if wechat_auth.mark_valid(state, result.account):
+        pending = state.get("bindingPending")
+        if pending and pending.get("target") != wechat_auth.identity(result.account):
+            raise RuntimeError("重新绑定身份与未完成记录不同，请显式确认要替换的身份。")
+        state.pop("bindingPending", None)
+        if wechat_auth.mark_valid(state, result.account) or pending:
             store.save("bridge", state)
     except BaseException:
         if was_running:

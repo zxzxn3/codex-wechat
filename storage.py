@@ -1,7 +1,9 @@
-"""Atomic state and a process-held single-instance lock on Linux and Windows."""
+"""Private JSON state and a process-held lock using native filesystem semantics."""
 import json
 import os
 from pathlib import Path
+import tempfile
+
 from platform_support import IS_WINDOWS
 
 if IS_WINDOWS:
@@ -16,6 +18,7 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         if not IS_WINDOWS:
             self.root.chmod(0o700)
+        self.lock = None
         if not lock:
             return
         self.lock = (self.root / "lock").open("a+")
@@ -28,30 +31,35 @@ class Store:
             else:
                 fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            self.lock.close()
+            self.close()
             raise RuntimeError("另一个 codex-wechat 进程正在使用此状态目录") from None
+
+    def close(self):
+        if self.lock is not None:
+            self.lock.close()
 
     def load(self, name, default=None):
         path = self.root / (name + ".json")
-        if not path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:
             return default
-        return json.loads(path.read_text(encoding="utf-8"))
 
     def save(self, name, value):
         path = self.root / (name + ".json")
-        temp = path.with_suffix(".tmp")
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if not IS_WINDOWS:
-            temp.chmod(0o600)
-        temp.replace(path)
-        if IS_WINDOWS:
-            return  # Windows does not expose POSIX directory fsync via os.open.
-        directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        fd, temporary = tempfile.mkstemp(prefix="." + name + "-", suffix=".tmp", dir=self.root)
+        temp = Path(temporary)
         try:
-            os.fsync(directory)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(value, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temp.replace(path)
+            if not IS_WINDOWS:
+                directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
         finally:
-            os.close(directory)
+            temp.unlink(missing_ok=True)
