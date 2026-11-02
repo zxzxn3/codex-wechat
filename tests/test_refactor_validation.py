@@ -9,7 +9,8 @@ from codex_wechat import Bridge
 from backend import CodexBackend
 from command_specs import COMMANDS, HELP, REGISTRY, command_lane
 from commands import HANDLERS, handle, parse_control, validate
-from configuration import ConfigLoader, processing_template
+from configuration import (ConfigLoader, DEFAULT_COMPLETION_TEMPLATE,
+                           completion_template, processing_template)
 from errors import UserFacingError
 from storage import Store
 from usage import UsageCache
@@ -61,7 +62,8 @@ class ConfigLoaderExtraTests(unittest.TestCase):
             self.assertNotIn("completionNotice", config)
             self.assertNotIn("processingNotice", state)
             self.assertNotIn("completionNotice", state)
-            self.assertEqual(processing_template(config, state), "{发送延迟}/{接收延迟}ms")
+            self.assertEqual(processing_template(config, state), "`IN: {输入Token}`")
+            self.assertEqual(completion_template(config, state), DEFAULT_COMPLETION_TEMPLATE)
 
             state["processingNotice"] = "new chat override"
             unrelated_hot = dict(deleted, quotaWarningThresholds=[25])

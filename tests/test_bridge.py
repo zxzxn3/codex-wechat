@@ -13,7 +13,7 @@ from media import OUTPUT_HINT, MediaError
 from latency import Latency
 from command_specs import HELP
 from commands import handle
-from configuration import DEFAULT_ACK_TEMPLATE, processing_template
+from configuration import DEFAULT_ACK_TEMPLATE, DEFAULT_COMPLETION_TEMPLATE, processing_template
 from prompts import (
     PING_REPLY,
     RESTART_NOT_SERVICE,
@@ -136,7 +136,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         stats.sends.append(50)
         values = stats.values(120)
         self.assertEqual(values, {"发送延迟": "120", "接收延迟": "50"})
-        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, values), "120/50ms")
+        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, {"输入Token": "12.3K"}),
+                         "`IN: 12.3K`")
         self.assertEqual(render_ack(PING_REPLY, values), "WeChat ─120/50ms")
         self.assertEqual(stats.values(), {"发送延迟": "-", "接收延迟": "50"})
 
@@ -169,8 +170,11 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                          "强度: High")
         self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="cwd"),
                          "目录: ~/project")
-        self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE, attachment_mib=20),
-                         "```\n接收提示: {发送延迟}/{接收延迟}ms\n结束提示: 关闭\n附件上限: 20 MiB\n```")
+        self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE,
+                                          completion_notice=DEFAULT_COMPLETION_TEMPLATE,
+                                          attachment_mib=20),
+                         "```\n接收提示: `IN: {输入Token}`\n"
+                         "结束提示: `OUT: {输出Token}`\n附件上限: 20 MiB\n```")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",

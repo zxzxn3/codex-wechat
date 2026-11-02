@@ -7,8 +7,8 @@ import sys
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
                    "compactionNotice", "quotaWarningThresholds")
-DEFAULT_COMPLETION_TEMPLATE = ""
-DEFAULT_ACK_TEMPLATE = "{发送延迟}/{接收延迟}ms"
+DEFAULT_COMPLETION_TEMPLATE = "`OUT: {输出Token}`"
+DEFAULT_ACK_TEMPLATE = "`IN: {输入Token}`"
 TEXT_LIMIT_BYTES = 3000
 
 
