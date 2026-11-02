@@ -1,6 +1,6 @@
 ---
 name: wechat-attachments
-description: Return requested local files or images to WeChat from a WeChat-originated Codex request.
+description: Return requested local files, images, or videos to WeChat from a WeChat-originated Codex request.
 ---
 
 # WeChat attachments
@@ -17,7 +17,7 @@ attachment outside fenced code in the final response:
 WECHAT_MEDIA: {"path":"/absolute/path/to/file","kind":"auto"}
 ```
 
-- `kind` is `auto`, `image`, or `file`; use `auto` normally.
+- `kind` is `auto`, `image`, `video`, or `file`; use `auto` normally.
 - Use absolute paths to existing files that the user requested.
 - Send at most 10 attachments per reply.
 - Do not claim that an attachment was sent, uploaded, or delivered; the bridge

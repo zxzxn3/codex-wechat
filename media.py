@@ -19,6 +19,14 @@ CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_MAX_MIB = 20
 MAX_ATTACHMENTS = 10
 OUTPUT_HINT = "\n\n" + DEFAULT_SOURCE_HINT
+VIDEO_SUFFIXES = {
+    ".3g2", ".3gp", ".avi", ".flv", ".m2ts", ".m4v", ".mkv", ".mov",
+    ".mp4", ".mpeg", ".mpg", ".ogv", ".webm",
+}
+VIDEO_BRANDS = {
+    b"3g2a", b"3gp4", b"3gp5", b"M4V ", b"avc1", b"iso2", b"isom",
+    b"mp41", b"mp42", b"qt  ",
+}
 
 
 class MediaError(ValueError):
@@ -34,6 +42,19 @@ def image_extension(data):
         return ".gif"
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return ".webp"
+    return None
+
+
+def video_extension(name, data):
+    suffix = Path(name).suffix.lower()
+    if suffix in VIDEO_SUFFIXES:
+        return suffix
+    if len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in VIDEO_BRANDS:
+        return ".mp4"
+    if data.startswith((b"\x1aE\xdf\xa3", b"FLV", b"\x00\x00\x01\xba")):
+        return ".webm" if data.startswith(b"\x1aE\xdf\xa3") else ".mp4"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"AVI ":
+        return ".avi"
     return None
 
 
@@ -96,7 +117,7 @@ def split_answer(answer):
             try:
                 spec = json.loads(match[1])
                 if (not isinstance(spec.get("path"), str)
-                        or spec.get("kind", "auto") not in ("auto", "image", "file")):
+                        or spec.get("kind", "auto") not in ("auto", "image", "video", "file")):
                     raise ValueError
                 attachments.append(spec)
                 continue
@@ -183,8 +204,13 @@ class Media:
             raise MediaError(f"每条消息最多 {MAX_ATTACHMENTS} 个附件。")
         result = []
         for item in items:
-            is_image = item.get("type") == 2
-            payload = item.get("image_item" if is_image else "file_item", {})
+            item_type = item.get("type")
+            field = {2: "image_item", 4: "file_item", 5: "video_item"}.get(item_type)
+            if field is None:
+                raise MediaError("收到不支持的附件类型。")
+            is_image = item_type == 2
+            is_video = item_type == 5
+            payload = item.get(field, {})
             reference = payload.get("media", {})
             url = reference.get("full_url")
             if not url:
@@ -197,20 +223,24 @@ class Media:
                 key = decode_key(reference, payload.get("aeskey") if is_image else None)
                 data = await asyncio.to_thread(cipher, data, key, decrypt=True)
             elif not is_image:
-                raise MediaError("文件附件缺少解密密钥。")
+                raise MediaError("附件缺少解密密钥。")
             if len(data) > self.limit:
                 raise MediaError("附件超过本地大小限制。")
-            digest = payload.get("md5")
+            digest = payload.get("md5") or payload.get("video_md5")
             if digest and (not isinstance(digest, str) or hashlib.md5(data).hexdigest().lower() != digest.lower()):
                 raise MediaError("附件 MD5 校验失败。")
-            kind = "image" if is_image and image_extension(data) else "file"
-            name = str(payload.get("file_name") or ("image" + (image_extension(data) or ".bin")))
+            kind = ("image" if is_image and image_extension(data) else
+                    "video" if is_video or video_extension("video", data) else "file")
+            default_name = ("image" + (image_extension(data) or ".bin") if is_image else
+                            "video" + (video_extension("video", data) or ".mp4") if is_video else
+                            "file.bin")
+            name = str(payload.get("file_name") or default_name)
             path = await asyncio.to_thread(self.write, "incoming", name, data)
             result.append({"path": str(path), "kind": kind})
         return result
 
     def snapshot(self, value, cwd, kind="auto", *, automatic=False):
-        if kind not in ("auto", "image", "file"):
+        if kind not in ("auto", "image", "video", "file"):
             raise MediaError("未知附件类型。")
         path = Path(value).expanduser()
         if IS_WINDOWS and (path.drive.startswith("\\\\") or
@@ -248,7 +278,11 @@ class Media:
         detected = image_extension(data)
         if kind == "image" and not detected:
             raise MediaError("图片仅支持 PNG、JPEG、GIF、WebP；其他格式请作为文件发送。")
-        selected = "image" if detected and kind != "file" else "file"
+        detected_video = video_extension(path.name, data)
+        if kind == "video" and not detected_video:
+            raise MediaError("视频格式无法识别；请使用 /sendfile 作为文件发送。")
+        selected = ("image" if detected and kind != "file" else
+                    "video" if detected_video and kind != "file" else "file")
         frozen = self.write("outgoing", path.name, data)
         return {"path": str(frozen), "name": path.name, "kind": selected}
 
@@ -264,9 +298,11 @@ class Media:
         key = secrets.token_bytes(16)
         encrypted = await asyncio.to_thread(cipher, data, key)
         filekey = secrets.token_hex(16)
-        image = asset["kind"] == "image"
+        kind = asset["kind"]
+        image = kind == "image"
+        video = kind == "video"
         response = await self.channel.request("ilink/bot/getuploadurl", {
-            "filekey": filekey, "media_type": 1 if image else 3,
+            "filekey": filekey, "media_type": 1 if image else 2 if video else 3,
             "to_user_id": entry["user"], "rawsize": len(data),
             "rawfilemd5": hashlib.md5(data).hexdigest(), "filesize": len(encrypted),
             "no_need_thumb": True, "aeskey": key.hex()})
@@ -284,5 +320,7 @@ class Media:
                      "aes_key": base64.b64encode(key.hex().encode()).decode(), "encrypt_type": 1}
         if image:
             return {"type": 2, "image_item": {"media": reference, "mid_size": len(encrypted)}}
+        if video:
+            return {"type": 5, "video_item": {"media": reference, "video_size": len(encrypted)}}
         return {"type": 4, "file_item": {"media": reference,
                                          "file_name": asset["name"], "len": str(len(data))}}

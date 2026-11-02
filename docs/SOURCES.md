@@ -28,6 +28,8 @@ resetsAt Unix秒，不从窗口长度推算。压缩使用 contextCompaction ite
 不能区分自动/手动。模型图片使用localImage；普通文件不冒充该类型。
 
 微信任意鉴权请求返回-14进入本项目的持久暂停；上游暂停一小时不代表一小时后token必然恢复。
+输入状态依据协议 `getconfig` / `sendtyping`；引用字段依据 `ref_msg`、`partial_text`、`svr_id`；
+语音转写读取 `voice_item.text`，视频使用上传类型 2 与消息项类型 5。
 binded_redirect保留已有凭据，但重绑流程若此前已失效，会用getconfig鉴权确认，不消费消息游标。
 同微信号重绑沿用同一聊天，按用户实测确认为项目行为；[腾讯微信渠道文档](https://cloud.tencent.cn/document/product/1759/132562)
 佐证单一有效绑定、新连接使旧连接失效，但未承诺bot ID不变。旧游标与context_token跨绑定有效性

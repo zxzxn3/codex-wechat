@@ -12,6 +12,7 @@ from configuration import completion_template
 from records import TurnResult
 from slicing import split_text
 from media import MediaError, MAX_ATTACHMENTS, split_answer
+from wechat_content import entry_summary, remember_quote
 from errors import WeChatAuthExpired, attachment_reason
 from diagnostics import current_request_id, error_fields, log_event
 from prompts import (
@@ -227,8 +228,10 @@ class OutputDelivery:
                 print(f"微信发送开始: queued={len(bridge.state['outbox'])} role={entry.get('role', 'body')}",
                       file=sys.stderr, flush=True)
                 send_started = time.perf_counter()
-                await bridge.channel.send(entry)
+                response = await bridge.channel.send(entry)
                 send_ms = (time.perf_counter() - send_started) * 1000
+                if isinstance(response, dict) and response.get("message_id") is not None:
+                    remember_quote(bridge.state, response["message_id"], entry_summary(entry))
             except WeChatAuthExpired:
                 await bridge.require_wechat_rebind()
                 continue

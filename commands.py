@@ -422,7 +422,8 @@ async def command_send(bridge, command, argument, received=None):
             return
         if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
             argument = argument[1:-1]
-        await bridge.queue_file(argument, {"/sendfile": "file", "/sendimage": "image"}.get(command, "auto"),
+        await bridge.queue_file(argument, {"/sendfile": "file", "/sendimage": "image",
+                                           "/sendvideo": "video"}.get(command, "auto"),
                               origin=(received or {}).get("media"))
         bridge.reply(ATTACHMENT_QUEUED)
     except (MediaError, ValueError, OSError) as error:

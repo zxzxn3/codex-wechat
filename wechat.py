@@ -133,13 +133,28 @@ class WeChat:
         return await self.request("ilink/bot/getupdates", {"get_updates_buf": cursor})
 
     async def send(self, entry):
-        await self.request("ilink/bot/sendmessage", {"msg": {
+        return await self.request("ilink/bot/sendmessage", {"msg": {
             "from_user_id": "", "to_user_id": entry["user"],
             "client_id": entry["id"], "message_type": 2, "message_state": 2,
             "context_token": entry["context"],
             "item_list": [entry["item"]] if "item" in entry else
                          [{"type": 1, "text_item": {"text": entry["text"]}}]}},
             request_id=entry.get("requestId"))
+
+    async def typing_ticket(self, user, context=None):
+        body = {"ilink_user_id": user}
+        if context:
+            body["context_token"] = context
+        result = await self.request("ilink/bot/getconfig", body, timeout=10)
+        ticket = result.get("typing_ticket")
+        return ticket if isinstance(ticket, str) else ""
+
+    async def set_typing(self, user, ticket, status):
+        await self.request("ilink/bot/sendtyping", {
+            "ilink_user_id": user,
+            "typing_ticket": ticket,
+            "status": status,
+        }, timeout=10)
 
 
 def print_qr(url):

@@ -15,7 +15,7 @@ ACK_VIEW = "```\n接收提示: {模板}\n```\n`/ack text {{模板}}`\n`/ack text
 ACK_USAGE = "`/ack text {模板}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
 ACK_TOO_LONG = "未更新接收提示: 最多 {字节} 字节"
 WORKING_DIRECTORY = "目录: {目录}"
-MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`"
+MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`\n`/sendvideo {路径}`"
 
 DESKTOP_NOTE = "补充消息会进入这个任务；`/stop` 也会停止它。"
 BLOCKED_NOTE = "等待桌面处理"
@@ -56,7 +56,7 @@ UNKNOWN_COMMAND = "未知指令，查看 `/help`"
 TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {数量} 个。\n请分开发送。"
 QUEUE_FULL = "拒绝接收: 排队消息已达 {数量} 条。\n请等待完成或使用 `/stop`。"
 UNSUPPORTED_MESSAGE = (
-    "消息未接收: 仅支持文字、图片和文件。\n"
+    "消息未接收: 仅支持文字、语音转写、图片、视频和文件。\n"
     "文字每条最多 {数量} 字符。"
 )
 

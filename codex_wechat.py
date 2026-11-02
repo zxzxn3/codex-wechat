@@ -33,6 +33,15 @@ from profiles import backend_label, definitions, snapshot
 from rebind import run_rebind
 from media import Media, MAX_ATTACHMENTS
 from latency import Latency, message_timestamps
+from typing_indicator import TypingIndicator
+from wechat_content import (
+    message_key,
+    message_summary,
+    message_text,
+    quote_context,
+    quoted_prompt,
+    remember_quote,
+)
 from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, backend_reason
 from platform_support import IS_WINDOWS, data_root
 from diagnostics import BACKUP_COUNT, error_fields, log_event, log_path, new_request_id
@@ -61,6 +70,7 @@ class Bridge:
         self.state = store.load("bridge", {"cursor": "", "thread": None,
             "inbox": [], "outbox": [], "seen": [], "running": False})
         self.state.setdefault("consecutiveSendFailures", 0)
+        self.state.setdefault("quoteCache", {})
         self.wechat_paused = wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED
         self.auth_wake = asyncio.Event()
         self.channel = channel or WeChat(account)
@@ -75,6 +85,7 @@ class Bridge:
         self.input_paused = False
         self.backend_recovering = False
         self.latency = Latency()
+        self.typing = TypingIndicator(self)
         self.external_results = asyncio.Queue()
         self.backend = self.make_backend(self.backend_name)
         self.backend_started = False
@@ -318,10 +329,9 @@ class Bridge:
             if (msg.get("from_user_id") != self.account["user"] or msg.get("group_id")
                     or msg.get("message_type") != 1):
                 continue
-            # Use a stable fallback when the backend omits message_id.
-            identity = msg.get("message_id") or msg.get("client_id") or hashlib.sha256(
+            # Use item IDs as the protocol fallback; hash only when every ID is absent.
+            identity = message_key(msg) or hashlib.sha256(
                 json.dumps(msg, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-            identity = str(identity)
             if not msg.get("context_token"):
                 # Cannot safely reply without a context token; don't execute.
                 continue
@@ -329,16 +339,19 @@ class Bridge:
             if identity in self.state["seen"]:
                 continue
             self.state["seen"].append(identity)
-            text = "\n".join(item.get("text_item", {}).get("text", "")
-                             for item in msg.get("item_list", []) if item.get("type") == 1).strip()
-            attachments = [item for item in msg.get("item_list", []) if item.get("type") in (2, 4)]
-            command, argument = parse_control(text)
+            body_text = message_text(msg)
+            quote = quote_context(msg, self.state["quoteCache"])
+            text = quoted_prompt(body_text, quote)
+            attachments = [item for item in msg.get("item_list", []) if item.get("type") in (2, 4, 5)]
+            remember_quote(self.state, identity, message_summary(msg))
+            command, argument = parse_control(body_text)
             spec = REGISTRY.get(command)
             queued = bool(spec and spec.route == "input")
             received = self.latency.received_any(message_timestamps(msg))
             if queued:
-                text = argument
-            kind = ("queued" if queued else "command" if text.startswith("/") and not attachments
+                text = quoted_prompt(argument, quote)
+            kind = ("queued" if queued else
+                    "command" if body_text.startswith("/") and not attachments
                     else "input" if text or attachments else "unsupported")
             log_event("input.received", component="input", request_id=request_id,
                       kind=kind, chars=len(text), count=len(attachments))
@@ -349,11 +362,11 @@ class Bridge:
                 self.reject_input(request_id, kind, "too_many_attachments")
                 self.reply(fill(TOO_MANY_ATTACHMENTS, {"数量": MAX_ATTACHMENTS}),
                            request_id=request_id)
-            elif text.startswith("/") and not attachments and not queued:
+            elif body_text.startswith("/") and not attachments and not queued:
                 received["request_id"] = request_id
                 if spec and spec.lane == "media":
                     received["media"] = self.media_origin()
-                controls.append((text, received))
+                controls.append((body_text, received))
             elif (text or attachments) and len(text) <= 20000:
                 if len(self.state["inbox"]) >= 20:
                     self.reject_input(request_id, kind, "queue_full")

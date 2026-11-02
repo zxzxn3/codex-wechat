@@ -124,7 +124,10 @@ class InputDelivery:
                       queued=len(bridge.state["inbox"]),
                       ingress_ms=job.get("ingress_ms"),
                       request_id=job.get("requestId"))
+            typing_started = False
             try:
+                typing_started = await bridge.typing.start(
+                    bridge.account["user"], bridge.state.get("context"))
                 try:
                     await ensure_session(bridge)
                 except Exception:
@@ -211,6 +214,8 @@ class InputDelivery:
                               request_id=job.get("requestId"), **error_fields(error))
                 print(f"Agent backend error: {type(error).__name__}", file=sys.stderr, flush=True)
             finally:
+                if typing_started:
+                    await bridge.typing.stop()
                 if bridge.stopping and bridge.state.get("currentInput") is job:
                     bridge.record_input(job, InputPhase.CANCELLED if job["phase"] == InputPhase.PREPARING
                                       else job["phase"])
@@ -242,7 +247,10 @@ class InputDelivery:
                     continue
                 turn_id, thread_id = active["turn"], active["thread"]
                 bridge.steering = True
+                typing_started = False
                 try:
+                    typing_started = await bridge.typing.start(
+                        bridge.account["user"], bridge.state.get("context"))
                     log_event("input.steer_start", component="input",
                               phase=job.get("phase", InputPhase.PREPARING),
                               mode=job.get("mode", "steer"),
@@ -295,5 +303,7 @@ class InputDelivery:
                               request_id=job.get("requestId"), **error_fields(error))
                     print(f"追加消息失败：{type(error).__name__}", file=sys.stderr, flush=True)
                 finally:
+                    if typing_started:
+                        await bridge.typing.stop()
                     bridge.steering = False
                     bridge.wake.set()

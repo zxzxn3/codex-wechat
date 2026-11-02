@@ -95,6 +95,7 @@ def prepare_identity_change(bridge_state, account):
 
     bridge_state["cursor"] = ""
     bridge_state["seen"] = []
+    bridge_state.pop("quoteCache", None)
     bridge_state.pop("context", None)
     bridge_state.pop("wechatContextPending", None)
     for key in ("restartRequested", "running", "phase"):

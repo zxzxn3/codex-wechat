@@ -55,6 +55,7 @@ class WeChatAuthTests(unittest.TestCase):
         state = {
             "cursor": "old-cursor",
             "seen": ["old-message"],
+            "quoteCache": {"old-message": "old content"},
             "context": "old-context",
             "thread": "old-thread",
             "backendSessions": {"codex": {"thread": "old-thread"}},
@@ -72,6 +73,7 @@ class WeChatAuthTests(unittest.TestCase):
         self.assertEqual(counts, {"inputs": 2, "outbox": 1})
         self.assertEqual(state["cursor"], "")
         self.assertEqual(state["seen"], [])
+        self.assertNotIn("quoteCache", state)
         self.assertNotIn("context", state)
         self.assertEqual(state["thread"], "old-thread")
         self.assertEqual(state["backendSessions"], {"codex": {"thread": "old-thread"}})
