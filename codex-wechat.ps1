@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('login', 'rebind', 'app', 'start', 'status', 'service-start', 'service-stop',
+    [ValidateSet('login', 'rebind', 'app', 'start', 'stop', 'status', 'service-start', 'service-stop',
                  'service-restart', 'service-status', 'autostart', 'logs', 'uninstall', 'update', 'install', 'menu', 'components')]
     [string]$Command = 'status',
     [Parameter(Position = 1)]
@@ -227,6 +227,10 @@ switch ($Command) {
             Fail 'the background service is running; stop it before starting a foreground bridge'
         }
         & $VenvPython -u $Agent start --state-dir $StateDir --config $ConfigPath
+        exit $LASTEXITCODE
+    }
+    'stop' {
+        & $VenvPython -u $Agent stop --state-dir $StateDir --config $ConfigPath
         exit $LASTEXITCODE
     }
     'status' {

@@ -49,7 +49,7 @@ def attachment_reason(error):
     if "图片仅支持" in text:
         return "图片格式不支持"
     if "凭据或运行状态" in text:
-        return "不允许发送消息桥私有状态"
+        return "不允许发送微信桥私有状态"
     if "自动回传仅限" in text:
         return "只能自动发送当前会话目录内的文件"
     if "不是普通文件" in text:

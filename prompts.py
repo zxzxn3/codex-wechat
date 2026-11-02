@@ -24,11 +24,12 @@ BLOCKED_NOTE = "等待桌面处理"
 
 BUSY_CHANGE = "未切换: 任务未结束。等待完成或 `/stop`。"
 BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
-RESTART_STARTED = "正在重启消息桥..."
-RESTART_READY = "消息桥已重启。"
+RESTART_STARTED = "正在重启微信桥..."
+RESTART_READY = "微信桥已重启。"
+SERVICE_STOPPING = "微信桥正在停止。"
 RESTART_CONFIRM_UNSENT = "确认消息未能及时发送。"
 RESTART_FAILED = "重启未完成: {reason}"
-RESTART_NOT_SERVICE = "当前消息桥不是由用户服务启动。"
+RESTART_NOT_SERVICE = "当前微信桥不是由用户服务启动。"
 
 STOP_REQUESTED = "已请求停止"
 STOP_DEFERRED = "已请求停止，准备结束后生效"
@@ -230,7 +231,7 @@ HELP_SEND = '回传文件、图片或视频'
 HELP_SENDFILE = '作为文件回传'
 HELP_SENDIMAGE = '作为图片回传'
 HELP_SENDVIDEO = '作为视频回传'
-HELP_RESTART = '重启消息桥'
+HELP_RESTART = '重启微信桥'
 HELP_HELP = '命令说明'
 
 DEFAULT_PROMPTS = MappingProxyType({name: value for name, value in tuple(globals().items())

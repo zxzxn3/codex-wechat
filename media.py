@@ -254,7 +254,7 @@ class Media:
             # The bridge's account token/state must not become an accidental attachment.
             state_root = self.root.parent
             if path.is_relative_to(state_root) and not path.is_relative_to(self.root):
-                raise MediaError("不能发送消息桥的登录凭据或运行状态。")
+                raise MediaError("不能发送微信桥的登录凭据或运行状态。")
             if automatic and not path.is_relative_to(self.root):
                 workspace = Path(cwd).expanduser().resolve()
                 if (workspace in (Path.home(), Path(workspace.anchor)) or not path.is_relative_to(workspace)

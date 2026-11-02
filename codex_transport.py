@@ -164,7 +164,7 @@ class CodexTransport:
 
     async def write(self, message):
         if self.websocket is None and (not self.proc or self.proc.returncode is not None):
-            raise RuntimeError("Codex 后端已退出，请重启消息桥")
+            raise RuntimeError("Codex 后端已退出，请重启微信桥")
         payload = json.dumps(message)
         if self.websocket is not None:
             from websockets.exceptions import WebSocketException
@@ -219,7 +219,7 @@ class CodexTransport:
             pass
         finally:
             error = RuntimeError("共享 Codex 连接断开，可重试 /backend 自动连接或启动后台；未重放任务"
-                                 if self.shared else "Codex 连接断开，请重启消息桥；未自动重放任务")
+                                 if self.shared else "Codex 连接断开，请重启微信桥；未自动重放任务")
             for future in list(self.requests.values()):
                 if not future.done():
                     future.set_exception(error)

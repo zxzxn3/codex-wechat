@@ -57,7 +57,7 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
     preview = Store(Path(state_dir), lock=False)
     state = preview.load("bridge", {})
     if not isinstance(state, dict):
-        raise RuntimeError("消息桥状态格式无效")
+        raise RuntimeError("微信桥状态格式无效")
     if active_work(state) and not stop_active:
         raise RuntimeError(
             "当前有尚未完成的任务；确认停止桥接后使用 "
@@ -76,7 +76,7 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
     # still needs the explicit --stop-active acknowledgement.
     latest = preview.load("bridge", {})
     if not isinstance(latest, dict):
-        raise RuntimeError("消息桥状态格式无效")
+        raise RuntimeError("微信桥状态格式无效")
     if active_work(latest) and not stop_active:
         raise RuntimeError(
             "当前有尚未完成的任务；确认停止桥接后使用 "
@@ -88,7 +88,7 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
         store = await _acquire_locked_store(Path(state_dir), wait_for_service=was_running)
         state = store.load("bridge", {})
         if not isinstance(state, dict):
-            raise RuntimeError("消息桥状态格式无效")
+            raise RuntimeError("微信桥状态格式无效")
         if active_work(state) and not stop_active:
             raise RuntimeError(
                 "当前有尚未完成的任务；确认停止桥接后使用 "

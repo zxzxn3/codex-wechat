@@ -27,7 +27,7 @@ from commands import (
     parse_control,
 )
 from command_specs import REGISTRY, CONTROL_LANES, command_lane
-from configuration import ConfigLoader, ConfigurationError
+from configuration import ConfigLoader, ConfigurationError, HotSettings
 from prompts import (prompt_text)
 from quota import quota_warnings
 from records import InputPhase
@@ -596,7 +596,7 @@ class Bridge:
             tasks.extend(asyncio.create_task(self.control_worker(lane)) for lane in self.controls)
             log_event("bridge.start", component="bridge", backend=self.backend_name,
                       connected=self.backend.connected)
-            print("微信消息桥已启动；Ctrl+C 停止。", flush=True)
+            print("微信桥已启动；Ctrl+C 停止。", flush=True)
             await asyncio.gather(*tasks)
         finally:
             for task in tasks:
@@ -673,6 +673,53 @@ def status_payload(store):
         if "unsent" in auth_details:
             payload["auth_unsent_at_detection"] = auth_details["unsent"]
     return payload
+
+
+def stop_notification_text(config_path):
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(config, dict):
+            raise ValueError("配置必须是对象")
+        overrides = HotSettings.from_config(config).prompts
+    except (AttributeError, OSError, ValueError):
+        overrides = {}
+    return prompt_text("SERVICE_STOPPING", overrides=overrides)
+
+
+async def send_stop_notification(state_dir, config_path):
+    try:
+        store = Store(state_dir, lock=False)
+        account = store.load("account")
+        state = store.load("bridge", {})
+    except (OSError, ValueError):
+        return
+    context = state.get("context") if isinstance(state, dict) else None
+    if (not isinstance(account, dict) or not account.get("user")
+            or not account.get("token") or not context):
+        return
+    text = stop_notification_text(config_path)
+    if not text:
+        return
+    entry = {"id": str(uuid.uuid4()), "user": account["user"],
+             "context": context, "text": text}
+    try:
+        await WeChat(account).send(entry)
+    except Exception as error:
+        print(f"关闭通知未发送：{type(error).__name__}", file=sys.stderr, flush=True)
+
+
+async def stop_background_service(state_dir, config_path):
+    """Stop only the installed background service without taking the bridge lock."""
+    current = await service_adapter.status()
+    if not current.installed:
+        print("未安装后台服务。")
+        return
+    if not current.running:
+        print("后台服务未运行。")
+        return
+    await send_stop_notification(state_dir, config_path)
+    await service_adapter.stop_and_wait()
+    print("后台服务已停止。")
 
 
 def _log_files(include_service=False):
@@ -776,7 +823,7 @@ def show_logs(follow=False, include_service=False):
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("login", "start", "status", "rebind", "logs"))
+    parser.add_argument("action", choices=("login", "start", "stop", "status", "rebind", "logs"))
     parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
     parser.add_argument("--stop-active", action="store_true")
@@ -793,6 +840,9 @@ async def main():
     os.umask(0o077)
     if args.action == "logs":
         show_logs(args.follow, args.service)
+        return
+    if args.action == "stop":
+        await stop_background_service(args.state_dir, args.config)
         return
     if args.action == "rebind":
         await run_rebind(
