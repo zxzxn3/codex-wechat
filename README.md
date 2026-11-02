@@ -1,252 +1,101 @@
 # codex-wechat
 
-微信私聊连接本机 Codex CLI，支持普通 Codex、codex-deepseek、已有会话、工作中追加消息及图片/文件收发。Linux / Windows 共用安装与桥接逻辑；桌面 App 适配不在此分支。
+通过微信使用本机 Codex，会话、模型、工具和认证沿用 Codex。Linux 与 Windows 共用一套程序，平台服务分别使用 systemd 用户服务和 Windows 计划任务。普通 Codex、App 内置 CLI 和自定义启动入口使用相同的 App Server 接口；codex-deepseek 可作为独立后端配置，不是安装前提。
 
-## 安装 / 更新
+## 安装与更新
 
-公开仓库尚未确定，OWNER/REPO 是占位符，不能原样执行；不使用旧私人仓库。首次安装和以后更新复用同一网络入口，也可先下载入口脚本、审阅后执行。
+公开仓库地址尚未确定，下面的 `OWNER/REPO` 需要替换。同一入口首次安装，已有安装则更新；也可先下载脚本审阅。当前使用源码与独立 Python 环境。
 
 Linux：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.sh | bash -s -- --repo https://github.com/OWNER/REPO'
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.sh | bash -s -- --repo https://github.com/OWNER/REPO --ref main'
 ```
 
 Windows PowerShell：
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.ps1))) -Repo https://github.com/OWNER/REPO
+& ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.ps1))) -Repo https://github.com/OWNER/REPO -Ref main
 ```
 
-入口要求 Python 3.11+ 和 Git；Linux 还需 curl。缺少入口依赖时提示补齐后重跑，不自动安装系统软件。进入安装器后显示：
+本地源码运行 `python3 installer.py`；Windows 可用 `py -3 installer.py`。菜单提供安装/更新、附加组件和退出。`--dry-run` 展示流程，不写文件、不联网，环境检查仍提示但不阻断演练；`--non-interactive` 采用保守默认。重复运行原安装命令即可更新，也可从已安装入口执行 `update`。
 
-```text
-1. 安装 / 更新
-2. 附加组件
-0. 退出
-```
+需要 Python 3.11+。系统工具与缺失策略集中于 dependencies.py，Python 包在 requirements 文件中声明；缺少 Codex 不妨碍安装，但模型任务在补齐前不可用。可使用独立 CLI 或 App 内置原生 CLI。二维码优先用 qrencode，缺少时安装轻量 Python 回退。
 
-第 1 项自动识别现有安装，展示计划并确认后执行；第 2 项单独选择组件，主体安装不附带安装所有组件。安装与更新保留配置、微信登录、待办、工作内容及原有自启状态，不自动启动或重启服务。新安装自启默认关闭。
+安装不扫码、不收集模型密钥、不自动启动程序、不为新用户开启自启。更新保留用户配置和自启状态，不重启正在使用的桥接。新版本先独立准备和检查，危险操作集中在最后激活；不提供安装回滚命令。
 
-已下载源码也使用同一安装器：
+## 第一次使用
+
+Linux：
 
 ```bash
-python3 installer.py
-# Windows: py -3 installer.py
+~/.local/share/codex-wechat/codex-wechat start
 ```
 
-`install.sh` / `install.ps1` 是本地适配入口，业务由 installer.py 维护。已安装后可执行 `codex-wechat menu` 或 `codex-wechat update`；更新来源由第一次在线安装保存，也可以显式传入 `--repo URL --ref main`。本地更新用 `--source /path/to/source`，不读取 cfg 或旧私人库的远端。
+Windows：
 
-### 演练与自动化
+```powershell
+& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" start
+```
+
+未绑定时仅交互式 start 显示二维码；扫码后继续启动。已绑定则直接运行，后台或重定向环境不会等待不可见的扫码。在微信发送 `/help` 查看当前指令。需要自启时使用 `/settings autostart on`；关闭自启不终止当前进程。
+
+## CLI 与 App 共用会话
+
+本地共享连接优先复用原生 daemon，仍可显式配置独立连接。桥接退出只关闭自己的连接/代理进程，不结束共享 Codex 后台。
+
+App 共享接入需要一次配置，在空闲且退出原 App 后执行：
 
 ```bash
-python3 installer.py --dry-run
-python3 installer.py install --non-interactive
-python3 installer.py update --source /path/to/source --non-interactive
+codex-wechat desktop setup
+codex-wechat app
+codex-wechat cli -- resume
 ```
 
-演练可走菜单和确认流程；不会写安装目录、安装依赖、绑定账户或修改服务。真实目录冲突、依赖缺失与源码不全会提示并放行。演练完成不表示正式安装条件已满足。网络薄入口的 `--dry-run` / `-DryRun` 只显示网络安装计划，不联网、不下载；完整交互演练使用上面的本地命令。
+若入口不在 PATH，使用前述完整路径。Windows 对应：
 
-`--non-interactive` 显式授权指定安装操作，使用保守默认：保留配置与自启、不启动服务、不额外安装组件。不带此参数的正式安装需要交互终端。网络入口也接受该参数；Windows 适配入口使用 `-NonInteractive`。
-
-### 启动与用户初始化
-
-安装器不收集账户、授权或凭据。安装后在交互终端运行：
-
-```bash
-codex-wechat start
+```powershell
+& "$env:LOCALAPPDATA\codex-wechat\app\codex-desktop.ps1" setup
+& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" app
+& "$env:LOCALAPPDATA\codex-wechat\app\codex-desktop.ps1" cli -- resume
 ```
 
-程序在未绑定微信时显示二维码，扫码确认后继续启动；已有登录直接使用。后台进程不会等待扫码，掉线也不自动重新绑定。Codex 自身的安装与登录是单独的运行条件。
+setup 保留其它配置，为选定后端设置本机共享端点，之后需重启微信桥生效。`--backend {名称}` 选择后端，`--executable {绝对路径}` 指定 CLI/App 内置 CLI。端口由系统分配后保存，也可显式指定 `--url ws://127.0.0.1:{端口}`。不能以同一个 CODEX_HOME 代替连接同一个后台，不能通过删除写入锁解决冲突。
 
-Linux 在微信执行 `/settings autostart on` 时才注册缺失的用户服务；已有服务不受安装器关闭。Windows 准备当前用户计划任务，保留已有自启，首次默认关闭。更新后何时重启由用户决定，微信 `/restart` 不下载或更新程序。
+**代理启动器只负责代理并转交命令。** 项目接入入口不读取系统代理、不维护代理配置；后台管理在运行层，App / CLI / 微信共用连接配置。代理环境在实际后台启动时继承，改变客户端环境不会修改已经运行的后台。
 
-```bash
-systemctl --user restart codex-wechat
-```
+App 的 WebSocket 接口属于版本相关实现，公开 App Server WebSocket 也仍为实验性。版本、依据及未验证组合见 [SOURCES](docs/SOURCES.md)。
 
-Windows 的入口与服务命令见 [Windows 指南](docs/WINDOWS.md)。
+## 日常行为
 
-### 微信绑定失效
+- 普通消息默认 steer；`/queue {prompt}` 在空闲后独立执行，且不挡后续 steer。
+- 可列出/搜索/翻页会话、切换后端、模型、思考强度与目录；控制指令由程序处理。
+- 中途完整回复直接发往微信，不等整轮结束，不发送逐字增量、推理或工具流水。
+- 图片与文件用手机原生附件发送。附件 skill 可从安装菜单单独安装；其它路径可显式 `/send`。
+- 原生提问与审批使用专门指令回应；桌面请求只处理实际送到此连接的部分，不冒充已接管全部请求。
+- `/stop` 中断当前共享轮次并清待办，不能撤销已发生的操作；`/restart` 保留确定未提交输入。
+- 重启后不自动重放已接受或提交结果不确定的输入；当前不补发断线期间的所有历史回答。
 
-腾讯接口以 `-14` 表示当前账号会话失效。桥接不会退出或进入异常重启循环，而是保存失效状态、停止继续轮询和发送，并保留游标、待办、发件箱及任务状态。处理提示只记录一次；`codex-wechat status` 会显示：
+提示、切片、限额阈值、压缩通知及来源 hint 在同一 config.json 中热加载。接收/结束提示也可在微信即时修改；已提交输入和已入发件箱的文本不追溯改变。`/ack fields` 列出模板字段，使用缓存快照，不额外请求模型。
 
-```text
-"auth": "reauth_required"
-"available": false
-"relink_required": true
-"relink_command": "codex-wechat relink"
-```
+AI 正文及中途回复按结构智能切片；控制回复仅在传输超限时拆分。`/ping` 测微信观测延迟和供应商 TCP/TLS 建连阶段，不调用模型，不代表模型响应速度或手机显示 RTT。
 
-在电脑的交互终端运行：
+## 微信绑定失效
+
+确定认证失效后暂停微信收发和新输入提交，保留待办与发件箱，通过系统通知给出指引。正在运行的 Agent 不被擅自终止，结果保留待处理；普通断网只重连。
 
 ```bash
 codex-wechat relink
 ```
 
-命令会按需停止原本运行的服务，等待状态锁释放后显示二维码。扫码得到同一身份时只刷新 token，原游标、待办和发件箱全部保留，成功后自动恢复原本运行的服务。当前存在未完成任务时默认拒绝；确认允许停止桥接后使用 `--stop-active`。它停止的是微信网关，不保证中断共享 Codex daemon 中已经提交的轮次。扫码得到另一个身份时默认拒绝；明确要更换机器人及聊天时必须使用 `--replace-identity`，旧聊天输入和未发送输出会移入隔离记录，游标、去重与会话选择清空，新聊天绝不会继承旧待办或旧任务结果。
+Windows 使用 `.ps1 relink`。命令在本机交互终端运行；同身份刷新保留交付、Agent 会话和偏好。更换身份需显式 `--replace-identity`（Windows `-ReplaceIdentity`），隔离旧交付。尚有已提交工作时需明确 `--stop-active` / `-StopActive`；排队消息本身不阻止重绑。
 
-`relink` 只接受默认状态与配置路径以及交互终端；自定义路径或前台手动管理的进程需自行运行 `login` 并管理服务。
+系统通知是尽力投递，通知被关闭或无桌面时仍可从本机 status 和日志查看重绑状态。
 
-### 安装边界
+## 配置与数据
 
-Python 包声明在 requirements.txt，平台依赖检查集中在 installer.py 的 DEPENDENCIES；缺失的运行依赖提示后可稍后补齐，程序环境构建失败则停止安装。构建使用独立版本目录；稳定入口及当前版本在准备完成后集中更新，不提供 rollback 命令或失败后的自动回滚。失败发生在版本切换后时，如实报错并保留当时状态，不谎称回到旧版。
+示例见 config.example.json；实际 config.json、账户和交付状态不入库。Linux 默认数据在安装目录；Windows 在 `%LOCALAPPDATA%\codex-wechat`，程序在其中 app 目录。可用 CODEX_WECHAT_DATA_ROOT / CODEX_WECHAT_INSTALL_ROOT 明确分离位置。
 
-下载、staging、入口临时文件和本次未激活的构建在成功或失败后清理，不保留下载续传缓存；已安装的版本可能仍被运行中的进程使用，不按临时文件删除。数据和未知用户文件不作为安装垃圾清理。
+源码、配置、`.state`、共享后台记录和日志分开。传输临时文件在成功和失败后均清理；用户原文件和已保存的附件不自动删除。凭据不放命令行、不复制供应商密钥，不提高原生沙箱权限。自动回传只允许工作目录内非隐藏文件或私有媒体目录，不允许外发桥接凭据与状态。
 
-ASCII art 位置为 assets/logo/codex-wechat.txt；图案后的声明与完成后的声明分别来自 assets/install/after-art.txt 和 after-install.txt。未提供这些文件时没有占位输出。
-
-### 附加组件
-
-微信附件通道说明已独立为 `skills/wechat-attachments/SKILL.md`。在菜单“附加组件”中选择安装，或显式执行：
-
-```bash
-python3 installer.py components --component wechat-attachments
-# 自动化需额外加 --non-interactive；查看计划用 --dry-run
-```
-
-默认安装到当前用户的 `~/.agents/skills/wechat-attachments`，供 Codex 原生发现并按需读取；不把完整附件说明重复附到每轮消息。`--skills-dir PATH` 可指定独立的 skill 目录。同名文件内容不同则保留原文件并报冲突，不覆盖用户修改。skill 不包含微信凭据，发送权限与路径校验仍由桥接执行。
-
-## 支持的后端
-
-本分支只支持普通 Codex CLI 和 codex-deepseek，不提供 Codex 桌面 App 适配。需安装可执行 `app-server` 的原生 CLI，并完成对应启动器的登录；不会发现或调用 App 内置后端，也不支持接管 App 正在使用的会话。
-
-App Server 是 CLI 提供的原生协议名称，不表示本分支支持桌面 App。两平台都允许先安装本项目，之后再补齐 CLI 和登录；不会自动安装 Codex 或复制其他用户的凭据。
-
-## 登录自启与异常恢复
-
-新安装默认不自启。Linux 只在设置中显式开启时注册缺失服务；Windows 首次安装默认关闭。之后均可即时修改：
-
-```text
-/settings
-/settings autostart on
-/settings autostart off
-```
-
-`/settings` 显示系统实际状态。关闭只影响以后登录，不停止当前会话，也不阻止手动启动。Linux 缺少服务时查询显示关闭，不会为了查询自动安装；首次开启会注册并安全移交到新服务。服务已有时只改变自启状态。无法读取或服务归属不匹配时显示“不可用”。自启直接保存在 systemd/计划任务，不在 config.json 或 bridge state 中再保存一个容易失真的开关。
-
-Linux 安装没有自启参数，安装器不会注册服务。Windows 首次安装默认关闭自启，
-之后可在微信发送 `/settings autostart on`；非交互安装使用：
-
-```powershell
-.\install.ps1 -NonInteractive
-```
-
-自启与异常恢复是两件事。正常退出不自动重开；已识别的持久配置错误退出码为 78，需人工修正。Linux 使用 systemd 的 on-failure，5 分钟内最多 5 次启动；Windows 仅由 supervisor 处理异常子进程退出，带退避，5 分钟内达到 5 次失败后停止；计划任务不再叠加另一层失败重试。微信 `/restart` 属于用户主动重启，不等于崩溃。
-
-## 使用
-
-发送文字、手机原生选择的图片或文件即可。空闲时开始新轮次，忙时默认追加到当前轮次；`/queue 提示词` 将这一条排队，空闲后单独执行。排队消息不会挡住后续普通消息追加到当前任务。明确不能追加时仍保留到下一轮。`/stop` 中断共享轮次并清空未投递待办，不撤销已经发生的修改。
-
-常用短名与完整命令完全等价：`/s` = `/status`，`/q` = `/queue`，`/m` = `/model`，`/e` = `/effort`，`/p` = `/ping`，`/h` = `/help`。`/settings`、`/sessions`、切换/停止/重启、审批和文件发送等仍要求完整命令；不会自动推断前缀。完整参数校验、调度通道和队列规则也相同。
-
-`/help` 从唯一命令表生成完整用法，包括：
-
-- 会话与后端：`/sessions`、`/switch`、`/new`、`/backend`。
-- 设置：`/model`（短名 `/m`）、`/effort`、`/cwd`、`/ack`。
-- 状态与控制：`/status`、`/settings`、`/ping`、`/stop`、`/restart`。
-- 审批和提问：`/approve`、`/deny`、`/answer`；显式回传本机路径：`/send`、`/sendfile`、`/sendimage`。
-
-`/sessions` 默认第 1 页，`/sessions {页码}` 翻页；每页 10 条，块外显示 `/sessions {页码}` 当前1/3页。仍可用 `/sessions 关键词` 搜索；数字页码沿用最近搜索，单独 `/sessions` 刷新全部列表。总页数从完整元数据列表计算，翻页缓存最多复用 60 秒；不读取会话正文。不再支持 next。
-
-编号对应最近一次显示的列表；后端名称不区分大小写。模型和强度清单来自当前后端，目录必须已存在。切换后端、会话或设置需要空闲且无待办。恢复会话和普通输入沿用 Codex 的当前设置，不再重放旧手机设置；只有显式设置指令才传递覆盖值。
-
-提示统一使用紧凑代码块或短句，不显示旧值、变化箭头或装饰分隔符。修改设置只确认实际生效值；动作提示及会话/模型等标题位于代码块外，详细内容在块内，操作指令置于块外并保留参数花括号；/help 每行一条指令，使用行内代码；模型列表只列模型，可选强度由 /effort 显示。状态页保留权限、协作、连接、Token 和上下文等完整信息，仅隐藏零值待办/审批/失败计数。
-
-新建、恢复、切换会话显示名称、模型/强度和目录；不会在这些摘要中加延迟。`/status` 显示当前运行及缓存的后端信息；用量优先使用实时事件；缺少事件时，从 Codex 返回的当前会话 JSONL 路径提取最近的 token_count 统计，恢复时及后台每 10 秒补取。只读取尾部最多 8 MiB，不推算用量；不存在可用统计时显示“暂不可用”。`/settings` 汇总提示、附件、切片和系统自启状态。控制指令由程序处理，不发送给模型。
-
-微信收发、本地指令与后端启动独立。后端连接失败会后台重试，未提交输入保留，可用 `/stop` 清空。慢速会话查询不会挡住 `/help`、`/ping`、`/status`、重启和停止入口；但所有回复仍共用顺序发件箱，附件上传会延后实际发出时间。
-
-接收提示和结束提示可在微信即时修改并保存，无需重启；已入发件箱的文字不追溯修改。也可直接编辑 config.json，相关设置在接收消息、生成回复或处理通知时按需热加载；文件中实际变更的提示键会替换此前微信覆盖，未变更的键继续保留微信设置。无效 JSON 或热配置值会保留整组原设置；文件暂时缺失也不清空设置。
-
-接收提示可复用状态字段，`/ack fields` 查看实际支持的变量。例如：
-
-```text
-/ack text `{发送延迟}/{接收延迟}ms context {上下文剩余} left`
-```
-
-字段包含后端、会话、模型、强度、目录、提供方、权限、协作、服务、状态、待办数、审批数、发送失败数、上下文、上下文剩余、累计Token、输入Token、输出Token、Token、限额及发送/接收/供应商延迟。数字延迟单位为 ms；供应商延迟使用本连接最近一次 `/ping` 样本，没有样本为 `-`。仅使用已有快照，不发额外 RPC、测速或模型调用。缺失值显示 `-`，未知字段保留原样，字段内容不递归替换。`/settings` 显示原始模板，不展开变量。启用的结束提示也支持同一字段表。
-
-## CLI 会话共享与恢复
-
-默认通过启动器的 `app-server proxy` 连接对应 CODEX_HOME 的共享 daemon；未运行则自动启动，不要求先打开 CLI。可 `/switch` 到其他 CLI 活动会话，接收接入之后的最终回答；手机输入和 `/stop` 会影响同一个轮次。
-
-`/compact` 可手动请求当前会话压缩，要求空闲且无待办；不接收参数，调用原生 thread/compact/start，不把指令作为提示词发送。请求确认不等于已完成，完成后由原生事件通知；手动请求的结果通知不受自动压缩提示开关限制。
-
-设置 `compactionNotice: true` 后，当前选中会话出现上下文压缩事件时，微信显示“正在压缩上下文...”及“上下文压缩已结束。”；轮次中断或失败时不会假称成功。压缩提示默认关闭。自动和手动压缩使用相同事件，启用后均会提示；不主动触发压缩，不回放接入前的压缩历史。
-
-原生提问使用 `/answer {问题编号} {选项或文字}` 回答，数字选项转换为原生选项文本，自由文字原样回传，不作为普通模型输入。多个问题逐个展示，全部回答后统一提交；每题使用独立编号，避免迟到回复误答下一题。问题取消、桌面回答、会话切换或断线后编号失效；不持久化、自动选择或重发答案。仅能处理当前连接实际收到的请求，不保证接管只发给其他 CLI 客户端的问题；CLI 共享路径仍需在线验证。
-
-其他 CLI 客户端发起的审批、自定义工具和其他复杂交互仍由原客户端处理。网关在 `item/completed` 时即转发 `commentary` / `partial_answer` 的完整中途回复，因此工作中追问进度不用等整轮结束；不发送逐字增量、推理或命令输出。最终回答仍在轮次结束后发送，不重复合并进度消息。中途回复不触发结束提示或附件回传；未提供 phase 的旧协议消息仍在轮次结束后处理。不回放历史回答。切换后还未入发件箱的旧会话结果被过滤，已经入发件箱的回复保留原来源和顺序。
-
-重启后，确定未提交的输入恢复等待；已接受或提交结果不确定的输入只保留记录，不自动重发。稳定客户端消息 ID 用于追踪，不代表已确认服务端去重。断线期间完成的结果可能需要在 CLI 查看。
-
-## 配置与切片
-
-`config.json` 可参考 `config.example.json`；它不入库。接收/结束提示、来源说明（hint）、切片、压缩通知和限额阈值支持热加载；无需拆分配置文件。修改后在下一次使用时生效，已提交的模型输入和已入队输出保持原样。后端启动参数、环境、初始目录和附件上限等其余配置修改后重启桥接生效。默认值和校验集中在代码，不另建远程通用配置接口。
-
-| 配置 | 含义 |
-| --- | --- |
-| `cwd` | 新会话初始目录；默认项目 `workspace/` |
-| `backends` | 启动器参数数组、环境和新会话选项；不复制认证 |
-| `compactionNotice` | 压缩开始/结束提示，默认 `false` |
-| `quotaWarningThresholds` | 剩余限额警告阈值列表，默认 `[50, 25, 5]`；`[]` 关闭 |
-| `processingNotice` | 接收提示模板；`/ack text {模板}` 即时修改，`/ack text` 关闭 |
-| `sourceHint` | 模型输入末尾的来源说明，默认 `[User from WeChat.]`；空字符串关闭，按原文使用，不展开变量 |
-| `completionNotice` | 结束提示模板，默认关闭；`/finish text {模板}` 即时修改，`/finish text` 关闭 |
-| `media.maxMiB` | 单附件本地大小上限，默认 20 MiB |
-| `slicing.mode` | `smart`（默认）按结构分条；`length` 只在超传输上限时拆 |
-| `slicing.targetChars` | 智能切片字符数软目标，默认 600，范围 80–20000 |
-
-旧 `inputMode` 配置不再生效；普通消息固定默认 steer，逐条用 `/queue` 指定排队，已有待办保留原模式。`/queue` 前缀不传给模型；空内容显示用法，同条消息的附件随任务排队。
-
-`targetChars` 按 Unicode 码点计数，不是字节数或屏幕宽度。短答不拆，标题和正文、能放进一条的列表/表格/代码尽量保持完整；软目标不会强制截断一个完整段落。特别长的内容仍受 UTF-8 字节上限约束，必要时在行或字符边界拆分；完整超长代码围栏会闭合并重开。不是完整 Markdown 重排器，不修改文字含义，不调用额外模型。
-
-**AI 最终正文和中途回复采用智能切片。** `/status`、模型/会话列表、帮助、审批等只按传输字节上限拆分。已入队的切片不会因配置变动或重启重新计算。
-
-可本地预览，完全不连接微信或模型、不打开状态目录：
-
-```bash
-python3 slicing.py answer.txt --mode smart --target-chars 500
-python3 slicing.py answer.txt --mode length --json
-```
-
-一条回答的正文、附件和可选结束提示作为一组持久化。正文某段连续发送失败后，停止该组剩余内容并尝试通知；附件失败可继续其余附件，但取消结束提示。失败提示本身不会无限生成新提示。已成功发送的部分不能撤回。
-
-`/status` 和 `{发送失败数}` 显示通道连续失败计数：每条消息（包括附件或失败通知）重试耗尽后加 1，后续任意消息经发送接口确认成功后清零。单次重试失败不累计，切换会话、后端及服务重启不清零。失败历史独立保留最近 20 条，清零不删除历史或自动重发旧回复。旧状态没有独立计数时从 0 开始，不用历史条数反推当前故障。
-
-限额警告使用后端已返回的账户窗口数据，不另发测速或模型请求。首次可用数据只建立基线；此后剩余百分比向下跨越阈值时提示。一次跨越多个阈值只发最低阈值的一条。每个窗口周期只提醒一次，恢复到最高阈值以上或确认进入新重置周期后重新计数；记录跨重启保留。缺失/无效数据不推测。`/settings` 显示压缩提示和限额警告设置；修改本地 config.json 后重启生效。
-
-## 延迟与附件
-
-`/ping` 返回一条紧凑测速结果：
-
-```text
-WeChat ─120/80ms─ Bridge ─185ms─ Provider
-```
-
-接收提示仍为 `120/80ms`。微信两段分别是源消息时间戳到本机收信的估算、上一次成功发信 API 耗时；缺失显示 `-`，不含队列等待，不是手机完整 RTT。
-
-Provider 从已连接后端的原生 `config/read` 取得当前供应商地址，按连接进程的代理环境发出不带认证的 HEAD 请求，只采用 DNS/TCP/TLS 建连阶段耗时，排除服务端响应等待；HTTP 地址只测 TCP。不会发模型请求或消耗推理 Token。ChatGPT 登录默认测 chatgpt.com，API key 登录默认测 api.openai.com，配置地址优先；无法确定地址或代理环境时显示 `unavailable`，超时显示 `timeout`。后台尚未就绪时不为测速启动后台。
-
-供应商测速为一次新连接，包含适用的代理协商，不代表模型复用连接的单向网络延迟；后台此前用不同代理环境启动时，本探针不能证明其历史环境与当前连接进程一致。测速独立于本地控制通道，不阻塞 `/help` 或停止入口。
-
-模型通过项目 `skills/wechat-attachments/` 的按需说明请求回传文件。每轮最多 10 个附件，自动回传仅允许工作目录内非隐藏文件或私有媒体目录；工作目录为 HOME 或 `/` 时限媒体目录。其他路径需用户显式 `/send`；桥接凭据与状态始终禁止发送。语音、视频、群聊不支持。
-
-## 状态、安全与验证
-
-`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/`、`releases/`、版本指针和各版本 `.venv/` 都不入库。媒体目前不会自动清理。`./codex-wechat status` 只读取最后保存的摘要和微信认证状态，不是完整健康检查。
-
-保留 Codex 原生沙箱和审批，不自动提高权限。控制消息保存游标后进入内存队列，崩溃时可能丢失，**不会自动重放控制命令**。微信发送接口响应丢失仍可能导致重试重复送达，不承诺恰好一次。
-
-历史用户实用确认包括扫码、普通聊天和图片接收；这不代表本轮重构通过测试。本轮验收须以专用测试会话报告为准；离线测试也不能替代真实微信、CLI 共享和附件协议联调。
-
-维护边界与离线测试说明见 [ARCHITECTURE](docs/ARCHITECTURE.md)。
-
-## 关机后的恢复
-
-开机后继续接收微信积压消息；确定未提交的待办会保留，已提交或结果未确认的任务不自动重发。消息时间早于本次服务启动时不作为网络延迟样本，持久化待办的旧入站样本也清除；提示中的未知延迟显示 `-`。
-
-`/restart` 允许保留待办及正在准备但尚未提交的输入，后台连接恢复也不挡重启；已提交/提交不确定、steering、活动模型轮次和会话设置操作仍须先处理或停止。重启确认发出前关闭提交入口，启动失败则重新开放，未提交消息不丢弃。
-
-DeepSeek 本地 proxy 不再读取密钥；真正启动后台仍需解锁桌面密钥环。不可用时显示明确原因，每 60 秒重试。同一启动配置使用稳定的 systemd transient unit，复用进行中的启动；不会修改密钥保存方式或绕过解锁。
+服务与交付边界见 [ARCHITECTURE](docs/ARCHITECTURE.md)，能力迁移基线见 [CAPABILITIES](docs/CAPABILITIES.md)。测试报告区分离线覆盖与实机结果；Linux mock 通过不能代替 Windows、真实微信或多客户端联调。
