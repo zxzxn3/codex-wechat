@@ -85,11 +85,12 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         if os.name != "nt":
             self.assertEqual(os.stat(Path(self.temp.name) / "bridge.json").st_mode & 0o777, 0o600)
 
-    async def test_empty_completion_notice_is_disabled(self):
+    async def test_default_completion_notice_follows_answer(self):
         self.bridge.state["context"] = "context"
         await self.bridge.deliver_answer("answer", notify_completion=True)
         texts = [entry.get("text") for entry in self.store.load("bridge")["outbox"]]
-        self.assertEqual(texts, ["answer"])
+        self.assertEqual(texts[0], "answer")
+        self.assertTrue(texts[1].startswith("`OUT: "))
 
     async def test_output_hint_is_concise_origin_marker(self):
         self.assertEqual(OUTPUT_HINT, "\n\n[User from WeChat.]")
