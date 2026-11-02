@@ -49,13 +49,13 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
     async def test_identity_change_is_refused_before_replacing_credentials(self):
         changed = {"token": "new", "bot": "bot-b", "user": "user-b"}
         callback = Mock()
-        with self.assertRaisesRegex(RuntimeError, "--replace-identity"):
+        with self.assertRaisesRegex(RuntimeError, "rebind"):
             await self.login(changed, before_identity_change=callback)
         self.assertEqual(self.store.load("account"), self.old)
         callback.assert_not_called()
 
     async def test_explicit_identity_change_calls_migration_before_save(self):
-        changed = {"token": "new", "bot": "bot-b", "user": "user-b"}
+        changed = {"token": "new", "bot": "bot-b", "user": "user-a"}
         observed = []
 
         def before(previous, account):
@@ -63,7 +63,7 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
 
         result = await self.login(
             changed,
-            allow_identity_change=True,
+            rebind=True,
             before_identity_change=before,
         )
         self.assertTrue(result.identity_changed)
@@ -78,7 +78,7 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
         callback = Mock()
         result = await self.login(
             refreshed,
-            allow_identity_change=True,
+            rebind=True,
             before_identity_change=callback,
         )
         self.assertFalse(result.identity_changed)
@@ -86,6 +86,37 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
         saved = self.store.load("account")
         self.assertEqual(saved["base_url"], wechat.BASE_URL)
         self.assertEqual({key: saved[key] for key in refreshed}, refreshed)
+
+    async def test_same_user_bot_change_needs_no_prompt_or_extra_flag(self):
+        changed = {**self.old, "token": "new", "bot": "bot-b"}
+        before = Mock()
+        with patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
+            result = await self.login(changed, rebind=True, before_identity_change=before)
+        self.assertTrue(result.identity_changed)
+        before.assert_called_once()
+        self.assertEqual(self.store.load("account")["bot"], "bot-b")
+
+    async def test_different_user_requires_terminal_confirmation_before_any_change(self):
+        changed = {"token": "new", "bot": "bot-b", "user": "user-b"}
+        before = Mock()
+        with patch("builtins.input", return_value="n") as confirm:
+            with self.assertRaisesRegex(RuntimeError, "已取消"):
+                await self.login(changed, rebind=True, before_identity_change=before)
+        confirm.assert_called_once()
+        before.assert_not_called()
+        self.assertEqual(self.store.load("account"), self.old)
+        with patch("builtins.input", return_value="y"):
+            result = await self.login(changed, rebind=True, before_identity_change=before)
+        self.assertTrue(result.identity_changed)
+        before.assert_called_once()
+        self.assertEqual(self.store.load("account")["user"], "user-b")
+
+    async def test_missing_terminal_input_cannot_accept_another_user(self):
+        changed = {"token": "new", "bot": "bot-b", "user": "user-b"}
+        with patch("builtins.input", side_effect=EOFError()):
+            with self.assertRaisesRegex(RuntimeError, "已取消"):
+                await self.login(changed, rebind=True, before_identity_change=Mock())
+        self.assertEqual(self.store.load("account"), self.old)
 
     async def test_binded_redirect_reuses_existing_local_credentials(self):
         callback = Mock()

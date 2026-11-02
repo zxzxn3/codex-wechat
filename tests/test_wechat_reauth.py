@@ -50,7 +50,7 @@ class WeChatReauthTests(unittest.IsolatedAsyncioTestCase):
             task = asyncio.create_task(bridge.sender())
             self.tasks.append(task)
             await wait_until(lambda: bridge.wechat_paused)
-            await bridge.require_wechat_relink()
+            await bridge.require_wechat_rebind()
         saved = self.store.load("bridge")
         self.assertEqual(saved["wechatAuth"]["state"], wechat_auth.AUTH_REQUIRED)
         self.assertEqual(saved["outbox"][0]["id"], original["id"])
@@ -69,17 +69,27 @@ class WeChatReauthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.bridge.wechat_paused)
         notify.assert_awaited_once()
 
+    async def test_old_notice_gets_one_updated_rebind_command(self):
+        self.bridge.state["wechatAuth"] = {"state": wechat_auth.AUTH_REQUIRED,
+                                           "notificationAttempted": True}
+        with patch("codex_wechat.service_adapter.notify", AsyncMock()) as notify:
+            await self.bridge.require_wechat_rebind()
+            await self.bridge.require_wechat_rebind()
+        notify.assert_awaited_once()
+        self.assertIn(wechat_auth.rebind_command(), notify.call_args.args[1])
+        self.assertIn("rebind", notify.call_args.args[1])
+
     async def test_local_status_exposes_recovery_command(self):
         self.bridge.state["outbox"] = [{"id": "still-unsent"}]
-        wechat_auth.require_relink(
+        wechat_auth.require_rebind(
             self.bridge.state, pending=1, now=123
         )
         self.store.save("account", self.bridge.account)
         self.store.save("bridge", self.bridge.state)
         payload = status_payload(self.store)
-        self.assertTrue(payload["relink_required"])
+        self.assertTrue(payload["rebind_required"])
         self.assertFalse(payload["available"])
-        self.assertEqual(payload["relink_command"], "codex-wechat relink")
+        self.assertEqual(payload["rebind_command"], wechat_auth.rebind_command())
         self.assertEqual(payload["unsent"], 1)
         self.assertEqual(payload["auth_detected_at"], 123)
 

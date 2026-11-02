@@ -49,7 +49,7 @@ class OutputDelivery:
     def reply(self, text, *, persist=True):
         bridge = self.bridge
         context = bridge.state.get("context")
-        if context:
+        if context or bridge.state.get("wechatContextPending"):
             bridge.enqueue(bridge.text_entries(text, group=str(uuid.uuid4()), context=context),
                          persist=persist)
 
@@ -64,7 +64,7 @@ class OutputDelivery:
                 or not bridge.current_source(message.source)):
             return
         context = bridge.state.get("context")
-        if not context:
+        if not context and not bridge.state.get("wechatContextPending"):
             return
         bridge.reload_config()
         text, _ = split_answer(message.text)  # Attachments are processed only in the final answer.
@@ -75,7 +75,7 @@ class OutputDelivery:
     def asset_entry(self, asset, *, group=None, context=None, source=None):
         bridge = self.bridge
         return {"id": str(uuid.uuid4()), "group": group or str(uuid.uuid4()), "role": "asset",
-                "user": bridge.account["user"], "context": context or bridge.state["context"],
+                "user": bridge.account["user"], "context": context or bridge.state.get("context", ""),
                 "asset": asset, **({"source": asdict(source)} if source else {})}
 
     async def queue_file(self, path, kind="auto", *, origin=None):
@@ -94,7 +94,7 @@ class OutputDelivery:
             answer = answer.text
         text, specs = split_answer(answer)
         context = bridge.state.get("context")
-        if not context:
+        if not context and not bridge.state.get("wechatContextPending"):
             return
         group = str(uuid.uuid4())
         assets, errors = [], []
@@ -176,7 +176,7 @@ class OutputDelivery:
     async def sender(self):
         bridge = self.bridge
         while True:
-            if bridge.wechat_paused:
+            if bridge.wechat_paused or bridge.state.get("wechatContextPending"):
                 bridge.send_wake.clear()
                 await bridge.send_wake.wait()
                 continue
@@ -195,7 +195,7 @@ class OutputDelivery:
                 await bridge.channel.send(entry)
                 send_ms = (time.perf_counter() - send_started) * 1000
             except WeChatAuthExpired:
-                await bridge.require_wechat_relink()
+                await bridge.require_wechat_rebind()
                 continue
             except Exception as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1

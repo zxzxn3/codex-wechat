@@ -14,9 +14,9 @@ def validate_paths(state_dir, config_path):
     expected_state = (data_root() / ".state").resolve()
     expected_config = (data_root() / "config.json").resolve()
     if Path(state_dir).expanduser().resolve() != expected_state:
-        raise ValueError("relink 只操作默认状态目录；自定义状态请手动管理登录和服务。")
+        raise ValueError("rebind 只操作默认状态目录；自定义状态请手动管理登录和服务。")
     if Path(config_path).expanduser().resolve() != expected_config:
-        raise ValueError("relink 只操作默认配置路径；自定义配置请手动管理登录和服务。")
+        raise ValueError("rebind 只操作默认配置路径；自定义配置请手动管理登录和服务。")
 
 
 def active_work(state):
@@ -45,14 +45,13 @@ async def _acquire_locked_store(state_dir, *, wait_for_service):
             await asyncio.sleep(0.2)
 
 
-async def run_relink(state_dir, config_path, *, replace_identity=False,
-                     stop_active=False, interactive=None, adapter=service_adapter,
+async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=None, adapter=service_adapter,
                      login_runner=login):
     validate_paths(state_dir, config_path)
     interactive = (sys.stdin.isatty() and sys.stdout.isatty()
                    if interactive is None else interactive)
     if not interactive:
-        raise ValueError("relink 必须在交互终端扫码，不能重定向输入或输出。")
+        raise ValueError("rebind 必须在交互终端扫码，不能重定向输入或输出。")
 
     service = await adapter.status()
     preview = Store(Path(state_dir), lock=False)
@@ -62,7 +61,7 @@ async def run_relink(state_dir, config_path, *, replace_identity=False,
     if active_work(state) and not stop_active:
         raise RuntimeError(
             "当前有尚未完成的任务；确认停止桥接后使用 "
-            "codex-wechat relink --stop-active"
+            + wechat_auth.rebind_command(stop_active=True)
         )
 
     was_running = service.running
@@ -80,13 +79,13 @@ async def run_relink(state_dir, config_path, *, replace_identity=False,
         def before_identity_change(previous, account):
             # Persist a pause before replacing credentials; never resume a half-change.
             state["bindingPending"] = {"target": wechat_auth.identity(account)}
-            counts.update(wechat_auth.prepare_identity_change(state, account))
-            wechat_auth.require_relink(state, pending=0)
+            counts.update(wechat_auth.prepare_rebind(state, previous, account))
+            wechat_auth.require_rebind(state, pending=0)
             store.save("bridge", state)
 
         result = await login_runner(
             store,
-            allow_identity_change=replace_identity,
+            rebind=True,
             before_identity_change=before_identity_change,
         )
         state = store.load("bridge", {})
@@ -110,7 +109,7 @@ async def run_relink(state_dir, config_path, *, replace_identity=False,
 
     if result.already_connected:
         print("服务端确认已经绑定；本地凭据和聊天队列未变。", flush=True)
-    elif result.identity_changed:
+    elif result.identity_changed and result.previous.get("user") != result.account.get("user"):
         print(
             "微信身份已更换；旧聊天待办和发件箱已隔离，不会发送到新聊天。",
             flush=True,
@@ -119,6 +118,8 @@ async def run_relink(state_dir, config_path, *, replace_identity=False,
             f"已隔离输入 {counts.get('inputs', 0)} 条、输出 {counts.get('outbox', 0)} 条。",
             flush=True,
         )
+    elif result.identity_changed:
+        print("微信已重新绑定；原聊天待办和回复已保留。请在微信发一条消息以恢复发送。", flush=True)
     else:
         print("微信身份未变；原游标、待办和发件箱已保留。", flush=True)
 

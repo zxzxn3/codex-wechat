@@ -5,11 +5,39 @@ import wechat_auth
 
 
 class WeChatAuthTests(unittest.TestCase):
+    def test_same_user_rebind_preserves_work_but_resets_transport(self):
+        current = {"id": "active", "phase": "accepted"}
+        state = {"context": "old", "cursor": "old", "seen": ["seen"],
+                 "currentInput": current, "inbox": [{"id": "queued"}],
+                 "outbox": [{"id": "reply", "context": "old", "attempts": 2,
+                             "item": {"file": "old-upload"}, "asset": {"path": "local"}}]}
+        wechat_auth.prepare_rebind(state, {"user": "u", "bot": "old"},
+                                   {"user": "u", "bot": "new"})
+        self.assertIs(state["currentInput"], current)
+        self.assertEqual(state["inbox"], [{"id": "queued"}])
+        self.assertEqual(state["seen"], ["seen"])
+        self.assertEqual(state["cursor"], "")
+        self.assertNotIn("context", state)
+        self.assertTrue(state["wechatContextPending"])
+        self.assertEqual(state["outbox"], [{"id": "reply", "context": "",
+                                           "asset": {"path": "local"}}])
+        wechat_auth.accept_context(state, "fresh")
+        self.assertEqual(state["outbox"][0]["context"], "fresh")
+        self.assertNotIn("wechatContextPending", state)
+
+    def test_different_user_still_quarantines_and_clears_context_wait(self):
+        state = {"wechatContextPending": True, "outbox": [{"id": "reply"}],
+                 "inbox": [{"id": "queued"}]}
+        wechat_auth.prepare_rebind(state, {"user": "old"}, {"user": "new"})
+        self.assertEqual(state["outbox"], [])
+        self.assertEqual(state["inbox"], [])
+        self.assertNotIn("wechatContextPending", state)
+
     def test_reauth_state_is_saved_once_and_preserves_first_detection(self):
         state = {}
-        self.assertTrue(wechat_auth.require_relink(state, pending=2, now=100))
+        self.assertTrue(wechat_auth.require_rebind(state, pending=2, now=100))
         first = dict(state["wechatAuth"])
-        self.assertFalse(wechat_auth.require_relink(state, pending=9, now=200))
+        self.assertFalse(wechat_auth.require_rebind(state, pending=9, now=200))
         self.assertEqual(state["wechatAuth"], first)
         self.assertEqual(first["state"], wechat_auth.AUTH_REQUIRED)
         self.assertEqual(first["unsent"], 2)

@@ -1,10 +1,21 @@
 """Shared WeChat credential state and cross-chat transition policy."""
 import time
+import shlex
+from platform_support import IS_WINDOWS, INSTALL_ROOT
 
 AUTH_UNKNOWN = "unknown"
 AUTH_VALID = "valid"
 AUTH_REQUIRED = "reauth_required"
 IDENTITY_CHANGED = "identity_changed"
+
+
+def rebind_command(*, stop_active=False):
+    """An actionable local command independent of PATH and shell aliases."""
+    if IS_WINDOWS:
+        path = str(INSTALL_ROOT / "codex-wechat.ps1").replace("'", "''")
+        return "& '" + path + "' rebind" + (" -StopActive" if stop_active else "")
+    return shlex.join([str(INSTALL_ROOT / "codex-wechat"), "rebind",
+                       *(["--stop-active"] if stop_active else [])])
 
 
 def identity(account):
@@ -25,7 +36,7 @@ def state(bridge_state):
     return AUTH_UNKNOWN
 
 
-def require_relink(bridge_state, *, pending, now=None):
+def require_rebind(bridge_state, *, pending, now=None):
     """Enter the durable paused state; repeated failures do not resave it."""
     if state(bridge_state) == AUTH_REQUIRED:
         return False
@@ -85,6 +96,7 @@ def prepare_identity_change(bridge_state, account):
     bridge_state["cursor"] = ""
     bridge_state["seen"] = []
     bridge_state.pop("context", None)
+    bridge_state.pop("wechatContextPending", None)
     for key in ("restartRequested", "running", "phase"):
         bridge_state.pop(key, None)
     bridge_state["wechatIdentity"] = identity(account)
@@ -93,3 +105,27 @@ def prepare_identity_change(bridge_state, account):
         "inputs": len(old_inputs),
         "outbox": len(quarantined_output),
     }
+
+
+def prepare_rebind(bridge_state, previous, account):
+    """Keep delivery for the same WeChat user, renew bot-scoped transport state."""
+    if not previous.get("user") or identity(previous)["user"] != identity(account)["user"]:
+        return prepare_identity_change(bridge_state, account)
+    bridge_state["cursor"] = ""
+    bridge_state.pop("context", None)
+    bridge_state["wechatContextPending"] = True
+    for entry in bridge_state.get("outbox", []):
+        entry["context"] = ""
+        # Uploaded references and retry budgets belong to the old connection.
+        entry.pop("item", None)
+        entry.pop("attempts", None)
+    bridge_state["wechatIdentity"] = identity(account)
+    return {"inputs": 0, "outbox": 0}
+
+
+def accept_context(bridge_state, context):
+    """Resume preserved output only after this binding receives a fresh token."""
+    bridge_state["context"] = context
+    if bridge_state.pop("wechatContextPending", False):
+        for entry in bridge_state.get("outbox", []):
+            entry["context"] = context

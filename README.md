@@ -85,10 +85,10 @@ AI 正文及中途回复按结构智能切片；控制回复仅在传输超限�
 确定认证失效后暂停微信收发和新输入提交，保留待办与发件箱，通过系统通知给出指引。正在运行的 Agent 不被擅自终止，结果保留待处理；普通断网只重连。
 
 ```bash
-codex-wechat relink
+codex-wechat rebind
 ```
 
-Windows 使用 `.ps1 relink`。命令在本机交互终端运行；同身份刷新保留交付、Agent 会话和偏好。更换身份需显式 `--replace-identity`（Windows `-ReplaceIdentity`），隔离旧交付。尚有已提交工作时需明确 `--stop-active` / `-StopActive`；排队消息本身不阻止重绑。
+Windows 使用 `.ps1 rebind`。同一微信号重绑沿用原聊天，保留待办、回复和去重记录；bot 变化时更新凭据、重置游标及协议上下文，在微信发一条消息后继续交付。换微信号需终端确认并隔离旧交付。Agent 会话选择和偏好始终保留。尚有已提交工作时需明确 `--stop-active` / `-StopActive`；排队消息本身不阻止重绑。
 
 系统通知是尽力投递，通知被关闭或无桌面时仍可从本机 status 和日志查看重绑状态。
 

@@ -5,7 +5,7 @@
 - codex_connection：唯一连接意图和校验；native_codex：CLI/App 可执行入口发现。
 - backend_runtime：后台准备与所有权；codex_transport：字节连接、JSON-RPC和关闭；backend：原生会话/轮次/事件。
 - desktop：App、CLI 的共同接入；代理由调用者启动器处理，进程级连接环境只给子进程。
-- wechat / media：微信和CDN协议；wechat_auth / relink：认证状态、身份与重绑编排。
+- wechat / media：微信和CDN协议；wechat_auth / rebind：认证状态、身份与重绑编排。
 - input_delivery / output_delivery：输入提交和有序输出；Bridge是组合根和持久化入口。
 - commands / command_specs / prompts / configuration：唯一命令目录、展示快照和配置；不重复业务状态。
 - platform_ui / platform_support / service_adapter：二维码、通知、平台路径与原生服务操作。
@@ -38,8 +38,10 @@ preparing可恢复，dispatching结果未知、accepted均不自动重发。clie
 原生问题/审批使用各自响应格式，只回应本连接实际收到的请求，不自动选择答案。
 
 确定认证失效保存reauth_required并暂停收发和新提交，一次系统提醒；不将临时断网误判
-为失效，也不擅自中断已运行Agent。同身份重绑保留交付；不同身份先持久隔离旧交付和
-未完成标记，再提交凭据，成功后清标记。半完成状态禁止启动业务，等待显式继续。
+为失效，也不擅自中断已运行Agent。同一微信用户重绑沿用聊天并保留交付；bot变化时重置
+游标、上下文及上传引用，保留去重记录，收到新的上下文后恢复待办和发件箱。等待期间的新结果仍保存。
+换微信用户先在终端确认并隔离旧交付。变更先持久保存未完成标记，再提交凭据，成功后清标记。
+半完成状态禁止启动业务，等待显式继续。
 用户会话选择和提示偏好不属于微信token，不因换bot清空。
 
 ## 配置与资源

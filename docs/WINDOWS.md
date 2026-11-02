@@ -14,7 +14,7 @@ PID、创建时间、exe和回环监听归属；不抢占未知端口，不因Ap
 以前的共享后台身份记录可核对沿用；旧CodexProxy修复/配置脚本不再是产品依赖。
 
 桌面接入使用codex-desktop.ps1，原生CLI参数放在cli后，推荐用--分隔。App连接变量只给
-子进程，退出不更改调用者环境。重新绑定统一用codex-wechat.ps1 relink，不复制独立业务。
+子进程，退出不更改调用者环境。重新绑定统一用codex-wechat.ps1 rebind，不复制独立业务。
 
 Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致不可见。源码和Linux mock
 不能证明Windows 5.1、任务、Job Object、App/CLI三端与真实微信都通过，具体覆盖以验收报告为准。

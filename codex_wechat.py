@@ -30,7 +30,7 @@ from configuration import ConfigLoader, ConfigurationError
 from quota import quota_warnings
 from records import InputPhase
 from profiles import backend_label, definitions, snapshot
-from relink import run_relink
+from rebind import run_rebind
 from media import Media, MAX_ATTACHMENTS
 from latency import Latency
 from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, backend_reason
@@ -139,7 +139,7 @@ class Bridge:
         return "\n\n" + self.source_hint if self.source_hint else ""
 
     def mark_wechat_valid(self):
-        # Once relink is required, only the stopped-service relink flow may
+        # Once rebind is required, only the stopped-service rebind flow may
         # clear it. A request already in flight must not silently resume polling.
         if wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED:
             return
@@ -147,19 +147,22 @@ class Bridge:
         if changed:
             self.save()
 
-    async def require_wechat_relink(self):
-        wechat_auth.require_relink(self.state, pending=len(self.state.get("outbox", [])))
+    async def require_wechat_rebind(self):
+        wechat_auth.require_rebind(self.state, pending=len(self.state.get("outbox", [])))
         self.wechat_paused = True
         details = self.state["wechatAuth"]
-        notify = not details.get("notificationAttempted", False)
+        command = wechat_auth.rebind_command()
+        notify = (not details.get("notificationAttempted", False)
+                  or details.get("notificationCommand") != command)
         if notify:
             details["notificationAttempted"] = True
+            details["notificationCommand"] = command
         self.save()
         if notify:
             try:
-                await service_adapter.notify("微信绑定已失效", "运行 codex-wechat relink 重新绑定。")
+                await service_adapter.notify("微信绑定已失效", "重新绑定\n" + command)
             except Exception:
-                print("微信绑定已失效；运行 codex-wechat relink 重新绑定。", file=sys.stderr)
+                print("微信绑定已失效；重新绑定\n" + wechat_auth.rebind_command(), file=sys.stderr)
 
     def check_quota(self, backend, payload):
         if backend is not self.backend or not self.state.get("context"):
@@ -290,12 +293,12 @@ class Bridge:
             identity = msg.get("message_id") or msg.get("client_id") or hashlib.sha256(
                 json.dumps(msg, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             identity = str(identity)
-            if identity in self.state["seen"]:
-                continue
             if not msg.get("context_token"):
                 # Cannot safely reply without a context token; don't execute.
                 continue
-            self.state["context"] = msg["context_token"]
+            wechat_auth.accept_context(self.state, msg["context_token"])
+            if identity in self.state["seen"]:
+                continue
             self.state["seen"].append(identity)
             text = "\n".join(item.get("text_item", {}).get("text", "")
                              for item in msg.get("item_list", []) if item.get("type") == 1).strip()
@@ -331,6 +334,7 @@ class Bridge:
             self.state["cursor"] = batch["get_updates_buf"]
         # Persist cursor and incoming work together, before starting any agent work.
         self.save()
+        self.send_wake.set()
         for command, received in controls:
             name, argument = parse_control(command)
             queue = self.controls[command_lane(name, argument)]
@@ -487,7 +491,7 @@ class Bridge:
                 await self.receive(batch)
                 delay = 2
             except WeChatAuthExpired:
-                await self.require_wechat_relink()
+                await self.require_wechat_rebind()
             except Exception as error:
                 print(f"接收失败：{error}", file=sys.stderr, flush=True)
                 await asyncio.sleep(delay)
@@ -500,7 +504,7 @@ class Bridge:
                 self.reply(RESTART_READY)
             self.recover_inputs()
             if self.wechat_paused:
-                await self.require_wechat_relink()
+                await self.require_wechat_rebind()
             tasks = [asyncio.create_task(fn()) for fn in
                      (self.poller, self.worker, self.steering_worker,
                       self.external_result_worker, self.sender, self.maintain_backend)]
@@ -542,9 +546,9 @@ async def startup_account(store):
     if account:
         state = store.load("bridge", {})
         if account.get("bindingPending") or isinstance(state, dict) and state.get("bindingPending"):
-            raise ConfigurationError("重新绑定尚未完成；运行 codex-wechat relink --replace-identity 继续。")
+            raise ConfigurationError("重新绑定尚未完成；运行 " + wechat_auth.rebind_command() + " 继续。")
         if not all(account.get(key) for key in ("user", "token")):
-            raise ConfigurationError("微信凭据不完整；运行 codex-wechat relink 重新绑定。")
+            raise ConfigurationError("微信凭据不完整；运行 " + wechat_auth.rebind_command() + " 重新绑定。")
         return account
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise ConfigurationError("尚未绑定微信，请在交互终端运行 codex-wechat start 完成扫码。")
@@ -564,8 +568,8 @@ def status_payload(store):
         "auth": auth,
         "available": (True if auth == wechat_auth.AUTH_VALID else
                       False if auth == wechat_auth.AUTH_REQUIRED else None),
-        "relink_required": auth == wechat_auth.AUTH_REQUIRED,
-        "relink_command": "codex-wechat relink",
+        "rebind_required": auth == wechat_auth.AUTH_REQUIRED,
+        "rebind_command": wechat_auth.rebind_command(),
         "thread": state.get("thread"),
         "backend": state.get("backendName", "codex"),
         "unfinished_at_last_save": bool(
@@ -585,20 +589,18 @@ def status_payload(store):
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("login", "start", "status", "relink"))
+    parser.add_argument("action", choices=("login", "start", "status", "rebind"))
     parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
-    parser.add_argument("--replace-identity", action="store_true")
     parser.add_argument("--stop-active", action="store_true")
     args = parser.parse_args()
-    if args.action != "relink" and (args.replace_identity or args.stop_active):
-        parser.error("--replace-identity 和 --stop-active 只能与 relink 一起使用")
+    if args.action != "rebind" and args.stop_active:
+        parser.error("--stop-active 只能与 rebind 一起使用")
     os.umask(0o077)
-    if args.action == "relink":
-        await run_relink(
+    if args.action == "rebind":
+        await run_rebind(
             args.state_dir,
             args.config,
-            replace_identity=args.replace_identity,
             stop_active=args.stop_active,
         )
         return

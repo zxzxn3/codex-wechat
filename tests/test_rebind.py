@@ -1,10 +1,10 @@
-"""Relink orchestration with native service and network boundaries mocked."""
+"""Rebind orchestration with native service and network boundaries mocked."""
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import relink
+import rebind
 import wechat_auth
 from service_adapter import ServiceState
 from storage import Store
@@ -29,7 +29,7 @@ class FakeAdapter:
         self.running = True
 
 
-class RelinkTests(unittest.IsolatedAsyncioTestCase):
+class RebindTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -53,9 +53,9 @@ class RelinkTests(unittest.IsolatedAsyncioTestCase):
         store = Store(self.state_dir, lock=False)
         return store.load("bridge"), store.load("account")
 
-    async def run_relink(self, adapter, login_runner, **kwargs):
-        with patch.object(relink, "data_root", return_value=self.root):
-            return await relink.run_relink(
+    async def run_rebind(self, adapter, login_runner, **kwargs):
+        with patch.object(rebind, "data_root", return_value=self.root):
+            return await rebind.run_rebind(
                 self.state_dir,
                 self.config_path,
                 interactive=True,
@@ -79,7 +79,7 @@ class RelinkTests(unittest.IsolatedAsyncioTestCase):
             return LoginResult(refreshed, previous, False)
 
         adapter = FakeAdapter(running=True)
-        await self.run_relink(adapter, login, stop_active=True)
+        await self.run_rebind(adapter, login, stop_active=True)
         bridge, saved_account = self.load_bridge()
         self.assertEqual(saved_account["token"], "new")
         self.assertEqual(bridge["cursor"], "cursor")
@@ -100,18 +100,18 @@ class RelinkTests(unittest.IsolatedAsyncioTestCase):
             "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED},
         }, old_account)
 
-        async def login(store, *, allow_identity_change=False,
+        async def login(store, *, rebind=False,
                         before_identity_change=None):
             previous = store.load("account")
             account = {"token": "new", "bot": "new-bot", "user": "new-user"}
-            self.assertTrue(allow_identity_change)
+            self.assertTrue(rebind)
             before_identity_change(previous, account)
             store.save("account", account)
             return LoginResult(account, previous, True)
 
         adapter = FakeAdapter(running=True)
-        await self.run_relink(
-            adapter, login, replace_identity=True, stop_active=True
+        await self.run_rebind(
+            adapter, login, stop_active=True
         )
         bridge, account = self.load_bridge()
         self.assertEqual(account["user"], "new-user")
@@ -136,7 +136,7 @@ class RelinkTests(unittest.IsolatedAsyncioTestCase):
         adapter = FakeAdapter(running=True)
         login = AsyncMock()
         with self.assertRaisesRegex(RuntimeError, "--stop-active"):
-            await self.run_relink(adapter, login)
+            await self.run_rebind(adapter, login)
         self.assertEqual(adapter.calls, ["status"])
         login.assert_not_awaited()
 
@@ -147,7 +147,7 @@ class RelinkTests(unittest.IsolatedAsyncioTestCase):
         adapter = FakeAdapter(running=True)
         login = AsyncMock(side_effect=RuntimeError("offline"))
         with self.assertRaisesRegex(RuntimeError, "offline"):
-            await self.run_relink(adapter, login)
+            await self.run_rebind(adapter, login)
         self.assertEqual(adapter.calls, ["status", "stop", "start"])
         self.assertTrue(adapter.running)
 

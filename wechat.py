@@ -114,7 +114,7 @@ def print_qr(url):
         print("未能绘制二维码，可使用二维码工具打开下面的链接。")
 
 
-async def login(store, *, starting=False, allow_identity_change=False,
+async def login(store, *, starting=False, rebind=False,
                 before_identity_change=None):
     client = WeChat()
     previous = store.load("account")
@@ -146,10 +146,17 @@ async def login(store, *, starting=False, allow_identity_change=False,
             if not account["user"] or not account["token"]:
                 raise RuntimeError("微信登录响应缺少身份或凭据")
             identity_changed = bool(previous and identity(previous) != identity(account))
-            if identity_changed and not allow_identity_change:
+            if identity_changed and not rebind:
                 raise RuntimeError(
-                    "扫码得到另一个微信机器人身份；确认要换聊天请运行 "
-                    "codex-wechat relink --replace-identity")
+                    "已有微信绑定；请运行 codex-wechat rebind 重新绑定。")
+            if identity_changed and str(previous.get("user") or "") != str(account["user"]):
+                try:
+                    answer = await asyncio.to_thread(
+                        input, "微信用户已变化，旧待办和回复将隔离。继续绑定？[y/N] ")
+                except EOFError:
+                    answer = ""
+                if answer.strip().casefold() not in ("y", "yes"):
+                    raise RuntimeError("已取消重新绑定。")
             if identity_changed and before_identity_change is not None:
                 before_identity_change(previous, account)
             store.save("account", account)

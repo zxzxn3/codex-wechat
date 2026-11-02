@@ -83,7 +83,8 @@ class InputDelivery:
             if bridge.wechat_paused:
                 await bridge.auth_wake.wait()
                 continue
-            if (bridge.restarting or bridge.steering or bridge.session_lock.locked() or bridge.input_paused):
+            if (bridge.restarting or bridge.steering or bridge.session_lock.locked() or bridge.input_paused
+                    or bridge.state.get("wechatContextPending")):
                 await asyncio.sleep(0.1)
                 continue
             if bridge.active_turn() or bridge.backend.blocked or not bridge.state["inbox"]:
@@ -177,7 +178,8 @@ class InputDelivery:
             await bridge.steer_wake.wait()
             bridge.steer_wake.clear()
             while ((bridge.running or bridge.active_turn()) and bridge.state["inbox"]
-                   and not bridge.stopping and not bridge.restarting and not bridge.wechat_paused):
+                   and not bridge.stopping and not bridge.restarting and not bridge.wechat_paused
+                   and not bridge.state.get("wechatContextPending")):
                 # Explicitly queued work must not block later live corrections.
                 job = next((item for item in bridge.state["inbox"]
                             if item.get("mode", "steer") != "queue"), None)

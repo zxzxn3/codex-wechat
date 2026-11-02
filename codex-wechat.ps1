@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('login', 'relink', 'app', 'start', 'status', 'service-start', 'service-stop',
+    [ValidateSet('login', 'rebind', 'app', 'start', 'status', 'service-start', 'service-stop',
                  'service-restart', 'service-status', 'autostart', 'logs', 'uninstall', 'update', 'install', 'menu', 'components')]
     [string]$Command = 'status',
     [Parameter(Position = 1)]
@@ -15,7 +15,6 @@ param(
     [string]$Ref,
     [switch]$DryRun,
     [switch]$NonInteractive,
-    [switch]$ReplaceIdentity,
     [switch]$StopActive,
     [string]$Component,
     [string]$SkillsDir
@@ -41,7 +40,7 @@ if ($Command -eq 'app') {
 }
 if ($Command -in @('update', 'install', 'menu', 'components')) {
     if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $PurgeData -or $Json -or
-            $ReplaceIdentity -or $StopActive) {
+            $StopActive) {
         throw 'installer commands do not accept service or chat control parameters'
     }
     $Installer = Join-Path $InstallRoot 'installer.py'
@@ -65,8 +64,8 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     exit $LASTEXITCODE
 }
 if ($Repo -or $Ref -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) { throw '-Repo, -Ref, -DryRun, -NonInteractive, -Component and -SkillsDir are only valid with installer commands' }
-if (($ReplaceIdentity -or $StopActive) -and $Command -ne 'relink') {
-    throw '-ReplaceIdentity and -StopActive are only valid with the relink command'
+if (($StopActive) -and $Command -ne 'rebind') {
+    throw '-StopActive are only valid with the rebind command'
 }
 $Project = $ScriptRoot
 $CurrentFile = Join-Path $InstallRoot 'current'
@@ -209,14 +208,13 @@ switch ($Command) {
         & $VenvPython -u $Agent login --state-dir $StateDir --config $ConfigPath
         exit $LASTEXITCODE
     }
-    'relink' {
+    'rebind' {
         if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
-            Fail 'WeChat relink needs an interactive terminal; do not redirect stdin or stdout'
+            Fail 'WeChat rebind needs an interactive terminal; do not redirect stdin or stdout'
         }
-        $relinkArguments = @($Agent, 'relink', '--state-dir', $StateDir, '--config', $ConfigPath)
-        if ($ReplaceIdentity) { $relinkArguments += '--replace-identity' }
-        if ($StopActive) { $relinkArguments += '--stop-active' }
-        & $VenvPython -u @relinkArguments
+        $rebindArguments = @($Agent, 'rebind', '--state-dir', $StateDir, '--config', $ConfigPath)
+        if ($StopActive) { $rebindArguments += '--stop-active' }
+        & $VenvPython -u @rebindArguments
         exit $LASTEXITCODE
     }
     'start' {

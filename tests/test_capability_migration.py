@@ -12,7 +12,7 @@ from codex_wechat import Bridge, startup_account
 from configuration import ConfigurationError
 from records import InputPhase
 from storage import Store
-import relink
+import rebind
 import wechat_auth
 
 
@@ -31,9 +31,9 @@ class ConnectionCapabilities(unittest.TestCase):
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 ConnectionSpec.from_config({'websocketUrl': endpoint})
 
-    def test_queue_alone_does_not_require_forced_relink(self):
-        self.assertFalse(relink.active_work({'inbox': [{'text': 'later'}]}))
-        self.assertTrue(relink.active_work({'currentInput': {'phase': 'accepted'}}))
+    def test_queue_alone_does_not_require_forced_rebind(self):
+        self.assertFalse(rebind.active_work({'inbox': [{'text': 'later'}]}))
+        self.assertTrue(rebind.active_work({'currentInput': {'phase': 'accepted'}}))
 
 
 class RuntimeCapabilities(unittest.IsolatedAsyncioTestCase):
@@ -57,12 +57,12 @@ class RuntimeCapabilities(unittest.IsolatedAsyncioTestCase):
                 job = {'text': 'pending', 'phase': InputPhase.PREPARING}
                 bridge.state['inbox'].append(job)
                 with patch('codex_wechat.service_adapter.notify', AsyncMock()) as notify:
-                    await bridge.require_wechat_relink()
-                    await bridge.require_wechat_relink()
+                    await bridge.require_wechat_rebind()
+                    await bridge.require_wechat_rebind()
                     self.assertFalse(bridge.dispatch_input(job, InputPhase.DISPATCHING, None, bridge.backend))
                     self.assertEqual(job['phase'], InputPhase.PREPARING)
                     reloaded = Bridge(store, bridge.account, {})
-                    await reloaded.require_wechat_relink()
+                    await reloaded.require_wechat_rebind()
                 notify.assert_awaited_once()
                 self.assertEqual(store.load('bridge')['inbox'][0]['text'], 'pending')
             finally:

@@ -133,7 +133,7 @@ class AsyncNotificationTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(platform_ui, "IS_WINDOWS", True), \
              patch.object(platform_ui.shutil, "which", side_effect=which), \
              patch.object(platform_ui, "_run_quiet", runner):
-            self.assertTrue(await platform_ui.notify("绑定失效", "运行 relink"))
+            self.assertTrue(await platform_ui.notify("绑定失效", "运行 rebind"))
 
         command = runner.await_args.args[0]
         encoded_index = command.index("-EncodedCommand") + 1
@@ -141,7 +141,7 @@ class AsyncNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("System.Windows.Forms.NotifyIcon", script)
         self.assertIn("ShowBalloonTip", script)
         self.assertNotIn("绑定失效", script)
-        self.assertNotIn("运行 relink", command)
+        self.assertNotIn("运行 rebind", command)
         env = runner.await_args.kwargs["env"]
         self.assertEqual(
             base64.b64decode(env[platform_ui.NOTIFY_TITLE_ENV]).decode(),
@@ -149,7 +149,7 @@ class AsyncNotificationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             base64.b64decode(env[platform_ui.NOTIFY_BODY_ENV]).decode(),
-            "运行 relink",
+            "运行 rebind",
         )
         self.assertEqual(runner.await_args.kwargs["timeout"], 7)
 
