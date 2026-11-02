@@ -137,7 +137,7 @@ async def login(store, *, starting=False, rebind=False,
           "同号再次扫码无效，使用ctrl+c取消等待。", flush=True)
     print_qr(url)
     print(url, flush=True)
-    deadline = time.monotonic() + 100
+    deadline = time.monotonic() + 150
     verify = None
     while time.monotonic() < deadline:
         query = {"qrcode": qr["qrcode"]}
