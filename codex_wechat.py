@@ -381,7 +381,9 @@ class Bridge:
                                                "ingress_ms": received.get("ingress_ms"),
                                                "requestId": request_id})
                     if queued:
-                        self.reply(fill(QUEUE_CONFIRMED, {"数量": len(self.state["inbox"])}),
+                        count = len(self.state["inbox"])
+                        self.reply(fill(QUEUE_CONFIRMED, {"数量": count,
+                                                         "单位": "task" if count == 1 else "tasks"}),
                                    persist=False, request_id=request_id)
             else:
                 status = "too_long" if len(text) > 20000 else "unsupported"
