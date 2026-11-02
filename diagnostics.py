@@ -47,6 +47,7 @@ _TEXT_FIELDS = {
     "operation": r"[a-z][a-z0-9_.-]{0,31}",
     "source": r"[a-z][a-z0-9_.-]{0,31}",
     "service": r"[a-z][a-z0-9_.-]{0,31}",
+    "endpoint": r"[a-z0-9/_-]{1,64}",
     "request_id": r"[A-Za-z0-9._-]{1,64}",
     "job_id": r"[A-Za-z0-9._-]{1,64}",
     "error_type": r"[A-Za-z_][A-Za-z0-9_]{0,60}",

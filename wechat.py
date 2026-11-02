@@ -5,13 +5,11 @@ import json
 import secrets
 import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 
 from errors import WeChatAuthExpired
-from diagnostics import log_event
+from diagnostics import error_fields, log_event
 from subprocess_io import communicate
 from platform_support import curl_command, subprocess_options
 import wechat_auth
@@ -42,16 +40,10 @@ def trusted_url(value):
     return value.rstrip("/")
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
 class WeChat:
     def __init__(self, account=None):
         self.account = account or {}
         self.base = trusted_url(self.account.get("base_url", BASE_URL))
-        self.opener = urllib.request.build_opener(NoRedirect)
 
     async def request(self, endpoint, body=None, *, auth=True, timeout=40, request_id=None):
         # A thread blocked in urllib survives task cancellation and delays
@@ -74,62 +66,60 @@ class WeChat:
                                         "bot_agent": "CodexWechat/" + VERSION}
             config.append("data = " + json.dumps(json.dumps(payload)))
         started = time.perf_counter()
-        proc = await asyncio.create_subprocess_exec(
-            curl_command(), "--disable",
-            "--silent", "--show-error", "--proto", "=https",
-            "--connect-timeout", str(min(timeout, 10)), "--max-time", str(timeout),
-            "--max-filesize", str(16 * 1024 * 1024),
-            "--write-out", "\n%{http_code}", "--config", "-",
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
-        output, _ = await communicate(proc, ("\n".join(config) + "\n").encode(), timeout=timeout + 2)
-        elapsed = time.perf_counter() - started
-        # Do not record request bodies, URLs, tokens or response content.
-        if proc.returncode or (endpoint != "ilink/bot/getupdates" and elapsed >= 2):
-            print(f"微信请求 {endpoint.split('?')[0]}: curl={proc.returncode} elapsed={elapsed:.2f}s",
-                  file=sys.stderr, flush=True)
-        if proc.returncode:
-            log_event("wechat.request", level="warning", component="wechat",
-                      endpoint=endpoint.split("?")[0], ok=False,
-                      curl_code=proc.returncode, duration_ms=elapsed * 1000,
-                      request_id=request_id)
-            raise RuntimeError(f"微信网络请求失败（curl {proc.returncode}）")
-        http_status = None
+        route = endpoint.partition("?")[0]
+        metadata = {"endpoint": route, "request_id": request_id}
+        ok, level = False, "warning"
         try:
-            raw, status = output.rsplit(b"\n", 1)
-            status = int(status)
-            http_status = status
+            proc = await asyncio.create_subprocess_exec(
+                curl_command(), "--disable",
+                "--silent", "--show-error", "--proto", "=https",
+                "--connect-timeout", str(min(timeout, 10)), "--max-time", str(timeout),
+                "--max-filesize", str(16 * 1024 * 1024),
+                "--write-out", "\n%{http_code}", "--config", "-",
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
+            output, _ = await communicate(proc, ("\n".join(config) + "\n").encode(), timeout=timeout + 2)
+            metadata["curl_code"] = proc.returncode
+            if proc.returncode:
+                raise RuntimeError(f"微信网络请求失败（curl {proc.returncode}）")
+            try:
+                raw, status = output.rsplit(b"\n", 1)
+                status = int(status)
+            except (ValueError, TypeError):
+                raise RuntimeError("微信响应无法解析") from None
+            metadata["http_status"] = status
             if not 200 <= status < 300:
-                log_event("wechat.request", level="warning", component="wechat",
-                          endpoint=endpoint.split("?")[0], ok=False,
-                          http_status=status, duration_ms=elapsed * 1000,
-                          request_id=request_id)
                 raise RuntimeError(f"微信 HTTP {status}")
-            result = json.loads(raw)
-            if not isinstance(result, dict):
-                raise ValueError()
-        except (ValueError, TypeError):
-            log_event("wechat.request", level="warning", component="wechat",
-                      endpoint=endpoint.split("?")[0], ok=False,
-                      http_status=http_status, duration_ms=elapsed * 1000,
-                      request_id=request_id)
-            raise RuntimeError("微信响应无法解析") from None
-        if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
-            code = result.get("errcode") or result.get("ret")
-            log_event("wechat.request", level="warning", component="wechat",
-                      endpoint=endpoint.split("?")[0], ok=False,
-                      http_status=http_status, error_code=code,
-                      duration_ms=elapsed * 1000, request_id=request_id)
-            if auth and str(code) == "-14":
-                raise WeChatAuthExpired()
-            raise RuntimeError(f"微信 API 错误 {code}")
-        # Long-poll requests are routine background traffic. Successful polls
-        # stay at debug even though each one normally waits ~18 seconds.
-        level = "debug" if endpoint.startswith("ilink/bot/getupdates") else "info"
-        log_event("wechat.request", level=level, component="wechat",
-                  endpoint=endpoint.split("?")[0], ok=True, http_status=http_status,
-                  duration_ms=elapsed * 1000, request_id=request_id)
-        return result
+            try:
+                result = json.loads(raw)
+                if not isinstance(result, dict):
+                    raise ValueError()
+            except (ValueError, TypeError):
+                raise RuntimeError("微信响应无法解析") from None
+            if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
+                code = result.get("errcode") or result.get("ret")
+                metadata["error_code"] = code
+                if auth and str(code) == "-14":
+                    raise WeChatAuthExpired()
+                raise RuntimeError(f"微信 API 错误 {code}")
+            # Successful long polls are routine traffic, regardless of duration.
+            ok, level = True, "debug" if route == "ilink/bot/getupdates" else "info"
+            return result
+        except asyncio.CancelledError:
+            level = "debug"
+            metadata["status"] = "cancelled"
+            raise
+        except Exception as error:
+            metadata.update(error_fields(error))
+            raise
+        finally:
+            elapsed = time.perf_counter() - started
+            # One outcome per request; never include bodies, URLs or exception text.
+            log_event("wechat.request", level=level, component="wechat", ok=ok,
+                      duration_ms=elapsed * 1000, **metadata)
+            if metadata.get("curl_code") or (route != "ilink/bot/getupdates" and elapsed >= 2):
+                print(f"微信请求 {route}: curl={metadata.get('curl_code')} elapsed={elapsed:.2f}s",
+                      file=sys.stderr, flush=True)
 
     async def poll(self, cursor):
         return await self.request("ilink/bot/getupdates", {"get_updates_buf": cursor})
