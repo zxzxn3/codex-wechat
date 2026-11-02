@@ -67,27 +67,6 @@ systemctl --user restart codex-wechat
 
 Windows 的入口与服务命令见 [Windows 指南](docs/WINDOWS.md)。
 
-### 微信绑定失效
-
-腾讯接口以 `-14` 表示当前账号会话失效。桥接不会退出或进入异常重启循环，而是保存失效状态、停止继续轮询和发送，并保留游标、待办、发件箱及任务状态。处理提示只记录一次；`codex-wechat status` 会显示：
-
-```text
-"auth": "reauth_required"
-"available": false
-"relink_required": true
-"relink_command": "codex-wechat relink"
-```
-
-在电脑的交互终端运行：
-
-```bash
-codex-wechat relink
-```
-
-命令会按需停止原本运行的服务，等待状态锁释放后显示二维码。扫码得到同一身份时只刷新 token，原游标、待办和发件箱全部保留，成功后自动恢复原本运行的服务。当前存在未完成任务时默认拒绝；确认允许停止桥接后使用 `--stop-active`。它停止的是微信网关，不保证中断共享 Codex daemon 中已经提交的轮次。扫码得到另一个身份时默认拒绝；明确要更换机器人及聊天时必须使用 `--replace-identity`，旧聊天输入和未发送输出会移入隔离记录，游标、去重与会话选择清空，新聊天绝不会继承旧待办或旧任务结果。
-
-`relink` 只接受默认状态与配置路径以及交互终端；自定义路径或前台手动管理的进程需自行运行 `login` 并管理服务。
-
 ### 安装边界
 
 Python 包声明在 requirements.txt，平台依赖检查集中在 installer.py 的 DEPENDENCIES；缺失的运行依赖提示后可稍后补齐，程序环境构建失败则停止安装。构建使用独立版本目录；稳定入口及当前版本在准备完成后集中更新，不提供 rollback 命令或失败后的自动回滚。失败发生在版本切换后时，如实报错并保留当时状态，不谎称回到旧版。
@@ -235,7 +214,7 @@ Provider 从已连接后端的原生 `config/read` 取得当前供应商地址�
 
 ## 状态、安全与验证
 
-`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/`、`releases/`、版本指针和各版本 `.venv/` 都不入库。媒体目前不会自动清理。`./codex-wechat status` 只读取最后保存的摘要和微信认证状态，不是完整健康检查。
+`.state/` 保存凭据、游标、去重记录、待办、发件箱及媒体快照；目录 0700，文件 0600。`config.json`、`.state/`、`workspace/`、`releases/`、版本指针和各版本 `.venv/` 都不入库。媒体目前不会自动清理。`./codex-wechat status` 只读取最后保存的摘要，不是健康检查。
 
 保留 Codex 原生沙箱和审批，不自动提高权限。控制消息保存游标后进入内存队列，崩溃时可能丢失，**不会自动重放控制命令**。微信发送接口响应丢失仍可能导致重试重复送达，不承诺恰好一次。
 

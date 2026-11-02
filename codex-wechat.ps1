@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('login', 'relink', 'start', 'status', 'service-start', 'service-stop',
+    [ValidateSet('login', 'start', 'status', 'service-start', 'service-stop',
                  'service-restart', 'service-status', 'autostart', 'logs', 'uninstall', 'update', 'install', 'menu', 'components')]
     [string]$Command = 'status',
     [Parameter(Position = 1)]
@@ -15,8 +15,6 @@ param(
     [string]$Ref,
     [switch]$DryRun,
     [switch]$NonInteractive,
-    [switch]$ReplaceIdentity,
-    [switch]$StopActive,
     [string]$Component,
     [string]$SkillsDir
 )
@@ -34,9 +32,8 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     $ScriptRoot
 }
 if ($Command -in @('update', 'install', 'menu', 'components')) {
-    if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $PurgeData -or $Json -or
-            $ReplaceIdentity -or $StopActive) {
-        throw 'installer commands do not accept service or chat control parameters'
+    if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $PurgeData -or $Json) {
+        throw 'installer commands do not accept -Value, -Follow, -PurgeData or -Json'
     }
     $Installer = Join-Path $InstallRoot 'installer.py'
     if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
@@ -58,10 +55,7 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     & $UpdatePython @InstallerArguments
     exit $LASTEXITCODE
 }
-if ($Repo -or $Ref -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) { throw '-Repo, -Ref, -DryRun, -NonInteractive, -Component and -SkillsDir are only valid with installer commands' }
-if (($ReplaceIdentity -or $StopActive) -and $Command -ne 'relink') {
-    throw '-ReplaceIdentity and -StopActive are only valid with the relink command'
-}
+if ($Repo -or $Ref -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) { throw '-Repo, -Ref and -DryRun are only valid with installer commands' }
 $Project = $ScriptRoot
 $CurrentFile = Join-Path $InstallRoot 'current'
 $CurrentItem = Get-Item -LiteralPath $CurrentFile -Force -ErrorAction SilentlyContinue
@@ -99,20 +93,15 @@ function Fail([string]$Message) {
     throw "codex-wechat.ps1: $Message"
 }
 
-if ($Command -ne 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
-    Fail '-Value is only valid with the autostart command'
-}
-if ($Command -notin @('autostart', 'service-status') -and $Json.IsPresent) {
-    Fail '-Json is only valid with the autostart command or the service-status command'
+if ($Command -ne 'autostart' -and
+        ($PSBoundParameters.ContainsKey('Value') -or $Json.IsPresent)) {
+    Fail '-Value and -Json are only valid with the autostart command'
 }
 
 function Get-InstalledTask {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $task) {
         Fail "scheduled task '$TaskName' is not installed; run .\install.ps1 first"
-    }
-    if (-not (Test-OwnedTask $task)) {
-        Fail "scheduled task '$TaskName' is not owned by this project"
     }
     return $task
 }
@@ -203,16 +192,6 @@ switch ($Command) {
         & $VenvPython -u $Agent login --state-dir $StateDir --config $ConfigPath
         exit $LASTEXITCODE
     }
-    'relink' {
-        if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
-            Fail 'WeChat relink needs an interactive terminal; do not redirect stdin or stdout'
-        }
-        $relinkArguments = @($Agent, 'relink', '--state-dir', $StateDir, '--config', $ConfigPath)
-        if ($ReplaceIdentity) { $relinkArguments += '--replace-identity' }
-        if ($StopActive) { $relinkArguments += '--stop-active' }
-        & $VenvPython -u @relinkArguments
-        exit $LASTEXITCODE
-    }
     'start' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         if ($task -and $task.State -in @('Running', 'Queued')) {
@@ -251,9 +230,6 @@ switch ($Command) {
             Write-Host 'service is not installed'
             exit 0
         }
-        if (-not (Test-OwnedTask $task)) {
-            Fail "scheduled task '$TaskName' is not owned by this project"
-        }
         if ($task.State -notin @('Running', 'Queued')) {
             Write-Host "service is not running (state=$($task.State))"
             exit 0
@@ -274,19 +250,6 @@ switch ($Command) {
     }
     'service-status' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        $installed = $null -ne $task
-        $owned = $installed -and (Test-OwnedTask $task)
-        $running = $installed -and $task.State -in @('Running', 'Queued')
-        $taskState = if ($installed) { [string]$task.State } else { 'not-installed' }
-        if ($Json) {
-            [ordered]@{
-                installed = [bool]$installed
-                owned = [bool]$owned
-                running = [bool]$running
-                state = $taskState
-            } | ConvertTo-Json -Compress
-            exit 0
-        }
         if (-not $task) {
             Write-Host 'task=not-installed'
             exit 1

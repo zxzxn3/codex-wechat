@@ -39,6 +39,8 @@ class CodexRpcError(RuntimeError):
 class CodexTransport:
     def __init__(self, config, cwd, *, on_request, on_event, on_connect, on_disconnect):
         self.config, self.cwd = config, cwd
+        if config.get("websocketUrl") is not None or config.get("websocketStartupCommand"):
+            raise ValueError("当前版本不支持共享 WebSocket 配置，请使用声明此能力的版本")
         self.on_request, self.on_event = on_request, on_event
         self.on_connect, self.on_disconnect = on_connect, on_disconnect
         self.proc = self.reader = self.websocket = None
