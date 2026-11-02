@@ -54,6 +54,16 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.load("account"), self.old)
         callback.assert_not_called()
 
+    async def test_deferred_login_returns_credentials_without_writing_or_migrating(self):
+        changed = {**self.old, "bot": "bot-b", "token": "new"}
+        callback = Mock()
+        result = await self.login(changed, rebind=True, persist=False,
+                                  before_identity_change=callback)
+        self.assertEqual(result.account["token"], "new")
+        self.assertTrue(result.identity_changed)
+        self.assertEqual(self.store.load("account"), self.old)
+        callback.assert_not_called()
+
     async def test_explicit_identity_change_calls_migration_before_save(self):
         changed = {"token": "new", "bot": "bot-b", "user": "user-a"}
         observed = []

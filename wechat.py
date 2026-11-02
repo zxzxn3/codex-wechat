@@ -115,7 +115,8 @@ def print_qr(url):
 
 
 async def login(store, *, starting=False, rebind=False,
-                before_identity_change=None):
+                before_identity_change=None, persist=True):
+    """Acquire credentials; rebind defers local writes until its commit lock."""
     client = WeChat()
     previous = store.load("account")
     local_tokens = ([str(previous["token"])]
@@ -124,6 +125,9 @@ async def login(store, *, starting=False, rebind=False,
                               {"local_token_list": local_tokens[-10:]}, auth=False)
     url = qr["qrcode_img_content"]
     print("用手机微信扫描二维码并确认授权：", flush=True)
+    if rebind and previous:
+        print("同号再次扫码可能直接进入原聊天，终端仍会等待。\n"
+              "仅确认现有连接无需重绑；可按 Ctrl+C 取消，不影响原服务。", flush=True)
     print_qr(url)
     print(url, flush=True)
     deadline = time.monotonic() + 300
@@ -157,11 +161,12 @@ async def login(store, *, starting=False, rebind=False,
                     answer = ""
                 if answer.strip().casefold() not in ("y", "yes"):
                     raise RuntimeError("已取消重新绑定。")
-            if identity_changed and before_identity_change is not None:
+            if persist and identity_changed and before_identity_change is not None:
                 before_identity_change(previous, account)
-            store.save("account", account)
-            print("绑定成功。只接受此次扫码用户的私聊；" +
-                  ("正在继续启动桥接。" if starting else "运行 start 启动桥接。"))
+            if persist:
+                store.save("account", account)
+                print("绑定成功。只接受此次扫码用户的私聊；" +
+                      ("正在继续启动桥接。" if starting else "运行 start 启动桥接。"))
             return LoginResult(account, previous, identity_changed)
         if status == "scaned_but_redirect":
             host = data.get("redirect_host", "")

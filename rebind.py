@@ -53,7 +53,7 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
     if not interactive:
         raise ValueError("rebind 必须在交互终端扫码，不能重定向输入或输出。")
 
-    service = await adapter.status()
+    await adapter.status()  # Refuse foreign/unavailable service management before scanning.
     preview = Store(Path(state_dir), lock=False)
     state = preview.load("bridge", {})
     if not isinstance(state, dict):
@@ -64,10 +64,13 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
             + wechat_auth.rebind_command(stop_active=True)
         )
 
+    previous = preview.load("account")
+    # Reading live state is safe; QR waiting must neither own the lock nor stop delivery.
+    result = await login_runner(preview, rebind=True, persist=False)
+    service = await adapter.status()
     was_running = service.running
     store = None
     counts = {}
-    result = None
     try:
         if was_running:
             await adapter.stop_and_wait()
@@ -75,27 +78,26 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
         state = store.load("bridge", {})
         if not isinstance(state, dict):
             raise RuntimeError("消息桥状态格式无效")
-
-        def before_identity_change(previous, account):
+        if store.load("account") != previous:
+            raise RuntimeError("扫码期间本地绑定已变化，请重新运行 rebind。")
+        if result.identity_changed:
             # Persist a pause before replacing credentials; never resume a half-change.
-            state["bindingPending"] = {"target": wechat_auth.identity(account)}
-            counts.update(wechat_auth.prepare_rebind(state, previous, account))
+            state["bindingPending"] = {"target": wechat_auth.identity(result.account)}
+            counts.update(wechat_auth.prepare_rebind(state, previous, result.account))
             wechat_auth.require_rebind(state, pending=0)
             store.save("bridge", state)
-
-        result = await login_runner(
-            store,
-            rebind=True,
-            before_identity_change=before_identity_change,
-        )
-        state = store.load("bridge", {})
         pending = state.get("bindingPending")
         if pending and pending.get("target") != wechat_auth.identity(result.account):
             raise RuntimeError("重新绑定身份与未完成记录不同，请显式确认要替换的身份。")
+        if not result.already_connected:
+            store.save("account", result.account)
         state.pop("bindingPending", None)
         if wechat_auth.mark_valid(state, result.account) or pending:
             store.save("bridge", state)
     except BaseException:
+        if store is not None:
+            _close_store(store)
+            store = None
         if was_running:
             try:
                 await adapter.start()

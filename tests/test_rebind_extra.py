@@ -119,7 +119,7 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
         bridge = self.load("bridge")
         self.assertEqual(bridge["inbox"], [{"id": "queued"}])
         self.assertEqual(bridge["outbox"], [{"id": "unsent"}])
-        self.assertEqual(adapter.calls, ["status"])
+        self.assertEqual(adapter.calls, ["status", "status"])
 
     async def test_failure_keeps_credentials_and_bridge_state(self):
         account = {"token": "t", "user": "u", "bot": "b"}
@@ -133,7 +133,7 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
             await self.run_rebind(adapter, login)
         self.assertEqual(self.load("account"), account)
         self.assertEqual(self.load("bridge"), bridge)
-        self.assertEqual(adapter.calls, ["status", "stop", "start"])
+        self.assertEqual(adapter.calls, ["status"])
 
     async def test_pending_target_mismatch_does_not_clear_or_mark_valid(self):
         account = {"token": "t", "user": "u", "bot": "b"}
@@ -156,11 +156,10 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
                    "thread": "thread-keep",
                    "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}}, old)
         new = {"token": "new", "user": "u", "bot": "b2"}
-        async def login(store, *, rebind=False, before_identity_change=None):
+        async def login(store, *, rebind=False, persist=True):
             previous = store.load("account")
             self.assertTrue(rebind)
-            before_identity_change(previous, new)
-            store.save("account", new)
+            self.assertFalse(persist)
             return LoginResult(new, previous, True)
         adapter = FakeAdapter(running=False)
         await self.run_rebind(adapter, login)

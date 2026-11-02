@@ -75,7 +75,7 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
         async def login(store, **kwargs):
             previous = store.load("account")
             refreshed = {**previous, "token": "new"}
-            store.save("account", refreshed)
+            self.assertFalse(kwargs["persist"])
             return LoginResult(refreshed, previous, False)
 
         adapter = FakeAdapter(running=True)
@@ -86,7 +86,7 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge["inbox"], [{"id": "queued"}])
         self.assertEqual(bridge["outbox"], [{"id": "unsent"}])
         self.assertEqual(bridge["wechatAuth"]["state"], wechat_auth.AUTH_VALID)
-        self.assertEqual(adapter.calls, ["status", "stop", "start"])
+        self.assertEqual(adapter.calls, ["status", "status", "stop", "start"])
 
     async def test_identity_change_quarantines_old_chat_data(self):
         old_account = {"token": "old", "bot": "old-bot", "user": "old-user"}
@@ -100,13 +100,11 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
             "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED},
         }, old_account)
 
-        async def login(store, *, rebind=False,
-                        before_identity_change=None):
+        async def login(store, *, rebind=False, persist=True):
             previous = store.load("account")
             account = {"token": "new", "bot": "new-bot", "user": "new-user"}
             self.assertTrue(rebind)
-            before_identity_change(previous, account)
-            store.save("account", account)
+            self.assertFalse(persist)
             return LoginResult(account, previous, True)
 
         adapter = FakeAdapter(running=True)
@@ -140,7 +138,7 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter.calls, ["status"])
         login.assert_not_awaited()
 
-    async def test_login_failure_restores_original_running_service(self):
+    async def test_login_failure_does_not_stop_running_service(self):
         self.seed({
             "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED},
         })
@@ -148,8 +146,33 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
         login = AsyncMock(side_effect=RuntimeError("offline"))
         with self.assertRaisesRegex(RuntimeError, "offline"):
             await self.run_rebind(adapter, login)
-        self.assertEqual(adapter.calls, ["status", "stop", "start"])
+        self.assertEqual(adapter.calls, ["status"])
         self.assertTrue(adapter.running)
+
+    async def test_scan_wait_keeps_service_running_and_commit_loads_latest_state(self):
+        account = {"token": "old", "bot": "bot-a", "user": "owner"}
+        self.seed({"cursor": "cursor", "inbox": [], "outbox": []}, account)
+        adapter = FakeAdapter(running=True)
+
+        async def login(store, *, rebind=False, persist=True):
+            self.assertFalse(persist)
+            self.assertTrue(adapter.running)
+            self.assertEqual(adapter.calls, ["status"])
+            # A concurrently running bridge can still lock and save during QR waiting.
+            current = Store(self.state_dir)
+            try:
+                state = current.load("bridge")
+                state["inbox"].append({"id": "during-scan"})
+                current.save("bridge", state)
+            finally:
+                current.close()
+            return LoginResult({**account, "token": "new"}, account, False)
+
+        await self.run_rebind(adapter, login)
+        bridge, saved = self.load_bridge()
+        self.assertEqual(saved["token"], "new")
+        self.assertEqual(bridge["inbox"], [{"id": "during-scan"}])
+        self.assertEqual(adapter.calls, ["status", "status", "stop", "start"])
 
 
 if __name__ == "__main__":
