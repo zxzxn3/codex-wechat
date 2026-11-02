@@ -1,0 +1,127 @@
+[
+  {
+    "path": "backend.py",
+    "kind": "modified",
+    "sha256": "3ffc5b3d17e35988bbb088a5c35249418bcf5a72e598dfd88bced76ffa5b9e52"
+  },
+  {
+    "path": "backend_runtime.py",
+    "kind": "added",
+    "sha256": "5fd8350589db66441f9b3e30ba4e360aba7ffc5f5319ba04dc9546f909c48ba5"
+  },
+  {
+    "path": "binding.py",
+    "kind": "added",
+    "sha256": "2b157b0b78306720cc9287f2c86aa46e718a83a047768b54b4469141a1bfae7a"
+  },
+  {
+    "path": "codex-wechat.ps1",
+    "kind": "modified",
+    "sha256": "8774626e402e87752a415747b11b8eb7b7fa91f7976db7013137f67e409b75e8"
+  },
+  {
+    "path": "codex_transport.py",
+    "kind": "modified",
+    "sha256": "458dc1ace7596e8abf4d3f243e3b7e32062052388e88c22df53685b7c958099c"
+  },
+  {
+    "path": "codex_wechat.py",
+    "kind": "modified",
+    "sha256": "58e839da164b2453cfbdbc12d12062513d3f8567cd1a4ae44164bacf2fd3c129"
+  },
+  {
+    "path": "commands.py",
+    "kind": "modified",
+    "sha256": "c1c9fdd2abdb3e99f5584adc395317db075406547f70fc225c51562158a093a6"
+  },
+  {
+    "path": "DESIGN-REVIEW.md",
+    "kind": "added",
+    "sha256": "81133f820d1c299af2c38cf8b015a9fe569150876fe03e38df0e63b038189522"
+  },
+  {
+    "path": "docs/ARCHITECTURE.md",
+    "kind": "modified",
+    "sha256": "b785879bbf485ffc96fda52e56c7a1f72e0dffc8574c9add5504128eca4d7f5d"
+  },
+  {
+    "path": "docs/WINDOWS.md",
+    "kind": "modified",
+    "sha256": "ccd65336a5cf48511b146ca01b53ec5a32ae83877b810f1f1a1c5641acf6cdaf"
+  },
+  {
+    "path": "installer.py",
+    "kind": "modified",
+    "sha256": "19c0fc4b74e917f9b837f9397f7c132b4a0d8ae2159b86c9230706a98eeb8e6f"
+  },
+  {
+    "path": "latency.py",
+    "kind": "modified",
+    "sha256": "4441cfe29cb0f1bc3913bad6246140db2d22c283d3ceddc66d42ce45aa74eefb"
+  },
+  {
+    "path": "media.py",
+    "kind": "modified",
+    "sha256": "4f984c9b084f7f434c86243d3d209d518839625714f5424a318eec1cd4a5ea05"
+  },
+  {
+    "path": "README.md",
+    "kind": "modified",
+    "sha256": "ba5a05ca323809f6547f6a9668cf2ea21c16385cd0015932e04c0281eb0c65bb"
+  },
+  {
+    "path": "runtime-capabilities.json",
+    "kind": "added",
+    "sha256": "566d6b8f0b3991288d6edb61b1bb52cb7423728c9fa1faf824df4007573054a0"
+  },
+  {
+    "path": "subprocess_io.py",
+    "kind": "added",
+    "sha256": "b26a413e90a3cf80f8dbec16aaf4e7379a267e3e38b7f29e98508af0be1e1751"
+  },
+  {
+    "path": "tests/test_binding.py",
+    "kind": "added",
+    "sha256": "b7644551d28e3683acffcd717cac26536ad46132dd5e5259ad36b29dc13ccebc"
+  },
+  {
+    "path": "tests/test_installer.py",
+    "kind": "modified",
+    "sha256": "c7077da79a06f1681ec1d14b4eeaf610dad0fb2d578429a99fa7527f59893e7e"
+  },
+  {
+    "path": "tests/test_latency.py",
+    "kind": "modified",
+    "sha256": "b1f7b51a4ab4046f98eb722c8f79ee8dc16c4c93a0d1169019272f7abc8499e8"
+  },
+  {
+    "path": "tests/test_runtime_compatibility.py",
+    "kind": "added",
+    "sha256": "58d467ba498b16fca999fd47fe38e91ab7539fe5df456d81554987e422833fa3"
+  },
+  {
+    "path": "tests/test_subprocess_io.py",
+    "kind": "added",
+    "sha256": "74275e12e2883ef120ea981fa107694e73279574e903b41d782f52df9bb4813a"
+  },
+  {
+    "path": "tests/test_websocket_transport.py",
+    "kind": "added",
+    "sha256": "1ef99afb0894ece81ef618b79c5c3d34838f025b7445d17da5657f5940dc201c"
+  },
+  {
+    "path": "wechat.py",
+    "kind": "modified",
+    "sha256": "8b678959c98925cc489c2464a6581a7dc2c98866ecb741c890ddadd70f02ff55"
+  },
+  {
+    "path": "WINDOWS-SHARED.md",
+    "kind": "added",
+    "sha256": "f813bce7a04694721ef1f53678b66acda2b7bab2a674962a5f75796815a0f4f9"
+  },
+  {
+    "path": "Windows\u5b89\u88c5\u6b65\u9aa4.md",
+    "kind": "added",
+    "sha256": "bfb2d48d91a16b12dd4c2b2fa0368355fc77a04bba19e64953a9d1dbd69aea21"
+  }
+]

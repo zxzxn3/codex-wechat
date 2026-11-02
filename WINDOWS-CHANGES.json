@@ -1,0 +1,329 @@
+{
+  "schema": 1,
+  "date": "2026-11-02",
+  "baseCommit": "df8d949",
+  "note": "Source inventory, not approval or test evidence. No credentials or runtime state included.",
+  "sources": [
+    {
+      "windowsRoot": "D:\\codex-wechat-app-support",
+      "linuxRoot": "/mnt/d/codex-wechat-app-support",
+      "changes": [
+        {
+          "path": "DESIGN-REVIEW.md",
+          "kind": "added",
+          "sha256": "113dca1eb2f8af05876a4dbaf16703fe63bb6b639f2e79a43523c5c455aac9a9"
+        },
+        {
+          "path": "README.md",
+          "kind": "modified",
+          "baseSha256": "fe3efba216447f260dcc7c55d98fba6cc21cfc3b70fb93bc59bf58af6a55dee3",
+          "sha256": "ba5a05ca323809f6547f6a9668cf2ea21c16385cd0015932e04c0281eb0c65bb"
+        },
+        {
+          "path": "WINDOWS-HANDOFF.md",
+          "kind": "added",
+          "sha256": "f385dbdf108fd75fe4ac5ccc2f9811b011dfefa2d34ebecd6c61c25788c6e8ab"
+        },
+        {
+          "path": "WINDOWS-SHARED.md",
+          "kind": "added",
+          "sha256": "66e53c0e11985d385e7fd2bb4cc617d3c657ce9b26f05efba04c231371b28f2b"
+        },
+        {
+          "path": "Windows安装步骤.md",
+          "kind": "added",
+          "sha256": "bfb2d48d91a16b12dd4c2b2fa0368355fc77a04bba19e64953a9d1dbd69aea21"
+        },
+        {
+          "path": "backend.py",
+          "kind": "modified",
+          "baseSha256": "90274b165de9c91b56e27b818b706fb63615e7e9a2fecd44deac8cb5ed391541",
+          "sha256": "3ffc5b3d17e35988bbb088a5c35249418bcf5a72e598dfd88bced76ffa5b9e52"
+        },
+        {
+          "path": "backend_runtime.py",
+          "kind": "added",
+          "sha256": "5fd8350589db66441f9b3e30ba4e360aba7ffc5f5319ba04dc9546f909c48ba5"
+        },
+        {
+          "path": "binding.py",
+          "kind": "added",
+          "sha256": "2b157b0b78306720cc9287f2c86aa46e718a83a047768b54b4469141a1bfae7a"
+        },
+        {
+          "path": "codex-desktop.ps1",
+          "kind": "added",
+          "sha256": "0a0f6a96642ac361771f2c8b3c183a78233f70d098bb6adf9dbf053b40d64709"
+        },
+        {
+          "path": "codex-wechat.ps1",
+          "kind": "modified",
+          "baseSha256": "3f502d98236e390fa14a9d1a9dc788227de53756c20dbf2b7c7280790493d8a8",
+          "sha256": "bc1f4bc883f65f8a94dcf15ea63a46b50c3b603e19ee4869f81f63c36d481d07"
+        },
+        {
+          "path": "codex_transport.py",
+          "kind": "modified",
+          "baseSha256": "550edf8e967ac4e4d5ca91f4116284b227c840a32ee11f73bfdb256ed52ed6a5",
+          "sha256": "458dc1ace7596e8abf4d3f243e3b7e32062052388e88c22df53685b7c958099c"
+        },
+        {
+          "path": "codex_wechat.py",
+          "kind": "modified",
+          "baseSha256": "0aecdeb02c3ab75f944d67c0b898f0d346cdfcde221c96f7e64be1b70749228f",
+          "sha256": "58e839da164b2453cfbdbc12d12062513d3f8567cd1a4ae44164bacf2fd3c129"
+        },
+        {
+          "path": "commands.py",
+          "kind": "modified",
+          "baseSha256": "799f05750ecb67efce70a32ad3cf3442e6c6eeb7cf097f9410951179e5be4c57",
+          "sha256": "c1c9fdd2abdb3e99f5584adc395317db075406547f70fc225c51562158a093a6"
+        },
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "kind": "modified",
+          "baseSha256": "04ffcf0f8cc291b78348a383ef173ee8a0bdaacc980fdbf31a9cea982299abb8",
+          "sha256": "b785879bbf485ffc96fda52e56c7a1f72e0dffc8574c9add5504128eca4d7f5d"
+        },
+        {
+          "path": "docs/WINDOWS.md",
+          "kind": "modified",
+          "baseSha256": "805ae486b737bdc4c3cc9f2001ab3857714a2fe48282fe6e4433c2929a468042",
+          "sha256": "87c0d6eb1b380ab92a06eb22efa6cf53a1a749c3f323276cc07bc08ac1814bc1"
+        },
+        {
+          "path": "experiments/windows-shared/Enable-SharedBackend.ps1",
+          "kind": "added",
+          "sha256": "ec24d12cc916177cff819607d3d9ae75c3d77412d9bf74e1a0677607a3716261"
+        },
+        {
+          "path": "experiments/windows-shared/Install-Shortcut.ps1",
+          "kind": "added",
+          "sha256": "587b6ad3758872f127e0802c0fa53e9945ea4aac8343664c24299a7fadf0ffd2"
+        },
+        {
+          "path": "experiments/windows-shared/Repair-Wechat.ps1",
+          "kind": "added",
+          "sha256": "d590f86ad56948f42a84bad45f296c4b369749169934ab3d6fd03dcbd125a868"
+        },
+        {
+          "path": "experiments/windows-shared/Resolve-CodexExecutable.ps1",
+          "kind": "added",
+          "sha256": "4414237a2825fa242f083903df07cc4d16eba2cdf95ac21d2e12c42561bf7156"
+        },
+        {
+          "path": "experiments/windows-shared/Start-Codex.ps1",
+          "kind": "added",
+          "sha256": "f6d316f0abf5956fffc2f2f351aba049e2c65aa1e5807c5a39c99d466bb9164e"
+        },
+        {
+          "path": "experiments/windows-shared/Start-CodexCli.ps1",
+          "kind": "added",
+          "sha256": "8bac4e34650e2422623908ce49c94e4c30dfa7e2753059e81defd3c7bfa41dd1"
+        },
+        {
+          "path": "experiments/windows-shared/Start-SharedBackend.ps1",
+          "kind": "added",
+          "sha256": "f52a7569963a7e4bde08f616f0b1e2c61ed1142c7500a01e356ba020d67a43e7"
+        },
+        {
+          "path": "installer.py",
+          "kind": "modified",
+          "baseSha256": "a2cb4d3e7ffb25f8808cac209110b17e805261d8dd926f759b146ce19752a3ff",
+          "sha256": "1598e699a235c1a7cd20b0714c57f7c81c4f87162570de54e5962118f0ba202b"
+        },
+        {
+          "path": "latency.py",
+          "kind": "modified",
+          "baseSha256": "35d32c2ad321abc9e9422a6c8de1290e8ba3c61e8151000603ce437fdb0d2230",
+          "sha256": "4441cfe29cb0f1bc3913bad6246140db2d22c283d3ceddc66d42ce45aa74eefb"
+        },
+        {
+          "path": "media.py",
+          "kind": "modified",
+          "baseSha256": "13e8efe78037522a545bf584900ce159a6f00de3aca19667d566ecbbbb1942d7",
+          "sha256": "4f984c9b084f7f434c86243d3d209d518839625714f5424a318eec1cd4a5ea05"
+        },
+        {
+          "path": "runtime-capabilities.json",
+          "kind": "added",
+          "sha256": "566d6b8f0b3991288d6edb61b1bb52cb7423728c9fa1faf824df4007573054a0"
+        },
+        {
+          "path": "subprocess_io.py",
+          "kind": "added",
+          "sha256": "b26a413e90a3cf80f8dbec16aaf4e7379a267e3e38b7f29e98508af0be1e1751"
+        },
+        {
+          "path": "tests/test_binding.py",
+          "kind": "added",
+          "sha256": "b7644551d28e3683acffcd717cac26536ad46132dd5e5259ad36b29dc13ccebc"
+        },
+        {
+          "path": "tests/test_desktop_entry.py",
+          "kind": "added",
+          "sha256": "e056d2b1ff5c8604ecec9824c4cdf41e1ea54890d15a142e81fbddfa1a126b1b"
+        },
+        {
+          "path": "tests/test_installer.py",
+          "kind": "modified",
+          "baseSha256": "150da3edf66882cc6dfbd6592564b8472d09f5a5470b98ccedc62a98c94bfc40",
+          "sha256": "c7077da79a06f1681ec1d14b4eeaf610dad0fb2d578429a99fa7527f59893e7e"
+        },
+        {
+          "path": "tests/test_latency.py",
+          "kind": "modified",
+          "baseSha256": "e4d7dcc240f1c26496c97ef2607579527d1cae45457671da6d048651412f0901",
+          "sha256": "b1f7b51a4ab4046f98eb722c8f79ee8dc16c4c93a0d1169019272f7abc8499e8"
+        },
+        {
+          "path": "tests/test_release_manifest.py",
+          "kind": "added",
+          "sha256": "acba0b1dea267b6947ddb31eaf801ee3e5cde4c8e742c24895e7dc97eb962b30"
+        },
+        {
+          "path": "tests/test_runtime_compatibility.py",
+          "kind": "added",
+          "sha256": "58d467ba498b16fca999fd47fe38e91ab7539fe5df456d81554987e422833fa3"
+        },
+        {
+          "path": "tests/test_subprocess_io.py",
+          "kind": "added",
+          "sha256": "74275e12e2883ef120ea981fa107694e73279574e903b41d782f52df9bb4813a"
+        },
+        {
+          "path": "tests/test_websocket_transport.py",
+          "kind": "added",
+          "sha256": "1ef99afb0894ece81ef618b79c5c3d34838f025b7445d17da5657f5940dc201c"
+        },
+        {
+          "path": "wechat.py",
+          "kind": "modified",
+          "baseSha256": "20e59cdf4b477c06a0071f1ee35e517910620516023fff99d9357dfad9827514",
+          "sha256": "8b678959c98925cc489c2464a6581a7dc2c98866ecb741c890ddadd70f02ff55"
+        },
+        {
+          "path": "windows/Resolve-CodexExecutable.ps1",
+          "kind": "added",
+          "sha256": "4414237a2825fa242f083903df07cc4d16eba2cdf95ac21d2e12c42561bf7156"
+        },
+        {
+          "path": "windows/SharedPaths.ps1",
+          "kind": "added",
+          "sha256": "5d1a206c83362ee4e19010a0bb683a5d79ee30d0a22628a3054ad5e015d32546"
+        },
+        {
+          "path": "windows/Start-App.ps1",
+          "kind": "added",
+          "sha256": "172d449f860e0907dc2647287980477a9b2e26b7251224f58bb7e12b38420b7c"
+        },
+        {
+          "path": "windows/Start-Cli.ps1",
+          "kind": "added",
+          "sha256": "593eb335c454befaddf72b76ce3af515eace56c8e6872eb67eaf1bbf2fdb0c13"
+        },
+        {
+          "path": "windows/Start-SharedBackend.ps1",
+          "kind": "added",
+          "sha256": "2b0f592e1106bf268cdffa27cef1737c8255194d2ab169869c804af44924caf1"
+        }
+      ]
+    },
+    {
+      "windowsRoot": "D:\\codex-wechat-install-df8d949",
+      "linuxRoot": "/mnt/d/codex-wechat-install-df8d949",
+      "changes": [
+        {
+          "path": "Windows安装步骤.md",
+          "kind": "added",
+          "sha256": "bfb2d48d91a16b12dd4c2b2fa0368355fc77a04bba19e64953a9d1dbd69aea21"
+        },
+        {
+          "path": "codex_transport.py",
+          "kind": "modified",
+          "baseSha256": "550edf8e967ac4e4d5ca91f4116284b227c840a32ee11f73bfdb256ed52ed6a5",
+          "sha256": "0e1d8efa20ec92b29e3c644f6ea209ed85d976072f56106830e11f5d95ea7c5a"
+        },
+        {
+          "path": "codex_wechat.py",
+          "kind": "modified",
+          "baseSha256": "0aecdeb02c3ab75f944d67c0b898f0d346cdfcde221c96f7e64be1b70749228f",
+          "sha256": "eb653607c7e3a1dffae767f92ed195acfe31e813a9b19869b3ae89920e63ef6c"
+        },
+        {
+          "path": "commands.py",
+          "kind": "modified",
+          "baseSha256": "799f05750ecb67efce70a32ad3cf3442e6c6eeb7cf097f9410951179e5be4c57",
+          "sha256": "c1c9fdd2abdb3e99f5584adc395317db075406547f70fc225c51562158a093a6"
+        },
+        {
+          "path": "installer.py",
+          "kind": "modified",
+          "baseSha256": "a2cb4d3e7ffb25f8808cac209110b17e805261d8dd926f759b146ce19752a3ff",
+          "sha256": "c6d0378e91141b89deb970fb9dc0b330e261804a7c2f20d55bebe88afb3a14f5"
+        },
+        {
+          "path": "runtime-capabilities.json",
+          "kind": "added",
+          "sha256": "c7a8349d354ab028085b141b01166c3bc7b296b31625882fe4729fc82c03263b"
+        },
+        {
+          "path": "tests/test_installer.py",
+          "kind": "modified",
+          "baseSha256": "150da3edf66882cc6dfbd6592564b8472d09f5a5470b98ccedc62a98c94bfc40",
+          "sha256": "badcbee0dcd2046ba68982da7076de0d88139b72a01dd44b5a04205203972f73"
+        },
+        {
+          "path": "wechat.py",
+          "kind": "modified",
+          "baseSha256": "20e59cdf4b477c06a0071f1ee35e517910620516023fff99d9357dfad9827514",
+          "sha256": "93ef57bedc55c0c18931bcd4bb4afb57fead3a21c08ad8524ff1be9dd592d228"
+        }
+      ]
+    }
+  ],
+  "runtimeScripts": [
+    {
+      "path": "experiments/windows-shared/Enable-SharedBackend.ps1",
+      "sha256": "ec24d12cc916177cff819607d3d9ae75c3d77412d9bf74e1a0677607a3716261",
+      "livePath": "C:\\Users\\zxzxo\\CodexProxy\\Enable-SharedBackend.ps1",
+      "matchesLive": true
+    },
+    {
+      "path": "experiments/windows-shared/Install-Shortcut.ps1",
+      "sha256": "587b6ad3758872f127e0802c0fa53e9945ea4aac8343664c24299a7fadf0ffd2",
+      "livePath": "C:\\Users\\zxzxo\\CodexProxy\\Install-Shortcut.ps1",
+      "matchesLive": true
+    },
+    {
+      "path": "experiments/windows-shared/Repair-Wechat.ps1",
+      "sha256": "d590f86ad56948f42a84bad45f296c4b369749169934ab3d6fd03dcbd125a868",
+      "livePath": "C:\\Users\\zxzxo\\CodexProxy\\Repair-Wechat.ps1",
+      "matchesLive": true
+    },
+    {
+      "path": "experiments/windows-shared/Resolve-CodexExecutable.ps1",
+      "sha256": "4414237a2825fa242f083903df07cc4d16eba2cdf95ac21d2e12c42561bf7156",
+      "livePath": "C:\\Users\\zxzxo\\CodexProxy\\Resolve-CodexExecutable.ps1",
+      "matchesLive": true
+    },
+    {
+      "path": "experiments/windows-shared/Start-Codex.ps1",
+      "sha256": "f6d316f0abf5956fffc2f2f351aba049e2c65aa1e5807c5a39c99d466bb9164e",
+      "livePath": "C:\\Users\\zxzxo\\CodexProxy\\Start-Codex.ps1",
+      "matchesLive": true
+    },
+    {
+      "path": "experiments/windows-shared/Start-CodexCli.ps1",
+      "sha256": "8bac4e34650e2422623908ce49c94e4c30dfa7e2753059e81defd3c7bfa41dd1",
+      "livePath": "C:\\Users\\zxzxo\\CodexProxy\\Start-CodexCli.ps1",
+      "matchesLive": true
+    },
+    {
+      "path": "experiments/windows-shared/Start-SharedBackend.ps1",
+      "sha256": "f52a7569963a7e4bde08f616f0b1e2c61ed1142c7500a01e356ba020d67a43e7",
+      "livePath": "C:\\Users\\zxzxo\\CodexProxy\\Start-SharedBackend.ps1",
+      "matchesLive": true
+    }
+  ]
+}
