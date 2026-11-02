@@ -52,6 +52,7 @@ App async 问题只在结构化 `agentMessage.questions` 上识别；多题依�
 ## 配置与资源
 
 热配置从同一JSON按inode/mtime/size变化读取，整组校验后应用；无效文件保留旧值。
+校验失败目前写入 stderr；是否同时写入默认结构化诊断并在微信提示，仍在考虑中，尚未实现。
 实际文件键变化才清对应微信模板覆盖。显示快照不成为原生设置的隐式写入来源。
 运行期文案唯一目录为prompts.py的DEFAULT_PROMPTS，config.prompts仅存覆盖；不重载代码模块。
 HotSettings在应用前统一验证键、文本类型、字节上限及简单占位符语法；删除键恢复默认。
