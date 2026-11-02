@@ -111,6 +111,30 @@ class HotPromptTests(unittest.IsolatedAsyncioTestCase):
             'turnId': 'turn', 'item': {'type': 'contextCompaction', 'id': 'compact'}}})
         self.assertEqual(self.bridge.state['outbox'][-1]['text'], 'shrinking')
 
+    async def test_compaction_unconfirmed_fallback_reads_hot_copy(self):
+        backend = self.bridge.backend
+        self.write({'compactionNotice': True,
+                    'prompts': {'COMPACT_UNCONFIRMED': 'result still unknown'}})
+        backend.event({'method': 'item/started', 'params': {'threadId': 'thread',
+            'turnId': 'turn', 'item': {'type': 'contextCompaction', 'id': 'compact'}}})
+        backend.event({'method': 'turn/completed', 'params': {'threadId': 'thread',
+            'turn': {'id': 'turn', 'status': 'completed'}}})
+        self.assertEqual(self.bridge.state['outbox'][-1]['text'], 'result still unknown')
+
+    async def test_missing_approval_command_reads_hot_copy(self):
+        backend = self.bridge.backend
+        backend.selected_thread = "thread"
+        backend.active = backend.new_turn("thread", "turn", owned=True)
+        notifications = []
+        backend.notify = notifications.append
+        self.write({'prompts': {'COMMAND_NOT_PROVIDED': 'not provided'}})
+        await backend.server_request({
+            "id": 7,
+            "method": "item/commandExecution/requestApproval",
+            "params": {"threadId": "thread", "turnId": "turn", "cwd": "/tmp"},
+        })
+        self.assertIn("命令: not provided", notifications[-1])
+
     async def test_labels_change_while_status_keys_and_data_stay_stable(self):
         self.write({'prompts': {'LABEL_MODEL': 'Model'}})
         await self.bridge.control('/s')

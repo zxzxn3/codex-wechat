@@ -180,7 +180,7 @@ class CodexBackend:
             self.pending[token] = msg
             if msg["method"] == "item/commandExecution/requestApproval":
                 summary = command_approval(
-                    command=params.get("command") or "未提供",
+                    command=params.get("command") or self.prompt("COMMAND_NOT_PROVIDED"),
                     cwd=params.get("cwd") or self.cwd,
                     reason=params.get("reason"),
                     token=token,
@@ -272,7 +272,7 @@ class CodexBackend:
                     self.compactions[key] = "interrupted"
                 if self.compaction_notice or (self.selection_epoch, self.selected_thread) in self.manual_compactions:
                     self.notify(self.prompt("COMPACT_INTERRUPTED") if turn.get("status") != "completed"
-                                else "上下文压缩结果未确认。")
+                                else self.prompt("COMPACT_UNCONFIRMED"))
         if method == "thread/settings/updated":
             # Native settings are authoritative; no replay of previously observed defaults.
             self.runtime_generation += 1
