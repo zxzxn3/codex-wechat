@@ -1,7 +1,7 @@
 """Transport lifecycle with synthetic byte streams, no real daemon."""
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from codex_transport import CodexTransport, CodexRpcError
 
@@ -19,6 +19,19 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         await transport.read()
         with self.assertRaises(RuntimeError):
             await pending
+        transport.on_disconnect.assert_called_once()
+
+    async def test_handler_failure_is_logged_before_the_disconnect(self):
+        transport = self.transport()
+        transport.on_event = Mock(side_effect=ValueError("bad payload"))
+        messages = iter([b'{"method": "event"}', b""])
+        transport.receive = AsyncMock(side_effect=lambda: next(messages))
+        records = []
+        with patch("codex_transport.log_event",
+                   side_effect=lambda name, **fields: records.append((name, fields))):
+            await transport.read()
+        self.assertEqual(records[0][0], "codex.read_failed")
+        self.assertEqual(records[0][1]["error_type"], "ValueError")
         transport.on_disconnect.assert_called_once()
 
     async def test_rpc_pairs_response_and_keeps_error_classification(self):

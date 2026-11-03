@@ -406,5 +406,14 @@ class RuntimeDiscoveryTests(unittest.TestCase):
                 self.assertEqual(installer._discover_runtime(source), "/from/path")
 
 
+class InstallerCommandTests(unittest.TestCase):
+    def test_hung_install_command_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(installer.subprocess, "run",
+                              side_effect=installer.subprocess.TimeoutExpired("pip", 900)):
+                with self.assertRaisesRegex(ValueError, "分钟未完成"):
+                    installer._run(["pip"], cwd=Path(directory))
+
+
 if __name__ == "__main__":
     unittest.main()

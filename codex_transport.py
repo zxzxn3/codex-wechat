@@ -8,6 +8,7 @@ import socket
 import daemon_control
 from backend_runtime import BackendRuntime
 from codex_connection import ConnectionSpec
+from diagnostics import error_fields, log_event
 from subprocess_io import communicate
 from platform_support import IS_WINDOWS, subprocess_options
 from version import APP_VERSION
@@ -215,8 +216,11 @@ class CodexTransport:
                     await self.on_request(msg)
                 else:
                     self.on_event(msg)
-        except (ValueError, OSError, RuntimeError):
-            pass
+        except (ValueError, OSError, RuntimeError) as error:
+            # A failing handler ends this loop as well, so record what happened;
+            # otherwise the disconnect below reads as a network problem.
+            log_event("codex.read_failed", level="warning", component="transport",
+                      **error_fields(error))
         finally:
             error = RuntimeError("共享 Codex 连接断开，可重试 /backend 自动连接或启动后台；未重放任务"
                                  if self.shared else "Codex 连接断开，请重启微信桥；未自动重放任务")

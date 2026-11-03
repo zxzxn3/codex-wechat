@@ -32,6 +32,9 @@ NON_INTERACTIVE = False
 # Dependency declarations are shared; requirements versions live in their files.
 PYTHON_REQUIREMENTS = Path("requirements.txt")
 QR_FALLBACK_REQUIREMENTS = Path("requirements-qr.txt")
+# Generous: pip on a slow mirror may legitimately take minutes, but a hung
+# command must not block the installer forever.
+INSTALL_COMMAND_TIMEOUT_SECONDS = 900
 DEPENDENCIES = (
     ("Codex runtime", "codex.exe" if IS_WINDOWS else "codex", None, "微信模型任务", "warn"),
     ("curl", "curl.exe" if IS_WINDOWS else "curl", (8, 4), "网络测速", "warn"),
@@ -549,7 +552,13 @@ def _copy_release(staging: Path, files: dict[Path, tuple[bytes, int]]) -> None:
 
 def _run(command: list[str], *, cwd: Path) -> None:
     detail("执行: " + " ".join(command))
-    subprocess.run(command, cwd=cwd, check=True)
+    try:
+        subprocess.run(command, cwd=cwd, check=True,
+                       timeout=INSTALL_COMMAND_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise ValueError(
+            f"安装命令超过 {INSTALL_COMMAND_TIMEOUT_SECONDS // 60} 分钟未完成，"
+            "请检查网络后重试。") from None
 
 
 def _venv_python(root: Path) -> Path:
@@ -798,7 +807,9 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
         print("演练完成，没有修改文件。")
         declaration(source, "complete")
         return 0
-    assert files is not None
+    if files is None:
+        # Not an assert: -O would drop the check and let a None manifest through.
+        raise ValueError("安装清单尚未准备完成，未修改安装。")
 
     created_target = not target.exists()
     release = None
