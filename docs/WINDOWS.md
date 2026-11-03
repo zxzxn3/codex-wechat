@@ -13,8 +13,12 @@ PID、创建时间、exe和回环监听归属；不抢占未知端口，不因Ap
 原生后台/Job Object与桥接寿命分开。后台配置来自同一config.json，不读取系统代理或保存第二份proxy。
 以前的共享后台身份记录可核对沿用；旧CodexProxy修复/配置脚本不再是产品依赖。
 
-桌面接入使用codex-desktop.ps1，原生CLI参数放在cli后，推荐用--分隔。App连接变量只给
-子进程，退出不更改调用者环境。重新绑定统一用codex-wechat.ps1 rebind，不复制独立业务。
+正常打开 App 后可从微信 `/switch` 跟随它持有的会话，无需 codex-desktop.ps1 或修改代理入口。
+通过 `\\.\pipe\codex-ipc` 复用既有 follower 协议；连接前核对管道服务进程的用户和已注册 App 路径。
+仅支持主 CODEX_HOME；先在 App 打开目标会话，微信后连接。源码与新增管道用例尚不等于实机验收。
+
+CLI 接入与后台准备保留 codex-desktop.ps1，参数放在 cli 后并用 -- 分隔；不再提供 App 启动命令。
+重新绑定统一用 codex-wechat.ps1 rebind，不复制独立业务。
 
 Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致不可见。源码和Linux mock
 不能证明Windows 5.1、任务、Job Object、App/CLI三端与真实微信都通过，具体覆盖以验收报告为准。
