@@ -989,18 +989,25 @@ def declaration(source: Path, stage: str) -> None:
             print(text)
 
 
-def _discover_runtime(source: Path, *, dry_run: bool):
+def _discover_runtime(source: Path):
     # The network entry downloads this single stdlib-only installer first.
-    # Once the full source is fetched, reuse its native discovery implementation.
+    # Once the full source is fetched, reuse its native discovery implementation:
+    # it only reads PATH, LOCALAPPDATA and the registered App, so a dry run can
+    # report the same answer without writing files or using the network.
+    fallback = shutil.which("codex.exe" if IS_WINDOWS else "codex")
     helper = source / "native_codex.py"
-    if not dry_run and helper.is_file() and not helper.is_symlink():
+    if not helper.is_file() or helper.is_symlink():
+        return fallback
+    try:
         spec = importlib.util.spec_from_file_location("codex_wechat_native_discovery", helper)
         if spec is None or spec.loader is None:
-            return shutil.which("codex.exe" if IS_WINDOWS else "codex")
+            return fallback
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.discover_codex(windows=IS_WINDOWS)
-    return shutil.which("codex.exe" if IS_WINDOWS else "codex")
+    except Exception:
+        # An unusable helper must not hide an interpreter that PATH already has.
+        return fallback
 
 
 def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
@@ -1011,7 +1018,7 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
     for name, command, minimum, purpose, policy in DEPENDENCIES:
         if (IS_WINDOWS and command in ("qrencode", "systemd-run")):
             continue
-        executable = (_discover_runtime(source, dry_run=dry_run) if name == "Codex runtime"
+        executable = (_discover_runtime(source) if name == "Codex runtime"
                       else shutil.which(command))
         ready = bool(executable)
         if ready and executable is not None and minimum and not dry_run:

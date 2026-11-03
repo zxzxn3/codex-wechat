@@ -375,5 +375,26 @@ class BootstrapRuntimeTests(unittest.TestCase):
             self.assertIn("import win32api, win32event, win32job", commands[-1])
 
 
+class RuntimeDiscoveryTests(unittest.TestCase):
+    """The dry-run report must not claim a missing runtime it never looked for."""
+
+    def test_local_source_discovery_is_used_in_every_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "native_codex.py").write_text(
+                "def discover_codex(env=None, *, windows=None):\n"
+                "    return '/found/by/source'\n", encoding="utf-8")
+            self.assertEqual(installer._discover_runtime(source), "/found/by/source")
+
+    def test_missing_or_broken_helper_falls_back_to_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            with patch.object(installer.shutil, "which", return_value="/from/path"):
+                self.assertEqual(installer._discover_runtime(source), "/from/path")
+                (source / "native_codex.py").write_text(
+                    "raise ValueError('broken helper')\n", encoding="utf-8")
+                self.assertEqual(installer._discover_runtime(source), "/from/path")
+
+
 if __name__ == "__main__":
     unittest.main()
