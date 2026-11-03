@@ -20,6 +20,12 @@ WebSocket 仍为实验性；App 连接环境变量是版本相关内部接口，
 CODEX_HOME 的 app-server-control socket；本版本最低接受 0.141.0。桥接启动入口先准备同一原生 daemon，并用
 App 内置 CLI 的 `app-server daemon version` 确认其可见；不改写 App 包，不停止已有后台。
 该入口是当前版本源码依据，离线测试不证明 App 所有运行条件均满足；真实共享仍需联调确认。
+Linux App IPC 依据同一 app.asar：early-bootstrap-339 的 IpcClient/IpcRouter 和 owner/follower
+请求路由；early-bootstrap-824 的 4 字节小端长度帧、私有 ipc.sock；early-bootstrap-439 的
+会话快照/Immer 增量、请求处理及状态转换；early-bootstrap.js 的方法版本表。
+本版本 thread-stream-state-changed=11、following-changed=1、start-turn=2、steer-turn=1、
+interrupt-turn=4。只有 initialize/owner discovery 已有本机只读查询证据，完整收发、审批和
+App 更新兼容性仍需验证；不是公开 App Server 协议，不据字段存在承诺幂等或原子 steer 条件。
 用户桌面入口遵循 [freedesktop Exec 规则](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html)，
 用同名用户文件覆盖系统入口，参数独立引用且保留 `%U`；没有 shell 拼接执行。
 Windows 原生 daemon 有自身脱离和管理能力，但不能据此认定 App 默认连接同一后台；

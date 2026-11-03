@@ -71,8 +71,9 @@ class CodexBackend:
         self.account_limits = None
         self.model_catalog = None
         self.models_checked_at = 0
+        self.app = None
         self.transport = CodexTransport(config, cwd,
-            on_request=self.server_request, on_event=self.event,
+            on_request=self.server_request, on_event=self.transport_event,
             on_connect=self.reset_connection, on_disconnect=self.connection_lost)
 
     def reset_connection(self):
@@ -99,19 +100,55 @@ class CodexBackend:
 
     @property
     def connected(self):
-        return self.transport.connected
+        return self.transport.connected and (not self.app or self.app.connected)
 
     async def start(self):
         await self.transport.start()
 
     async def rpc(self, method, params):
+        if self.app and method != "thread/resume" and params.get("threadId") == self.app.thread_id:
+            return await self.app.rpc(method, params)
         return await self.transport.rpc(method, params)
 
     async def write(self, message):
+        if self.app and "id" in message:
+            return await self.app.respond(message)
         await self.transport.write(message)
 
     async def close(self):
+        app, self.app = self.app, None
+        if app:
+            await app.close()
         await self.transport.close()
+
+    def transport_event(self, message):
+        # The App owns this live stream. The other backend may still publish
+        # stale thread metadata; account-wide events keep their original route.
+        if self.app and message.get("params", {}).get("threadId") == self.app.thread_id:
+            return
+        self.event(message)
+
+    async def attach_app(self, thread_id, options):
+        from app_ipc import AppSession, ipc_path
+        path = ipc_path(self.config)
+        if path is None or not path.exists():
+            return None
+        candidate = None
+        candidate = AppSession(path, thread_id,
+            on_event=lambda event: self.event(event) if self.app is candidate else None,
+            on_request=lambda request: self.app_request(candidate, request),
+            on_disconnect=lambda error: self.connection_lost(error) if self.app is candidate else None)
+        try:
+            await candidate.attach()
+            await candidate.settings(options)
+        except BaseException:
+            await candidate.close()
+            raise
+        return candidate
+
+    async def app_request(self, candidate, request):
+        if self.app is candidate:
+            await self.server_request(request)
 
     @property
     def proc(self):
@@ -170,7 +207,7 @@ class CodexBackend:
                     "source": self.source(), "index": 0, "answers": {}})
                 self.notify(question_prompt(questions[0], token, 0, len(questions), text=self.prompt))
                 return
-        if self.shared and self.active and not self.active.get("owned"):
+        if self.shared and not self.app and self.active and not self.active.get("owned"):
             # Observing a desktop turn does not transfer its tool/approval request ownership.
             return
         if (self.active and params.get("threadId") == self.active["thread"]
@@ -471,9 +508,24 @@ class CodexBackend:
         options.update(overrides)
         if effort is not None:
             options["config"] = {**options.get("config", {}), "model_reasoning_effort": effort}
-        if thread_id:
-            result = await self.rpc("thread/resume", {**options, "threadId": thread_id,
-                                                      "excludeTurns": True})
+        app = None
+        if thread_id and self.app and self.app.thread_id == thread_id and self.app.connected:
+            await self.app.settings(options)
+            app = self.app
+            result = app.thread_result()
+        elif thread_id:
+            try:
+                result = await self.rpc("thread/resume", {
+                    **options, "threadId": thread_id, "excludeTurns": True})
+            except CodexRpcError as error:
+                # Only this explicit writer conflict permits the App follower path.
+                # Other RPC failures must never silently change transports.
+                if error.code != -32600 or "already has an active writer" not in error.reason:
+                    raise
+                app = await self.attach_app(thread_id, options)
+                if app is None:
+                    raise
+                result = app.thread_result()
         else:
             result = await self.rpc("thread/start", options)
         thread = result["thread"]
@@ -496,7 +548,14 @@ class CodexBackend:
             self.active = None
             self.pending.clear()
         self.selected_thread = thread["id"]
+        previous_app, self.app = self.app, app
+        if previous_app and previous_app is not app:
+            await previous_app.close()
         await self.refresh_runtime()
+        if app and not app.enabled:
+            # Requests are queued by activate(). Establish the selected runtime
+            # turn first so a pending approval is not rejected as unsupported.
+            app.activate()
         await self.refresh_usage()
         return result["thread"]["id"]
 

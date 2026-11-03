@@ -62,6 +62,8 @@ class Bridge:
         self.state.setdefault("quoteCache", {})
         self.wechat_paused = wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED
         self.auth_wake = asyncio.Event()
+        self.auth_notice_lock = asyncio.Lock()
+        self.auth_notice_attempted = False
         self.channel = channel or WeChat(account)
         self.media = Media(store, self.channel, config.get("media"))
         self.backend_factory = backend_factory
@@ -169,20 +171,35 @@ class Bridge:
         self.wechat_paused = True
         details = self.state["wechatAuth"]
         command = wechat_auth.rebind_command()
-        notify = (not details.get("notificationAttempted", False)
-                  or details.get("notificationCommand") != command)
-        if notify:
-            details["notificationAttempted"] = True
-            details["notificationCommand"] = command
         self.save()
         log_event("wechat.auth_required", level="warning", component="wechat",
                   queued=len(self.state.get("outbox", [])))
-        if notify:
-            try:
-                await service_adapter.notify(self.prompt("WECHAT_AUTH_TITLE"),
-                                             self.prompt("WECHAT_REBIND_HINT", {"command": command}))
-            except Exception:
-                print("微信绑定已失效；重新绑定\n" + wechat_auth.rebind_command(), file=sys.stderr)
+        async with self.auth_notice_lock:
+            if self.auth_notice_attempted or (
+                    details.get("notificationDelivered", False)
+                    and details.get("notificationCommand") == command):
+                return
+            self.auth_notice_attempted = True
+            for attempt in range(1, 4):
+                try:
+                    delivered = bool(await service_adapter.notify(
+                        self.prompt("WECHAT_AUTH_TITLE"),
+                        self.prompt("WECHAT_REBIND_HINT", {"command": command})))
+                except Exception as exc:
+                    delivered = False
+                    log_event("wechat.auth_notice_failed", level="warning",
+                              component="wechat", attempt=attempt, **error_fields(exc))
+                else:
+                    log_event("wechat.auth_notice", level="info" if delivered else "warning",
+                              component="wechat", attempt=attempt, ok=delivered)
+                if delivered:
+                    details["notificationDelivered"] = True
+                    details["notificationCommand"] = command
+                    details.pop("notificationAttempted", None)
+                    self.save()
+                    return
+                if attempt < 3:
+                    await asyncio.sleep(5)
 
     def check_quota(self, backend, payload):
         if backend is not self.backend or not self.state.get("context"):
