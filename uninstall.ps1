@@ -42,6 +42,46 @@ function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
     Fail "scheduled task '$TaskName' did not stop within $TimeoutSeconds seconds"
 }
 
+function Stop-SharedBackends {
+    # The bridge keeps its app-server alive across client restarts, so it can
+    # still hold the data directory open when the installation is removed.
+    $sharedRoot = Join-Path $DataRoot 'shared'
+    if (-not (Test-Path -LiteralPath $sharedRoot)) {
+        return
+    }
+    $records = @(Get-ChildItem -LiteralPath $sharedRoot -Filter 'shared-backend-process.json' -Recurse -File -ErrorAction SilentlyContinue)
+    foreach ($record in $records) {
+        $value = $null
+        try {
+            $value = Get-Content -LiteralPath $record.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        $id = 0
+        if (-not $value -or -not [int]::TryParse([string]$value.pid, [ref]$id)) {
+            continue
+        }
+        $process = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $id) -ErrorAction SilentlyContinue
+        if (-not $process) {
+            continue
+        }
+        if (-not $process.ExecutablePath -or $process.ExecutablePath -ne $value.executable -or
+                $process.CreationDate.ToUniversalTime().ToString('o') -ne $value.creationTimeUtc) {
+            Write-Warning "skipping shared backend ${id}: recorded identity no longer matches"
+            continue
+        }
+        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+        $deadline = (Get-Date).AddSeconds(15)
+        while ((Get-Process -Id $id -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
+            Start-Sleep -Milliseconds 250
+        }
+        if (Get-Process -Id $id -ErrorAction SilentlyContinue) {
+            Fail "shared backend $id did not stop"
+        }
+        Write-Host "stopped shared backend: $id"
+    }
+}
+
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($task) {
     $actionText = [string]$task.Actions[0].Arguments
@@ -66,6 +106,8 @@ if ($task) {
 } else {
     Write-Host "scheduled task is not installed: $TaskName"
 }
+
+Stop-SharedBackends
 
 if ($PurgeData) {
     $expectedLeaf = 'codex-wechat'

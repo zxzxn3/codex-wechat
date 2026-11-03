@@ -318,6 +318,14 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("data retained", text)
         self.assertIn("project files and the virtual environment were not removed", text)
 
+    def test_uninstall_stops_shared_backend_before_removing_data(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertEqual(text.count("Stop-SharedBackends"), 2)
+        self.assertLess(text.rindex("Stop-SharedBackends"),
+                        text.index("Remove-Item -LiteralPath $DataRoot"))
+        self.assertIn("shared-backend-process.json", text)
+        self.assertIn("recorded identity no longer matches", text)
+
     def test_powershell_entry_does_not_read_undefined_last_exit_code(self):
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
         uninstall = entry[entry.index("    'uninstall' {"):]
