@@ -183,7 +183,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                                           completion_notice=DEFAULT_COMPLETION_TEMPLATE,
                                           attachment_mib=20),
                          "```\n接收提示: `IN < {input_tokens}`\n"
-                         "结束提示: `OUT > {output_tokens}`\n附件上限: 20 MiB\n```")
+                         "结束提示: `OUT > {output_tokens} in {elapsed}`\n附件上限: 20 MiB\n```")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",
