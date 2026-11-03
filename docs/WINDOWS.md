@@ -24,8 +24,9 @@ PID、创建时间、exe和回环监听归属；不抢占未知端口，不因Ap
 CLI 接入与后台准备保留 codex-desktop.ps1，参数放在 cli 后并用 -- 分隔；不再提供 App 启动命令。
 重新绑定统一用 codex-wechat.ps1 rebind，不复制独立业务。
 
-Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致不可见。源码和Linux mock
-不能证明Windows 5.1、任务、Job Object、App/CLI三端与真实微信都通过，具体覆盖以验收报告为准。
+Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致不可见。2026-11-04 已在
+本机实机确认气泡可见，但该结论只覆盖当时的登录会话。App/CLI/微信三端共享仍未实机验证，
+具体覆盖以验收报告为准。
 
 ## 诊断与实机验证
 
@@ -34,5 +35,11 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 `service.log`，该文件未承诺脱敏。日志字段与网络计时定义见 [ARCHITECTURE](ARCHITECTURE.md)。
 
 曾观察到curl56/28和发送积压，但尚无充分证据将根因归于IPv6；保留TLS校验、系统默认IP选择及现有代理入口。
-需要核对真实PowerShell5.1、字节锁、日志轮转、子进程取消、计划任务、Job Object、NotifyIcon及App/CLI共享；
-再由用户确认手机回复、语音/附件、重绑和重启。源码审查、Linux/mock测试及一次成功样本不能替代这些实机证据。
+2026-11-04 实测：`novac2c.cdn.weixin.qq.com` 的 AAAA 地址在本机连接黑洞（10 秒以上无响应），
+而双栈客户端 10/10 自动选择 IPv4（TCP 0.25–0.32 秒），因此未把该黑洞当作发送超时的成因；
+超时请求的 `dns/connect/tls` 均为 0、卡在 `response_body`，指向服务器响应慢而非本机路由。
+2026-11-04 的实机验收已覆盖：真实 PowerShell 5.1、计划任务生命周期、Job Object
+随任务停止的清理、单实例互斥、NotifyIcon 可见性、App IPC 连接与身份核对、用户重启
+（含跨版本切换），以及真实微信的文本、图片、文件、语音、引用、原生提问与审批。
+仍待核对：字节锁、日志轮转、子进程取消、App/CLI/微信三端并发共享会话；重绑未在
+本轮重做。源码审查、Linux/mock 测试及一次成功样本不能替代这些实机证据。

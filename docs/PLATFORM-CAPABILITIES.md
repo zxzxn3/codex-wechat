@@ -48,7 +48,11 @@ AUMID，可再把 Windows 适配替换为 toast，无需改调用接口。
 - `wechat.print_qr()` 调用 `platform_ui.show_qr()`；绘制失败时保留可点击的
   原始 URL。`service_adapter.notify()` 在持久化认证状态之后调用
   `platform_ui.notify()`，通知失败不改变待重绑状态，也不阻塞主流程。
-- 本机验收只覆盖 mock 子进程、可选 Python 回退和 Linux 真实 `qrencode`
-  存在性；没有弹出真实桌面通知。
-- Windows 的 PowerShell、NotifyIcon 与实际通知可见性均未实机验证；Focus
-  Assist、通知开关、会话隔离和无桌面环境仍可能导致返回失败或不可见。
+- 本机验收只覆盖 mock 子进程和可选 Python 回退；Linux 侧另验证过真实
+  `qrencode` 存在性。
+- Windows 通知已实机验证：2026-11-04 在实际登录会话中调用
+  `platform_ui.notify()`，PowerShell 5.1 + `NotifyIcon.ShowBalloonTip`
+  的气泡在任务栏通知区域可见，调用返回 `True`（约 5.3 秒，含 4.5 秒保留
+  窗口）。该结果只证明这条路径在本机可用；Focus Assist、通知开关、非交互
+  会话和无桌面环境仍可能让调用返回成功但气泡不可见，因此 `notify()` 的
+  `True` 仍只表示「已尽力发出」，不等于用户一定看到。
