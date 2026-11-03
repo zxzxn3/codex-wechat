@@ -386,6 +386,16 @@ class RuntimeDiscoveryTests(unittest.TestCase):
                 "    return '/found/by/source'\n", encoding="utf-8")
             self.assertEqual(installer._discover_runtime(source), "/found/by/source")
 
+    def test_discovery_does_not_cache_bytecode_in_the_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "native_codex.py").write_text(
+                "def discover_codex(env=None, *, windows=None):\n"
+                "    return '/found/by/source'\n", encoding="utf-8")
+            with patch.object(installer.sys, "dont_write_bytecode", False):
+                installer._discover_runtime(source)
+            self.assertFalse((source / "__pycache__").exists())
+
     def test_missing_or_broken_helper_falls_back_to_path(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory)

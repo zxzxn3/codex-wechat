@@ -998,6 +998,9 @@ def _discover_runtime(source: Path):
     helper = source / "native_codex.py"
     if not helper.is_file() or helper.is_symlink():
         return fallback
+    # A dry run must not leave files behind, including a bytecode cache.
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
         spec = importlib.util.spec_from_file_location("codex_wechat_native_discovery", helper)
         if spec is None or spec.loader is None:
@@ -1008,6 +1011,8 @@ def _discover_runtime(source: Path):
     except Exception:
         # An unusable helper must not hide an interpreter that PATH already has.
         return fallback
+    finally:
+        sys.dont_write_bytecode = previous
 
 
 def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
