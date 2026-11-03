@@ -31,7 +31,19 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
         process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
             b'{"time_appconnect":0}', None)), stdin=None)
         with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-            self.assertEqual(await connection_probe("https://api.example", {}), "timeout")
+            self.assertEqual(await connection_probe("https://api.example", {}),
+                             "timeout(直连,未配置代理)")
+
+    async def test_timeout_names_the_failing_path(self):
+        process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
+            b'{"time_appconnect":0}', None)), stdin=None)
+        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+            self.assertEqual(
+                await connection_probe("https://api.example", {"HTTPS_PROXY": "http://127.0.0.1:7897"}),
+                "timeout(代理未响应)")
+            self.assertEqual(
+                await connection_probe("https://api.example", {"HTTPS_PROXY": "  "}),
+                "timeout(直连,未配置代理)")
 
     async def test_missing_backend_or_rpc_timeout_is_explicit(self):
         backend = SimpleNamespace(probe_target=AsyncMock(return_value=None))

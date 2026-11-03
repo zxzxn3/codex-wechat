@@ -455,6 +455,9 @@ async def command_ping(bridge, command, argument, received=None):
     else:
         ingress = received.get("ingress_ms") if received else None
         channel = ping_channel(bridge.latency.values(ingress), text=bridge.prompt)
+        # The provider probe can block for the full connect timeout, so answer
+        # the channel leg first and report the connection phase afterwards.
+        bridge.reply(channel)
         backend = bridge.backend
         connection = backend.connection_id
         provider = await provider_latency(backend)

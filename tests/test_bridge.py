@@ -120,10 +120,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.state["context"] = "context"
         self.bridge.latency.sends.append(50)
         await self.bridge.control("/ping", received={"ingress_ms": 120})
-        entry = self.store.load("bridge")["outbox"][-1]
-        self.assertEqual(entry["text"], "WeChat ─120/50ms─ Bridge ─unavailable─ Provider")
-        self.assertNotIn("ping", entry)
-        self.assertEqual(len(self.store.load("bridge")["outbox"]), 1)
+        outbox = self.store.load("bridge")["outbox"]
+        self.assertEqual([entry["text"] for entry in outbox],
+                         ["WeChat ─120/50ms", "Bridge ─unavailable─ Provider"])
+        self.assertNotIn("ping", outbox[-1])
         self.assertFalse(self.bridge.backend_started)
 
     async def test_settings_remain_available_without_backend(self):

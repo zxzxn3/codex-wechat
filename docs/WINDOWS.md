@@ -34,7 +34,9 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 `codex-wechat.ps1 logs [-Follow]`；默认不显示原始控制台输出。加 `-Service` 才显示
 `service.log`，该文件未承诺脱敏。日志字段与网络计时定义见 [ARCHITECTURE](ARCHITECTURE.md)。
 
-曾观察到curl56/28和发送积压，但尚无充分证据将根因归于IPv6；保留TLS校验、系统默认IP选择及现有代理入口。
+曾观察到curl56/28和发送积压。2026-11-04 在本机定位到不可达的 IPv6 DNS 会让 curl_cffi 每次
+新建连接多等 4–25 秒（详见下方「本机环境观察」，只覆盖该机器）；其它机器仍保留 TLS 校验、
+系统默认 IP 选择及现有代理入口。
 2026-11-04 实测：`novac2c.cdn.weixin.qq.com` 的 AAAA 地址在本机连接黑洞（10 秒以上无响应），
 而双栈客户端 10/10 自动选择 IPv4（TCP 0.25–0.32 秒），因此未把该黑洞当作发送超时的成因；
 超时请求的 `dns/connect/tls` 均为 0、卡在 `response_body`，指向服务器响应慢而非本机路由。
@@ -47,3 +49,24 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 `--dry-run` 未改动 releases 与 current；无 qrencode 时二维码回退可渲染。
 仍待核对：App/CLI/微信三端并发共享会话；重绑未在本轮重做。源码审查、Linux/mock
 测试及一次成功样本不能替代这些实机证据。
+
+## 本机环境观察（不代表其它机器）
+
+以下只描述 2026-11-04 这台机器的网络环境，不是产品行为，也不应写成对外的通用结论。
+
+- 本机 WLAN 通过路由通告（RA/RDNSS）拿到两个 IPv6 DNS（`2409:8057:2000:6::8`、
+  `2409:8057:2000:2::8`），两者在本机都完全不可达：查询 15 秒超时，到它们的 TCP 连接也为假。
+  `netsh interface ipv6 set dnsservers ... address=none` 会回复「没有配置 DNS」，但通告值仍在，
+  说明 Windows 没有删除入口。
+- 桥接的 HTTP 客户端用 curl_cffi（自带解析器，不共享 Windows 解析缓存）。它会先试不可达的
+  IPv6 DNS 再回落 IPv4，于是**每次新建连接**多花 4–25 秒：日志表现为 `dns_ms≈4040` 且
+  `pretransfer_ms≈dns_ms`，或在 `curl 28` 里停在 `pretransfer` 阶段。连接复用时为 0，
+  所以只有空闲后的第一条消息、首次扫码、`/ping` 和 `输入中` 会受影响。
+- 本机处置：`Disable-NetAdapterBinding -Name "WLAN" -ComponentID ms_tcpip6`。处置前后同一测试
+  （发布版 venv、清空 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`）从 4.16 秒降到 0.12–0.18 秒；
+  需要 IPv6 时用 `Enable-NetAdapterBinding` 恢复。该网络 IPv6 本来不可用，禁用没有实际损失。
+- 复现方法：清空代理变量后，用发布版 venv 的 python 依次请求
+  `https://ilinkai.weixin.qq.com/`，对比默认解析与显式 `CurlOpt.DNS_SERVERS="192.168.0.1"`
+  的耗时；再直接连 IP，验证开销只在名字解析。若本机没有这个黑洞，两侧耗时应当接近。
+
+排查其它机器时先看 `dns_ms` 是否接近 `curl_total_ms`：是则问题在解析，不在微信服务端。
