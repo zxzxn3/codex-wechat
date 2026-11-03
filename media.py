@@ -38,6 +38,36 @@ class MediaError(ValueError):
     pass
 
 
+class _TransferFailure:
+    """One failed CDN attempt and whether repeating it can help."""
+
+    __slots__ = ("kind", "message", "retryable", "error", "curl_code", "http_status")
+
+    def __init__(self, kind, *, message, retryable, error=None,
+                 curl_code=None, http_status=None):
+        self.kind = kind
+        self.message = message
+        self.retryable = retryable
+        self.error = error
+        self.curl_code = curl_code
+        self.http_status = http_status
+
+
+def _classify_transfer(status, code):
+    """Describe a completed response; None means the body arrived normally."""
+    if code == 63:
+        return _TransferFailure("size_limit", curl_code=code, retryable=False,
+                                message="附件超过本地大小限制。")
+    if code:
+        return _TransferFailure("curl", curl_code=code, retryable=code == 28,
+                                message=f"附件 CDN 请求失败（curl {code}），"
+                                        "未输出含令牌的 URL。")
+    if status != 200:
+        return _TransferFailure("http_status", http_status=status, retryable=False,
+                                message="微信 CDN 未返回 HTTP 200。")
+    return None
+
+
 def image_extension(data):
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return ".png"
@@ -160,45 +190,31 @@ class Media:
     async def transfer(self, url, data=None):
         url = cdn_url(url)
         for attempt in range(1, CDN_ATTEMPTS + 1):
-            retry = attempt < CDN_ATTEMPTS
             started = time.monotonic()
             try:
                 received, status, code, parameter = await self.channel.http.transfer(
                     url, data, limit=self.limit + 16,
                     connect_timeout=CDN_CONNECT_TIMEOUT)
             except TimeoutError as error:
-                self._log_transfer(False, started, kind="timeout", error=error)
-                if retry:
-                    self._log_retry(attempt, "timeout")
-                    continue
-                raise MediaError("附件传输达到总超时限制。") from None
+                failure = _TransferFailure("timeout", error=error, retryable=True,
+                                           message="附件传输达到总超时限制。")
             except Exception as error:
                 # Transport exception strings can contain the encrypted CDN query.
-                self._log_transfer(False, started, kind="transport", error=error)
-                if retry:
-                    self._log_retry(attempt, "transport")
-                    continue
-                raise MediaError("附件 CDN 请求失败，未输出含令牌的 URL。") from None
-            if code:
-                if code == 63:
-                    self._log_transfer(False, started, kind="size_limit", curl_code=code)
-                    raise MediaError("附件超过本地大小限制。")
-                self._log_transfer(False, started, kind="curl", curl_code=code)
-                if code == 28 and retry:
-                    self._log_retry(attempt, "curl")
-                    continue
-                raise MediaError(f"附件 CDN 请求失败（curl {code}），未输出含令牌的 URL。")
-            if status != 200:
-                self._log_transfer(False, started, kind="http_status", http_status=status)
-                raise MediaError("微信 CDN 未返回 HTTP 200。")
-            self._log_transfer(True, started, kind="ok", http_status=status,
-                               bytes_=len(received))
-            return received, parameter
-
-    @staticmethod
-    def _log_retry(attempt, kind):
-        log_event("media.transfer_retry", level="warning", component="media",
-                  attempt=attempt, kind=kind)
+                failure = _TransferFailure("transport", error=error, retryable=True,
+                                           message="附件 CDN 请求失败，未输出含令牌的 URL。")
+            else:
+                failure = _classify_transfer(status, code)
+                if failure is None:
+                    self._log_transfer(True, started, kind="ok",
+                                       http_status=status, bytes_=len(received))
+                    return received, parameter
+            self._log_transfer(False, started, kind=failure.kind, error=failure.error,
+                               curl_code=failure.curl_code,
+                               http_status=failure.http_status)
+            if not (failure.retryable and attempt < CDN_ATTEMPTS):
+                raise MediaError(failure.message) from None
+            log_event("media.transfer_retry", level="warning", component="media",
+                      attempt=attempt, kind=failure.kind)
 
     @staticmethod
     def _log_transfer(ok, started, *, kind, error=None, curl_code=None,
