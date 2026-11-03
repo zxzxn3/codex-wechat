@@ -10,7 +10,7 @@ DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
                    "compactionNotice", "quotaWarningThresholds", "prompts", "connectionIdleSeconds")
 DEFAULT_CONNECTION_IDLE_SECONDS = 60
-DEFAULT_COMPLETION_TEMPLATE = "`OUT > {output_tokens}`"
+DEFAULT_COMPLETION_TEMPLATE = "`OUT > {output_tokens} in {elapsed}`"
 DEFAULT_ACK_TEMPLATE = "`IN < {input_tokens}`"
 TEXT_LIMIT_BYTES = 3000
 QUOTA_WINDOWS = ("primary", "secondary")
