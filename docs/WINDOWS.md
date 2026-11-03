@@ -9,6 +9,8 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
 不叠加Task Scheduler重试。supervisor处理桥接崩溃退避、主动重启75和持久配置错误78。
 版本环境和稳定服务入口环境都从 requirements-windows.txt 安装原生服务依赖；
 安装器在激活前检查服务入口可导入 win32api、win32event、win32job。
+远程重启核对所有者令牌及进程链；Windows venv 多出的启动器必须正是记录的子进程、
+属于记录的 supervisor，且可执行文件与当前 venv 的解释器一致。
 
 App / CLI / 微信共用的WS后台由backend_runtime调用本项目的原生PowerShell适配，核对
 PID、创建时间、exe和回环监听归属；不抢占未知端口，不因App更新结束正在运行的旧后台。

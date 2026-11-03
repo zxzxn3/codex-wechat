@@ -78,6 +78,9 @@ class WindowsPywin32Tests(unittest.TestCase):
             job.close()
         self.assertEqual(info["BasicLimitInformation"]["LimitFlags"],
                          0x00003000)
+        attributes, name = job_module.CreateJobObject.call_args.args
+        self.assertIsNone(attributes)
+        self.assertTrue(isinstance(name, str) and name.startswith("Local\\CodexWeChatChild-"))
         configure.assert_called_once_with(
             handle, 9, info)
         self.assertEqual(handle.closed, 1)

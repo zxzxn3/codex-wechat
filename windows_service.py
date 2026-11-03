@@ -162,7 +162,8 @@ class ChildJob:
         if os.name != "nt":
             return
         import win32job
-        handle = win32job.CreateJobObject(None, None)
+        # pywin32 requires a string name (unlike Win32's nullable lpName).
+        handle = win32job.CreateJobObject(None, "Local\\CodexWeChatChild-" + secrets.token_hex(16))
         try:
             info = win32job.QueryInformationJobObject(
                 handle, win32job.JobObjectExtendedLimitInformation)

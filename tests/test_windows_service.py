@@ -69,6 +69,27 @@ class ServiceControlTests(unittest.IsolatedAsyncioTestCase):
                     service_control._require_windows_owner()
 
 
+    def test_windows_owner_accepts_only_the_recorded_venv_launcher_chain(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "owner.json"
+            path.write_text(json.dumps({"token": "secret-token", "child_pid": 1234,
+                                        "supervisor_pid": 4321}), encoding="utf-8")
+            parent = {os.getpid(): 1234, 1234: 4321}
+            with patch.dict(os.environ, {"AGENT_WECHAT_SERVICE_OWNER": str(path),
+                                        "AGENT_WECHAT_SERVICE_TOKEN": "secret-token"}), \
+                    patch.object(windows_service, "parent_pid", side_effect=parent.get), \
+                    patch.object(service_control, "_is_venv_launcher", return_value=True) as launcher:
+                service_control._require_windows_owner()
+                launcher.assert_called_once_with(1234)
+                launcher.return_value = False
+                with self.assertRaises(ValueError):
+                    service_control._require_windows_owner()
+                launcher.return_value = True
+                parent[1234] = 9999
+                with self.assertRaises(ValueError):
+                    service_control._require_windows_owner()
+
+
 class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.enterContext(patch.object(windows_service, "ChildJob"))

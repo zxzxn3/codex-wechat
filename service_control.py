@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import signal
+import sys
 from subprocess_io import communicate
 from pathlib import Path
 
@@ -47,12 +48,40 @@ def _require_windows_owner():
     recorded_token = str(status.get("token", ""))
     if not hmac.compare_digest(recorded_token, token):
         raise ValueError("服务所有者令牌不匹配，不能远程重启。")
-    if status.get("child_pid") != os.getpid():
-        raise ValueError("当前桥接不是服务记录的桥接进程，不能远程重启。")
     from windows_service import parent_pid
-    if status.get("supervisor_pid") != parent_pid(os.getpid()):
+    current = os.getpid()
+    parent = parent_pid(current)
+    if status.get("child_pid") == current:
+        owned = status.get("supervisor_pid") == parent
+    else:
+        # Windows venv redirectors remain alive as the supervisor's direct child.
+        # Accept only that exact recorded launcher, never arbitrary descendants.
+        owned = (status.get("child_pid") == parent and parent is not None
+                 and status.get("supervisor_pid") == parent_pid(parent)
+                 and _is_venv_launcher(parent))
+    if not owned:
         raise ValueError("当前进程不是计划任务 supervisor 的直接子进程，"
                          "不能远程重启。")
+
+
+def _is_venv_launcher(pid):
+    python = Path(sys.executable)
+    if python.parent.name.casefold() != "scripts" or not (python.parent.parent / "pyvenv.cfg").is_file():
+        return False
+    import pywintypes
+    import win32api
+    import win32con
+    import win32process
+    process = None
+    try:
+        process = win32api.OpenProcess(
+            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, pid)
+        return os.path.samefile(win32process.GetModuleFileNameEx(process, 0), python)
+    except (OSError, pywintypes.error):
+        return False
+    finally:
+        if process is not None:
+            process.Close()
 
 
 async def restart():
