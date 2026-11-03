@@ -414,6 +414,19 @@ class InstallerCommandTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "分钟未完成"):
                     installer._run(["pip"], cwd=Path(directory))
 
+    def test_unreadable_install_entry_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            for name in ("bootstrap_supervisor.py", "codex-wechat.ps1", "current"):
+                (target / name).write_text("x", encoding="utf-8")
+            (target / "releases" / "abc").mkdir(parents=True)
+            installer.check_user_access(target, "abc")
+            with patch.object(installer, "_readable",
+                              side_effect=lambda path: path.name != "current"):
+                with self.assertRaisesRegex(ValueError, "icacls") as caught:
+                    installer.check_user_access(target, "abc")
+            self.assertIn("current", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

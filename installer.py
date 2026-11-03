@@ -371,6 +371,38 @@ def _write_pointer(target: Path, name: str, value: str) -> None:
     )
 
 
+def _readable(path: Path) -> bool:
+    """A real access check: Windows denies reads without failing stat()."""
+    try:
+        if path.is_dir():
+            with os.scandir(path) as entries:
+                next(entries, None)
+        else:
+            with path.open("rb"):
+                pass
+    except OSError:
+        return False
+    return True
+
+
+def check_user_access(target: Path, identifier: str) -> None:
+    """The service starts as the installing user, so entries must be readable.
+
+    A restricted or elevated sandbox can create files with a private DACL: the
+    install looks successful while `pythonw` fails to load the entry, and the
+    scheduled task logs nothing. Detect that here instead.
+    """
+    entries = [target / "bootstrap_supervisor.py", target / "codex-wechat.ps1",
+               target / CURRENT_FILE, release_path(target, identifier)]
+    denied = [path for path in entries if not _readable(path)]
+    if denied:
+        raise ValueError(
+            "当前用户无法读取安装入口，服务会以该用户身份启动并静默失败:\n"
+            + "\n".join("  " + str(path) for path in denied)
+            + "\n请在普通（非管理员、非沙箱）终端重新安装，或以管理员执行: "
+            + f'icacls "{target}" /reset /t /c /q')
+
+
 class InstallLock:
     def __init__(self, target: Path):
         self.path = target / LOCK_FILE
@@ -840,6 +872,7 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
             activate_release(target, identifier)
             configure_windows(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
+            check_user_access(target, identifier)
     except BaseException:
         # Only delete a release we created and never activated; no restoration.
         if created and release is not None and read_pointer(target, CURRENT_FILE) != identifier:
