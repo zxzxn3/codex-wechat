@@ -208,6 +208,16 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")), "后端连接中断")
         self.assertEqual(attachment_reason(MediaError("附件超过本地大小限制")), "文件超过大小限制")
 
+    def test_reason_tables_keep_first_match_priority(self):
+        # Rules are ordered data now; an earlier rule must win over a later one.
+        self.assertEqual(
+            attachment_reason(MediaError("附件超过大小限制，cdn 请求失败")), "文件超过大小限制")
+        self.assertEqual(
+            attachment_reason(MediaError("cdn 请求失败，但缺少下载引用")), "微信附件服务未响应")
+        self.assertEqual(
+            backend_reason(RuntimeError("websocket 连接失败：依赖缺失")), "后端连接中断")
+        self.assertEqual(attachment_reason(MediaError("没有匹配的文本")), "附件处理失败")
+
     async def test_desktop_session_info_uses_status_without_followup_note(self):
         self.bridge.backend.info = {
             "name": "微信附件", "model": "example", "effort": "high", "cwd": "/tmp/project"
