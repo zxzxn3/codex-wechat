@@ -1,4 +1,5 @@
 """Structured diagnostics stay bounded and never record message content."""
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ from log_viewer import _log_files, _read_log_updates, _tail_lines, show_logs
 from commands import dispatch
 from storage import Store
 from wechat import WeChat
+from tests.http_fixtures import exchange
 
 
 class CodedError(RuntimeError):
@@ -291,12 +293,8 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_wechat_logs_endpoint_without_query_or_credentials(self):
         token = "TOKEN_SENTINEL_7f935"
-        process = SimpleNamespace(returncode=0, stdin=None)
         client = WeChat({"token": token, "base_url": "https://ilinkai.weixin.qq.com"})
-        with patch("wechat.asyncio.create_subprocess_exec",
-                   AsyncMock(return_value=process)), \
-             patch("wechat.communicate",
-                   AsyncMock(return_value=(b'{"ret":0}\n200', b""))):
+        with exchange():
             await client.request("ilink/bot/getconfig?token=" + token)
         record = next(item for item in self.records() if item["event"] == "wechat.request")
         self.assertEqual(record["endpoint"], "ilink/bot/getconfig")
@@ -307,13 +305,9 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("?token=", data)
 
     async def test_successful_poll_is_debug_only(self):
-        process = SimpleNamespace(returncode=0, stdin=None)
         client = WeChat({"token": "token",
                          "base_url": "https://ilinkai.weixin.qq.com"})
-        with patch("wechat.asyncio.create_subprocess_exec",
-                   AsyncMock(return_value=process)), \
-             patch("wechat.communicate",
-                   AsyncMock(return_value=(b'{"ret":0}\n200', b""))):
+        with exchange():
             diagnostics.configure(level="info")
             await client.request("ilink/bot/getupdates")
             self.assertFalse(any(item["event"] == "wechat.request"
@@ -323,14 +317,46 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(item["event"] == "wechat.request"
                             for item in self.records()))
 
+    async def test_typing_success_is_debug_but_failures_and_messages_stay_visible(self):
+        client = WeChat({"token": "fixture"})
+        diagnostics.configure(level="info")
+        with exchange():
+            await client.request("ilink/bot/getconfig")
+            await client.request("ilink/bot/sendtyping")
+            self.assertEqual(self.records(), [])
+            await client.request("ilink/bot/sendmessage")
+        self.assertEqual(self.records()[-1]["endpoint"], "ilink/bot/sendmessage")
+        self.assertEqual(self.records()[-1]["level"], "info")
+        with exchange(b'{"ret":-2,"errmsg":"prepare failed"}\n200'):
+            with self.assertRaises(RuntimeError):
+                await client.request("ilink/bot/sendtyping")
+        self.assertEqual(self.records()[-1]["level"], "warning")
+        self.assertEqual(self.records()[-1]["api_error_kind"], "prepare_failed")
+        diagnostics.configure(level="debug")
+        with exchange():
+            await client.request("ilink/bot/sendtyping")
+        self.assertEqual(self.records()[-1]["level"], "debug")
+
+    async def test_typing_lifecycle_successes_are_debug_only(self):
+        channel = SimpleNamespace(typing_ticket=AsyncMock(return_value="ticket"),
+                                  set_typing=AsyncMock())
+        bridge = Bridge(self.store, {"user": "owner", "token": "fixture"}, {}, channel=channel)
+        diagnostics.configure(level="info")
+        await bridge.typing.start("owner", "context")
+        await asyncio.sleep(0)
+        await bridge.typing.stop()
+        self.assertFalse(any(r["event"].startswith("wechat.typing_") for r in self.records()))
+        diagnostics.configure(level="debug")
+        await bridge.typing.start("owner", "context")
+        await asyncio.sleep(0)
+        await bridge.typing.stop()
+        events = [r["event"] for r in self.records() if r["event"].startswith("wechat.typing_")]
+        self.assertEqual(events, ["wechat.typing_started", "wechat.typing_stopped"])
+
     async def test_successful_slow_poll_is_debug_only(self):
-        process = SimpleNamespace(returncode=0, stdin=None)
         client = WeChat({"token": "token",
                          "base_url": "https://ilinkai.weixin.qq.com"})
-        with patch("wechat.asyncio.create_subprocess_exec",
-                   AsyncMock(return_value=process)), \
-             patch("wechat.communicate",
-                   AsyncMock(return_value=(b'{"ret":0}\n200', b""))), \
+        with exchange(), \
              patch("wechat.time.perf_counter", side_effect=[0, 18]):
             diagnostics.configure(level="info")
             await client.request("ilink/bot/getupdates")

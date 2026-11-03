@@ -34,7 +34,7 @@ PYTHON_REQUIREMENTS = Path("requirements.txt")
 QR_FALLBACK_REQUIREMENTS = Path("requirements-qr.txt")
 DEPENDENCIES = (
     ("Codex runtime", "codex.exe" if IS_WINDOWS else "codex", None, "微信模型任务", "warn"),
-    ("curl", "curl.exe" if IS_WINDOWS else "curl", (8, 4), "微信登录与收发", "warn"),
+    ("curl", "curl.exe" if IS_WINDOWS else "curl", (8, 4), "网络测速", "warn"),
     ("qrencode", "qrencode", None, "原生终端二维码（缺少时使用轻量回退）", "warn"),
     ("systemd-run", "systemd-run", (254,), "Linux 共享后台", "warn"),
 )
@@ -58,6 +58,8 @@ PRIVATE_NAMES = {
     "__pycache__",
     "dist",
     "experiments",
+    "htmlcov",
+    "coverage.xml",
     RELEASES_DIR,
     "workspace",
     "shared",
@@ -797,6 +799,7 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
         print("演练完成，没有修改文件。")
         declaration(source, "complete")
         return 0
+    assert files is not None
 
     created_target = not target.exists()
     release = None
@@ -993,6 +996,8 @@ def _discover_runtime(source: Path, *, dry_run: bool):
     helper = source / "native_codex.py"
     if not dry_run and helper.is_file() and not helper.is_symlink():
         spec = importlib.util.spec_from_file_location("codex_wechat_native_discovery", helper)
+        if spec is None or spec.loader is None:
+            return shutil.which("codex.exe" if IS_WINDOWS else "codex")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.discover_codex(windows=IS_WINDOWS)
@@ -1010,7 +1015,7 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
         executable = (_discover_runtime(source, dry_run=dry_run) if name == "Codex runtime"
                       else shutil.which(command))
         ready = bool(executable)
-        if ready and minimum and not dry_run:
+        if ready and executable is not None and minimum and not dry_run:
             try:
                 result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=5)
                 version = re.search(r"\b(\d+)(?:\.(\d+))?", result.stdout)
@@ -1192,7 +1197,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except KeyboardInterrupt:
         print("\ninstaller.py: 已取消", file=sys.stderr)
-        raise SystemExit(130)
+        raise SystemExit(130) from None
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"installer.py: {error}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from error

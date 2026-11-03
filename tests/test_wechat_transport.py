@@ -3,13 +3,13 @@ import asyncio
 import json
 from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
 import diagnostics
 from errors import WeChatAuthExpired
 from wechat import WeChat
+from tests.http_fixtures import exchange
 
 
 class WeChatTransportTests(unittest.IsolatedAsyncioTestCase):
@@ -39,17 +39,14 @@ class WeChatTransportTests(unittest.IsolatedAsyncioTestCase):
         )
         for index, (output, code, auth, error, message, status, api_code) in enumerate(cases):
             with self.subTest(index=index):
-                process = SimpleNamespace(returncode=code)
                 before = len(self.records()) if self.path.exists() else 0
-                with patch("wechat.asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as spawn, \
-                     patch("wechat.communicate", AsyncMock(return_value=(output, b''))) as exchange:
+                with exchange(output, code=code) as request:
                     with self.assertRaises(error) as caught:
                         await self.client.request("ilink/bot/getconfig", auth=auth,
                                                   request_id=f"req-{index}")
                     if message:
                         self.assertEqual(str(caught.exception), message)
-                    spawn.assert_awaited_once()
-                    exchange.assert_awaited_once()
+                    request.assert_awaited_once()
                 records = self.records()[before:]
                 self.assertEqual(len(records), 1)
                 self.assertFalse(records[0]["ok"])
@@ -57,14 +54,11 @@ class WeChatTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(records[0].get("http_status"), status)
                 self.assertEqual(records[0].get("error_code"), api_code)
 
-    async def test_spawn_failure_and_timeout_are_logged_without_exception_text(self):
-        for error in (FileNotFoundError("SECRET-PATH"), TimeoutError("SECRET-RESPONSE")):
+    async def test_transport_failure_and_timeout_are_logged_without_exception_text(self):
+        for error in (OSError("SECRET-PATH"), TimeoutError("SECRET-RESPONSE")):
             with self.subTest(error=type(error).__name__):
                 before = len(self.records()) if self.path.exists() else 0
-                spawn = AsyncMock(side_effect=error) if isinstance(error, FileNotFoundError) else \
-                    AsyncMock(return_value=SimpleNamespace(returncode=None))
-                with patch("wechat.asyncio.create_subprocess_exec", spawn), \
-                     patch("wechat.communicate", AsyncMock(side_effect=error)):
+                with patch("wechat.PooledHTTP.request", AsyncMock(side_effect=error)):
                     with self.assertRaises(type(error)) as caught:
                         await self.client.request("ilink/bot/sendmessage", request_id="req-failure")
                     self.assertIs(caught.exception, error)
@@ -74,9 +68,7 @@ class WeChatTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("SECRET", json.dumps(records))
 
     async def test_cancellation_is_propagated_and_not_logged_as_warning(self):
-        with patch("wechat.asyncio.create_subprocess_exec",
-                   AsyncMock(return_value=SimpleNamespace(returncode=None))), \
-             patch("wechat.communicate", AsyncMock(side_effect=asyncio.CancelledError())):
+        with patch("wechat.PooledHTTP.request", AsyncMock(side_effect=asyncio.CancelledError())):
             with self.assertRaises(asyncio.CancelledError):
                 await self.client.request("ilink/bot/getupdates")
         records = self.records()
@@ -84,20 +76,15 @@ class WeChatTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(records[0]["status"], "cancelled")
         self.assertEqual(records[0]["level"], "debug")
 
-    async def test_success_preserves_curl_timeouts_and_private_stdin(self):
-        process = SimpleNamespace(returncode=0)
-        with patch("wechat.asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as spawn, \
-             patch("wechat.communicate", AsyncMock(return_value=(b'{"ret":0}\n200', b''))) as exchange:
+    async def test_success_preserves_timeout_auth_body_and_private_logs(self):
+        with exchange() as request:
             result = await self.client.request("ilink/bot/sendmessage?secret=SECRET-QUERY",
                 {"text": "SECRET-BODY"}, timeout=5, request_id="req-success")
         self.assertEqual(result, {"ret": 0})
-        args = spawn.await_args.args
-        self.assertEqual(args[args.index("--connect-timeout") + 1], "5")
-        self.assertEqual(args[args.index("--max-time") + 1], "5")
-        self.assertNotIn("--location", args)
-        self.assertNotIn("SECRET", str(args))
-        self.assertEqual(exchange.await_args.kwargs["timeout"], 7)
-        self.assertIn(b"SECRET-TOKEN", exchange.await_args.args[1])
+        self.assertEqual(request.await_args.kwargs["timeout"], 5)
+        self.assertFalse(request.await_args.kwargs["polling"])
+        self.assertEqual(request.await_args.args[1]["Authorization"], "Bearer SECRET-TOKEN")
+        self.assertIn(b"SECRET-BODY", request.await_args.args[2])
         records = self.records()
         self.assertEqual(len(records), 1)
         self.assertTrue(records[0]["ok"])

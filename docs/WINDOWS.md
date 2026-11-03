@@ -1,6 +1,6 @@
 # Windows
 
-需要原生 Windows Python 3.11+、curl 和可用 Codex runtime。独立 CLI 或已注册 App 的内置
+需要原生 Windows Python 3.11+、curl（bootstrap 与网络测速）和可用 Codex runtime。独立 CLI 或已注册 App 的内置
 codex.exe 均可发现；显式 command 始终优先，不把 .cmd/.bat 当原生 exe 自动执行。
 App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径。也可显式配置完整命令数组。
 

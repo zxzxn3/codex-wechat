@@ -101,31 +101,99 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
         self.assertTrue(await bridge.typing.start("owner", "context"))
         self.assertTrue(await bridge.typing.start("owner", "context"))
+        await asyncio.sleep(0)
         await bridge.typing.stop()
         self.assertEqual(channel.statuses, [("owner", "ticket", 1)])
         await bridge.typing.stop()
         self.assertEqual(channel.statuses,
                          [("owner", "ticket", 1), ("owner", "ticket", 2)])
 
-    async def test_typing_auth_failure_pauses_instead_of_starting_model_work(self):
+    async def test_typing_ticket_cache_refreshes_at_expiry_and_identity_change(self):
+        channel = FakeChannel()
+        channel.typing_ticket = AsyncMock(side_effect=["first", "second", "third"])
+        bridge = Bridge(self.store, {"user": "owner", "bot": "bot", "token": "token"}, {}, channel=channel)
+        with patch("typing_indicator.time.monotonic", return_value=100) as clock:
+            self.assertEqual(await bridge.typing._get_ticket(), "first")
+            clock.return_value = 699
+            self.assertEqual(await bridge.typing._get_ticket(), "first")
+            channel.typing_ticket.assert_awaited_once()
+            clock.return_value = 700
+            self.assertEqual(await bridge.typing._get_ticket(), "second")
+            bridge.account["bot"] = "new-bot"
+            self.assertEqual(await bridge.typing._get_ticket(), "third")
+        self.assertEqual(channel.typing_ticket.await_count, 3)
+
+    async def test_failed_refresh_does_not_keep_expired_ticket(self):
+        channel = FakeChannel()
+        channel.typing_ticket = AsyncMock(side_effect=RuntimeError("unavailable"))
+        bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
+        bridge.typing.ticket, bridge.typing.ticket_key = "old", (None, "owner")
+        bridge.typing.ticket_expires = 0
+        with self.assertRaises(RuntimeError):
+            await bridge.typing._get_ticket()
+        self.assertEqual(bridge.typing.ticket, "")
+        self.assertEqual(bridge.typing.ticket_expires, 0)
+
+    async def test_stop_refreshes_an_expired_ticket(self):
+        channel = FakeChannel()
+        channel.typing_ticket = AsyncMock(return_value="fresh")
+        bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
+        bridge.typing.active = 1
+        bridge.typing.started = True
+        bridge.typing.user = "owner"
+        bridge.typing.ticket, bridge.typing.ticket_key = "old", (None, "owner")
+        bridge.typing.ticket_expires = 0
+        await bridge.typing.stop()
+        self.assertEqual(channel.statuses, [("owner", "fresh", 2)])
+
+    async def test_background_typing_auth_failure_pauses_bridge(self):
         channel = FakeChannel()
         channel.typing_ticket = AsyncMock(side_effect=WeChatAuthExpired())
         bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
-        bridge.state.update(context="context", thread="thread")
-        bridge.state["inbox"].append({"id": "job", "text": "work", "phase": "preparing"})
-        bridge.ensure_backend = AsyncMock()
-        bridge.backend.run = AsyncMock()
         paused = asyncio.Event()
         async def pause():
             bridge.wechat_paused = True
             paused.set()
         bridge.require_wechat_rebind = AsyncMock(side_effect=pause)
-        self.tasks.append(asyncio.create_task(bridge.worker()))
+        await bridge.typing.start("owner", "context")
         await asyncio.wait_for(paused.wait(), 1)
-        await asyncio.sleep(0)
-        bridge.backend.run.assert_not_awaited()
-        bridge.ensure_backend.assert_not_awaited()
-        self.assertEqual(bridge.state["inbox"][0]["id"], "job")
+        await bridge.typing.stop()
+        bridge.require_wechat_rebind.assert_awaited_once()
+        self.assertTrue(bridge.wechat_paused)
+
+    async def test_slow_typing_ticket_does_not_block_start_and_is_cancelled(self):
+        channel = FakeChannel()
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+        async def ticket(*args):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        channel.typing_ticket = ticket
+        bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
+        self.assertTrue(await asyncio.wait_for(bridge.typing.start("owner", "context"), 1))
+        await asyncio.wait_for(entered.wait(), 1)
+        task = bridge.typing.task
+        await bridge.typing.stop()
+        self.assertTrue(cancelled.is_set())
+        self.assertTrue(task.done())
+        self.assertEqual(channel.statuses, [])
+
+    async def test_slow_typing_send_is_cancelled_before_stop_status(self):
+        channel = FakeChannel()
+        entered = asyncio.Event()
+        async def status(user, ticket, value):
+            channel.statuses.append((user, ticket, value))
+            if value == 1:
+                entered.set()
+                await asyncio.Event().wait()
+        channel.set_typing = status
+        bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
+        self.assertTrue(await asyncio.wait_for(bridge.typing.start("owner", "context"), 1))
+        await asyncio.wait_for(entered.wait(), 1)
+        await bridge.typing.stop()
+        self.assertEqual([value for _, _, value in channel.statuses], [1, 2])
 
     async def test_keepalive_auth_failure_uses_the_same_pause(self):
         channel = FakeChannel()

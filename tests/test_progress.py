@@ -1,5 +1,4 @@
 """Visible interim replies use complete native items, never model/tool calls."""
-import asyncio
 from pathlib import Path
 import tempfile
 import unittest

@@ -1,5 +1,4 @@
 """Source compatibility checks are pure and never read the real user config."""
-import json
 from pathlib import Path
 import unittest
 from installer import check_runtime_compatibility

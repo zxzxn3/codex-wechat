@@ -9,6 +9,9 @@ from storage import Store
 
 
 class FakeWeChat:
+    async def close(self):
+        pass
+
     def __init__(self, account, status="confirmed"):
         self.account = account
         self.status = status

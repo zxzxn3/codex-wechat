@@ -65,11 +65,12 @@ class BackendRuntime:
             args.append("--property=UnsetEnvironment=" + " ".join(absent))
         try:
             await run([*args, "--", *command], env=env, cwd=self.cwd, timeout=15)
-        except BackendStartupError:
+        except BackendStartupError as error:
             state = await daemon_control.status(unit)
             if state.get("ActiveState") not in ("active", "activating", "reloading"):
                 failure = daemon_control.failure(state, command)
-                raise failure or BackendStartupError("Codex 后台启动失败，请查看用户服务日志。")
+                raise (failure or BackendStartupError(
+                    "Codex 后台启动失败，请查看用户服务日志。")) from error
         return unit
 
     async def ensure_websocket(self, command, env, endpoint, root, *, name):
@@ -112,7 +113,7 @@ class BackendRuntime:
                           env=env, cwd=self.cwd, timeout=2)
                 if state.get("ActiveState") == "active":
                     return
-            except (BackendStartupError, asyncio.TimeoutError):
+            except (TimeoutError, BackendStartupError):
                 pass
             await asyncio.sleep(0.2)
         raise BackendStartupError("共享后台未就绪，请查看用户服务日志。")

@@ -192,6 +192,7 @@ class OutputDelivery:
         bridge.state["failedOutbox"] = (bridge.state.get("failedOutbox", []) + [failed])[-20:]
         bridge.state["consecutiveSendFailures"] += 1
         log_event("output.failed", level="warning", component="output",
+                  send_failures=bridge.state["consecutiveSendFailures"],
                   role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
                   parts=entry.get("parts"), part=entry.get("part"),
                   count=len(skipped), job_id=entry.get("group"),
@@ -236,8 +237,6 @@ class OutputDelivery:
                           attempt=entry.get("attempts", 0), part=entry.get("part"),
                           parts=entry.get("parts"), job_id=entry.get("group"),
                           request_id=entry.get("requestId"), **waiting)
-                print(f"微信发送开始: queued={len(bridge.state['outbox'])} role={entry.get('role', 'body')}",
-                      file=sys.stderr, flush=True)
                 send_started = time.perf_counter()
                 response = await bridge.channel.send(entry)
                 send_ms = (time.perf_counter() - send_started) * 1000
@@ -267,8 +266,8 @@ class OutputDelivery:
                       attempt=entry.get("attempts", 0), duration_ms=send_ms,
                       queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
                       request_id=entry.get("requestId"))
-            print(f"微信发送完成: elapsed={send_ms:.0f}ms", file=sys.stderr, flush=True)
             bridge.latency.sends.append(send_ms)
+            bridge.state["lastSendMs"] = round(send_ms, 1)
             bridge.mark_wechat_valid()
             bridge.save()
             if not bridge.state["outbox"]:

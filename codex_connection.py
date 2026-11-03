@@ -4,9 +4,9 @@ import os
 import re
 from urllib.parse import urlsplit
 
-SUPPORTED_TRANSPORTS = ("stdio", "native-daemon", "loopback-websocket")
-
 from platform_support import IS_WINDOWS
+
+SUPPORTED_TRANSPORTS = ("stdio", "native-daemon", "loopback-websocket")
 
 
 @dataclass(frozen=True)

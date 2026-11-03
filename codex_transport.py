@@ -1,7 +1,6 @@
 """Codex launcher, byte transport and JSON-RPC lifecycle; no thread state."""
 import asyncio
 import json
-import os
 from pathlib import Path
 import re
 import socket
@@ -10,7 +9,8 @@ import daemon_control
 from backend_runtime import BackendRuntime
 from codex_connection import ConnectionSpec
 from subprocess_io import communicate
-from platform_support import IS_WINDOWS, resolve_command, subprocess_options
+from platform_support import IS_WINDOWS, subprocess_options
+from version import APP_VERSION
 
 SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
 
@@ -73,7 +73,7 @@ class CodexTransport:
                 return
             except CodexRpcError:
                 raise  # A protocol rejection is not evidence that the daemon is absent.
-            except (RuntimeError, OSError, asyncio.TimeoutError):
+            except (TimeoutError, RuntimeError, OSError):
                 await self.close()
             unit = await self.start_shared_daemon(command[:-1], env)
             deadline = asyncio.get_running_loop().time() + 30
@@ -85,11 +85,11 @@ class CodexTransport:
                     return
                 except CodexRpcError:
                     raise
-                except (RuntimeError, OSError, asyncio.TimeoutError) as error:
+                except (TimeoutError, RuntimeError, OSError) as error:
                     state = await daemon_control.status(unit) if unit else {}
                     failure = daemon_control.failure(state, command) if unit else None
                     if failure:
-                        raise failure
+                        raise failure from error
                     last_error = str(error) if isinstance(error, RuntimeError) else type(error).__name__
                     await self.close()
                     await asyncio.sleep(0.5)
@@ -155,7 +155,7 @@ class CodexTransport:
                 limit=16 * 1024 * 1024, **subprocess_options())
         self.reader = asyncio.create_task(self.read())
         await self.rpc("initialize", {"clientInfo": {
-            "name": "codex_wechat", "title": "Codex WeChat", "version": "0.1.0"},
+            "name": "codex_wechat", "title": "Codex WeChat", "version": APP_VERSION},
             "capabilities": {"experimentalApi": True}})
         await self.write({"method": "initialized", "params": {}})
         # Keep project-owned skills local to this app-server connection instead

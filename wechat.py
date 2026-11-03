@@ -8,19 +8,34 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from errors import WeChatAuthExpired
+from errors import WeChatAuthExpired, WeChatPollTimeout
 from diagnostics import error_fields, log_event
-from subprocess_io import communicate
-from latency import CURL_WRITE_OUT, curl_timings, timeout_stage
-from platform_support import curl_command, subprocess_options
+from latency import timeout_stage
+from wechat_http import PooledHTTP
+from configuration import DEFAULT_CONNECTION_IDLE_SECONDS
 import wechat_auth
 from wechat_auth import identity
 
 BASE_URL = "https://ilinkai.weixin.qq.com"
-VERSION = "0.1.0"
-POLL_TIMEOUT = 10
+# This is the WeChat channel protocol identity, independent of the product version.
+CHANNEL_VERSION = "0.1.0"
+POLL_TIMEOUT = 35
+POLL_TIMEOUT_GRACE = 5
+MAX_POLL_TIMEOUT = 120
 SEND_TIMEOUT = 5
 TYPING_TIMEOUT = 2
+
+
+def api_error_kind(code, message):
+    """Fixed diagnostic labels only; message hints are not verified root causes."""
+    if str(code) == "-14":
+        return "auth_expired"
+    hint = message.strip().casefold() if isinstance(message, str) else ""
+    if hint in ("prepare failed", "unknown error"):
+        return hint.replace(" ", "_")
+    if hint in ("frequency limit", "frequency limited", "rate limit exceeded", "too many requests"):
+        return "rate_limit_hint"
+    return "other"
 
 
 @dataclass(frozen=True)
@@ -43,13 +58,19 @@ def trusted_url(value):
 
 
 class WeChat:
-    def __init__(self, account=None):
+    def __init__(self, account=None, *, idle_seconds=DEFAULT_CONNECTION_IDLE_SECONDS):
         self.account = account or {}
         self.base = trusted_url(self.account.get("base_url", BASE_URL))
+        self.http = PooledHTTP(idle_seconds)
+        self.poll_timeout = POLL_TIMEOUT
+
+    def set_idle_seconds(self, seconds):
+        self.http.set_idle_seconds(seconds)
+
+    async def close(self):
+        await self.http.close()
 
     async def request(self, endpoint, body=None, *, auth=True, timeout=40, request_id=None):
-        # A thread blocked in urllib survives task cancellation and delays
-        # asyncio.run shutdown. A curl child can be terminated immediately.
         headers = {"iLink-App-Id": "bot", "iLink-App-ClientVersion": "256"}
         if body is not None:
             headers.update({"Content-Type": "application/json",
@@ -58,33 +79,30 @@ class WeChat:
                                 str(secrets.randbits(32)).encode()).decode()})
         if auth:
             headers["Authorization"] = "Bearer " + self.account["token"]
-        config = ["url = " + json.dumps(self.base + "/" + endpoint)]
-        config.extend("header = " + json.dumps(key + ": " + value)
-                      for key, value in headers.items())
+        payload = None
         if body is not None:
             payload = dict(body)
             if auth:
-                payload["base_info"] = {"channel_version": VERSION,
-                                        "bot_agent": "CodexWechat/" + VERSION}
-            config.append("data = " + json.dumps(json.dumps(payload)))
+                payload["base_info"] = {"channel_version": CHANNEL_VERSION,
+                                        "bot_agent": "CodexWechat/" + CHANNEL_VERSION}
+            payload = json.dumps(payload).encode()
         started = time.perf_counter()
         route = endpoint.partition("?")[0]
         metadata = {"endpoint": route, "request_id": request_id}
         ok, level = False, "warning"
         try:
-            proc = await asyncio.create_subprocess_exec(
-                curl_command(), "--disable",
-                "--silent", "--show-error", "--proto", "=https",
-                "--connect-timeout", str(min(timeout, 10)), "--max-time", str(timeout),
-                "--max-filesize", str(16 * 1024 * 1024),
-                "--write-out", CURL_WRITE_OUT, "--config", "-",
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, **subprocess_options())
-            output, stderr = await communicate(proc, ("\n".join(config) + "\n").encode(), timeout=timeout + 2)
-            metadata.update(curl_timings(stderr))
-            metadata["curl_code"] = proc.returncode
-            if proc.returncode:
-                raise RuntimeError(f"微信网络请求失败（curl {proc.returncode}）")
+            output, timings = await self.http.request(
+                self.base + "/" + endpoint, headers, payload,
+                timeout=timeout, polling=route == "ilink/bot/getupdates")
+            metadata.update(timings)
+            if metadata.get("curl_code"):
+                if (route == "ilink/bot/getupdates" and metadata["curl_code"] == 28
+                        and timeout_stage(metadata) == "request_or_response"
+                        and metadata.get("pretransfer_ms", 0) > 0
+                        and metadata.get("first_byte_ms") == 0
+                        and output in (b"\n0", b"\n000")):
+                    raise WeChatPollTimeout("微信长轮询等待到期")
+                raise RuntimeError(f"微信网络请求失败（curl {metadata['curl_code']}）")
             try:
                 raw, status = output.rsplit(b"\n", 1)
                 status = int(status)
@@ -102,12 +120,19 @@ class WeChat:
             if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
                 code = result.get("errcode") or result.get("ret")
                 metadata["error_code"] = code
+                metadata["api_error_kind"] = api_error_kind(
+                    code, result.get("errmsg") or result.get("msg"))
                 if auth and str(code) == "-14":
                     raise WeChatAuthExpired()
                 raise RuntimeError(f"微信 API 错误 {code}")
-            # Successful long polls are routine traffic, regardless of duration.
-            ok, level = True, "debug" if route == "ilink/bot/getupdates" else "info"
+            # Poll and typing successes are routine traffic; failures remain visible.
+            ok, level = True, "debug" if route in (
+                "ilink/bot/getupdates", "ilink/bot/getconfig", "ilink/bot/sendtyping") else "info"
             return result
+        except WeChatPollTimeout:
+            level = "debug"
+            metadata.update(status="poll_idle_timeout", timeout_stage="request_or_response")
+            raise
         except asyncio.CancelledError:
             level = "debug"
             metadata["status"] = "cancelled"
@@ -122,13 +147,18 @@ class WeChat:
             # One outcome per request; never include bodies, URLs or exception text.
             log_event("wechat.request", level=level, component="wechat", ok=ok,
                       duration_ms=elapsed * 1000, **metadata)
-            if metadata.get("curl_code") or (route != "ilink/bot/getupdates" and elapsed >= 2):
+            if metadata.get("status") != "poll_idle_timeout" and (
+                    metadata.get("curl_code") or (route != "ilink/bot/getupdates" and elapsed >= 2)):
                 print(f"微信请求 {route}: curl={metadata.get('curl_code')} elapsed={elapsed:.2f}s",
                       file=sys.stderr, flush=True)
 
     async def poll(self, cursor):
-        return await self.request("ilink/bot/getupdates", {"get_updates_buf": cursor},
-                                  timeout=POLL_TIMEOUT)
+        result = await self.request("ilink/bot/getupdates", {"get_updates_buf": cursor},
+                                    timeout=self.poll_timeout + POLL_TIMEOUT_GRACE)
+        suggested = result.get("longpolling_timeout_ms")
+        if type(suggested) is int and suggested > 0:
+            self.poll_timeout = min(MAX_POLL_TIMEOUT, max(1, suggested / 1000))
+        return result
 
     async def send(self, entry):
         return await self.request("ilink/bot/sendmessage", {"msg": {
@@ -165,6 +195,14 @@ async def login(store, *, starting=False, rebind=False,
                 before_identity_change=None, persist=True):
     """Acquire credentials; rebind defers local writes until its commit lock."""
     client = WeChat()
+    try:
+        return await _login(client, store, starting=starting, rebind=rebind,
+                            before_identity_change=before_identity_change, persist=persist)
+    finally:
+        await client.close()
+
+
+async def _login(client, store, *, starting, rebind, before_identity_change, persist):
     previous = store.load("account")
     local_tokens = ([str(previous["token"])]
                     if previous and previous.get("token") else [])
@@ -218,8 +256,12 @@ async def login(store, *, starting=False, rebind=False,
             if (wechat_auth.state(state) == wechat_auth.AUTH_REQUIRED or state.get("bindingPending")):
                 # QR status alone does not prove that a previously rejected token
                 # works. getconfig authenticates without consuming the message cursor.
-                await WeChat(previous).request("ilink/bot/getconfig",
+                verification = WeChat(previous)
+                try:
+                    await verification.request("ilink/bot/getconfig",
                                                {"ilink_user_id": previous["user"]}, timeout=10)
+                finally:
+                    await verification.close()
             print("服务端确认此微信机器人已绑定；本地凭据保持不变。", flush=True)
             return LoginResult(previous, previous, False, already_connected=True)
         elif status in ("expired", "verify_code_blocked"):

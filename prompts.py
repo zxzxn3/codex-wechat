@@ -117,7 +117,7 @@ SESSION_TARGET_ACTIVE = (
     "请切换后端或等待任务结束。"
 )
 SESSION_INDEX_INVALID = "未切换会话: 编号无效\n请先发送 `/sessions`。"
-SESSION_USAGE = "用法: `/switch {编号或ID}`"
+SESSION_USAGE = "用法: `/switch {{编号、ID或搜索词}}`"
 NEW_USAGE = "用法: `/new`"
 MODEL_INVALID = "未切换模型: 名称无效\n请使用 `/model` 查看可用模型。"
 MODEL_NOT_IN_CATALOG = "未切换强度: 当前模型不在模型列表中。"
@@ -147,12 +147,16 @@ LABEL_SEND_FAILURES = "发送失败"
 LABEL_ACK = "接收提示"
 LABEL_FINISH = "结束提示"
 LABEL_AUTOSTART = "自启"
+LABEL_CONNECTION_IDLE = "连接空闲"
+VALUE_CONNECTION_IDLE_UNLIMITED = "不按空闲回收"
 LABEL_ATTACHMENTS = "附件上限"
 LABEL_SLICING = "切片"
 LABEL_TARGET_LENGTH = "目标长度"
 LABEL_SOURCE = "来源说明"
 LABEL_COMPACTION = "压缩提示"
 LABEL_QUOTA_WARNING = "限额警告"
+LABEL_QUOTA_PRIMARY = "5小时"
+LABEL_QUOTA_SECONDARY = "7天"
 CURRENT_SESSION = "当前会话"
 SESSION_DESKTOP = "已连接桌面会话"
 SESSION_RESTORED = "已恢复会话"
@@ -164,6 +168,9 @@ NO_MODELS = "暂无可用模型"
 SESSION_PAGE = "当前{page}/{total_pages}页"
 PAGE_INVALID = "页码必须大于 0"
 PAGE_RANGE = "页码超出范围: 1–{count}"
+SESSION_SEARCH_EMPTY = "没有匹配“{query}”的会话。"
+SESSION_SEARCH_MULTIPLE = "找到 {count} 个匹配会话；请用 `/switch {{编号}}` 选择。"
+SESSION_SEARCH_MORE = "仅显示前 {count} 条；`/sessions {query}` 查看全部。"
 SESSION_LIST_FAILED = "会话列表读取未完成，请重试。"
 COMPACT_BLOCKED = "暂不能压缩: 当前会话等待处理。"
 COMPACT_REQUESTED = "已请求压缩上下文。"
@@ -211,14 +218,14 @@ FINISH_TOO_LONG = ACK_TOO_LONG.replace("接收提示", "结束提示")
 
 HELP_STATUS = '当前状态'
 HELP_SETTINGS = '查看设置或修改登录自启'
-HELP_SESSIONS = '会话'
+HELP_SESSIONS = '列出、搜索或翻页会话'
 HELP_NEW = '新建'
 HELP_COMPACT = '压缩当前会话上下文'
 HELP_QUEUE = '排队到当前任务结束后执行'
 HELP_UNQUEUE = '撤回最后一条尚未开始的排队消息'
 HELP_STOP = '停止并清空待办'
 HELP_PING = '微信与供应商网络延迟'
-HELP_SWITCH = '切换会话'
+HELP_SWITCH = '按编号、ID或搜索词切换会话'
 HELP_BACKEND = '查看或切换后端'
 HELP_MODEL = '查看或切换模型'
 HELP_EFFORT = '查看或切换强度'
@@ -526,7 +533,8 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
 
 
 def status_from_fields(values, *, text=prompt_text):
-    label = lambda key: text(_FIELD_LABELS[key])
+    def label(key):
+        return text(_FIELD_LABELS[key])
     counts = "  ".join(f"{label(key)}: {values[key]}" for key in
                        ("queue_depth", "pending_requests", "send_failures")
                        if values[key])
@@ -546,22 +554,32 @@ def status_summary(**kwargs):
 
 
 def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None,
-                     completion_notice="", source_hint=None, autostart=None, text=prompt_text):
+                     completion_notice="", source_hint=None, autostart=None,
+                     connection_idle_seconds=None, text=prompt_text):
     off = text('VALUE_OFF')
     lines = [f"{text('LABEL_ACK')}: {notice or off}",
              f"{text('LABEL_FINISH')}: {completion_notice or off}",
              f"{text('LABEL_ATTACHMENTS')}: {attachment_mib} MiB"]
     if autostart is not None:
         lines.append(f"{text('LABEL_AUTOSTART')}: {autostart}")
+    if connection_idle_seconds is not None:
+        value = (f"{connection_idle_seconds}s" if connection_idle_seconds else
+                 text('VALUE_CONNECTION_IDLE_UNLIMITED'))
+        lines.append(f"{text('LABEL_CONNECTION_IDLE')}: {value}")
     if slicing is not None:
         lines.extend([f"{text('LABEL_SLICING')}: {slicing.mode}",
                       f"{text('LABEL_TARGET_LENGTH')}: {slicing.target_chars} 字符"])
     if source_hint is not None:
         lines.append(f"{text('LABEL_SOURCE')}: {source_hint or off}")
     if notifications is not None:
-        thresholds = "/".join(f"{value}%" for value in notifications.quota_thresholds) or off
+        summaries = []
+        for window, label in (("primary", "LABEL_QUOTA_PRIMARY"),
+                              ("secondary", "LABEL_QUOTA_SECONDARY")):
+            values = notifications.quota_thresholds.get(window, ())
+            summary = "/".join(f"{value}%" for value in values) or off
+            summaries.append(f"{text(label)}={summary}")
         lines.extend([f"{text('LABEL_COMPACTION')}: {text('VALUE_ON') if notifications.compaction else off}",
-                      f"{text('LABEL_QUOTA_WARNING')}: {thresholds}"])
+                      f"{text('LABEL_QUOTA_WARNING')}: " + "；".join(summaries)])
     return panel(*lines)
 
 

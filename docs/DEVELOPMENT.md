@@ -1,0 +1,72 @@
+# 开发与检查
+
+本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，能力边界见
+[CAPABILITIES](CAPABILITIES.md)，外部依据见 [SOURCES](SOURCES.md)。
+
+## 离线测试
+
+```bash
+cd ~/.local/share/codex-wechat
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
+```
+
+Windows、真实微信/CDN、App/daemon 联调不属于离线测试；mock 通过不能写成真实平台或端到端通过。
+相关文档入口、版本和已确认约束应在派发测试时一并交接。
+
+## 静态检查、覆盖率与依赖审计
+
+在已有的运行时 `.venv` 中只安装开发工具；它们不会进入运行时安装：
+
+```bash
+cd ~/.local/share/codex-wechat
+.venv/bin/python -m pip install -r requirements-dev.txt
+```
+
+新建开发环境时，先安装 `requirements.txt`，再安装 `requirements-dev.txt`。
+
+`ruff`、`pyright`、`shellcheck` 仍由系统提供，版本以 `--version` 为准。一键检查：
+
+```bash
+scripts/check.sh
+scripts/check.sh --audit   # 额外审计 requirements，需要网络
+```
+
+脚本依次运行 ruff、pyright、shellcheck 和带分支覆盖的完整单元测试，最后输出覆盖率。
+`--audit` 再运行 pip-audit，检查 `requirements.txt` 和 `requirements-qr.txt` 的已知漏洞。
+它审计的是声明版本；当前 `.venv` 是否已同步，可用
+`.venv/bin/python -m pip_audit --local` 单独确认。
+
+coverage 不是测试生成器，而是记录测试执行时哪些行和分支从未走到。当前基线约 74%，先看
+报告定位错误恢复、附件失败和平台分支的缺口，不设硬性通过门槛。需要逐行查看时运行
+`.venv/bin/python -m coverage html`，产物 `htmlcov/` 已被忽略且不会进入发行包。
+
+`pyproject.toml` 固定 ruff 的 Python 3.11 目标、行宽和规则集，并保存 coverage 的分支/排除
+配置；`pyrightconfig.json` 覆盖顶层模块与 `tests/`，固定基础检查级别和 `.venv`。不运行
+`ruff format` 大面积改样式。
+
+Linux 上 `windows_service.py` 的 pywin32 导入和 `.venv` 未包含的 `cryptography` 会产生
+missing-import 警告；这些是平台/环境边界，不是代码错误。平台条件导入、第三方类型 stub、
+动态 dict 推断的误报用定点 `# pyright: ignore[...]`，不全局关闭检查。
+
+## 依赖版本
+
+运行时依赖在 `requirements.txt` 中用兼容范围声明，安装器不锁死到单一版本；升级依赖后必须
+跑完整离线测试。`curl-cffi` 当前要求 `>=0.17,<0.18`，0.17.0 已通过完整测试并包含安全修复。
+`pywin32` 尚未在 Windows 实机复核，暂不收紧版本。开发工具在 `requirements-dev.txt` 中固定
+版本，避免不同机器上的 coverage/pip-audit 结果漂移。
+
+更新运行时依赖使用 `.venv/bin/python -m pip install -r requirements.txt`；更新后需要重启
+服务才会让新依赖生效，运行中的进程不会自动换包。
+
+## 变更检查
+
+- 改持久状态：同步恢复逻辑、旧版 fixture 和恢复测试；当前没有通用状态版本或迁移框架。
+- 改协议字段：同步 SOURCES、ARCHITECTURE、诊断事件和失败边界。
+- 改提示或配置：保持 `prompts.py` 默认目录和英文 snake_case 字段；无效配置整组保留旧值。
+- 改 Windows/服务/安装：至少做静态入口检查；有实机时再跑真实回归。
+- 提交按主题拆分；cfg 提交使用中文并附 `Committed-by` footer。
+
+## 重构边界
+
+见 [COMPLEXITY](COMPLEXITY.md)：优先解决已观察到的边界问题，不按行数拆文件，不为跨平台
+强行统一平台适配层。

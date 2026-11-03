@@ -93,5 +93,5 @@ class PipeWebSocket:
             try:
                 self.protocol.send_close()
                 await asyncio.wait_for(self.flush(), 1)
-            except (OSError, RuntimeError, asyncio.TimeoutError):
+            except (TimeoutError, OSError, RuntimeError):
                 pass

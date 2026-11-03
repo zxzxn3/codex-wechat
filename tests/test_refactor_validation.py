@@ -30,7 +30,7 @@ class ConfigLoaderExtraTests(unittest.TestCase):
                 "sourceHint": "hint-a",
                 "slicing": {"mode": "smart", "targetChars": 600},
                 "compactionNotice": False,
-                "quotaWarningThresholds": [50],
+                "quotaWarningThresholds": {"primary": [50], "secondary": [25]},
             }
             path.write_text(json.dumps(initial))
             config = dict(initial)
@@ -69,11 +69,13 @@ class ConfigLoaderExtraTests(unittest.TestCase):
             self.assertEqual(completion_template(config, state), DEFAULT_COMPLETION_TEMPLATE)
 
             state["processingNotice"] = "new chat override"
-            unrelated_hot = dict(deleted, quotaWarningThresholds=[25])
+            unrelated_hot = dict(deleted, quotaWarningThresholds={
+                "primary": [25], "secondary": [10]})
             path.write_text(json.dumps(unrelated_hot))
             self.assertFalse(loader.reload(state))
             self.assertEqual(state["processingNotice"], "new chat override")
-            self.assertEqual(loader.hot.notifications.quota_thresholds, (25,))
+            self.assertEqual(loader.hot.notifications.quota_thresholds,
+                             {"primary": (25,), "secondary": (10,)})
 
 
 class CommandMetadataExtraTests(unittest.TestCase):
@@ -84,6 +86,9 @@ class CommandMetadataExtraTests(unittest.TestCase):
             self.assertIn(spec.usage, HELP)
             for alias in spec.aliases:
                 self.assertIs(REGISTRY[alias], spec)
+            if spec.route != "input":
+                self.assertEqual(HANDLERS[spec.name].__name__,
+                                 "command_" + (spec.handler or spec.name.removeprefix("/")))
         self.assertNotIn("/models", REGISTRY)
         self.assertEqual(command_lane("/backend", ""), "local")
         self.assertEqual(command_lane("/backend", "codex"), "backend")

@@ -4,7 +4,6 @@ import base64
 import contextlib
 import io
 import subprocess
-import sys
 import types
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -172,7 +171,7 @@ class AsyncNotificationTests(unittest.IsolatedAsyncioTestCase):
 
         async def timeout(coroutine, _timeout):
             coroutine.close()
-            raise asyncio.TimeoutError
+            raise TimeoutError
 
         with patch.object(platform_ui.asyncio, "create_subprocess_exec",
                           AsyncMock(return_value=process)), \

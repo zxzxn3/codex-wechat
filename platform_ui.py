@@ -5,7 +5,6 @@ import asyncio
 import base64
 import importlib
 import os
-from pathlib import Path
 import shutil
 import subprocess
 
@@ -84,7 +83,7 @@ async def _run_quiet(command: list[str], *, timeout: float,
         return False
     try:
         await asyncio.wait_for(process.wait(), timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         if process.returncode is None:
             try:
                 process.kill()

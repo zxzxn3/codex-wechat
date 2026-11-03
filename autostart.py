@@ -100,6 +100,6 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
+    except (TimeoutError, ValueError, RuntimeError, OSError) as error:
         print(str(error), file=sys.stderr)
         sys.exit(1)

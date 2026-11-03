@@ -143,6 +143,12 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(render_ack(PING_REPLY, values), "WeChat ─120/50ms")
         self.assertEqual(stats.values(), {"ingress_ms": "-", "egress_ms": "50"})
 
+    async def test_last_send_sample_survives_bridge_restart(self):
+        self.bridge.state["lastSendMs"] = 123.4
+        self.bridge.save()
+        restarted = Bridge(self.store, {"user": "owner"}, {})
+        self.assertEqual(restarted.prompt_fields()["egress_ms"], "123")
+
     async def test_ack_text_controls_notice_without_switch(self):
         self.bridge.state["context"] = "context"
         self.bridge.state["processingNotice"] = "{ingress_ms}|{egress_ms}ms"
@@ -195,7 +201,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for unwanted in ("审批: 0", "发送失败: 0", "Session", "·", "->", "→"):
             self.assertNotIn(unwanted, status)
         self.assertTrue(HELP.startswith("`/status` 当前状态"))
-        for command in ("/status", "/switch {编号或ID}", "/backend {名称}", "/approve", "/sendimage"):
+        for command in ("/status", "/switch {编号、ID或搜索词}", "/backend {名称}",
+                        "/approve", "/sendimage"):
             self.assertIn(command, HELP)
         self.assertNotIn("```", HELP)
         self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")), "后端连接中断")
@@ -243,7 +250,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(text.startswith("```\n1."))
         self.assertIn("1. 当前会话  [当前  工作中", text)
         self.assertIn("2. Super-agent 调研  [工作中]", text)
-        self.assertIn("```\n`/switch {编号或ID}`", text)
+        self.assertIn("```\n`/switch {编号、ID或搜索词}`", text)
         self.assertNotIn("thread-current", text)
         self.assertNotIn("[active]", text)
 
@@ -284,12 +291,74 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         text = self.bridge.state["outbox"][-1]["text"]
         self.assertEqual(self.bridge.state["sessionChoices"], [str(i) for i in range(10, 20)])
         self.assertNotIn("2/3页", text.split("```")[1])
-        self.assertTrue(text.endswith("`/sessions {页码}` 当前2/3页"))
+        self.assertTrue(text.endswith("`/sessions [页码|搜索词]` 当前2/3页"))
         self.assertNotIn("下一页", text)
         with self.assertRaises(UserFacingError):
             await handle(self.bridge, "/sessions", "4")
         with self.assertRaises(UserFacingError):
             await handle(self.bridge, "/sessions", "next")
+
+    async def test_sessions_keyword_uses_native_search(self):
+        self.bridge.state["context"] = "context"
+        calls = []
+
+        async def threads(cursor=None, search=None):
+            calls.append((cursor, search))
+            return {"data": [{"id": "target", "name": "微信重构"}]}
+
+        self.bridge.backend.list_threads = threads
+        await handle(self.bridge, "/sessions", "微信")
+        text = self.bridge.state["outbox"][-1]["text"]
+        self.assertEqual(calls, [(None, "微信")])
+        self.assertIn("1. 微信重构", text)
+        self.assertEqual(self.bridge.state["sessionChoices"], ["target"])
+        self.assertEqual(self.bridge.state["sessionSearch"], "微信")
+
+    async def test_switch_unique_search_result_activates(self):
+        self.bridge.state.update(context="context", thread="current")
+        self.bridge.backend.list_threads = AsyncMock(return_value={
+            "data": [{"id": "target", "name": "微信重构"}]})
+        self.bridge.backend.read_thread = AsyncMock(return_value={
+            "id": "target", "status": {"type": "inactive"}})
+        self.bridge.backend.thread = AsyncMock(return_value="target")
+        await handle(self.bridge, "/switch", "重构")
+        self.bridge.backend.thread.assert_awaited_once_with("target", {})
+        self.assertEqual(self.bridge.state["thread"], "target")
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"].splitlines()[0],
+                         "已切换会话")
+
+    async def test_switch_ambiguous_search_lists_choices_without_activating(self):
+        self.bridge.state.update(context="context", thread="current")
+        self.bridge.backend.list_threads = AsyncMock(return_value={"data": [
+            {"id": "a", "name": "微信一"}, {"id": "b", "name": "微信二"}]})
+        self.bridge.backend.thread = AsyncMock()
+        await handle(self.bridge, "/switch", "微信")
+        self.bridge.backend.thread.assert_not_awaited()
+        text = self.bridge.state["outbox"][-1]["text"]
+        self.assertIn("1. 微信一", text)
+        self.assertIn("2. 微信二", text)
+        self.assertIn("找到 2 个匹配会话", text)
+        self.assertIn("`/switch {编号}`", text)
+        self.assertEqual(self.bridge.state["sessionChoices"], ["a", "b"])
+
+    async def test_switch_empty_search_reports_no_match(self):
+        self.bridge.state.update(context="context", thread="current")
+        self.bridge.backend.list_threads = AsyncMock(return_value={"data": []})
+        with self.assertRaises(UserFacingError) as raised:
+            await handle(self.bridge, "/switch", "不存在")
+        self.assertIn("没有匹配", str(raised.exception))
+
+    async def test_switch_truncated_matches_offer_search_outside_panel(self):
+        self.bridge.state.update(context="context", thread="current")
+        self.bridge.backend.list_threads = AsyncMock(return_value={"data": [
+            {"id": str(i), "name": f"微信 {i}"} for i in range(11)]})
+        self.bridge.backend.thread = AsyncMock()
+        await handle(self.bridge, "/switch", "微信")
+        text = self.bridge.state["outbox"][-1]["text"]
+        self.bridge.backend.thread.assert_not_awaited()
+        self.assertEqual(len(self.bridge.state["sessionChoices"]), 10)
+        self.assertIn("仅显示前 10 条", text.split("```")[-1])
+        self.assertIn("`/sessions 微信`", text.split("```")[-1])
 
     async def test_backend_arguments_are_lowercase(self):
         self.bridge.state["context"] = "context"

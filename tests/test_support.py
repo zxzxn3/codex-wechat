@@ -3,7 +3,6 @@ from functools import wraps
 import os
 from pathlib import Path
 import tempfile
-import unittest
 
 def requires_symlinks(method):
     @wraps(method)

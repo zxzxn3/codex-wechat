@@ -12,6 +12,7 @@ from commands import dispatch
 import diagnostics
 from storage import Store
 from wechat import WeChat
+from tests.http_fixtures import exchange
 
 
 class DiagnosticStageTests(unittest.IsolatedAsyncioTestCase):
@@ -75,7 +76,9 @@ class DiagnosticStageTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.reply('reply')
         entry = self.bridge.state['outbox'][0]
         self.bridge.output._queued_at[entry['id']] -= .25
-        await self.send_one()
+        with patch('output_delivery.print') as console:
+            await self.send_one()
+        console.assert_not_called()
         start = next(record for record in self.records() if record['event'] == 'output.send_start')
         self.assertGreaterEqual(start['queue_wait_ms'], 250)
         self.assertEqual(self.bridge.output._queued_at, {})
@@ -89,11 +92,9 @@ class DiagnosticStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('queue_wait_ms', start)
 
     async def test_request_timeout_logs_phase_and_proxy_without_raw_stderr(self):
-        process = type('Process', (), {'returncode': 28})()
         trailer = (b'SECRET-ERROR\ncodex_wechat_proxy_used=1\n'
                    b'{"time_connect":0.01,"time_appconnect":0.05,"time_starttransfer":0,"time_total":5}')
-        with patch('wechat.asyncio.create_subprocess_exec', AsyncMock(return_value=process)), \
-                patch('wechat.communicate', AsyncMock(return_value=(b'\n000', trailer))):
+        with exchange(b'\n000', code=28, stderr=trailer):
             with self.assertRaises(RuntimeError):
                 await WeChat({'token': 'PRIVATE-TOKEN'}).request('ilink/bot/sendmessage')
         record = self.records()[-1]

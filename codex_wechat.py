@@ -11,6 +11,7 @@ import sys
 import time
 import uuid
 
+from lifecycle import can_restart, can_handoff_service
 import service_adapter
 import service_control
 import wechat_auth
@@ -43,7 +44,7 @@ from wechat_content import (
     quoted_prompt,
     remember_quote,
 )
-from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, backend_reason
+from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, WeChatPollTimeout, backend_reason
 from platform_support import IS_WINDOWS, data_root
 from diagnostics import error_fields, log_event, new_request_id
 from log_viewer import show_logs
@@ -62,7 +63,10 @@ class Bridge:
         self.state.setdefault("quoteCache", {})
         self.wechat_paused = wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED
         self.auth_wake = asyncio.Event()
-        self.channel = channel or WeChat(account)
+        self.auth_notice_lock = asyncio.Lock()
+        self.auth_notice_attempted = False
+        self.channel = channel or WeChat(
+            account, idle_seconds=self.settings.hot.connection_idle_seconds)
         self.media = Media(store, self.channel, config.get("media"))
         self.backend_factory = backend_factory
         self.backend_configs = definitions(config)
@@ -74,6 +78,9 @@ class Bridge:
         self.input_paused = False
         self.backend_recovering = False
         self.latency = Latency()
+        last_send = self.state.get("lastSendMs")
+        if type(last_send) in (int, float) and last_send >= 0:
+            self.latency.sends.append(float(last_send))
         self.typing = TypingIndicator(self)
         self.external_results = asyncio.Queue()
         self.backend = self.make_backend(self.backend_name)
@@ -110,6 +117,9 @@ class Bridge:
 
     def reload_config(self):
         changed = self.settings.reload(self.state)
+        set_idle = getattr(self.channel, "set_idle_seconds", None)
+        if set_idle is not None:
+            set_idle(self.settings.hot.connection_idle_seconds)
         self.backend.compaction_notice = self.notifications.compaction
         if changed:
             self.save()
@@ -169,20 +179,35 @@ class Bridge:
         self.wechat_paused = True
         details = self.state["wechatAuth"]
         command = wechat_auth.rebind_command()
-        notify = (not details.get("notificationAttempted", False)
-                  or details.get("notificationCommand") != command)
-        if notify:
-            details["notificationAttempted"] = True
-            details["notificationCommand"] = command
         self.save()
         log_event("wechat.auth_required", level="warning", component="wechat",
                   queued=len(self.state.get("outbox", [])))
-        if notify:
-            try:
-                await service_adapter.notify(self.prompt("WECHAT_AUTH_TITLE"),
-                                             self.prompt("WECHAT_REBIND_HINT", {"command": command}))
-            except Exception:
-                print("微信绑定已失效；重新绑定\n" + wechat_auth.rebind_command(), file=sys.stderr)
+        async with self.auth_notice_lock:
+            if self.auth_notice_attempted or (
+                    details.get("notificationDelivered", False)
+                    and details.get("notificationCommand") == command):
+                return
+            self.auth_notice_attempted = True
+            for attempt in range(1, 4):
+                try:
+                    delivered = bool(await service_adapter.notify(
+                        self.prompt("WECHAT_AUTH_TITLE"),
+                        self.prompt("WECHAT_REBIND_HINT", {"command": command})))
+                except Exception as exc:
+                    delivered = False
+                    log_event("wechat.auth_notice_failed", level="warning",
+                              component="wechat", attempt=attempt, **error_fields(exc))
+                else:
+                    log_event("wechat.auth_notice", level="info" if delivered else "warning",
+                              component="wechat", attempt=attempt, ok=delivered)
+                if delivered:
+                    details["notificationDelivered"] = True
+                    details["notificationCommand"] = command
+                    details.pop("notificationAttempted", None)
+                    self.save()
+                    return
+                if attempt < 3:
+                    await asyncio.sleep(5)
 
     def check_quota(self, backend, payload):
         if backend is not self.backend or not self.state.get("context"):
@@ -442,9 +467,7 @@ class Bridge:
                 (self.settings.path is not None and
                  self.settings.path.resolve() != (default / "config.json").resolve())):
             raise UserFacingError(self.prompt("AUTOSTART_CUSTOM_PATH"))
-        if (self.restarting or self.running or self.steering or self.active_turn()
-                or (self.session_lock.locked() and not self.backend_recovering)
-                or self.backend.pending):
+        if not can_handoff_service(self):
             raise UserFacingError(self.prompt("AUTOSTART_BUSY"))
         self.restarting = True
         try:
@@ -462,11 +485,7 @@ class Bridge:
 
 
     async def restart_service(self):
-        current = self.state.get("currentInput")
-        submitted = current and current.get("phase") != InputPhase.PREPARING
-        if (self.restarting or self.steering or self.active_turn() or submitted
-                or (self.running and not current)
-                or (self.session_lock.locked() and not self.backend_recovering)):
+        if not can_restart(self):
             raise UserFacingError(self.prompt("BUSY_RESTART"))
         # No await before closing the dispatch barrier. Preparing work is recoverable;
         # queued work must not make a disconnected bridge impossible to restart.
@@ -479,7 +498,7 @@ class Bridge:
             self.reply(self.prompt("RESTART_STARTED"))
             try:
                 await asyncio.wait_for(self.outbox_drained.wait(), 20)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise UserFacingError(self.prompt("RESTART_CONFIRM_UNSENT")) from None
             self.state["restartRequested"] = True
             self.save()
@@ -504,7 +523,7 @@ class Bridge:
                     await asyncio.wait_for(self.control(text, received=received), 5)
                 else:
                     await self.control(text, received=received)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.reply(self.prompt("CONTROL_TIMEOUT"))
                 log_event("control.timeout", level="warning", component="input",
                           kind=lane, request_id=received.get("request_id"), command=received.get("command"),
@@ -585,6 +604,11 @@ class Bridge:
                 self.mark_wechat_valid()
                 await self.receive(batch)
                 delay = 2
+            except WeChatPollTimeout:
+                # The transport reached the long-poll wait deadline. No cursor or
+                # authentication state changes, and no reconnect backoff is needed.
+                delay = 2
+                continue
             except WeChatAuthExpired:
                 await self.require_wechat_rebind()
             except Exception as error:
@@ -616,7 +640,12 @@ class Bridge:
                 if not task.done() and not task.cancelling():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            await self.backend.close()
+            try:
+                await self.backend.close()
+            finally:
+                close_channel = getattr(self.channel, "close", None)
+                if close_channel is not None:
+                    await close_channel()
             log_event("bridge.stop", component="bridge")
 
 
@@ -716,7 +745,11 @@ async def send_stop_notification(state_dir, config_path):
     entry = {"id": str(uuid.uuid4()), "user": account["user"],
              "context": context, "text": text}
     try:
-        await WeChat(account).send(entry)
+        client = WeChat(account)
+        try:
+            await client.send(entry)
+        finally:
+            await client.close()
     except Exception as error:
         print(f"关闭通知未发送：{type(error).__name__}", file=sys.stderr, flush=True)
 
@@ -798,8 +831,9 @@ async def main():
 if __name__ == "__main__":
     if IS_WINDOWS:
         for stream in (sys.stdout, sys.stderr):
-            if hasattr(stream, "reconfigure"):
-                stream.reconfigure(encoding="utf-8", errors="replace")
+            reconfigure = getattr(stream, "reconfigure", None)
+            if reconfigure is not None:
+                reconfigure(encoding="utf-8", errors="replace")
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, asyncio.CancelledError):

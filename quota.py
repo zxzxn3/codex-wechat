@@ -7,7 +7,7 @@ from prompts import limit_duration, prompt_text
 
 
 def quota_warnings(records, payload, scope, thresholds, *, now=None, text=prompt_text):
-    if not thresholds or not isinstance(payload, dict):
+    if not thresholds or not isinstance(thresholds, dict) or not isinstance(payload, dict):
         return []
     now = time.time() if now is None else now
     buckets = payload.get("rateLimitsByLimitId")
@@ -28,7 +28,8 @@ def quota_warnings(records, payload, scope, thresholds, *, now=None, text=prompt
             continue
         for window in ("primary", "secondary"):
             value = snapshot.get(window)
-            if not isinstance(value, dict):
+            window_thresholds = thresholds.get(window)
+            if not isinstance(value, dict) or not window_thresholds:
                 continue
             used = value.get("usedPercent")
             if type(used) not in (int, float) or not math.isfinite(used) or not 0 <= used <= 100:
@@ -39,13 +40,24 @@ def quota_warnings(records, payload, scope, thresholds, *, now=None, text=prompt
             old = records.get(key)
             reset = value.get("resetsAt")
             reset = reset if type(reset) in (int, float) and math.isfinite(reset) else None
-            warned = set(old.get("warned", [])) if old else set()
-            if old:
+            warned = set()
+            old_remaining = old_reset = None
+            if isinstance(old, dict):
+                previous_warned = old.get("warned")
+                if isinstance(previous_warned, (list, tuple, set)):
+                    warned = {value for value in previous_warned if type(value) is int}
+                old_remaining = old.get("remaining")
                 old_reset = old.get("reset")
+            if type(old_remaining) not in (int, float) or not math.isfinite(old_remaining):
+                old_remaining = None
+            if type(old_reset) not in (int, float) or not math.isfinite(old_reset):
+                old_reset = None
+            if old_remaining is not None:
                 if ((old_reset is not None and reset is not None and now >= old_reset and reset > old_reset)
-                        or remaining > max(thresholds)):
+                        or remaining > max(window_thresholds)):
                     warned.clear()
-                crossed = [t for t in thresholds if old["remaining"] > t >= remaining and t not in warned]
+                crossed = [t for t in window_thresholds
+                           if old_remaining > t >= remaining and t not in warned]
                 if crossed:
                     warned.update(crossed)
                     duration = limit_duration(value.get("windowDurationMins")) or window

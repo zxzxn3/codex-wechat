@@ -11,11 +11,11 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 from pathlib import PureWindowsPath
 
-import codex_wechat
 import rebind
 import wechat
 import wechat_auth
-from codex_wechat import Bridge, startup_account, status_payload
+from tests.http_fixtures import exchange
+from codex_wechat import Bridge, startup_account
 from configuration import ConfigurationError
 from errors import WeChatAuthExpired
 from service_adapter import ServiceState
@@ -187,18 +187,9 @@ class StartupPendingTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RequestClassificationTests(unittest.IsolatedAsyncioTestCase):
-    class Proc:
-        def __init__(self, returncode):
-            self.returncode = returncode
-
     async def request(self, *, auth, payload, status=200, returncode=0):
         output = json.dumps(payload).encode() + b"\n" + str(status).encode()
-
-        async def fake_exec(*args, **kwargs):
-            return self.Proc(returncode)
-
-        with patch.object(wechat.asyncio, "create_subprocess_exec", fake_exec), \
-                patch.object(wechat, "communicate", AsyncMock(return_value=(output, b""))):
+        with exchange(output, code=returncode):
             client = wechat.WeChat({"token": "t", "base_url": "https://ilinkai.weixin.qq.com"})
             return await client.request("ilink/bot/getupdates", {}, auth=auth)
 

@@ -93,6 +93,38 @@ class WeChatReauthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["unsent"], 1)
         self.assertEqual(payload["auth_detected_at"], 123)
 
+    async def test_notice_retries_false_then_persists_success(self):
+        with patch("codex_wechat.service_adapter.notify", AsyncMock(
+                side_effect=[False, False, True])) as notify, \
+                patch("codex_wechat.asyncio.sleep", AsyncMock()) as sleep:
+            await self.bridge.require_wechat_rebind()
+            await self.bridge.require_wechat_rebind()
+        self.assertEqual(notify.await_count, 3)
+        self.assertEqual([call.args for call in sleep.await_args_list], [(5,), (5,)])
+        self.assertTrue(self.store.load("bridge")["wechatAuth"]["notificationDelivered"])
+
+    async def test_failed_notice_budget_resets_on_process_restart(self):
+        with patch("codex_wechat.service_adapter.notify", AsyncMock(
+                return_value=False)) as notify, \
+                patch("codex_wechat.asyncio.sleep", AsyncMock()) as sleep:
+            await asyncio.gather(self.bridge.require_wechat_rebind(),
+                                 self.bridge.require_wechat_rebind())
+        self.assertEqual(notify.await_count, 3)
+        self.assertEqual(sleep.await_count, 2)
+        self.assertNotIn("notificationDelivered", self.store.load("bridge")["wechatAuth"])
+        restarted = Bridge(self.store, self.bridge.account, {}, channel=self.channel)
+        with patch("codex_wechat.service_adapter.notify", AsyncMock(return_value=True)) as notify:
+            await restarted.require_wechat_rebind()
+        notify.assert_awaited_once()
+
+    async def test_notice_exception_uses_same_retry_budget(self):
+        with patch("codex_wechat.service_adapter.notify", AsyncMock(
+                side_effect=[RuntimeError("fixture"), True])) as notify, \
+                patch("codex_wechat.asyncio.sleep", AsyncMock()) as sleep:
+            await self.bridge.require_wechat_rebind()
+        self.assertEqual(notify.await_count, 2)
+        sleep.assert_awaited_once_with(5)
+
 
 if __name__ == "__main__":
     unittest.main()

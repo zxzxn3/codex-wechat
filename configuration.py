@@ -1,5 +1,5 @@
 """Local configuration and atomic hot-setting reloads."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import json
 import sys
@@ -8,10 +8,16 @@ from diagnostics import error_fields, log_event
 
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
-                   "compactionNotice", "quotaWarningThresholds", "prompts")
+                   "compactionNotice", "quotaWarningThresholds", "prompts", "connectionIdleSeconds")
+DEFAULT_CONNECTION_IDLE_SECONDS = 60
 DEFAULT_COMPLETION_TEMPLATE = "`OUT > {output_tokens}`"
 DEFAULT_ACK_TEMPLATE = "`IN < {input_tokens}`"
 TEXT_LIMIT_BYTES = 3000
+QUOTA_WINDOWS = ("primary", "secondary")
+DEFAULT_QUOTA_THRESHOLDS = {
+    "primary": (50, 25, 10, 5, 1),
+    "secondary": (50, 25, 10, 5, 1),
+}
 
 
 class ConfigurationError(ValueError):
@@ -21,18 +27,29 @@ class ConfigurationError(ValueError):
 @dataclass(frozen=True)
 class Notifications:
     compaction: bool = False
-    quota_thresholds: tuple[int, ...] = (50, 25, 10, 5, 1)
+    quota_thresholds: dict[str, tuple[int, ...]] = field(
+        default_factory=lambda: dict(DEFAULT_QUOTA_THRESHOLDS))
 
     @classmethod
     def from_config(cls, config):
         compact = config.get("compactionNotice", cls.compaction)
-        thresholds = config.get("quotaWarningThresholds", list(cls.quota_thresholds))
         if type(compact) is not bool:
             raise ValueError("compactionNotice 必须是布尔值")
-        if (not isinstance(thresholds, list) or
-                any(type(value) is not int or not 0 <= value <= 100 for value in thresholds)):
-            raise ValueError("quotaWarningThresholds 必须是 0–100 整数列表")
-        return cls(compact, tuple(sorted(set(thresholds), reverse=True)))
+        value = config.get("quotaWarningThresholds")
+        if "quotaWarningThresholds" not in config:
+            thresholds = dict(DEFAULT_QUOTA_THRESHOLDS)
+        elif not isinstance(value, dict) or set(value) != set(QUOTA_WINDOWS):
+            raise ValueError("quotaWarningThresholds 必须分别配置 primary 和 secondary")
+        else:
+            thresholds = {}
+            for window in QUOTA_WINDOWS:
+                values = value[window]
+                if (not isinstance(values, list) or
+                        any(type(item) is not int or not 0 <= item <= 100 for item in values)):
+                    raise ValueError(
+                        f"quotaWarningThresholds.{window} 必须是 0–100 整数列表")
+                thresholds[window] = tuple(sorted(set(values), reverse=True))
+        return cls(compact, thresholds)
 
 
 @dataclass(frozen=True)
@@ -60,6 +77,7 @@ class HotSettings:
     notifications: Notifications
     source_hint: str
     prompts: dict[str, str]
+    connection_idle_seconds: int
 
     @classmethod
     def from_config(cls, config):
@@ -70,8 +88,11 @@ class HotSettings:
         if not isinstance(hint, str) or len(hint.encode()) > 4000:
             raise ValueError("sourceHint 必须是最多 4000 字节的文本")
         templates = validate_prompt_overrides(config.get("prompts", {}), limit=TEXT_LIMIT_BYTES)
+        idle = config.get("connectionIdleSeconds", DEFAULT_CONNECTION_IDLE_SECONDS)
+        if type(idle) is not int or not 0 <= idle <= 3600:
+            raise ValueError("connectionIdleSeconds 必须是 0–3600 的整数")
         return cls(Slicing.from_config(config.get("slicing")), Notifications.from_config(config), hint,
-                   templates)
+                   templates, idle)
 
 
 def processing_template(config, state):

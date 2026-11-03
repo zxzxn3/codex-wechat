@@ -165,13 +165,14 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             class Process:
                 pid = 1234
 
-                def __init__(self):
+                def __init__(self, returncode):
                     self.returncode = returncode
 
                 async def wait(self):
-                    return returncode
+                    return self.returncode
 
-            spawn = AsyncMock(side_effect=lambda *args, **kwargs: (Process(), Stream()))
+            spawn = AsyncMock(side_effect=lambda *args, returncode=returncode, **kwargs:
+                              (Process(returncode), Stream()))
             sleep = AsyncMock()
             with tempfile.TemporaryDirectory() as temp:
                 with patch.object(windows_service, "_spawn_bridge", spawn), \

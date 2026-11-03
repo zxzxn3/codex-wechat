@@ -13,7 +13,7 @@ import sys
 from backend_runtime import BackendRuntime, run
 from codex_connection import ConnectionSpec
 from native_codex import APP_DESKTOP_ID, discover_app, discover_app_codex, discover_codex, supports_app_daemon
-from platform_support import IS_WINDOWS, INSTALL_ROOT, data_root, resolve_command
+from platform_support import IS_WINDOWS, INSTALL_ROOT, data_root
 from profiles import definitions
 
 

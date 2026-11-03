@@ -33,9 +33,12 @@ class StandaloneInstallerTests(unittest.TestCase):
             with self.subTest(native=native), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 for name in installer.REQUIRED_FILES:
-                    path=root/name; path.parent.mkdir(parents=True,exist_ok=True); path.write_text('fixture')
+                    path=root/name
+                    path.parent.mkdir(parents=True,exist_ok=True)
+                    path.write_text('fixture')
                 python=installer._venv_python(root)
-                python.parent.mkdir(parents=True); python.touch()
+                python.parent.mkdir(parents=True)
+                python.touch()
                 with patch.object(installer, '_run') as run, \
                         patch.object(installer.shutil, 'which', return_value=native):
                     installer.prepare_runtime(root)

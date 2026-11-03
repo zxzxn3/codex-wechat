@@ -1,6 +1,5 @@
 """iLink image/file CDN transport. Cipher format is prescribed by Tencent."""
 import asyncio
-from subprocess_io import communicate
 import base64
 import hashlib
 import json
@@ -8,12 +7,11 @@ import os
 from pathlib import Path
 import re
 import secrets
-import tempfile
 import urllib.parse
 import uuid
 
 from configuration import DEFAULT_SOURCE_HINT
-from platform_support import IS_WINDOWS, curl_command, subprocess_options
+from platform_support import IS_WINDOWS
 
 CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_MAX_MIB = 20
@@ -154,50 +152,21 @@ class Media:
 
     async def transfer(self, url, data=None):
         url = cdn_url(url)
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        # curl uses Happy Eyeballs instead of waiting a full timeout per IPv6 address.
-        # URL goes through stdin, so the encrypted query parameter is absent from argv/logs.
-        with tempfile.TemporaryDirectory(prefix="transfer-", dir=self.root) as temporary:
-            folder = Path(temporary)
-            body, headers = folder / "body", folder / "headers"
-            arguments = [curl_command(), "--disable", "--silent", "--fail", "--globoff",
-                "--proto", "=https", "--connect-timeout", "10", "--max-time", "60",
-                "--max-filesize", str(self.limit + 16), "--output", str(body),
-                "--dump-header", str(headers), "--write-out", "%{http_code}", "--config", "-"]
-            if data is not None:
-                upload = folder / "upload"
-                upload.write_bytes(data)
-                if not IS_WINDOWS:
-                    upload.chmod(0o600)
-                arguments.extend(["--header", "Content-Type: application/octet-stream",
-                                  "--data-binary", "@" + str(upload)])
-            try:
-                process = await asyncio.create_subprocess_exec(*arguments,
-                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
-            except FileNotFoundError:
-                raise MediaError("附件传输需要 curl。") from None
-            try:
-                output, _ = await communicate(process,
-                    ("url = " + json.dumps(url, ensure_ascii=False) + "\n").encode(), timeout=65)
-            except asyncio.TimeoutError:
-                raise MediaError("附件传输达到总超时限制。") from None
-            if process.returncode:
-                if process.returncode == 63:
-                    raise MediaError("附件超过本地大小限制。")
-                raise MediaError(f"附件 CDN 请求失败（curl {process.returncode}），未输出含令牌的 URL。")
-            if output.strip() != b"200":
-                raise MediaError("微信 CDN 未返回 HTTP 200。")
-            with body.open("rb") as stream:
-                received = stream.read(self.limit + 17)
-            if len(received) > self.limit + 16:
+        try:
+            received, status, code, parameter = await self.channel.http.transfer(
+                url, data, limit=self.limit + 16)
+        except TimeoutError:
+            raise MediaError("附件传输达到总超时限制。") from None
+        except Exception:
+            # Transport exception strings can contain the encrypted CDN query.
+            raise MediaError("附件 CDN 请求失败，未输出含令牌的 URL。") from None
+        if code:
+            if code == 63:
                 raise MediaError("附件超过本地大小限制。")
-            parameter = None
-            for line in headers.read_text(errors="replace").splitlines():
-                key, _, value = line.partition(":")
-                if key.lower() == "x-encrypted-param":
-                    parameter = value.strip()
-            return received, parameter
+            raise MediaError(f"附件 CDN 请求失败（curl {code}），未输出含令牌的 URL。")
+        if status != 200:
+            raise MediaError("微信 CDN 未返回 HTTP 200。")
+        return received, parameter
 
     async def incoming(self, items):
         if len(items) > MAX_ATTACHMENTS:

@@ -20,6 +20,10 @@ class WeChatAuthExpired(RuntimeError):
         super().__init__("微信绑定已失效；运行 " + rebind_command())
 
 
+class WeChatPollTimeout(RuntimeError):
+    """Long poll reached its wait deadline after HTTPS preparation, without a response."""
+
+
 def backend_reason(error):
     if isinstance(error, BackendStartupError):
         return error.reason

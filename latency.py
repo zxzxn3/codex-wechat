@@ -34,7 +34,7 @@ CURL_WRITE_OUT = ("%{stderr}\ncodex_wechat_proxy_used=%{proxy_used}\n{" + ",".jo
 ) + "}%{stdout}\n%{http_code}")
 
 
-def curl_timings(stderr):
+def curl_timings(stderr, *, connection_reused=False):
     """Read only the numeric write-out trailer; discard curl error text entirely."""
     try:
         raw = json.loads(stderr.rsplit(b"\n", 1)[-1])
@@ -58,8 +58,8 @@ def curl_timings(stderr):
             values[field] = value
     for field, (start, end) in _PHASE_PAIRS.items():
         before, after = values.get(start), values.get(end)
-        if field in _POST_TLS_PHASES and not (
-                values.get("connect_ms", 0) > 0 and values.get("appconnect_ms", 0) > 0):
+        if field in _POST_TLS_PHASES and not (connection_reused or (
+                values.get("connect_ms", 0) > 0 and values.get("appconnect_ms", 0) > 0)):
             continue
         # Zero can mean that a milestone was never reached. Do not invent a
         # completed TLS/wait/download phase after a failed connection.
@@ -71,6 +71,8 @@ def curl_timings(stderr):
 
 def timeout_stage(timings):
     """Classify only reached HTTPS milestones, never infer a remote root cause."""
+    if timings.get("connection_reused"):
+        return "response_body" if timings.get("first_byte_ms", 0) > 0 else "request_or_response"
     if "connect_ms" not in timings or "appconnect_ms" not in timings:
         return "unknown"
     if timings["connect_ms"] <= 0:
@@ -177,7 +179,7 @@ async def provider_latency(backend):
         if target is None:
             return "unavailable"
         return await connection_probe(*target)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return "timeout"
     except (OSError, ValueError, RuntimeError):
         return "unavailable"

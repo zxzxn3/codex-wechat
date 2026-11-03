@@ -116,17 +116,12 @@ class SingleInstance:
     def acquire(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         if os.name == "nt":
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            kernel32.CreateMutexW.restype = ctypes.c_void_p
-            kernel32.CreateMutexW.argtypes = [
-                ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
-            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-            handle = kernel32.CreateMutexW(None, False, _mutex_name(self.state_dir))
-            if not handle:
-                raise OSError("could not create the supervisor mutex")
-            if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-                kernel32.CloseHandle(handle)
+            import win32api
+            import win32event
+            import winerror
+            handle = win32event.CreateMutex(None, False, _mutex_name(self.state_dir))
+            if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+                handle.Close()
                 raise AlreadyRunning("another supervisor owns this state directory")
             self._handle = handle
             return
@@ -142,9 +137,7 @@ class SingleInstance:
 
     def release(self) -> None:
         if self._handle is not None:
-            import ctypes
-            ctypes.windll.kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-            ctypes.windll.kernel32.CloseHandle(self._handle)
+            self._handle.Close()
             self._handle = None
         if self._stream is not None:
             try:
@@ -162,98 +155,43 @@ class ChildJob:
     Object; the bridge owns that lifecycle and must not kill a shared daemon.
     """
 
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
-    JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK = 0x00001000
-    PROCESS_SET_QUOTA = 0x0100
-    PROCESS_TERMINATE = 0x0001
-
     def __init__(self):
         self._handle = None
-        self._kernel32 = None
 
     def open(self) -> None:
         if os.name != "nt":
             return
-        import ctypes
-        from ctypes import wintypes
-
-        class IO_COUNTERS(ctypes.Structure):
-            _fields_ = [
-                ("ReadOperationCount", ctypes.c_ulonglong),
-                ("WriteOperationCount", ctypes.c_ulonglong),
-                ("OtherOperationCount", ctypes.c_ulonglong),
-                ("ReadTransferCount", ctypes.c_ulonglong),
-                ("WriteTransferCount", ctypes.c_ulonglong),
-                ("OtherTransferCount", ctypes.c_ulonglong),
-            ]
-
-        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ("PerProcessUserTimeLimit", ctypes.c_longlong),
-                ("PerJobUserTimeLimit", ctypes.c_longlong),
-                ("LimitFlags", wintypes.DWORD),
-                ("MinimumWorkingSetSize", ctypes.c_size_t),
-                ("MaximumWorkingSetSize", ctypes.c_size_t),
-                ("ActiveProcessLimit", wintypes.DWORD),
-                ("Affinity", ctypes.c_size_t),
-                ("PriorityClass", wintypes.DWORD),
-                ("SchedulingClass", wintypes.DWORD),
-            ]
-
-        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
-                ("IoInfo", IO_COUNTERS),
-                ("ProcessMemoryLimit", ctypes.c_size_t),
-                ("JobMemoryLimit", ctypes.c_size_t),
-                ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                ("PeakJobMemoryUsed", ctypes.c_size_t),
-            ]
-
-        kernel32 = ctypes.windll.kernel32
-        kernel32.CreateJobObjectW.restype = ctypes.c_void_p
-        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
-        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-        kernel32.SetInformationJobObject.argtypes = [
-            ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
-        handle = kernel32.CreateJobObjectW(None, None)
-        if not handle:
-            raise OSError("could not create the bridge Job Object")
-        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-        info.BasicLimitInformation.LimitFlags = (
-            self.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
-            self.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK)
-        if not kernel32.SetInformationJobObject(
-                handle, 9, ctypes.addressof(info), ctypes.sizeof(info)):
-            kernel32.CloseHandle(handle)
-            raise OSError("could not configure the bridge Job Object")
+        import win32job
+        handle = win32job.CreateJobObject(None, None)
+        try:
+            info = win32job.QueryInformationJobObject(
+                handle, win32job.JobObjectExtendedLimitInformation)
+            info["BasicLimitInformation"]["LimitFlags"] = (
+                win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+                win32job.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK)
+            win32job.SetInformationJobObject(
+                handle, win32job.JobObjectExtendedLimitInformation, info)
+        except BaseException:
+            handle.Close()
+            raise
         self._handle = handle
-        self._kernel32 = kernel32
 
     def assign(self, pid: int) -> None:
         if self._handle is None:
             return
-        import ctypes
-        kernel32 = self._kernel32
-        kernel32.OpenProcess.restype = ctypes.c_void_p
-        kernel32.OpenProcess.argtypes = [
-            ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
-        kernel32.AssignProcessToJobObject.argtypes = [
-            ctypes.c_void_p, ctypes.c_void_p]
-        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-        process = kernel32.OpenProcess(
-            self.PROCESS_SET_QUOTA | self.PROCESS_TERMINATE, False, int(pid))
-        if not process:
-            raise OSError("could not open the bridge process for Job Object assignment")
+        import win32api
+        import win32con
+        import win32job
+        process = win32api.OpenProcess(
+            win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE, False, int(pid))
         try:
-            if not kernel32.AssignProcessToJobObject(self._handle, process):
-                raise OSError("could not assign the bridge process to its Job Object")
+            win32job.AssignProcessToJobObject(self._handle, process)
         finally:
-            kernel32.CloseHandle(process)
+            process.Close()  # pyright: ignore[reportAttributeAccessIssue]
 
     def close(self) -> None:
         if self._handle is not None:
-            self._kernel32.CloseHandle(self._handle)
+            self._handle.Close()
             self._handle = None
 
 

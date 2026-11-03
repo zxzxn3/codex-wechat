@@ -10,7 +10,7 @@ async def _finish(process, exchange, grace):
             pass
         try:
             await asyncio.wait_for(process.wait(), grace)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 process.kill()
             except ProcessLookupError:

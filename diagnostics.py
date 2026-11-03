@@ -20,8 +20,8 @@ import threading
 from platform_support import data_root
 from storage import locked_file
 from latency import NETWORK_TIMING_FIELDS
+from version import APP_VERSION
 
-APP_VERSION = "0.1.0"
 MAX_BYTES = 5 * 1024 * 1024
 BACKUP_COUNT = 3
 _LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
@@ -55,6 +55,7 @@ _TEXT_FIELDS = {
     "job_id": r"[A-Za-z0-9._-]{1,64}",
     "error_type": r"[A-Za-z_][A-Za-z0-9_]{0,60}",
     "error_code": r"[A-Za-z0-9._-]{1,16}",
+    "api_error_kind": r"(?:auth_expired|rate_limit_hint|prepare_failed|unknown_error|other)",
     "platform": r"[a-z0-9_.-]{1,16}",
     "version": r"[A-Za-z0-9._-]{1,32}",
 }
@@ -62,9 +63,9 @@ _NUMBER_FIELDS = {
     "duration_ms", "ingress_ms", "queued", "pending", "attempt", "count",
     "bytes", "chars", "parts", "part", "http_status", "curl_code",
     "exit_code", "retry_in_ms", "threshold", "sample_ms", "pid",
-    "message_type", "message_state", "queue_wait_ms",
+    "message_type", "message_state", "queue_wait_ms", "send_failures",
 } | NETWORK_TIMING_FIELDS
-_BOOL_FIELDS = {"ok", "connected", "proxy_used"}
+_BOOL_FIELDS = {"ok", "connected", "proxy_used", "connection_reused"}
 
 
 def _configured_level():

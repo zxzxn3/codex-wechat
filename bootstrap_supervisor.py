@@ -104,4 +104,4 @@ if __name__ == "__main__":
     except Exception as error:
         log_failure(error)
         print(f"bootstrap_supervisor.py: {type(error).__name__}: {error}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from error

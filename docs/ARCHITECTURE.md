@@ -4,14 +4,16 @@
 
 - codex_connection：唯一连接意图和校验；native_codex：CLI/App 可执行入口发现。
 - backend_runtime：后台准备与所有权；codex_transport：字节连接、JSON-RPC和关闭；backend：原生会话/轮次/事件。
+- app_ipc：Linux App 的有界帧、持有者发现、会话快照/增量和 follower 请求适配；复用 backend 的事件与交付状态。
 - desktop：App、CLI 的共同接入；代理由调用者启动器处理，进程级连接环境只给子进程。
 - wechat / media：微信和CDN协议；wechat_auth / rebind：认证状态、身份与重绑编排。
 - input_delivery / output_delivery：输入提交和有序输出；Bridge是组合根和持久化入口。
+- lifecycle：按操作维护会话变更、重启、服务接管、输入准备和 steer 的准入条件；调用方仍持有锁及提交屏障。
 - commands / command_specs / prompts / configuration：唯一命令目录、展示快照和配置；不重复业务状态。
 - diagnostics 写入安全事件，log_viewer 读取和跟随日志；命令行入口只负责调用。
 - platform_ui / platform_support / service_adapter：二维码、通知、平台路径与原生服务操作。
 - subprocess_io / storage：有界子进程收尾、私有JSON与原生单实例锁。
-- installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。
+- installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。Windows Mutex/Job Object 使用 pywin32 封装原生 API。
 
 共享后台与微信服务是两种所有权：前者可以被 App/CLI 继续使用，后者只管理桥接。
 连接失败不删除写入锁、不抢停桌面、不静默另开独立写入后台。App 的共享WS仅回环，
@@ -19,6 +21,14 @@
 backend 的事件入口保留来源过滤、早到事件缓冲和轮次检查；用量、设置、消息及轮次收口
 分开处理，仍共用同一 Backend 状态，不增加事件总线或第二份会话状态。
 Linux App 启动复用同一原生 daemon；显式 WebSocket 和 Windows 接入保持原路径。
+已独立启动的 Linux App 在 resume 明确报告 active writer 时走 App IPC：同用户私有 socket，
+按后端 CODEX_HOME 发现持有者并固定 owner，收到初始快照后才提交选择。非写入冲突不回退，
+不删除锁、不接管 App 进程。只有选定 owner/thread/host/version 的事件可更新会话；
+快照作为历史基线，增量按 revision 应用，缺口重取快照；旧正文不回发。
+App 请求结果超时/断连仍为投递不确定，不切回原生后台重发；审批/问题答案始终返回原 App owner，
+已失效请求不落入另一个后台。关闭桥接只关闭 follower 连接。
+IPC steer 在发出前核对快照中的 expectedTurnId；App 内部 follower 接口没有同名原子前置条件，
+因此不能承诺与原生 turn/steer 相同的跨客户端竞态保证。Windows IPC 未实现，保留原连接方式。
 可选用户桌面入口只转交稳定的 desktop 控制器；后台与代理职责仍各自独立。
 
 ## 输入与输出
@@ -26,6 +36,10 @@ Linux App 启动复用同一原生 daemon；显式 WebSocket 和 Windows 接入�
 输入以一次保存从inbox进入currentInput。RPC前记dispatching，接受后记accepted；
 preparing可恢复，dispatching结果未知、accepted均不自动重发。clientUserMessageId只是
 追踪标识，未经验证不承诺服务端持久去重。明确不能steer可排队；超时/断连不算明确拒绝。
+
+会话检索使用原生 `thread/list` 的 `searchTerm`，不解析 Agent 正文，也不调用模型。
+`/switch` 对唯一点名结果直接采用；多个结果只保存当前候选并要求编号选择，避免按模糊
+线索静默切错会话。会话切换仍受 busy 保护，不在运行中改写当前连接。
 
 每份结果固定携带来源、会话、轮次与目录；选择代次、连接代次不持久化。异步附件快照完成
 后再核对来源。已入发件箱的内容不因切换重新解释。完整中途消息按原生item ID去重，
@@ -93,27 +107,50 @@ endpoint、HTTP/curl状态和耗时。事件字段由固定白名单校验，正
 锁被占用或写盘失败时丢弃本条诊断，不等待、不阻断消息收发。`codex-wechat logs`
 默认展示结构化日志及轮转文件；`--service`才加入supervisor/控制台输出，后者未脱敏，
 不是结构化日志。跟随模式按文件身份和读取位置追踪轮转，在备份保留范围内补读旧文件。
-typing的认证失效进入同一暂停与重绑通知流程；普通typing错误仅作尽力重试。
-微信请求统一记录一次结果，包含子进程启动失败、超时及解析失败；取消继续向上传播，
-仅记debug，成功长轮询也仅记debug。仍沿用curl子进程和现有收尾函数，不增加请求重试。
+默认保留命令处理、输出入队/开始/结果及网络计时，便于判断延迟所在阶段；poll、getconfig、
+sendtyping 成功和 typing 启停仅记 debug，故障仍可见。发送开始/完成不再重复写 stderr。
+typing 的 getconfig/sendtyping 与输入处理并行，不等待网络完成再准备或提交消息。
+并发输入共用引用计数，最后一项结束时取消启动/保活任务，再尽力发送停止状态。
+typing ticket 缓存最多 600s，以单调时钟计时；到期或身份变化时，在下一次启动、保活或停止
+状态请求前重新获取，失败不沿用过期 ticket。这是本地刷新策略，不代表服务端保证的有效期。
+typing 的认证失效进入同一暂停与重绑通知流程，但发现失效前输入可能已经提交；
+不撤回或重发已提交输入。普通 typing 错误不阻断输入处理。
+微信 API 通过 curl_cffi 0.17 的异步 libcurl 连接池发送。长轮询和其它请求各有一个池，
+每池最多 8 个并发请求；空闲时限由 connectionIdleSeconds 控制（默认 60s，0–3600 的整数），
+整池空闲后关闭，单条连接超过时限不再复用。该值支持整组校验和热更新：新请求使用新值，
+已发出的请求不中断；空闲池按新值减去已空闲时长重新计时，删除配置键恢复默认。
+0 不创建空闲回收任务；libcurl 的 MAXAGE_CONN 无无限值，内部以跨平台有符号 long 上限
+替代，不把配置 0 直接传入。生命周期上限、缓存容量、故障和对端关闭等机制仍然有效。
+保留 HTTPS 校验、代理环境变量、禁止重定向、总超时和 16 MiB 响应上限，不增加应用层重试。
+取消直接移除 libcurl 请求；服务退出、登录结束和一次性通知结束均关闭连接池。
+媒体传输复用 outgoing 连接池，独立限制响应大小且不携带 API 凭据；/ping 仍用 curl 子进程。微信请求统一记录一次结果，包含连接失败、超时及解析失败；
+取消和成功长轮询仅记 debug。
+收信默认等待 35s 并留 5s 传输余量；成功响应的 longpolling_timeout_ms 可调整下一轮等待，
+限制在 1–120s，余量另加。仅 getupdates 的 curl 28 且 HTTPS 已准备、无首字节或正文时，
+作为 WeChatPollTimeout 立即开始下一轮，保留游标、不确认认证有效、不进入失败退避。
+该事件以 debug 的 status=poll_idle_timeout 记录；不证明网络健康。连接、TLS、响应体阶段
+超时及其它接口的超时仍为故障，外部取消继续传播。
+业务错误额外记录固定 api_error_kind（auth_expired、prepare_failed、unknown_error、
+rate_limit_hint、other），仅按明确提示归类，不保存 errmsg，也不将 -2 自动认定为限流。
+output.failed 的 send_failures 保存当时连续发送失败条目数，成功清零规则不变。
 当前用户私聊在路由前记录input.observed：消息类型、状态、内容类别、字数、项数及跳过原因，
 用于区分上游未投递与本地过滤/去重；不记录正文或消息标识。
 
-微信请求沿用curl，仅采集指定的数值write-out字段，不使用可能包含URL/凭据的完整JSON诊断。
-正文和HTTP状态仍走stdout；stderr只解析最后一行计时JSON，curl原始错误文本直接丢弃。
-正常退出和curl失败均可保留已返回的计时；进程未返回时不补造阶段数据。
+微信 API 从 libcurl getinfo 读取指定数值计时、代理标记和连接创建数；不采集 URL、IP 或异常原文。
+失败响应可保留已到达的计时，取消不补造阶段数据。/ping 的 curl write-out 解析继续共用计时校验。
 
 | 日志字段 | 含义 |
 | --- | --- |
 | dns_ms | curl观测到的名称解析累计耗时 |
 | connect_ms / appconnect_ms / pretransfer_ms / first_byte_ms | 从curl开始到TCP连接、TLS/隧道握手、协议准备完成、首响应字节的累计时间点 |
-| curl_total_ms | curl操作总耗时；duration_ms另含子进程启动和收尾的墙钟耗时 |
+| curl_total_ms | curl操作总耗时；duration_ms为包含连接池等待与收尾的墙钟耗时 |
 | tcp_ms / tls_ms | connect−dns、appconnect−connect；TCP可能连到代理，TLS段可能包含代理隧道协商 |
 | response_wait_ms | first_byte−pretransfer，包含发送请求、服务端等待及网络返回；长轮询等待也在内，不是纯网络RTT或模型生成时间 |
 | download_ms | total−first_byte，收到首字节后到传输完成的耗时 |
 
 单位均为ms；差值只在相关时间点已到达且顺序有效时生成。curl返回0的时间点可能表示尚未到达，
-不能据此断言某阶段没有耗时。时限、代理路径、重试和用户提示格式不因诊断采集改变。
+不能据此断言某阶段没有耗时。connection_reused=true 表示协议准备已到达且本次未创建连接；
+此时 TCP/TLS 时间点为 0 不代表失败，仍可计算请求等待和下载耗时。
 
 命令名 `command` 经唯一命令目录校验并规范化别名，未知名字和参数不记录。
 `control.started.queue_wait_ms` 是收到命令至进入处理器的单调时钟间隔（含路由/保存/排队）；
@@ -123,8 +160,7 @@ typing的认证失效进入同一暂停与重绑通知流程；普通typing错�
 
 超时仅按已取得的 HTTPS 时间点记录 `timeout_stage`：connect（含DNS/连接）、
 tls_or_tunnel、request_or_response、response_body 或 unknown。请求发送和服务端等待未拆开，
-这些阶段不等于故障根因。`proxy_used` 仅接受curl报告的0/1，不从代理环境变量推断；
-可选输出独立于计时JSON，curl低于8.7不支持该字段时省略，既有计时仍可读取。
+这些阶段不等于故障根因。`proxy_used` 仅接受 libcurl 报告的 0/1，不从代理环境变量推断。
 不记录代理地址、远端IP、原始stderr或响应内容；也不能由此识别透明代理/VPN。
 
 ## 验证

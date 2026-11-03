@@ -55,6 +55,8 @@ print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe="") + 
         return 1
     fi
     task_temporary=$(mktemp -d -t codex-wechat-bootstrap.XXXXXXXX)
+    # Freeze the safely quoted path now because task_temporary is local to main().
+    # shellcheck disable=SC2064
     trap "$(printf 'rm -rf -- %q' "$task_temporary")" EXIT
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
         --connect-timeout 15 --max-time 120 "$installer_url" -o "$task_temporary/installer.py"

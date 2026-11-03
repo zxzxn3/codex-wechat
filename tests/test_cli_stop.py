@@ -70,7 +70,7 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
             config = root / "config.json"
             config.write_text('{"prompts":{"SERVICE_STOPPING":"bye"}}',
                               encoding="utf-8")
-            client = SimpleNamespace(send=AsyncMock(return_value={}))
+            client = SimpleNamespace(send=AsyncMock(return_value={}), close=AsyncMock())
             with patch.object(codex_wechat, "WeChat", return_value=client):
                 await codex_wechat.send_stop_notification(state_dir, config)
         entry = client.send.await_args.args[0]
@@ -102,7 +102,8 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
             store.save("account", {"user": "owner", "token": "secret"})
             store.save("bridge", {"context": "context"})
             client = SimpleNamespace(
-                send=AsyncMock(side_effect=RuntimeError("send failed")))
+                send=AsyncMock(side_effect=RuntimeError("send failed")),
+                close=AsyncMock())
             stop = AsyncMock(return_value=ServiceState(True, False))
             error_output = StringIO()
             with patch.object(codex_wechat.service_adapter, "status",

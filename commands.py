@@ -1,8 +1,11 @@
 """WeChat conversation controls; lists come from the current backend."""
+from functools import wraps
+from lifecycle import can_change_session
 from pathlib import Path
 import asyncio
 import sys
 import time
+import uuid
 import autostart
 
 from profiles import backend_argument, backend_label, switch
@@ -101,14 +104,14 @@ async def command_settings(bridge, command, argument, received=None):
             enabled = await autostart.set_enabled(parts[1] == "on")
         except UserFacingError:
             raise
-        except (ValueError, RuntimeError, OSError, asyncio.TimeoutError):
+        except (TimeoutError, ValueError, RuntimeError, OSError):
             raise UserFacingError(bridge.prompt("AUTOSTART_FAILED")) from None
         bridge.reply(bridge.prompt("LABEL_AUTOSTART") + ": " +
                      bridge.prompt("VALUE_ON" if enabled else "VALUE_OFF"))
         return
     try:
         autostart_text = bridge.prompt("VALUE_ON" if await autostart.status() else "VALUE_OFF")
-    except (ValueError, RuntimeError, OSError, asyncio.TimeoutError):
+    except (TimeoutError, ValueError, RuntimeError, OSError):
         autostart_text = bridge.prompt("VALUE_UNAVAILABLE")
     bridge.reply(settings_summary(
         notice=notice(bridge),
@@ -118,6 +121,7 @@ async def command_settings(bridge, command, argument, received=None):
         slicing=bridge.slicing,
         notifications=bridge.notifications,
         autostart=autostart_text,
+        connection_idle_seconds=bridge.settings.hot.connection_idle_seconds,
         text=bridge.prompt,
     ))
     return
@@ -163,41 +167,24 @@ async def command_notice(bridge, command, argument, received=None):
     return
 
 
-async def command_sessions(bridge, command, argument, received=None):
-    if argument == "next":
-        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"usage": REGISTRY['/sessions'].usage}))
-    page = int(argument) if argument.isdecimal() else 1
-    search = bridge.state.get("sessionSearch") if argument.isdecimal() else argument or None
-    if page < 1:
-        raise UserFacingError(bridge.prompt("PAGE_INVALID"))
-    cache = bridge.session_catalog
-    key = (bridge.backend.connection_id, search)
-    if (not argument.isdecimal() or cache is None or cache[0] != key
-            or time.monotonic() - cache[1] > 60):
-        catalog, cursor, cursors, identities = [], None, set(), set()
-        while True:
-            result = await bridge.backend.list_threads(cursor, search)
-            for thread in result["data"]:
-                if thread["id"] not in identities:
-                    identities.add(thread["id"])
-                    catalog.append(thread)
-            cursor = result.get("nextCursor")
-            if not cursor:
-                break
-            if cursor in cursors:
-                raise UserFacingError(bridge.prompt("SESSION_LIST_FAILED"))
-            cursors.add(cursor)
-        bridge.session_catalog = (key, time.monotonic(), catalog)
-    else:
-        catalog = cache[2]
-    total = max(1, (len(catalog) + 9) // 10)
-    if page > total:
-        raise UserFacingError(bridge.prompt("PAGE_RANGE", {"count": total}))
-    threads = catalog[(page - 1) * 10:page * 10]
-    bridge.state["sessionChoices"] = [thread["id"] for thread in threads]
-    bridge.state.pop("sessionCursor", None)
-    bridge.state["sessionSearch"] = search
-    bridge.save()
+async def _session_catalog(bridge, search):
+    catalog, cursor, cursors, identities = [], None, set(), set()
+    while True:
+        result = await bridge.backend.list_threads(cursor, search)
+        for thread in result["data"]:
+            if thread["id"] not in identities:
+                identities.add(thread["id"])
+                catalog.append(thread)
+        cursor = result.get("nextCursor")
+        if not cursor:
+            break
+        if cursor in cursors:
+            raise UserFacingError(bridge.prompt("SESSION_LIST_FAILED"))
+        cursors.add(cursor)
+    return catalog
+
+
+def _session_lines(bridge, threads):
     lines = []
     for index, thread in enumerate(threads, 1):
         title = session_name(thread.get("name"))
@@ -218,6 +205,33 @@ async def command_sessions(bridge, command, argument, received=None):
         lines.append(f"{index}. {title}" + (f"  [{state}]" if state else ""))
     if not threads:
         lines.append(bridge.prompt("NO_SESSIONS"))
+    return lines
+
+
+async def command_sessions(bridge, command, argument, received=None):
+    if argument == "next":
+        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"usage": REGISTRY['/sessions'].usage}))
+    page = int(argument) if argument.isdecimal() else 1
+    search = bridge.state.get("sessionSearch") if argument.isdecimal() else argument or None
+    if page < 1:
+        raise UserFacingError(bridge.prompt("PAGE_INVALID"))
+    cache = bridge.session_catalog
+    key = (bridge.backend.connection_id, search)
+    if (not argument.isdecimal() or cache is None or cache[0] != key
+            or time.monotonic() - cache[1] > 60):
+        catalog = await _session_catalog(bridge, search)
+        bridge.session_catalog = (key, time.monotonic(), catalog)
+    else:
+        catalog = cache[2]
+    total = max(1, (len(catalog) + 9) // 10)
+    if page > total:
+        raise UserFacingError(bridge.prompt("PAGE_RANGE", {"count": total}))
+    threads = catalog[(page - 1) * 10:page * 10]
+    bridge.state["sessionChoices"] = [thread["id"] for thread in threads]
+    bridge.state.pop("sessionCursor", None)
+    bridge.state["sessionSearch"] = search
+    bridge.save()
+    lines = _session_lines(bridge, threads)
     hints = [f"`{REGISTRY['/switch'].usage}`",
              f"`{REGISTRY['/sessions'].usage}` " +
              bridge.prompt("SESSION_PAGE", {"page": page, "total_pages": total})]
@@ -244,116 +258,182 @@ async def command_cwd_view(bridge, command, argument, received=None):
     return
 
 
-async def command_session(bridge, command, argument, received=None):
-    if command == "/compact" and argument:
-        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"usage": REGISTRY['/compact'].usage}))
-    if command == "/new" and argument:
-        raise UserFacingError(bridge.prompt("NEW_USAGE"))
-    if command == "/switch" and not argument:
-        raise UserFacingError(bridge.prompt("SESSION_USAGE"))
-    # All state-changing session controls use one lock; incoming work waits until done.
-    if (bridge.restarting or bridge.running or bridge.steering or bridge.active_turn()
-            or bridge.state["inbox"] or bridge.session_lock.locked()):
-        raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
-    async with bridge.session_lock:
-        if command == "/backend":
-            await switch(bridge, argument)
-            bridge.reply(info(bridge, bridge.prompt("BACKEND_SWITCHED"), include_backend=True))
+def session_control(handler):
+    """Keep the existing session mutation barrier around each command handler."""
+    @wraps(handler)
+    async def guarded(bridge, command, argument, received=None):
+        if command == "/compact" and argument:
+            raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"usage": REGISTRY['/compact'].usage}))
+        if command == "/new" and argument:
+            raise UserFacingError(bridge.prompt("NEW_USAGE"))
+        if command == "/switch" and not argument:
+            raise UserFacingError(bridge.prompt("SESSION_USAGE"))
+        if not can_change_session(bridge):
+            raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
+        async with bridge.session_lock:
+            return await handler(bridge, command, argument, received)
+    return guarded
+
+
+@session_control
+async def _change_backend(bridge, command, argument, received=None):
+    await switch(bridge, argument)
+    bridge.reply(info(bridge, bridge.prompt("BACKEND_SWITCHED"), include_backend=True))
+    return
+
+
+@session_control
+async def command_new(bridge, command, argument, received=None):
+    await activate(bridge)
+    bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED")))
+    return
+
+
+@session_control
+async def command_switch(bridge, command, argument, received=None):
+    target = argument
+    if argument.isdecimal():
+        choices = bridge.state.get("sessionChoices", [])
+        index = int(argument) - 1
+        if not 0 <= index < len(choices):
+            raise UserFacingError(bridge.prompt("SESSION_INDEX_INVALID"))
+        target = choices[index]
+    elif not _is_thread_id(argument):
+        matches = await _session_catalog(bridge, argument)
+        exact = next((thread for thread in matches
+                      if thread["id"] == argument), None)
+        if exact is not None:
+            matches = [exact]
+        if len(matches) == 1:
+            target = matches[0]["id"]
+        elif not matches:
+            raise UserFacingError(bridge.prompt(
+                "SESSION_SEARCH_EMPTY", {"query": argument}))
+        else:
+            shown = matches[:10]
+            bridge.state["sessionChoices"] = [thread["id"] for thread in shown]
+            bridge.state["sessionSearch"] = argument
+            bridge.save()
+            text = panel(*_session_lines(bridge, shown)) + "\n" + bridge.prompt(
+                "SESSION_SEARCH_MULTIPLE", {"count": len(matches)})
+            if len(matches) > len(shown):
+                text += "\n" + bridge.prompt("SESSION_SEARCH_MORE", {
+                    "count": len(shown), "query": argument})
+            bridge.reply(text)
             return
-        if command == "/new":
-            await activate(bridge)
-            bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED")))
-            return
-        if command == "/switch":
-            target = argument
-            if argument.isdecimal():
-                choices = bridge.state.get("sessionChoices", [])
-                index = int(argument) - 1
-                if not 0 <= index < len(choices):
-                    raise UserFacingError(bridge.prompt("SESSION_INDEX_INVALID"))
-                target = choices[index]
-            desktop = await activate(bridge, target)
-            bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop else bridge.prompt("SESSION_SWITCHED")))
-            return
-        await ensure_session(bridge)
-        if command == "/compact":
-            if bridge.backend.blocked:
-                raise UserFacingError(bridge.prompt("COMPACT_BLOCKED"))
-            await bridge.backend.compact(bridge.state["thread"])
-            bridge.reply(bridge.prompt("COMPACT_REQUESTED"))
-            return
-        overrides = {}
-        if command in ("/model", "/effort"):
-            models = (bridge.model_choices if argument.isdecimal() and bridge.model_choices
-                      and command != "/effort" else await model_entries(bridge))
-            if command == "/effort":
-                current = next((m for m in models
-                                if m["model"] == bridge.backend.info.get("model")), None)
-                if current is None:
-                    raise UserFacingError(bridge.prompt("MODEL_NOT_IN_CATALOG"))
-                choices = effort_choices(current)
-                if not argument:
-                    current_effort = bridge.backend.info.get("effort")
-                    bridge.reply(bridge.prompt("EFFORT_SUMMARY", {
-                        "current": effort_label(current_effort),
-                        "choices": " | ".join(effort_label(value) for value in choices) or "无",
-                    }))
-                    return
-                selected_effort = next(
-                    (value for value in choices
-                     if value.casefold() == argument.casefold()), None)
-                if selected_effort is None:
-                    raise UserFacingError(bridge.prompt("EFFORT_INVALID", {
-                        "choices": " | ".join(effort_label(value) for value in choices) or "无"}))
-                overrides["effort"] = selected_effort
-            else:
-                selected = None
-                if argument.isdecimal():
-                    index = int(argument) - 1
-                    if 0 <= index < len(models):
-                        selected = models[index]
-                else:
-                    selected = next((m for m in models if m["model"] == argument), None)
-                if selected is None:
-                    raise UserFacingError(bridge.prompt("MODEL_INVALID"))
-                overrides["model"] = selected["model"]
-                # Model-specific defaults prevent carrying an unsupported effort to another model.
-                overrides["effort"] = selected.get("defaultReasoningEffort")
-        elif command == "/cwd":
-            base = Path(bridge.backend.info.get("cwd") or bridge.backend.cwd)
-            path = Path(argument).expanduser()
-            if not path.is_absolute():
-                path = base / path
-            try:
-                path = path.resolve(strict=True)
-            except OSError:
-                raise UserFacingError(bridge.prompt("DIRECTORY_INVALID")) from None
-            if not path.is_dir():
-                raise UserFacingError(bridge.prompt("DIRECTORY_NOT_FOLDER"))
-            overrides["cwd"] = str(path)
-        await activate(bridge, bridge.state["thread"], overrides)
-        details = bridge.backend.info
-        bridge.reply(setting_summary(model=details.get("model"), effort=details.get("effort"),
-                                     cwd=details.get("cwd") or bridge.backend.cwd,
-                                     field=command.removeprefix("/"), text=bridge.prompt))
+    desktop = await activate(bridge, target)
+    bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop else bridge.prompt("SESSION_SWITCHED")))
+    return
+
+
+@session_control
+async def command_compact(bridge, command, argument, received=None):
+    await ensure_session(bridge)
+    if bridge.backend.blocked:
+        raise UserFacingError(bridge.prompt("COMPACT_BLOCKED"))
+    await bridge.backend.compact(bridge.state["thread"])
+    bridge.reply(bridge.prompt("COMPACT_REQUESTED"))
+    return
+
+
+@session_control
+async def _change_model(bridge, command, argument, received=None):
+    await ensure_session(bridge)
+    models = (bridge.model_choices if argument.isdecimal() and bridge.model_choices
+              else await model_entries(bridge))
+    overrides = {}
+    selected = None
+    if argument.isdecimal():
+        index = int(argument) - 1
+        if 0 <= index < len(models):
+            selected = models[index]
+    else:
+        selected = next((m for m in models if m["model"] == argument), None)
+    if selected is None:
+        raise UserFacingError(bridge.prompt("MODEL_INVALID"))
+    overrides["model"] = selected["model"]
+    # Model-specific defaults prevent carrying an unsupported effort to another model.
+    overrides["effort"] = selected.get("defaultReasoningEffort")
+    await _apply_settings(bridge, command, overrides)
+
+
+@session_control
+async def command_effort(bridge, command, argument, received=None):
+    await ensure_session(bridge)
+    models = await model_entries(bridge)
+    overrides = {}
+    current = next((m for m in models
+                    if m["model"] == bridge.backend.info.get("model")), None)
+    if current is None:
+        raise UserFacingError(bridge.prompt("MODEL_NOT_IN_CATALOG"))
+    choices = effort_choices(current)
+    if not argument:
+        current_effort = bridge.backend.info.get("effort")
+        bridge.reply(bridge.prompt("EFFORT_SUMMARY", {
+            "current": effort_label(current_effort),
+            "choices": " | ".join(effort_label(value) for value in choices) or "无",
+        }))
+        return
+    selected_effort = next(
+        (value for value in choices
+         if value.casefold() == argument.casefold()), None)
+    if selected_effort is None:
+        raise UserFacingError(bridge.prompt("EFFORT_INVALID", {
+            "choices": " | ".join(effort_label(value) for value in choices) or "无"}))
+    overrides["effort"] = selected_effort
+    await _apply_settings(bridge, command, overrides)
+
+
+@session_control
+async def _change_cwd(bridge, command, argument, received=None):
+    await ensure_session(bridge)
+    overrides = {}
+    base = Path(bridge.backend.info.get("cwd") or bridge.backend.cwd)
+    path = Path(argument).expanduser()
+    if not path.is_absolute():
+        path = base / path
+    try:
+        path = path.resolve(strict=True)
+    except OSError:
+        raise UserFacingError(bridge.prompt("DIRECTORY_INVALID")) from None
+    if not path.is_dir():
+        raise UserFacingError(bridge.prompt("DIRECTORY_NOT_FOLDER"))
+    overrides["cwd"] = str(path)
+    await _apply_settings(bridge, command, overrides)
+
+
+async def _apply_settings(bridge, command, overrides):
+    await activate(bridge, bridge.state["thread"], overrides)
+    details = bridge.backend.info
+    bridge.reply(setting_summary(model=details.get("model"), effort=details.get("effort"),
+                                 cwd=details.get("cwd") or bridge.backend.cwd,
+                                 field=command.removeprefix("/"), text=bridge.prompt))
+
+
+def _is_thread_id(value):
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
 
 
 async def command_backend(bridge, command, argument, received=None):
     if not argument:
         return await command_backend_view(bridge, command, argument, received)
-    return await command_session(bridge, command, argument, received)
+    return await _change_backend(bridge, command, argument, received)
 
 
 async def command_model(bridge, command, argument, received=None):
     if not argument:
         return await command_model_view(bridge, command, argument, received)
-    return await command_session(bridge, command, argument, received)
+    return await _change_model(bridge, command, argument, received)
 
 
 async def command_cwd(bridge, command, argument, received=None):
     if not argument:
         return await command_cwd_view(bridge, command, argument, received)
-    return await command_session(bridge, command, argument, received)
+    return await _change_cwd(bridge, command, argument, received)
 
 
 async def command_help(bridge, command, argument, received=None):
@@ -397,7 +477,7 @@ async def command_restart(bridge, command, argument, received=None):
         await bridge.restart_service()
     except UserFacingError as error:
         bridge.reply(bridge.prompt("RESTART_REJECTED", {"reason": str(error)}))
-    except (RuntimeError, OSError, asyncio.TimeoutError) as error:
+    except (TimeoutError, RuntimeError, OSError) as error:
         bridge.reply(bridge.prompt("RESTART_FAILED", {"reason": backend_reason(error)}))
 
 
@@ -440,7 +520,7 @@ async def command_stop(bridge, command, argument, received=None):
             bridge.reply(bridge.prompt("STOP_DEFERRED") + cleared_note)
         else:
             bridge.reply(bridge.prompt("STOP_IDLE") + cleared_note)
-    except (RuntimeError, OSError, asyncio.TimeoutError):
+    except (TimeoutError, RuntimeError, OSError):
         bridge.reply(bridge.prompt("STOP_UNCONFIRMED") + cleared_note)
 
 
@@ -451,7 +531,7 @@ async def command_approval(bridge, command, argument, received=None):
             argument, "accept" if accept else "decline")
         bridge.reply(bridge.prompt("APPROVAL_ACCEPTED") if ok and accept else
                    bridge.prompt("APPROVAL_DECLINED") if ok else bridge.prompt("APPROVAL_EXPIRED"))
-    except (RuntimeError, OSError, asyncio.TimeoutError):
+    except (TimeoutError, RuntimeError, OSError):
         bridge.reply(bridge.prompt("APPROVAL_FAILED"))
 
 
@@ -464,12 +544,35 @@ async def command_answer(bridge, command, argument, received=None):
         bridge.reply(bridge.prompt("ANSWER_ACCEPTED") if ok else bridge.prompt("ANSWER_EXPIRED"))
     except ValueError as error:
         bridge.reply(str(error))
-    except (RuntimeError, OSError, asyncio.TimeoutError):
+    except (TimeoutError, RuntimeError, OSError):
         bridge.reply(bridge.prompt("ANSWER_FAILED"))
 
 
-HANDLERS = {spec.name: globals()["command_" + (spec.handler or spec.name.removeprefix("/"))]
-            for spec in COMMANDS if spec.route != "input"}
+_HANDLER_FUNCTIONS = {
+    "status": command_status,
+    "settings": command_settings,
+    "sessions": command_sessions,
+    "new": command_new,
+    "compact": command_compact,
+    "unqueue": command_unqueue,
+    "stop": command_stop,
+    "ping": command_ping,
+    "switch": command_switch,
+    "backend": command_backend,
+    "model": command_model,
+    "effort": command_effort,
+    "cwd": command_cwd,
+    "notice": command_notice,
+    "approval": command_approval,
+    "answer": command_answer,
+    "send": command_send,
+    "restart": command_restart,
+    "help": command_help,
+}
+HANDLERS = {
+    spec.name: _HANDLER_FUNCTIONS[spec.handler or spec.name.removeprefix("/")]
+    for spec in COMMANDS if spec.route != "input"
+}
 
 
 def parse_control(text):
@@ -528,7 +631,7 @@ async def dispatch(bridge, text, *, received=None):
             log_event("control.rejected", component="input", kind="command",
                       status="invalid", duration_ms=(time.perf_counter() - started) * 1000, **fields)
             bridge.reply(str(error))
-        except (ValueError, RuntimeError, OSError, asyncio.TimeoutError) as error:
+        except (TimeoutError, ValueError, RuntimeError, OSError) as error:
             failed_command = spec.name if spec else command
             label = (bridge.prompt("FAILURE_" + failed_command[1:].upper())
                      if failed_command in COMMAND_FAILURE_LABELS else bridge.prompt("GENERIC_FAILURE"))

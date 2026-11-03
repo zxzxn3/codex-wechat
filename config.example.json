@@ -1,5 +1,6 @@
 {
   "sourceHint": "[User from WeChat.]",
+  "connectionIdleSeconds": 60,
   "prompts": {},
   "processingNotice": "`IN < {input_tokens}`",
   "backends": {
@@ -13,11 +14,20 @@
     "targetChars": 600
   },
   "compactionNotice": false,
-  "quotaWarningThresholds": [
-    50,
-    25,
-    10,
-    5,
-    1
-  ]
+  "quotaWarningThresholds": {
+    "primary": [
+      50,
+      25,
+      10,
+      5,
+      1
+    ],
+    "secondary": [
+      50,
+      25,
+      10,
+      5,
+      1
+    ]
+  }
 }

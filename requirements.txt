@@ -1,3 +1,7 @@
 # Media encryption and mature WebSocket transport.
 cryptography>=38
 websockets>=15,<18
+# Async libcurl connection pools for the WeChat API (Linux and Windows).
+curl-cffi>=0.17,<0.18
+# Native Windows Job Object and mutex bindings.
+pywin32; sys_platform == "win32"

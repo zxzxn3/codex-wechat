@@ -222,6 +222,9 @@ class ScanFailureTests(unittest.IsolatedAsyncioTestCase):
 
 class BindedRedirectTests(unittest.IsolatedAsyncioTestCase):
     class Client:
+        async def close(self):
+            pass
+
         def __init__(self, statuses, getconfig=None):
             self.statuses = list(statuses)
             self.getconfig = getconfig
@@ -253,7 +256,6 @@ class BindedRedirectTests(unittest.IsolatedAsyncioTestCase):
             return await wechat.login(self.store, rebind=True, persist=False)
 
     async def test_binded_redirect_without_local_credentials_is_not_success(self):
-        import wechat
         client = self.Client(["binded_redirect"])
         with self.assertRaisesRegex(RuntimeError, "没有可用凭据"):
             await self.login(client)
@@ -262,7 +264,6 @@ class BindedRedirectTests(unittest.IsolatedAsyncioTestCase):
     async def test_binded_redirect_after_failure_revalidates_local_token(self):
         self.store.save("account", {"token": "t", "user": "u", "bot": "b"})
         self.store.save("bridge", {"wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}})
-        import wechat
         client = self.Client(["binded_redirect"], getconfig=RuntimeError("expired"))
         with self.assertRaisesRegex(RuntimeError, "expired"):
             await self.login(client)

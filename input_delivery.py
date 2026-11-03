@@ -3,8 +3,10 @@
 The bridge is the shared runtime context and sole persistence owner. This component
 never copies backend selection or persistent queues across an await.
 """
+from lifecycle import can_prepare_input, can_steer_input
 from dataclasses import asdict
 import asyncio
+import functools
 import sys
 import time
 import uuid
@@ -95,14 +97,21 @@ class InputDelivery:
             bridge.state.pop("currentInput")
         bridge.save()
 
+    async def _prepare_attachments(self, job):
+        if "preparedAttachments" in job:
+            return False
+        bridge = self.bridge
+        job["preparedAttachments"] = await bridge.media.incoming(job.get("attachments", []))
+        bridge.save()
+        return True
+
     async def worker(self):
         bridge = self.bridge
         while True:
             if bridge.wechat_paused:
                 await bridge.auth_wake.wait()
                 continue
-            if (bridge.restarting or bridge.steering or bridge.session_lock.locked() or bridge.input_paused
-                    or bridge.state.get("wechatContextPending")):
+            if not can_prepare_input(bridge):
                 await asyncio.sleep(0.1)
                 continue
             if bridge.active_turn() or bridge.backend.blocked or not bridge.state["inbox"]:
@@ -148,9 +157,7 @@ class InputDelivery:
                     self.defer_restart(job)
                     continue
                 bridge.acknowledge(job)
-                if "preparedAttachments" not in job:
-                    job["preparedAttachments"] = await bridge.media.incoming(job.get("attachments", []))
-                    bridge.save()
+                if await self._prepare_attachments(job):
                     log_event("input.prepared", component="input", count=len(job["preparedAttachments"]),
                               duration_ms=(time.perf_counter() - started) * 1000,
                               request_id=job.get("requestId"))
@@ -163,7 +170,7 @@ class InputDelivery:
                 answer = await backend.run(bridge.state["thread"], job["text"],
                     attachments=job["preparedAttachments"], client_id=job["clientId"],
                     allow_steer=job.get("mode", "steer") != "queue",
-                    dispatch=lambda phase, turn: bridge.dispatch_input(job, phase, turn, backend))
+                    dispatch=functools.partial(bridge.dispatch_input, job, backend=backend))
                 if job.get("restartDeferred") or job.get("authDeferred"):
                     if not bridge.stopping:
                         self.defer_restart(job)
@@ -234,9 +241,7 @@ class InputDelivery:
         while True:
             await bridge.steer_wake.wait()
             bridge.steer_wake.clear()
-            while ((bridge.running or bridge.active_turn()) and bridge.state["inbox"]
-                   and not bridge.stopping and not bridge.restarting and not bridge.wechat_paused
-                   and not bridge.state.get("wechatContextPending")):
+            while can_steer_input(bridge):
                 # Explicitly queued work must not block later live corrections.
                 job = next((item for item in bridge.state["inbox"]
                             if item.get("mode", "steer") != "queue"), None)
@@ -260,16 +265,14 @@ class InputDelivery:
                               phase=job.get("phase", InputPhase.PREPARING),
                               mode=job.get("mode", "steer"),
                               request_id=job.get("requestId"))
-                    if "preparedAttachments" not in job:
-                        job["preparedAttachments"] = await bridge.media.incoming(job.get("attachments", []))
-                        bridge.save()
+                    await self._prepare_attachments(job)
                     if bridge.stopping or not any(item is job for item in bridge.state["inbox"]):
                         break
                     if backend.pending or backend.blocked:
                         continue
                     accepted = await backend.steer(thread_id, turn_id, job["text"],
                         attachments=job["preparedAttachments"], client_id=job["clientId"],
-                        dispatch=lambda phase, turn: bridge.dispatch_input(job, phase, turn, backend))
+                        dispatch=functools.partial(bridge.dispatch_input, job, backend=backend))
                     if accepted:
                         bridge.state["inbox"] = [item for item in bridge.state["inbox"] if item is not job]
                         bridge.save()

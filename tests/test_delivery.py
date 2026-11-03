@@ -157,7 +157,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             saved = self.store.load("bridge")["currentInput"]
             self.assertEqual(saved["phase"], "dispatching")
             self.assertEqual(params["clientUserMessageId"], saved["clientId"])
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         backend.rpc = rpc
         with self.assertRaises(asyncio.TimeoutError):
@@ -240,6 +240,17 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         backend.rpc = AsyncMock(return_value={"thread": {"id": "new"}})
         await backend.thread("new")
         self.assertEqual(backend.account_limits, limits)
+
+    async def test_successful_send_persists_last_latency_sample(self):
+        b = self.bridge
+        b.reply("one")
+        b.channel.send = AsyncMock(return_value={"message_id": "m"})
+        task = self.start(b.sender())
+        await asyncio.wait_for(b.outbox_drained.wait(), 1)
+        saved = self.store.load("bridge")
+        self.assertIn("lastSendMs", saved)
+        self.assertGreaterEqual(saved["lastSendMs"], 0)
+        task.cancel()
 
     async def test_usage_before_resume_response_is_kept_per_thread(self):
         backend = self.bridge.backend

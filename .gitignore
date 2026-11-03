@@ -19,3 +19,7 @@ __pycache__/
 *.pyc
 *.pyo
 dist/
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/

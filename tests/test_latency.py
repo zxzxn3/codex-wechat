@@ -36,7 +36,7 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_backend_or_rpc_timeout_is_explicit(self):
         backend = SimpleNamespace(probe_target=AsyncMock(return_value=None))
         self.assertEqual(await provider_latency(backend), "unavailable")
-        backend.probe_target.side_effect = asyncio.TimeoutError()
+        backend.probe_target.side_effect = TimeoutError()
         self.assertEqual(await provider_latency(backend), "timeout")
 
     async def test_cancellation_reaps_probe(self):
