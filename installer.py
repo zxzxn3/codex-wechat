@@ -145,6 +145,13 @@ def introduction() -> bool:
     ))
     print()
     print(textwrap.fill(
+        "本项目为第三方独立开发，与 OpenAI、腾讯公司（微信）及其关联方"
+        "没有隶属、合作或背书关系，也未获其授权；"
+        "相关名称与商标归各自权利人所有。",
+        width=width,
+    ))
+    print()
+    print(textwrap.fill(
         "接下来展示操作计划，确认后执行；不启用新自启、不启动服务、不安装附加组件。",
         width=width,
     ))
@@ -863,9 +870,10 @@ def next_steps(target: Path, *, update: bool, identifier: str) -> None:
         if update:
             print(f"重启服务: {command} service-restart")
         else:
-            print("安装时不扫码，登录自启默认关闭。")
             print(f"首次运行: {command} start")
+            print("启动后在终端显示二维码，用微信扫码登录。")
             print("然后在微信发送 /help 或普通消息。")
+            print("自启默认关闭；需要时在微信发送 /settings autostart on。")
     elif update:
         print("重启已有服务: systemctl --user restart codex-wechat")
         print("若未使用服务，先退出原前台进程，再运行 codex-wechat start。")
