@@ -43,8 +43,9 @@ function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
 }
 
 function Stop-SharedBackends {
-    # The bridge keeps its app-server alive across client restarts, so it can
-    # still hold the data directory open when the installation is removed.
+    # A shared backend keeps `shared/<id>/backend.std*.log` open, so the data
+    # directory can only be purged after it exits. It is deliberately shared
+    # with other clients, which is why this runs only for -PurgeData.
     $sharedRoot = Join-Path $DataRoot 'shared'
     if (-not (Test-Path -LiteralPath $sharedRoot)) {
         return
@@ -69,6 +70,22 @@ function Stop-SharedBackends {
                 $process.CreationDate.ToUniversalTime().ToString('o') -ne $value.creationTimeUtc) {
             Write-Warning "skipping shared backend ${id}: recorded identity no longer matches"
             continue
+        }
+        $port = 0
+        try {
+            $port = ([Uri][string]$value.url).Port
+        } catch {
+            $port = 0
+        }
+        if ($port -gt 0 -and -not $Force) {
+            $attached = @(Get-NetTCPConnection -State Established -LocalPort $port -ErrorAction SilentlyContinue)
+            if ($attached.Count -gt 0) {
+                $owners = @($attached | ForEach-Object {
+                    $owner = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+                    if ($owner) { "$($owner.ProcessName)($($owner.Id))" } else { "pid $($_.OwningProcess)" }
+                }) -join ', '
+                Fail "shared backend $id still has attached clients: $owners; close them first or pass -Force"
+            }
         }
         Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
         $deadline = (Get-Date).AddSeconds(15)
@@ -107,8 +124,6 @@ if ($task) {
     Write-Host "scheduled task is not installed: $TaskName"
 }
 
-Stop-SharedBackends
-
 if ($PurgeData) {
     $expectedLeaf = 'codex-wechat'
     $resolvedParent = [IO.Path]::GetFullPath((Split-Path -Parent $DataRoot))
@@ -121,10 +136,12 @@ if ($PurgeData) {
         if ((-not $dataItem.PSIsContainer) -or ((($dataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
             Fail "refusing to purge non-directory or reparse-point data path: $DataRoot"
         }
+        Stop-SharedBackends
         Remove-Item -LiteralPath $DataRoot -Recurse -Force
         Write-Host "removed data: $DataRoot"
     }
 } else {
     Write-Host "data retained: $DataRoot (use -PurgeData only when credentials and state are no longer needed)"
+    Write-Host 'a shared Codex backend under the data root is left running'
 }
 Write-Host 'project files and the virtual environment were not removed'
