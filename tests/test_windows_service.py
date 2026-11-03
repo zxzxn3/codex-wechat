@@ -264,6 +264,47 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 0)
         self.assertEqual(spawn.await_count, 7)
 
+    async def test_restart_switches_release_only_when_the_pointer_moves(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            release = root / "releases" / "abc123"
+            release.mkdir(parents=True)
+            (root / "current").write_text("abc123\n", encoding="utf-8")
+            with patch.dict(os.environ, {"CODEX_WECHAT_INSTALL_ROOT": str(root)}):
+                self.assertTrue(windows_service.release_changed(ROOT))
+                self.assertFalse(windows_service.release_changed(release.resolve()))
+                (root / "current").write_text("../escape\n", encoding="utf-8")
+                self.assertFalse(windows_service.release_changed(ROOT))
+                (root / "current").unlink()
+                self.assertFalse(windows_service.release_changed(ROOT))
+
+    async def test_restart_returns_switch_code_when_the_pointer_moved(self):
+        class Process:
+            pid = 1234
+            returncode = 75
+
+            async def wait(self):
+                return 75
+
+        class Stream:
+            def close(self):
+                pass
+
+        spawn = AsyncMock(side_effect=lambda *args, **kwargs: (Process(), Stream()))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "app"
+            (root / "releases" / "next").mkdir(parents=True)
+            (root / "current").write_text("next\n", encoding="utf-8")
+            with patch.dict(os.environ, {"CODEX_WECHAT_INSTALL_ROOT": str(root)}), \
+                 patch.object(windows_service, "_spawn_bridge", spawn), \
+                 patch.object(windows_service.asyncio, "sleep", AsyncMock()) as sleep:
+                result = await windows_service.supervise(
+                    ROOT, Path(temp) / ".state",
+                    Path(temp) / "config.json", Path(temp) / "service.log")
+        self.assertEqual(result, windows_service.RELEASE_SWITCH_EXIT_CODE)
+        self.assertEqual(spawn.await_count, 1)
+        sleep.assert_not_awaited()
+
     def test_scripts_pin_current_user_task_and_power_settings(self):
         install = (ROOT / "install.ps1").read_text(encoding="utf-8")
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")

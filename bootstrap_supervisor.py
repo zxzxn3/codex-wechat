@@ -39,7 +39,11 @@ def active_release(install_root: Path) -> Path:
 
 
 def load_supervisor(release: Path):
-    sys.path.insert(0, str(release))
+    entry = str(release)
+    # Reloading a new release must shadow the previous one instead of stacking it.
+    while entry in sys.path:
+        sys.path.remove(entry)
+    sys.path.insert(0, entry)
     path = release / "windows_service.py"
     spec = importlib.util.spec_from_file_location("codex_wechat_windows_service", path)
     if spec is None or spec.loader is None:
@@ -62,40 +66,59 @@ def parser() -> argparse.ArgumentParser:
 
 def log_failure(error: BaseException) -> None:
     root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
-    path = root / "codex-wechat" / "logs" / "service.log"
+    _write_failure(root / "codex-wechat" / "logs" / "service.log", error, "bootstrap")
+
+
+def log_release_failure(error: BaseException, path: Path) -> None:
+    _write_failure(path, error, "bootstrap release switch")
+
+
+def _write_failure(path: Path, error: BaseException, label: str) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(f"{stamp} bootstrap: {type(error).__name__}: {error}\n")
+            stream.write(f"{stamp} {label}: {type(error).__name__}: {error}\n")
     except OSError:
         pass
 
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
-    install_root = args.install_root.expanduser()
-    release = active_release(install_root)
-    install_root = install_root.resolve()
+    install_root = args.install_root.expanduser().resolve()
     os.environ["CODEX_WECHAT_INSTALL_ROOT"] = str(install_root)
-    python = release / ".venv" / "Scripts" / "python.exe"
-    if not python.is_file():
-        raise FileNotFoundError(f"release Python environment is missing: {python}")
-    module = load_supervisor(release)
     root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "codex-wechat"
     state_dir = args.state_dir or root / ".state"
     config = args.config or root / "config.json"
     log_path = args.log or root / "logs" / "service.log"
-    try:
-        return asyncio.run(module.supervise(
-            release,
-            state_dir,
-            config,
-            log_path,
-            python=python,
-        ))
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        return 0
+    active = None
+    while True:
+        try:
+            release = active_release(install_root)
+            python = release / ".venv" / "Scripts" / "python.exe"
+            if not python.is_file():
+                raise FileNotFoundError(f"release Python environment is missing: {python}")
+            module = load_supervisor(release)
+        except Exception as error:
+            if active is None:
+                raise
+            # A broken pointer must not leave the task without a bridge.
+            log_release_failure(error, log_path)
+            release, python, module = active
+        else:
+            active = (release, python, module)
+        try:
+            code = asyncio.run(module.supervise(
+                release,
+                state_dir,
+                config,
+                log_path,
+                python=python,
+            ))
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            return 0
+        if code != getattr(module, "RELEASE_SWITCH_EXIT_CODE", 76):
+            return code
 
 
 if __name__ == "__main__":
