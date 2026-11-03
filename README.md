@@ -71,6 +71,8 @@ Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对
 托管——如果 VS Code 的 Codex 扩展先占用它，桥接会因为身份校验不通过而无法跟随（日志
 `backend.app_attach_failed`）；此时桌面端的回信不会进入微信，微信发消息会得到
 “会话正被桌面端占用”。IPC 只支持“App 作为写者”的方向；桥接不会反向充当 IPC 持有者。
+反向接入（桥接作为 owner 向 App 广播会话状态并承接它的 follower 请求）尚未实现：需要复刻
+App 的 conversationState/增量与 revision 语义，属于版本相关的内部协议，实现与维护成本较高。
 App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
 若旧版本曾通过 `--shortcut` 创建 Linux 用户桌面覆盖，请先核对
 `~/.local/share/applications/chatgpt.desktop` 中的 `X-Codex-WeChat=true`，仅移除项目创建且未自行修改的覆盖，恢复系统原入口。
