@@ -139,11 +139,23 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.rpc = AsyncMock(return_value={})
         self.assertTrue(await backend.release_thread("thread-1"))
         backend.rpc.assert_awaited_once_with("thread/unsubscribe", {"threadId": "thread-1"})
+        self.assertEqual(backend.released_thread, "thread-1")
         backend.rpc = AsyncMock(side_effect=RuntimeError("unsupported method"))
         self.assertFalse(await backend.release_thread("thread-2"))
+        self.assertEqual(backend.released_thread, "thread-1")
         backend.transport.proc = SimpleNamespace(returncode=1)
         backend.rpc = AsyncMock(return_value={})
         self.assertFalse(await backend.release_thread("thread-3"))
+
+    async def test_followed_app_thread_keeps_its_subscription(self):
+        # A followed thread still needs its IPC events, so it is never released.
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.app = SimpleNamespace(thread_id="thread-1", connected=True)
+        backend.rpc = AsyncMock(return_value={})
+        self.assertFalse(await backend.release_thread("thread-1"))
+        backend.rpc.assert_not_awaited()
 
     async def test_windows_probe_falls_back_to_the_system_proxy(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

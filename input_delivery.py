@@ -167,7 +167,8 @@ class InputDelivery:
                     self.defer_restart(job)
                     continue
                 bridge.steer_wake.set()
-                answer = await backend.run(bridge.state["thread"], job["text"],
+                thread_id = bridge.state["thread"]
+                answer = await backend.run(thread_id, job["text"],
                     attachments=job["preparedAttachments"], client_id=job["clientId"],
                     allow_steer=job.get("mode", "steer") != "queue",
                     dispatch=functools.partial(bridge.dispatch_input, job, backend=backend))
@@ -182,6 +183,9 @@ class InputDelivery:
                               duration_ms=(time.perf_counter() - started) * 1000,
                               queued=len(bridge.state["inbox"]),
                               request_id=job.get("requestId"))
+                    # Hand the writer back so the App can open this thread while
+                    # the bridge is idle; the next turn resumes it.
+                    await backend.release_thread(thread_id)
                 else:
                     bridge.state.pop("currentInput", None)
                     bridge.save()

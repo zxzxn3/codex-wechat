@@ -45,6 +45,7 @@ class CodexBackend:
         self.pending = {}
         self.recent_tokens = deque(maxlen=PENDING_TOKEN_RECENT)
         self.active = None
+        self.released_thread = None
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
@@ -643,19 +644,21 @@ class CodexBackend:
         return endpoint, env
 
     async def release_thread(self, thread_id):
-        """Drop the writer this client holds for a thread it has left.
+        """Drop the writer this client holds for a thread.
 
         The app-server exposes no unload call; unsubscribing is the only way to
         stop holding the writer, which is what leaves another client (the App)
         looking at a locked thread. Best effort: an older server that does not
-        know the method must not fail the switch.
+        know the method must not fail the caller, and a followed App thread is
+        left alone because its events still arrive through IPC.
         """
-        if not thread_id or not self.connected or self.active is not None:
+        if not thread_id or not self.connected or self.active is not None or self.app is not None:
             return False
         try:
             await self.rpc("thread/unsubscribe", {"threadId": thread_id})
         except (CodexRpcError, OSError, RuntimeError):
             return False
+        self.released_thread = thread_id
         return True
 
     async def list_threads(self, cursor=None, search=None):
@@ -744,6 +747,11 @@ class CodexBackend:
         self.active = current
         self.stop_requested = False
         try:
+            if self.released_thread == thread_id:
+                # The writer was returned after the previous turn: take it back,
+                # or follow the desktop if it claimed the thread meanwhile.
+                self.released_thread = None
+                await self.thread(thread_id)
             await self.refresh_runtime()
             current["cwd"] = self.info.get("cwd") or self.cwd
             inputs = await self.input_items(text, attachments)
