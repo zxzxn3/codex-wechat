@@ -97,11 +97,14 @@ if ($existing) {
     # by an elevated installer is owned by Administrators. Skip the write when
     # nothing changed so a normal user can still update the program.
     $current = @($existing.Actions)
+    # Task Scheduler stores the account name without the machine/domain prefix.
+    $currentUser = ([string]$existing.Principal.UserId -split '\\')[-1]
+    $wantedUser = ($user -split '\\')[-1]
     $unchanged = ($current.Count -eq 1 -and
         [string]$current[0].Execute -eq [string]$action.Execute -and
         [string]$current[0].Arguments -eq [string]$action.Arguments -and
         [string]$current[0].WorkingDirectory -eq [string]$action.WorkingDirectory -and
-        [string]$existing.Principal.UserId -eq $user -and
+        $currentUser -eq $wantedUser -and
         [string]$existing.Principal.LogonType -eq 'Interactive')
     if ($unchanged) {
         Write-Host 'Task unchanged; access rules preserved.'
