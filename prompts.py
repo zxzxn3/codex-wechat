@@ -120,6 +120,10 @@ SESSION_WRITER_BUSY = (
     "未提交: 会话正被桌面端占用，桥接无法跟随。\n"
     "请在 App 里关闭该会话，或稍后重试。"
 )
+SESSION_WRITER_QUEUED = (
+    "已排队: 会话正被桌面端占用，暂时无法提交。\n"
+    "在 App 里关闭该会话后会自动发送；最多等待 10 分钟。"
+)
 SESSION_INDEX_INVALID = "未切换会话: 编号无效\n请先发送 `/sessions`。"
 SESSION_USAGE = "用法: `/switch {{编号、ID或搜索词}}`"
 NEW_USAGE = "用法: `/new`"

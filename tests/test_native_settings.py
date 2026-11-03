@@ -2,12 +2,15 @@
 import asyncio
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from codex_wechat import Bridge
 from backend import CodexBackend
+from codex_transport import CodexRpcError
 from commands import activate
+from input_delivery import InputDelivery
 from storage import Store
 
 
@@ -46,6 +49,58 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
                                  [("target",), ("other",)])
             finally:
                 store.lock.close()
+
+    async def test_desktop_writer_conflict_keeps_the_bridge_loaded(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = Store(Path(root) / "state")
+            try:
+                bridge = Bridge(store, {"user": "owner"}, {})
+                conflict = CodexRpcError(-32600, "thread t already has an active writer")
+                bridge.backend.read_thread = AsyncMock(return_value={"status": {"type": "idle"},
+                                                                     "name": "name", "cwd": "/cwd"})
+                bridge.backend.thread = AsyncMock(side_effect=conflict)
+                bridge.backend.release_thread = AsyncMock(return_value=True)
+                await activate(bridge, "t")
+                self.assertTrue(bridge.loaded)
+                self.assertEqual(bridge.state["thread"], "t")
+                self.assertEqual(bridge.backend.selected_thread, "t")
+                self.assertEqual(bridge.backend.released_thread, "t")
+                self.assertEqual(bridge.backend.info["cwd"], "/cwd")
+                bridge.backend.release_thread.assert_not_awaited()
+            finally:
+                store.lock.close()
+
+    async def test_writer_conflict_queues_the_message_once(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = Store(Path(root) / "state")
+            try:
+                bridge = Bridge(store, {"user": "owner"}, {})
+                delivery = InputDelivery(bridge)
+                bridge.reply = Mock()
+                job = {"text": "hi", "requestId": "req-1", "phase": "preparing"}
+                self.assertTrue(delivery.queue_writer_conflict(bridge, job))
+                self.assertEqual(bridge.state["inbox"], [job])
+                self.assertEqual(bridge.reply.call_count, 1)
+                self.assertIn("已排队", bridge.reply.call_args.args[0])
+                self.assertGreater(delivery.writer_wait_left(job), 0)
+                self.assertTrue(delivery.queue_writer_conflict(bridge, job))
+                self.assertEqual(bridge.reply.call_count, 1)
+                job["writerQueuedAt"] = 0
+                self.assertFalse(delivery.queue_writer_conflict(bridge, job))
+            finally:
+                store.lock.close()
+
+    async def test_failed_resume_keeps_watching_for_the_desktop(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.released_thread = "t"
+        backend.input_items = AsyncMock(return_value=[])
+        backend.thread = AsyncMock(side_effect=CodexRpcError(
+            -32600, "thread t already has an active writer"))
+        with self.assertRaises(CodexRpcError):
+            await backend.run("t", "hello")
+        self.assertEqual(backend.released_thread, "t")
 
     async def test_settings_event_updates_only_selected_thread(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

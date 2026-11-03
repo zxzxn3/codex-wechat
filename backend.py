@@ -48,6 +48,7 @@ class CodexBackend:
         self.active = None
         self.released_thread = None
         self.attach_error = None
+        self.router_trust_reported = False
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
@@ -136,11 +137,18 @@ class CodexBackend:
         path = ipc_path(self.config)
         if path is None or (not IS_WINDOWS and not path.exists()):
             return None
+        trust_router = bool(self.config.get("appIpcTrustRouter"))
+        if trust_router and not self.router_trust_reported:
+            # An opt-in that widens who may relay App IPC: say it once.
+            self.router_trust_reported = True
+            self.writer_event("backend.app_ipc_router_trusted", level="warning",
+                              status="trusted")
         candidate = None
         candidate = AppSession(path, thread_id,
             on_event=lambda event: self.event(event) if self.app is candidate else None,
             on_request=lambda request: self.app_request(candidate, request),
-            on_disconnect=lambda error: self.connection_lost(error) if self.app is candidate else None)
+            on_disconnect=lambda error: self.connection_lost(error) if self.app is candidate else None,
+            trust_router=trust_router)
         try:
             await candidate.attach()
             await candidate.settings(options)
@@ -740,6 +748,34 @@ class CodexBackend:
         result = await self.rpc("thread/read", {"threadId": thread_id})
         return result["thread"]
 
+    async def adopt_thread(self, thread_id, thread=None):
+        """Take a thread as the selection without holding or following its writer.
+
+        Used when the desktop owns it and its IPC cannot be followed: the bridge
+        stays usable, keeps retrying, and reports the conflict per message
+        instead of failing backend recovery in a loop.
+        """
+        thread = thread or {}
+        previous = self.info if self.info.get("id") == thread_id else {}
+        self.info = {"id": thread_id, "name": thread.get("name"),
+                     "path": thread.get("path"),
+                     "model": thread.get("model", previous.get("model")),
+                     "provider": thread.get("modelProvider", previous.get("provider")),
+                     "effort": thread.get("reasoningEffort", previous.get("effort")),
+                     "cwd": thread.get("cwd") or previous.get("cwd") or self.cwd,
+                     "approval": thread.get("approvalPolicy", previous.get("approval")),
+                     "sandbox": thread.get("sandbox", previous.get("sandbox")),
+                     "collaboration": thread.get("collaborationMode",
+                                                 previous.get("collaboration")),
+                     "usage": self.usage_by_thread.get(thread_id, previous.get("usage"))}
+        if self.selected_thread != thread_id:
+            self.selection_epoch += 1
+            self.active = None
+            self.pending.clear()
+        self.selected_thread = thread_id
+        self.released_thread = thread_id
+        return thread_id
+
     async def models(self, max_age=60):
         if self.model_catalog is not None and time.monotonic() - self.models_checked_at < max_age:
             return self.model_catalog
@@ -819,7 +855,12 @@ class CodexBackend:
                 # The writer was returned after the previous turn: take it back,
                 # or follow the desktop if it claimed the thread meanwhile.
                 self.released_thread = None
-                await self.thread(thread_id)
+                try:
+                    await self.thread(thread_id)
+                except Exception:
+                    # Keep watching: the desktop still owns the thread.
+                    self.released_thread = thread_id
+                    raise
             await self.refresh_runtime()
             current["cwd"] = self.info.get("cwd") or self.cwd
             inputs = await self.input_items(text, attachments)

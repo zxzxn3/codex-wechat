@@ -21,6 +21,10 @@ class InputDelivery:
     # While idle with a released thread, watch for a desktop that takes it over.
     FOLLOW_POLL_SECONDS = 5
     FOLLOW_RETRY_SECONDS = 60
+    # A desktop holding the thread is usually a user action, not an error: keep
+    # the message queued until it lets go, but never forever.
+    WRITER_WAIT_SECONDS = 600
+    WRITER_RETRY_SECONDS = 30
 
     def __init__(self, bridge):
         self.bridge = bridge
@@ -30,6 +34,36 @@ class InputDelivery:
         backend = self.bridge.backend
         thread = self.bridge.state.get("thread")
         return bool(thread and backend.released_thread == thread and backend.app is None)
+
+    def writer_wait_left(self, job):
+        retry_at = job.get("writerRetryAt")
+        if not isinstance(retry_at, (int, float)):
+            return 0
+        return max(0.0, retry_at - time.time())
+
+    def queue_writer_conflict(self, bridge, job):
+        """Keep the message while the desktop holds the thread, then give up."""
+        now = time.time()
+        queued_at = job.get("writerQueuedAt")
+        if not isinstance(queued_at, (int, float)):
+            queued_at = job["writerQueuedAt"] = now
+        if now - queued_at > self.WRITER_WAIT_SECONDS:
+            return False
+        job["writerRetryAt"] = now + self.WRITER_RETRY_SECONDS
+        job["phase"] = InputPhase.PREPARING
+        job["mode"] = "queue"
+        if bridge.state.get("currentInput") is job:
+            bridge.state.pop("currentInput")
+        if not any(item is job for item in bridge.state["inbox"]):
+            bridge.state["inbox"].insert(0, job)
+        if not job.get("writerNotified"):
+            job["writerNotified"] = True
+            bridge.reply(bridge.prompt("SESSION_WRITER_QUEUED"),
+                         request_id=job.get("requestId"))
+        log_event("input.writer_wait", component="input", status="queue",
+                  phase=job["phase"], mode="queue", request_id=job.get("requestId"))
+        bridge.save()
+        return True
 
     async def follow_desktop(self):
         """Re-attach to the App once it owns our idle thread; else back off."""
@@ -143,6 +177,14 @@ class InputDelivery:
                 else:
                     await bridge.wake.wait()
                 continue
+            wait = self.writer_wait_left(bridge.state["inbox"][0])
+            if wait > 0:
+                bridge.wake.clear()
+                try:
+                    await asyncio.wait_for(bridge.wake.wait(), min(wait, self.FOLLOW_POLL_SECONDS))
+                except asyncio.TimeoutError:
+                    pass
+                continue
             bridge.running = True
             bridge.stopping = False
             job = bridge.state["inbox"].pop(0)
@@ -226,6 +268,10 @@ class InputDelivery:
                 bridge.state.pop("currentInput", None)
                 bridge.save()
             except Exception as error:
+                conflict = (isinstance(error, CodexRpcError) and error.code == -32600
+                            and "already has an active writer" in str(error.reason))
+                if conflict and not bridge.stopping and self.queue_writer_conflict(bridge, job):
+                    continue
                 if bridge.state.get("currentInput") is job:
                     phase = job["phase"]
                     uncertain = phase == InputPhase.DISPATCHING and not (
@@ -233,8 +279,6 @@ class InputDelivery:
                     bridge.record_input(job, InputPhase.UNCERTAIN if uncertain else
                                       InputPhase.ACCEPTED if phase == InputPhase.ACCEPTED else InputPhase.FAILED)
                     bridge.state.pop("currentInput", None)
-                    conflict = (isinstance(error, CodexRpcError) and error.code == -32600
-                                and "already has an active writer" in str(error.reason))
                     bridge.reply(bridge.prompt("INPUT_SUBMISSION_UNCERTAIN") if uncertain else
                                bridge.prompt("INPUT_RESULT_INTERRUPTED") if phase == InputPhase.ACCEPTED else
                                bridge.prompt("SESSION_WRITER_BUSY") if conflict else

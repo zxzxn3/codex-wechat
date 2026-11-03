@@ -42,11 +42,26 @@ def info(bridge, action=None, *, include_backend=False):
     return text
 
 
+async def adopt(bridge, thread_id, overrides, thread):
+    """Resume the target, or adopt it without a writer when the desktop owns it.
+
+    A desktop that holds the thread and cannot be followed must not fail the
+    session: the bridge would stay unloaded, pause input and retry forever.
+    """
+    try:
+        return await bridge.backend.thread(thread_id, overrides)
+    except CodexRpcError as error:
+        if not (error.code == -32600 and "already has an active writer" in str(error.reason)):
+            raise
+        return await bridge.backend.adopt_thread(thread_id, thread)
+
+
 async def activate(bridge, thread_id=None, overrides=None):
     # Only this explicit command may override native settings. Never replay a mobile cache.
     saved = dict(overrides or {})
     previous = bridge.state.get("thread")
     desktop = False
+    thread = None
     if thread_id:
         thread = await bridge.backend.read_thread(thread_id)
         status = thread.get("status", {}).get("type")
@@ -61,7 +76,7 @@ async def activate(bridge, thread_id=None, overrides=None):
             # Adopt the desktop's current settings instead of applying stale mobile overrides.
             saved = {}
     bridge.loaded = False
-    selected = await bridge.backend.thread(thread_id, saved)
+    selected = await adopt(bridge, thread_id, saved, thread)
     if previous and previous != selected:
         # Leaving a thread must not keep its writer, or the App shows it locked.
         await bridge.backend.release_thread(previous)
@@ -71,7 +86,8 @@ async def activate(bridge, thread_id=None, overrides=None):
     bridge.save()
     # Adoption itself needs no writer: return it so the App can open this thread
     # while the bridge is idle. The next turn resumes it or follows the App.
-    await bridge.backend.release_thread(selected, follow=True)
+    if bridge.backend.released_thread != selected:
+        await bridge.backend.release_thread(selected, follow=True)
     return desktop
 
 
