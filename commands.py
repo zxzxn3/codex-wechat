@@ -357,31 +357,34 @@ async def _change_model(bridge, command, argument, received=None):
     await _apply_settings(bridge, command, overrides)
 
 
-@session_control
-async def command_effort(bridge, command, argument, received=None):
+async def _current_effort_choices(bridge):
     await ensure_session(bridge)
     models = await model_entries(bridge)
-    overrides = {}
     current = next((m for m in models
                     if m["model"] == bridge.backend.info.get("model")), None)
     if current is None:
         raise UserFacingError(bridge.prompt("MODEL_NOT_IN_CATALOG"))
-    choices = effort_choices(current)
-    if not argument:
-        current_effort = bridge.backend.info.get("effort")
-        bridge.reply(bridge.prompt("EFFORT_SUMMARY", {
-            "current": effort_label(current_effort),
-            "choices": " | ".join(effort_label(value) for value in choices) or "无",
-        }))
-        return
+    return effort_choices(current)
+
+
+async def command_effort_view(bridge, command, argument, received=None):
+    choices = await _current_effort_choices(bridge)
+    bridge.reply(bridge.prompt("EFFORT_SUMMARY", {
+        "current": effort_label(bridge.backend.info.get("effort")),
+        "choices": " | ".join(effort_label(value) for value in choices) or "无",
+    }))
+
+
+@session_control
+async def _change_effort(bridge, command, argument, received=None):
+    choices = await _current_effort_choices(bridge)
     selected_effort = next(
         (value for value in choices
          if value.casefold() == argument.casefold()), None)
     if selected_effort is None:
         raise UserFacingError(bridge.prompt("EFFORT_INVALID", {
             "choices": " | ".join(effort_label(value) for value in choices) or "无"}))
-    overrides["effort"] = selected_effort
-    await _apply_settings(bridge, command, overrides)
+    await _apply_settings(bridge, command, {"effort": selected_effort})
 
 
 @session_control
@@ -428,6 +431,12 @@ async def command_model(bridge, command, argument, received=None):
     if not argument:
         return await command_model_view(bridge, command, argument, received)
     return await _change_model(bridge, command, argument, received)
+
+
+async def command_effort(bridge, command, argument, received=None):
+    if not argument:
+        return await command_effort_view(bridge, command, argument, received)
+    return await _change_effort(bridge, command, argument, received)
 
 
 async def command_cwd(bridge, command, argument, received=None):

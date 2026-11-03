@@ -2,7 +2,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
 
+import commands
+from errors import UserFacingError
 from codex_wechat import Bridge
 from lifecycle import (
     can_change_session,
@@ -45,6 +48,23 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         async with self.bridge.session_lock:
             self.assertGate(can_change_session, False, "session lock")
         self.assertGate(can_change_session, True, "released")
+
+    async def test_effort_query_is_available_during_work_but_changes_are_blocked(self):
+        self.bridge.running = True
+        self.bridge.backend.info = {"model": "fixture", "effort": "high"}
+        self.bridge.backend.models = AsyncMock(return_value=[{
+            "model": "fixture", "supportedReasoningEfforts": [{"reasoningEffort": "high"}]}])
+        self.bridge.reply = replies = Mock()
+        with patch.object(commands, "ensure_session", AsyncMock()), \
+                patch.object(commands, "_apply_settings", AsyncMock()) as apply:
+            await commands.command_effort(self.bridge, "/effort", "")
+            replies.assert_called_once()
+            apply.assert_not_awaited()
+            self.bridge.backend.models.reset_mock()
+            with self.assertRaises(UserFacingError):
+                await commands.command_effort(self.bridge, "/effort", "high")
+            self.bridge.backend.models.assert_not_awaited()
+            apply.assert_not_awaited()
 
     async def test_restart_allows_queued_work_but_not_submitted_work(self):
         self.bridge.state["inbox"] = [{"id": "queued"}]
