@@ -73,6 +73,18 @@ def remove_owner_status(path: Path, token: str) -> None:
             pass
 
 
+def discard_owner_status(path: Path) -> None:
+    """Drop a record left by a stop or crash that skipped the normal cleanup.
+
+    Only called while the single-instance guard is held, so no live supervisor
+    owns the record.
+    """
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _rotate_log(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -353,6 +365,7 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
     _append_log(log_path, f"starting for {project}")
     job = ChildJob()
     status_path = owner_status_path(state_dir)
+    discard_owner_status(status_path)
     token = secrets.token_urlsafe(32)
     python = bridge_python(project, str(python) if python else None)
     command = bridge_command(project, state_dir, config, python)

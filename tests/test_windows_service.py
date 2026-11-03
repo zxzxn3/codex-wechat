@@ -305,6 +305,41 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spawn.await_count, 1)
         sleep.assert_not_awaited()
 
+    async def test_startup_discards_a_stale_owner_record(self):
+        class Process:
+            pid = 1234
+            returncode = 0
+
+            async def wait(self):
+                return 0
+
+        class Stream:
+            def close(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp) / ".state"
+            state.mkdir()
+            status_path = windows_service.owner_status_path(state)
+            status_path.write_text(json.dumps({
+                "version": 1, "supervisor_pid": 111, "child_pid": 222,
+                "token": "stale", "state_dir": str(state), "started_at": 0}),
+                encoding="utf-8")
+            seen = []
+
+            async def spawn(command, project, env, log_path):
+                # The new supervisor must not inherit the previous owner record.
+                seen.append(status_path.exists())
+                return Process(), Stream()
+
+            with patch.object(windows_service, "_spawn_bridge", spawn):
+                result = await windows_service.supervise(
+                    ROOT, state, Path(temp) / "config.json",
+                    Path(temp) / "service.log")
+        self.assertEqual(result, 0)
+        self.assertEqual(seen, [False])
+        self.assertFalse(status_path.exists())
+
     def test_scripts_pin_current_user_task_and_power_settings(self):
         install = (ROOT / "install.ps1").read_text(encoding="utf-8")
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
