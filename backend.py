@@ -27,6 +27,7 @@ from questions import (
 )
 from prompts import (prompt_text)
 from platform_support import IS_WINDOWS
+from diagnostics import log_event
 from prompts import (command_approval, file_approval)
 
 from codex_transport import CodexTransport, CodexRpcError
@@ -146,6 +147,13 @@ class CodexBackend:
             # Missing App endpoint does not turn a native writer conflict into
             # a guessed attachment or a new independent writer.
             await candidate.close()
+            return None
+        except ValueError as error:
+            # A relay that is not the registered App (for example the VS Code
+            # extension host) cannot be used: keep the caller's own reason.
+            await candidate.close()
+            log_event("backend.app_attach_failed", level="warning", component="backend",
+                      error_type=type(error).__name__)
             return None
         except BaseException:
             await candidate.close()
