@@ -56,6 +56,7 @@ _TEXT_FIELDS = {
     "error_type": r"[A-Za-z_][A-Za-z0-9_]{0,60}",
     "error_code": r"[A-Za-z0-9._-]{1,16}",
     "reason": r"[^\x00-\x1f\x7f]{1,160}",
+    "method": r"[A-Za-z][A-Za-z0-9/_.@-]{0,63}",
     "thread": r"[A-Za-z0-9._-]{1,64}",
     "api_error_kind": r"(?:auth_expired|rate_limit_hint|prepare_failed|unknown_error|other)",
     "platform": r"[a-z0-9_.-]{1,16}",
