@@ -7,7 +7,17 @@
 
 ```bash
 cd ~/.local/share/codex-wechat
-PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
+CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" PYTHONDONTWRITEBYTECODE=1 \
+    .venv/bin/python -m unittest discover -s tests -v
+```
+
+诊断日志默认写在 `data_root()/logs/bridge.jsonl`，不隔离会把测试事件混进已安装实例
+正在使用的日志，真实问题的排查会被测试噪音污染。`CODEX_WECHAT_DATA_ROOT` 指向临时
+目录即可，测试本身不依赖该目录内容。Windows PowerShell：
+
+```powershell
+$env:CODEX_WECHAT_DATA_ROOT = Join-Path $env:TEMP ("cw-tests-" + [guid]::NewGuid())
+py -3 -m unittest discover -s tests -v
 ```
 
 Windows、真实微信/CDN、App/daemon 联调不属于离线测试；mock 通过不能写成真实平台或端到端通过。

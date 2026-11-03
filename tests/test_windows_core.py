@@ -28,7 +28,9 @@ class PlatformTests(unittest.TestCase):
 
     def test_windows_paths_and_optional_launcher(self):
         with patch.object(platform_support, "IS_WINDOWS", True), \
-                patch.dict("os.environ", {"LOCALAPPDATA": "/tmp/local"}):
+                patch.dict("os.environ", {"LOCALAPPDATA": "/tmp/local",
+                                          "CODEX_WECHAT_DATA_ROOT": ""}):
+            # An ambient override (a test-isolated run sets one) must not leak in.
             self.assertEqual(platform_support.data_root(), Path("/tmp/local/codex-wechat"))
         with patch.object(platform_support, "IS_WINDOWS", False), \
                 patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": "/tmp/stable-data"}):
