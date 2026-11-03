@@ -206,8 +206,12 @@ class WindowsRouterTests(RouterTests):
         self.failed = Mock()
         self.nested_response = False
         self.enterContext(patch("app_ipc_windows.PIPE_PATH", str(self.path)))
+        core = Path(self.temp.name) / "resources" / "codex.exe"
+        core.parent.mkdir(parents=True)
+        core.write_text("", encoding="utf-8")
+        (core.parent.parent / "ChatGPT.exe").write_text("", encoding="utf-8")
         self.enterContext(patch("app_ipc_windows.discover_app_codex",
-                                return_value=str(Path(self.temp.name) / "resources/codex.exe")))
+                                return_value=str(core)))
         self.verify = self.enterContext(patch("app_ipc_windows.verify_server"))
         loop = asyncio.get_running_loop()
         def protocol():
@@ -289,6 +293,18 @@ class WindowsVerifyServerTests(unittest.IsolatedAsyncioTestCase):
         other = Path(os.environ["WINDIR"]) / "System32" / "cmd.exe"
         with self.assertRaisesRegex(ValueError, "不是当前已注册的 Codex App"):
             verify_server(await self._connected_handle(), other)
+
+    async def test_missing_app_executable_is_reported_before_connecting(self):
+        import app_ipc_windows
+        with tempfile.TemporaryDirectory() as temp:
+            core = Path(temp) / "resources" / "codex.exe"
+            core.parent.mkdir(parents=True)
+            core.write_text("", encoding="utf-8")
+            with patch.object(app_ipc_windows, "PIPE_PATH", self.path), \
+                 patch.object(app_ipc_windows, "discover_app_codex",
+                              return_value=str(core)):
+                with self.assertRaisesRegex(ValueError, "找不到已注册的 Codex App 主程序"):
+                    await app_ipc_windows.open_pipe(self.path, limit=1024)
 
 
 @unittest.skipUnless(os.name == "nt", "Windows App endpoint selection")

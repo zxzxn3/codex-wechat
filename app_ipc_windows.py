@@ -6,6 +6,9 @@ from pathlib import Path
 from native_codex import discover_app_codex
 
 PIPE_PATH = r"\\.\pipe\codex-ipc"
+# The App package ships its Electron main executable next to the codex CLI
+# resources; the identity check below compares against this exact image.
+APP_EXECUTABLE = "ChatGPT.exe"
 
 
 def verify_server(handle, executable):
@@ -33,7 +36,11 @@ def verify_server(handle, executable):
                 if token is not None:
                     token.Close()
         image = win32process.GetModuleFileNameEx(process, 0)
-        if not os.path.samefile(image, executable):
+        try:
+            same = os.path.samefile(image, executable)
+        except OSError:
+            same = False
+        if not same:
             raise ValueError("App IPC 服务不是当前已注册的 Codex App；更新 App 后请退出重开")
     finally:
         process.Close()
@@ -46,7 +53,9 @@ async def open_pipe(path, *, limit):
     core = await asyncio.to_thread(discover_app_codex, windows=True)
     if not core:
         raise ValueError("找不到已注册的 Codex App，无法确认 IPC 服务身份")
-    executable = Path(core).parent.parent / "ChatGPT.exe"
+    executable = Path(core).parent.parent / APP_EXECUTABLE
+    if not executable.is_file():
+        raise ValueError("找不到已注册的 Codex App 主程序；请完全退出并重新打开 App 后再试")
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader(limit=limit)
     protocol = asyncio.StreamReaderProtocol(reader)
