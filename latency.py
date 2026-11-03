@@ -189,9 +189,10 @@ async def provider_latency(backend):
     try:
         target = await asyncio.wait_for(backend.probe_target(), 3)
         if target is None:
-            return "unavailable"
+            return "unavailable(无可用目标)"
         return await connection_probe(*target)
     except TimeoutError:
-        return "timeout"
-    except (OSError, ValueError, RuntimeError):
-        return "unavailable"
+        return "timeout(读取后端配置)"
+    except (OSError, ValueError, RuntimeError) as error:
+        # The class is the only clue a user can report back; texts are unsafe.
+        return f"unavailable({type(error).__name__})"
