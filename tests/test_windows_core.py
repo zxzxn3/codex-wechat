@@ -132,6 +132,35 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(CodexTransport({}, "/tmp", **callbacks).shared)
             self.assertTrue(CodexTransport({"sharedDaemon": True}, "/tmp", **callbacks).shared)
 
+    async def test_windows_probe_falls_back_to_the_system_proxy(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.transport.launch_env = {}
+        backend.info = {"provider": "custom"}
+        backend.rpc = AsyncMock(return_value={"config": {"model_providers": {
+            "custom": {"base_url": "https://example.com/v1"}}}})
+        with patch("backend.IS_WINDOWS", True), \
+                patch("platform_support.getproxies",
+                      return_value={"https": "http://127.0.0.1:7897", "no": "localhost;127.*"}):
+            _, env = await backend.probe_target()
+        self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:7897")
+        self.assertEqual(env["NO_PROXY"], "localhost,127.*")
+
+    async def test_explicit_proxy_environment_wins_over_the_system_proxy(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.transport.launch_env = {"HTTPS_PROXY": "http://localhost:1234"}
+        backend.info = {"provider": "custom"}
+        backend.rpc = AsyncMock(return_value={"config": {"model_providers": {
+            "custom": {"base_url": "https://example.com/v1"}}}})
+        with patch("backend.IS_WINDOWS", True), \
+                patch("platform_support.getproxies",
+                      return_value={"https": "http://127.0.0.1:7897"}):
+            _, env = await backend.probe_target()
+        self.assertEqual(env["HTTPS_PROXY"], "http://localhost:1234")
+
     async def test_windows_probe_uses_only_launch_network_environment(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.transport.proc = SimpleNamespace(returncode=None)

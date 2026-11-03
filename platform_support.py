@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from urllib.request import getproxies
 from native_codex import discover_codex
 
 IS_WINDOWS = os.name == "nt"
@@ -54,6 +55,31 @@ def account_identity() -> str:
         identity = (domain + "\\" if domain else "") + (os.environ.get("USERNAME") or "")
     _ACCOUNT_IDENTITY = identity
     return identity
+
+
+def system_proxy():
+    """The machine-configured proxy, used to explain a probe, never to route.
+
+    The bridge keeps its own WeChat traffic on the inherited environment. A
+    backend started without proxy variables follows the system setting, so the
+    `/ping` connection probe mirrors that instead of claiming a direct path.
+    """
+    try:
+        proxies = getproxies()
+    except (OSError, ImportError, ValueError):
+        return {}
+    if not isinstance(proxies, dict):
+        return {}
+    found = {}
+    for scheme in ("http", "https", "all"):
+        value = proxies.get(scheme)
+        if isinstance(value, str) and value:
+            found[scheme.upper() + "_PROXY"] = value
+    override = proxies.get("no")
+    if isinstance(override, str) and override:
+        # The Windows registry separates entries with ';', curl wants ','.
+        found["NO_PROXY"] = override.replace(";", ",")
+    return found
 
 
 def make_private(directory) -> None:

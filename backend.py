@@ -633,6 +633,13 @@ class CodexBackend:
                {"PATH", "HOME", "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE",
                 "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LOCALAPPDATA"}}
         env.update({k: v for k, v in selected.items() if k in proxy_keys})
+        # A backend without proxy variables follows the machine setting, so the
+        # probe mirrors that rather than reporting a direct path it never uses.
+        proxy_variables = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                           "http_proxy", "https_proxy", "all_proxy"}
+        if not any(env.get(name) for name in proxy_variables):
+            from platform_support import system_proxy
+            env.update(system_proxy())
         return endpoint, env
 
     async def list_threads(self, cursor=None, search=None):
