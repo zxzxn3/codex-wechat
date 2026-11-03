@@ -95,11 +95,14 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 return Module()
 
             with patch.dict(os.environ, {}), \
+                 patch.object(bootstrap_supervisor.time, "sleep"), \
                  patch.object(bootstrap_supervisor, "load_supervisor", load):
                 code = bootstrap_supervisor.main(self._argv(directory, root))
 
             self.assertEqual(code, 0)
             self.assertEqual(loaded, ["first", "second"])
+            log = (Path(directory) / "service.log").read_text(encoding="utf-8")
+            self.assertIn("version pointer changed; loading second", log)
 
     def test_broken_pointer_keeps_the_running_release(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -119,12 +122,16 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                     return 0
 
             with patch.dict(os.environ, {}), \
+                 patch.object(bootstrap_supervisor.time, "sleep"), \
                  patch.object(bootstrap_supervisor, "load_supervisor",
                               lambda release: Module()):
                 code = bootstrap_supervisor.main(self._argv(directory, root))
 
             self.assertEqual(code, 0)
             self.assertEqual(runs, ["first", "first"])
+            log = (Path(directory) / "service.log").read_text(encoding="utf-8")
+            # The same broken pointer is reported once, not on every restart.
+            self.assertEqual(log.count("release switch:"), 1)
 
 
 if __name__ == "__main__":

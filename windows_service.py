@@ -1,10 +1,10 @@
 """Per-user Windows supervisor for the codex-wechat bridge.
 
 The Task Scheduler starts this process for the current interactive user.  The
-supervisor owns one bridge child, restarts it after exit code 75, and keeps the
+supervisor owns one bridge child, restarts it after a crash, and keeps the
 child in a kill-on-close Job Object so stopping the task cannot leave an orphan.
-A restart requested while the version pointer selects another release returns 76
-so the bootstrap supervisor can load that release instead.
+A user restart returns 76 so the bootstrap supervisor re-resolves the active
+release; this module never parses the install layout itself.
 """
 from __future__ import annotations
 
@@ -312,27 +312,7 @@ async def _stop_process(process, timeout: float = 5.0) -> None:
         await process.wait()
 
 
-def release_changed(project: Path) -> bool:
-    """Report whether the version pointer now selects a different release."""
-    root = os.environ.get("CODEX_WECHAT_INSTALL_ROOT")
-    if not root:
-        return False
-    current = Path(root) / "current"
-    try:
-        if current.is_symlink() or not current.is_file():
-            return False
-        identifier = current.read_text(encoding="utf-8").strip()
-    except OSError:
-        return False
-    if (not identifier or not identifier.isascii()
-            or not all(char.isalnum() or char in "._-" for char in identifier)):
-        return False
-    return (Path(root) / "releases" / identifier).resolve() != project
-
-
-def restart_delay(returncode: int | None, backoff: float) -> float:
-    if returncode == RESTART_EXIT_CODE:
-        return 0.2
+def restart_delay(backoff: float) -> float:
     return min(max(1.0, backoff), 60.0)
 
 
@@ -411,24 +391,20 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
             if returncode == CONFIG_EXIT_CODE:
                 _append_log(log_path, "bridge configuration failed; not restarting")
                 return CONFIG_EXIT_CODE
-            if returncode == RESTART_EXIT_CODE and release_changed(project):
-                # The pointer moved to another release; only bootstrap can reload it.
-                _append_log(log_path, "version pointer changed; reloading the active release")
+            if returncode == RESTART_EXIT_CODE:
+                # Only the bootstrap knows the install layout; hand the restart back.
+                _append_log(log_path, "user restart requested; handing back to the bootstrap")
                 return RELEASE_SWITCH_EXIT_CODE
             now = time.monotonic()
             failures[:] = [stamp for stamp in failures
                            if now - stamp < FAILURE_WINDOW_SECONDS]
             if not failures:
                 backoff = 1.0
-            if returncode is None or returncode != RESTART_EXIT_CODE:
-                if note_failure(failures, now):
-                    _append_log(log_path, "bridge failure limit reached; giving up")
-                    return 1
-            delay = restart_delay(returncode, backoff)
-            if returncode == RESTART_EXIT_CODE:
-                backoff = 1.0
-            else:
-                backoff = min(backoff * 2, 60.0)
+            if note_failure(failures, now):
+                _append_log(log_path, "bridge failure limit reached; giving up")
+                return 1
+            delay = restart_delay(backoff)
+            backoff = min(backoff * 2, 60.0)
             _append_log(log_path, f"restarting in {delay:g}s")
             await asyncio.sleep(delay)
     finally:

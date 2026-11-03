@@ -114,10 +114,9 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(path.exists())
 
     def test_restart_delay(self):
-        self.assertEqual(windows_service.restart_delay(75, 30), 0.2)
-        self.assertEqual(windows_service.restart_delay(1, 4), 4)
-        self.assertEqual(windows_service.restart_delay(1, 0.05), 1)
-        self.assertEqual(windows_service.restart_delay(1, 100), 60)
+        self.assertEqual(windows_service.restart_delay(4), 4)
+        self.assertEqual(windows_service.restart_delay(0.05), 1)
+        self.assertEqual(windows_service.restart_delay(100), 60)
 
     def test_failure_window_allows_five_then_resets_after_five_minutes(self):
         failures = []
@@ -143,7 +142,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             second.acquire()
             second.release()
 
-    async def test_supervisor_restarts_exit_75_and_removes_owner_status(self):
+    async def test_user_restart_returns_switch_code_and_removes_owner_status(self):
         class Process:
             pid = 1234
             returncode = 75
@@ -159,23 +158,21 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         spawn = AsyncMock(side_effect=lambda *args, **kwargs: (
             calls.append(1) or (Process(), Stream())
         ))
-
-        async def stop_loop(_delay):
-            if len(calls) >= 2:
-                raise asyncio.CancelledError
+        sleep = AsyncMock()
 
         with tempfile.TemporaryDirectory() as temp:
             state = Path(temp) / ".state"
             log = Path(temp) / "service.log"
             owner = windows_service.owner_status_path(state)
             with patch.object(windows_service, "_spawn_bridge", spawn), \
-                 patch.object(windows_service.asyncio, "sleep", stop_loop):
-                with self.assertRaises(asyncio.CancelledError):
-                    await windows_service.supervise(
-                        ROOT, state, Path(temp) / "config.json", log)
-            self.assertEqual(spawn.await_count, 2)
+                 patch.object(windows_service.asyncio, "sleep", sleep):
+                result = await windows_service.supervise(
+                    ROOT, state, Path(temp) / "config.json", log)
+            self.assertEqual(result, windows_service.RELEASE_SWITCH_EXIT_CODE)
+            self.assertEqual(spawn.await_count, 1)
+            sleep.assert_not_awaited()
             self.assertFalse(owner.exists())
-            self.assertIn("bridge started", log.read_text(encoding="utf-8"))
+            self.assertIn("handing back to the bootstrap", log.read_text(encoding="utf-8"))
 
     async def test_supervisor_exits_without_restart_on_normal_or_config_exit(self):
         class Stream:
@@ -237,73 +234,6 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
                     Path(temp) / "config.json", Path(temp) / "service.log")
         self.assertEqual(result, 1)
         self.assertEqual(spawn.await_count, 5)
-
-    async def test_user_restart_does_not_consume_failure_budget(self):
-        class Process:
-            pid = 1234
-
-            def __init__(self, returncode):
-                self.returncode = returncode
-
-            async def wait(self):
-                return self.returncode
-
-        class Stream:
-            def close(self):
-                pass
-
-        codes = iter([75, 75, 75, 75, 75, 75, 0])
-        spawn = AsyncMock(side_effect=lambda *args, **kwargs: (
-            Process(next(codes)), Stream()))
-        with tempfile.TemporaryDirectory() as temp:
-            with patch.object(windows_service, "_spawn_bridge", spawn), \
-                 patch.object(windows_service.asyncio, "sleep", AsyncMock()):
-                result = await windows_service.supervise(
-                    ROOT, Path(temp) / ".state",
-                    Path(temp) / "config.json", Path(temp) / "service.log")
-        self.assertEqual(result, 0)
-        self.assertEqual(spawn.await_count, 7)
-
-    async def test_restart_switches_release_only_when_the_pointer_moves(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            release = root / "releases" / "abc123"
-            release.mkdir(parents=True)
-            (root / "current").write_text("abc123\n", encoding="utf-8")
-            with patch.dict(os.environ, {"CODEX_WECHAT_INSTALL_ROOT": str(root)}):
-                self.assertTrue(windows_service.release_changed(ROOT))
-                self.assertFalse(windows_service.release_changed(release.resolve()))
-                (root / "current").write_text("../escape\n", encoding="utf-8")
-                self.assertFalse(windows_service.release_changed(ROOT))
-                (root / "current").unlink()
-                self.assertFalse(windows_service.release_changed(ROOT))
-
-    async def test_restart_returns_switch_code_when_the_pointer_moved(self):
-        class Process:
-            pid = 1234
-            returncode = 75
-
-            async def wait(self):
-                return 75
-
-        class Stream:
-            def close(self):
-                pass
-
-        spawn = AsyncMock(side_effect=lambda *args, **kwargs: (Process(), Stream()))
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp) / "app"
-            (root / "releases" / "next").mkdir(parents=True)
-            (root / "current").write_text("next\n", encoding="utf-8")
-            with patch.dict(os.environ, {"CODEX_WECHAT_INSTALL_ROOT": str(root)}), \
-                 patch.object(windows_service, "_spawn_bridge", spawn), \
-                 patch.object(windows_service.asyncio, "sleep", AsyncMock()) as sleep:
-                result = await windows_service.supervise(
-                    ROOT, Path(temp) / ".state",
-                    Path(temp) / "config.json", Path(temp) / "service.log")
-        self.assertEqual(result, windows_service.RELEASE_SWITCH_EXIT_CODE)
-        self.assertEqual(spawn.await_count, 1)
-        sleep.assert_not_awaited()
 
     async def test_startup_discards_a_stale_owner_record(self):
         class Process:

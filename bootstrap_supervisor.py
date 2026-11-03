@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Resolve the active release and run its Windows supervisor."""
+"""Resolve the active release and run its Windows supervisor.
+
+The supervisor returns 76 when the user asks for a restart, so this loop
+re-resolves the version pointer and loads whatever release it now names.
+"""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +15,8 @@ import sys
 import time
 
 LEGACY_ID = "legacy"
+# Let the previous child finish closing before the next supervisor starts.
+RESTART_SETTLE_SECONDS = 0.2
 
 
 def active_release(install_root: Path) -> Path:
@@ -66,19 +72,20 @@ def parser() -> argparse.ArgumentParser:
 
 def log_failure(error: BaseException) -> None:
     root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
-    _write_failure(root / "codex-wechat" / "logs" / "service.log", error, "bootstrap")
+    write_log(root / "codex-wechat" / "logs" / "service.log",
+              f"{type(error).__name__}: {error}")
 
 
 def log_release_failure(error: BaseException, path: Path) -> None:
-    _write_failure(path, error, "bootstrap release switch")
+    write_log(path, f"release switch: {type(error).__name__}: {error}")
 
 
-def _write_failure(path: Path, error: BaseException, label: str) -> None:
+def write_log(path: Path, message: str) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(f"{stamp} {label}: {type(error).__name__}: {error}\n")
+            stream.write(f"{stamp} bootstrap: {message}\n")
     except OSError:
         pass
 
@@ -92,6 +99,7 @@ def main(argv=None) -> int:
     config = args.config or root / "config.json"
     log_path = args.log or root / "logs" / "service.log"
     active = None
+    last_failure = None
     while True:
         try:
             release = active_release(install_root)
@@ -103,9 +111,15 @@ def main(argv=None) -> int:
             if active is None:
                 raise
             # A broken pointer must not leave the task without a bridge.
-            log_release_failure(error, log_path)
+            failure = f"{type(error).__name__}: {error}"
+            if failure != last_failure:
+                log_release_failure(error, log_path)
+                last_failure = failure
             release, python, module = active
         else:
+            last_failure = None
+            if active is not None and release != active[0]:
+                write_log(log_path, f"version pointer changed; loading {release.name}")
             active = (release, python, module)
         try:
             code = asyncio.run(module.supervise(
@@ -119,6 +133,7 @@ def main(argv=None) -> int:
             return 0
         if code != getattr(module, "RELEASE_SWITCH_EXIT_CODE", 76):
             return code
+        time.sleep(RESTART_SETTLE_SECONDS)
 
 
 if __name__ == "__main__":
