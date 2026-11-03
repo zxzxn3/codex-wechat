@@ -79,6 +79,7 @@ REQUIRED_FILES = {
     Path("install.ps1"),
     Path("installer.py"),
     Path("requirements.txt"),
+    Path("requirements-windows.txt"),
 }
 STABLE_LINUX_FILES = (
     Path("codex-desktop"),
@@ -597,7 +598,7 @@ def prepare_runtime(root: Path) -> None:
           "[compile(Path(p).read_bytes(), p, 'exec') for p in sys.argv[1:]]", *python_files], cwd=root)
 
 
-def prepare_bootstrap_runtime(target: Path) -> None:
+def prepare_bootstrap_runtime(target: Path, *, requirements: Path) -> None:
     if not IS_WINDOWS:
         return
     root = target / ".bootstrap-venv"
@@ -606,18 +607,16 @@ def prepare_bootstrap_runtime(target: Path) -> None:
     if root.exists() and not root.is_dir():
         raise ValueError(f"Windows supervisor 环境不是目录: {root}")
     python = target / ".bootstrap-venv/Scripts/python.exe"
-    if python.is_file():
-        _run([
-            str(python),
-            "-c",
-            "import sys; raise SystemExit(sys.version_info < (3, 11))",
-        ], cwd=target)
-        return
     created = not root.exists()
     try:
-        _run([sys.executable, "-m", "venv", str(root)], cwd=target)
+        if not python.is_file():
+            _run([sys.executable, "-m", "venv", str(root)], cwd=target)
         if not python.is_file():
             raise ValueError(f"Windows supervisor 环境创建失败: {python}")
+        _run([str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"], cwd=target)
+        _run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
+              "--no-cache-dir", "-r", str(requirements)], cwd=target)
+        _run([str(python), "-c", "import win32api, win32event, win32job"], cwd=target)
     except BaseException:
         if created and root.exists():
             shutil.rmtree(root)
@@ -815,7 +814,7 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
                 raise ValueError("确认期间当前版本发生变化，请重新运行")
             phase("准备程序与依赖...")
             release, created = install_release(target, identifier, files)
-            prepare_bootstrap_runtime(target)
+            prepare_bootstrap_runtime(target, requirements=release / "requirements-windows.txt")
             # Everything requiring downloads/builds/user input finishes above.
             phase("更新入口与当前版本...")
             install_bootstrap(source, target)

@@ -25,7 +25,7 @@ class InstallerTests(unittest.TestCase):
         self.enterContext(patch.object(installer, "introduction", return_value=True))
         self.enterContext(patch.object(installer, "prepare_runtime"))
         self.enterContext(patch.object(installer, "report_dependencies"))
-        def bootstrap(target):
+        def bootstrap(target, *, requirements):
             if installer.IS_WINDOWS:
                 executable = target / ".bootstrap-venv/Scripts/python.exe"
                 executable.parent.mkdir(parents=True, exist_ok=True)
@@ -351,6 +351,24 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('INSTALL_ROOT/installer.py', text)
         self.assertIn('INSTALL_ROOT/releases/$RELEASE_ID', text)
         self.assertIn('[ -L "$CURRENT_FILE" ]', text)
+
+
+class BootstrapRuntimeTests(unittest.TestCase):
+    def test_existing_environment_still_installs_and_checks_native_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            python = target / ".bootstrap-venv/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"fixture")
+            requirements = target / "requirements-windows.txt"
+            requirements.write_text('pywin32; sys_platform == "win32"\n', encoding="utf-8")
+            with patch.object(installer, "IS_WINDOWS", True), patch.object(installer, "_run") as run:
+                installer.prepare_bootstrap_runtime(target, requirements=requirements)
+            commands = [call.args[0] for call in run.call_args_list]
+            install = next(command for command in commands if "pip" in command)
+            self.assertEqual(install[0], str(python))
+            self.assertEqual(install[-2:], ["-r", str(requirements)])
+            self.assertIn("import win32api, win32event, win32job", commands[-1])
 
 
 if __name__ == "__main__":

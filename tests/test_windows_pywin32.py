@@ -130,7 +130,9 @@ class WindowsPywin32Tests(unittest.TestCase):
 
     def test_windows_dependency_is_declared_for_windows_only(self):
         requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text()
-        self.assertIn('pywin32; sys_platform == "win32"', requirements)
+        self.assertIn('-r requirements-windows.txt', requirements)
+        native = (Path(__file__).resolve().parents[1] / "requirements-windows.txt").read_text()
+        self.assertIn('pywin32; sys_platform == "win32"', native)
 
 
 if __name__ == "__main__":
