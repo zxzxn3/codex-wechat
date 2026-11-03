@@ -198,6 +198,8 @@ class InputDelivery:
                 bridge.state.pop("currentInput", None)
                 bridge.save()
             except Exception as error:
+                conflict = (isinstance(error, CodexRpcError) and error.code == -32600
+                            and "already has an active writer" in str(error.reason))
                 if bridge.state.get("currentInput") is job:
                     phase = job["phase"]
                     uncertain = phase == InputPhase.DISPATCHING and not (
@@ -207,6 +209,7 @@ class InputDelivery:
                     bridge.state.pop("currentInput", None)
                     bridge.reply(bridge.prompt("INPUT_SUBMISSION_UNCERTAIN") if uncertain else
                                bridge.prompt("INPUT_RESULT_INTERRUPTED") if phase == InputPhase.ACCEPTED else
+                               bridge.prompt("SESSION_WRITER_BUSY") if conflict else
                                bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"reason": attachment_reason(error)})
                                if isinstance(error, MediaError) else bridge.prompt("TASK_FAILED"),
                                request_id=job.get("requestId"))

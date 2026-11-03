@@ -42,10 +42,25 @@ def info(bridge, action=None, *, include_backend=False):
     return text
 
 
+async def adopt(bridge, thread_id, overrides, thread):
+    """Resume the target, or adopt it without a writer when the desktop owns it.
+
+    A desktop holding the thread must not fail the session: the bridge would
+    stay unloaded, pause input and retry recovery forever.
+    """
+    try:
+        return await bridge.backend.thread(thread_id, overrides)
+    except CodexRpcError as error:
+        if not (error.code == -32600 and "already has an active writer" in str(error.reason)):
+            raise
+        return await bridge.backend.adopt_thread(thread_id, thread)
+
+
 async def activate(bridge, thread_id=None, overrides=None):
     # Only this explicit command may override native settings. Never replay a mobile cache.
     saved = dict(overrides or {})
     desktop = False
+    thread = None
     if thread_id:
         thread = await bridge.backend.read_thread(thread_id)
         status = thread.get("status", {}).get("type")
@@ -60,7 +75,7 @@ async def activate(bridge, thread_id=None, overrides=None):
             # Adopt the desktop's current settings instead of applying stale mobile overrides.
             saved = {}
     bridge.loaded = False
-    selected = await bridge.backend.thread(thread_id, saved)
+    selected = await adopt(bridge, thread_id, saved, thread)
     bridge.state["thread"] = selected
     bridge.state.pop("sessionOptions", None)  # Retire legacy override replay after successful adoption.
     bridge.loaded = True

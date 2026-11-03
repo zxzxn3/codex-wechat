@@ -45,6 +45,7 @@ class CodexBackend:
         self.pending = {}
         self.recent_tokens = deque(maxlen=PENDING_TOKEN_RECENT)
         self.active = None
+        self.writer_conflict = None
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
@@ -653,6 +654,34 @@ class CodexBackend:
         result = await self.rpc("thread/read", {"threadId": thread_id})
         return result["thread"]
 
+    async def adopt_thread(self, thread_id, thread=None):
+        """Take a thread as the selection without holding its writer.
+
+        Used when the desktop owns it and its IPC cannot be followed: the bridge
+        stays usable and takes the writer back on the next message instead of
+        failing backend recovery in a loop.
+        """
+        thread = thread or {}
+        previous = self.info if self.info.get("id") == thread_id else {}
+        self.info = {"id": thread_id, "name": thread.get("name"),
+                     "path": thread.get("path"),
+                     "model": thread.get("model", previous.get("model")),
+                     "provider": thread.get("modelProvider", previous.get("provider")),
+                     "effort": thread.get("reasoningEffort", previous.get("effort")),
+                     "cwd": thread.get("cwd") or previous.get("cwd") or self.cwd,
+                     "approval": thread.get("approvalPolicy", previous.get("approval")),
+                     "sandbox": thread.get("sandbox", previous.get("sandbox")),
+                     "collaboration": thread.get("collaborationMode",
+                                                 previous.get("collaboration")),
+                     "usage": self.usage_by_thread.get(thread_id, previous.get("usage"))}
+        if self.selected_thread != thread_id:
+            self.selection_epoch += 1
+            self.active = None
+            self.pending.clear()
+        self.selected_thread = thread_id
+        self.writer_conflict = thread_id
+        return thread_id
+
     async def models(self, max_age=60):
         if self.model_catalog is not None and time.monotonic() - self.models_checked_at < max_age:
             return self.model_catalog
@@ -728,6 +757,15 @@ class CodexBackend:
         self.active = current
         self.stop_requested = False
         try:
+            if self.writer_conflict == thread_id:
+                # The desktop owned this thread last time: take it back, or fail
+                # this message rather than every backend recovery attempt.
+                self.writer_conflict = None
+                try:
+                    await self.thread(thread_id)
+                except Exception:
+                    self.writer_conflict = thread_id
+                    raise
             await self.refresh_runtime()
             current["cwd"] = self.info.get("cwd") or self.cwd
             inputs = await self.input_items(text, attachments)
