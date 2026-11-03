@@ -13,6 +13,9 @@ PID、创建时间、exe和回环监听归属；不抢占未知端口，不因Ap
 原生后台/Job Object与桥接寿命分开。后台配置来自同一config.json，不读取系统代理或保存第二份proxy。
 以前的共享后台身份记录可核对沿用；旧CodexProxy修复/配置脚本不再是产品依赖。
 
+正常打开 App 后可从微信 /switch 跟随已打开的会话。Windows 使用本机命名管道，
+核对服务进程用户和已注册 App，只跟随主 CODEX_HOME；反向接入尚未实现。
+
 桌面接入使用codex-desktop.ps1，原生CLI参数放在cli后，推荐用--分隔。App连接变量只给
 子进程，退出不更改调用者环境。重新绑定统一用codex-wechat.ps1 rebind，不复制独立业务。
 

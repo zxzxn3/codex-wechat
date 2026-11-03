@@ -34,6 +34,14 @@ App webview app-initial 的 continuation 检查直接使用 input.text_elements.
 Windows 原生 daemon 有自身脱离和管理能力，但不能据此认定 App 默认连接同一后台；
 App 共享路径明确配置，不能在失败时静默换为独立后台。
 
+Windows IPC 适配另核对本机 App 26.1027.6604.0 的 early-bootstrap-824：Windows 端点为
+`\\.\pipe\codex-ipc`；early-bootstrap.js 的 follower 方法版本与上述 Linux 版本一致。
+使用 Python 3.12 本机 `asyncio/windows_events.py` 的 Proactor 管道连接及现有流协议，
+以已连接管道的服务 PID 核对用户 token 和已注册 App 文件。权限依据
+[Named pipe security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)，
+事件循环限制见 [asyncio platform support](https://docs.python.org/3.12/library/asyncio-platforms.html)。
+这属于当前 App 源码适配依据；新增管道用例尚未执行，不据此声称真实收发、审批或多 home 已验收。
+
 item/completed 提供完整 agentMessage；commentary/partial_answer 可即时转发，final_answer
 在轮次收口，reasoning/工具输出不混入聊天。原生请求仅回答本连接收到的部分。
 CLI 0.166.0 的公开schema确认 agentMessage 可带 `delivery=async` 与结构化 `questions`

@@ -7,6 +7,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 from app_ipc import AppSession, VERSIONS, app_inputs, apply_patches, ipc_path, turns
@@ -55,6 +56,8 @@ class StateTests(unittest.TestCase):
             self.assertEqual(ipc_path({"command": ["custom", "app-server"],
                 "env": {"CODEX_HOME": "/tmp/home"}}), Path("/tmp/home/ipc/ipc.sock"))
             self.assertIsNone(ipc_path({"websocketUrl": "ws://127.0.0.1:1234"}))
+            self.assertEqual(ipc_path({"websocketUrl": "ws://127.0.0.1:1234",
+                "env": {"CODEX_HOME": "/tmp/home"}}), Path("/tmp/home/ipc/ipc.sock"))
 
 
 @unittest.skipIf(os.name == "nt", "Linux Unix-socket App IPC")
@@ -185,6 +188,67 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.messages[-1]["params"]["decision"], "accept")
         with self.assertRaises(ValueError):
             await self.session.respond({"id": 8, "result": {"decision": "accept"}})
+
+
+@unittest.skipUnless(os.name == "nt", "Windows named-pipe App IPC")
+class WindowsRouterTests(RouterTests):
+    __unittest_skip__ = os.name != "nt"
+
+    async def asyncSetUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(r"\\.\pipe\codex-wechat-fixture-" + uuid.uuid4().hex)
+        self.state = conversation()
+        self.messages, self.events, self.received_requests = [], [], []
+        self.clients = set()
+        self.failed = Mock()
+        self.nested_response = False
+        self.enterContext(patch("app_ipc_windows.PIPE_PATH", str(self.path)))
+        self.enterContext(patch("app_ipc_windows.discover_app_codex",
+                                return_value=str(Path(self.temp.name) / "resources/codex.exe")))
+        self.verify = self.enterContext(patch("app_ipc_windows.verify_server"))
+        loop = asyncio.get_running_loop()
+        def protocol():
+            reader = asyncio.StreamReader(limit=16 * 1024 * 1024 + 4)
+            return asyncio.StreamReaderProtocol(reader, self.handle)
+        self.servers = await loop.start_serving_pipe(protocol, str(self.path))
+        self.session = AppSession(self.path, "thread", on_event=self.events.append,
+            on_request=AsyncMock(side_effect=self.received_requests.append), on_disconnect=self.failed)
+
+    async def asyncTearDown(self):
+        await self.session.close()
+        for server in self.servers:
+            server.close()
+        for writer in self.clients:
+            writer.close()
+            await writer.wait_closed()
+        self.temp.cleanup()
+
+    async def test_private_endpoint_required(self):
+        self.verify.side_effect = ValueError("untrusted server")
+        with self.assertRaisesRegex(ValueError, "untrusted server"):
+            await self.session.attach()
+        self.assertEqual(self.messages, [])
+
+    async def test_nonlocal_pipe_is_rejected(self):
+        self.session.path = Path(r"\\other-host\pipe\codex-ipc")
+        with self.assertRaises(ValueError):
+            await self.session.attach()
+        self.verify.assert_not_called()
+
+
+@unittest.skipUnless(os.name == "nt", "Windows App endpoint selection")
+class WindowsEndpointTests(unittest.TestCase):
+    def test_websocket_backend_can_follow_app_only_in_primary_home(self):
+        from app_ipc_windows import PIPE_PATH
+        with tempfile.TemporaryDirectory() as primary, tempfile.TemporaryDirectory() as other:
+            with patch.dict(os.environ, {"CODEX_HOME": primary}):
+                config = {"websocketUrl": "ws://127.0.0.1:1234", "env": {"CODEX_HOME": primary}}
+                self.assertEqual(ipc_path(config), Path(PIPE_PATH))
+                config["env"]["CODEX_HOME"] = other
+                self.assertIsNone(ipc_path(config))
+
+    def test_custom_launcher_home_is_never_guessed(self):
+        self.assertIsNone(ipc_path({"command": ["custom.exe", "app-server"]}))
 
 
 class AdoptionTests(unittest.IsolatedAsyncioTestCase):

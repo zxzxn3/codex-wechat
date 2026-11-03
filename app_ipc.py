@@ -1,4 +1,4 @@
-"""Version-scoped Linux App follower protocol; never owns an App process.
+"""Version-scoped App follower protocol; never owns an App process.
 
 Framing and method versions come from App 26.1027.51404. This is not the
 public app-server protocol. Only a discovered owner may receive a request.
@@ -37,13 +37,22 @@ RESPONSES = {
 
 def ipc_path(config):
     """Do not guess the home selected inside an arbitrary launcher."""
-    if os.name == "nt" or config.get("websocketUrl"):
-        return None
     home = config.get("env", {}).get("CODEX_HOME")
     command = config.get("command", ["codex", "app-server"])
-    if not home and Path(command[0]).name != "codex":
+    if not home and Path(command[0]).name.lower() not in ("codex", "codex.exe"):
         return None
-    return Path(home or Path.home() / ".codex").expanduser() / "ipc" / "ipc.sock"
+    home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+    if os.name == "nt":
+        # Windows has a single App pipe per user, not one socket per CODEX_HOME.
+        # Do not adopt a same-ID conversation from a separate backend home.
+        primary = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+        if home.resolve() != primary.resolve():
+            return None
+        from app_ipc_windows import PIPE_PATH
+        return Path(PIPE_PATH)
+    if config.get("websocketUrl") and not config.get("env", {}).get("CODEX_HOME"):
+        return None
+    return home / "ipc" / "ipc.sock"
 
 
 def apply_patches(state, patches):
@@ -131,14 +140,25 @@ class AppSession:
         return bool(self.reader and not self.reader.done() and not self.closing)
 
     async def attach(self):
+        if os.name == "nt":
+            from app_ipc_windows import open_pipe
+            self.stream, self.writer = await asyncio.wait_for(
+                open_pipe(self.path, limit=MAX_FRAME + 4), 8)
+        else:
+            self.stream, self.writer = await self.open_unix()
+        await self.attach_protocol()
+
+    async def open_unix(self):
         # Same-user private socket only; no symlink endpoints or shared directories.
         parent, endpoint = self.path.parent.lstat(), self.path.lstat()
         if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.getuid()
                 or parent.st_mode & 0o022 or not stat.S_ISSOCK(endpoint.st_mode)
                 or endpoint.st_uid != os.getuid()):
             raise ValueError("App IPC 路径不属于当前用户或权限不安全")
-        self.stream, self.writer = await asyncio.wait_for(asyncio.open_unix_connection(
+        return await asyncio.wait_for(asyncio.open_unix_connection(
             str(self.path), limit=MAX_FRAME + 4), 3)
+
+    async def attach_protocol(self):
         self.reader = asyncio.create_task(self.read())
         result = await self.request("initialize", {"clientType": "codex-wechat"})
         self.client = result["clientId"]

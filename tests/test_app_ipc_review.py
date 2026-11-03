@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import json
+import os
 from pathlib import Path
 import struct
 import tempfile
@@ -36,6 +37,7 @@ def canonical(turns, *, complete=False):
                 "islands": [{"id": "tail", "entries": entries}]}}}
 
 
+@unittest.skipIf(os.name == "nt", "Unix-socket counterexamples; Windows has its own pipe fixture")
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()

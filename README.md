@@ -52,12 +52,13 @@ Windows 使用 `.ps1 stop`。命令会先尽力向最近一次微信会话发送
 
 本地共享连接优先复用原生 daemon，仍可显式配置独立连接。桥接退出只关闭自己的连接/代理进程，不结束共享 Codex 后台。
 
-Linux App 正常启动后，也可直接在微信 `/switch` 到它持有的会话。遇到原生后台的
+Linux 与 Windows App 正常启动后，可直接在微信 `/switch` 到它持有的会话。遇到原生后台的
 active writer 冲突时，桥接通过同一 CODEX_HOME 下的 App IPC 跟随会话，不关闭 App、
 不抢占写入锁。已完成历史不回发，新消息、中途回复和最终回答仍走现有交付流程。
 App 退出或 IPC 断开时不自动重发输入；重新打开 App 后用 `/switch` 或 `/backend` 重连。
 自定义启动器只有显式配置后端 `env.CODEX_HOME` 才查找 IPC，不猜测它内部使用的目录。
-此路径目前仅实现 Linux，内部协议随 App 版本变化；Windows 仍用下述共享入口。
+Linux 使用同一 CODEX_HOME 的私有 socket；Windows 使用本机命名管道，核对当前用户和已注册 App。
+Windows 仅跟随主 CODEX_HOME；Linux 显式 WebSocket 须配置 env.CODEX_HOME。内部协议随 App 版本变化。
 
 **启动顺序限制**：IPC 只支持“先在 App 打开会话，再从微信连接”。若微信桥先通过原生
 后台连接会话，随后用独立后台的 App 打开同一会话，App 可能显示被锁定。反向接入需要

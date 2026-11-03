@@ -131,7 +131,7 @@ class CodexBackend:
     async def attach_app(self, thread_id, options):
         from app_ipc import AppSession, ipc_path
         path = ipc_path(self.config)
-        if path is None or not path.exists():
+        if path is None or (not IS_WINDOWS and not path.exists()):
             return None
         candidate = None
         candidate = AppSession(path, thread_id,
@@ -141,6 +141,11 @@ class CodexBackend:
         try:
             await candidate.attach()
             await candidate.settings(options)
+        except FileNotFoundError:
+            # Missing App endpoint does not turn a native writer conflict into
+            # a guessed attachment or a new independent writer.
+            await candidate.close()
+            return None
         except BaseException:
             await candidate.close()
             raise
