@@ -623,7 +623,6 @@ def prepare_runtime(root: Path) -> None:
         "pip",
         "install",
         "--disable-pip-version-check",
-        "--no-cache-dir",
         "-r",
         str(root / PYTHON_REQUIREMENTS),
     ], cwd=root)
@@ -631,7 +630,7 @@ def prepare_runtime(root: Path) -> None:
     if not shutil.which("qrencode"):
         detail("未找到原生二维码编码器，准备轻量二维码回退。")
         _run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
-              "--no-cache-dir", "-r", str(root / QR_FALLBACK_REQUIREMENTS)], cwd=root)
+              "-r", str(root / QR_FALLBACK_REQUIREMENTS)], cwd=root)
     _run([
         str(python),
         "-c",
@@ -663,7 +662,7 @@ def prepare_bootstrap_runtime(target: Path, *, requirements: Path) -> None:
             raise ValueError(f"Windows supervisor 环境创建失败: {python}")
         _run([str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"], cwd=target)
         _run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
-              "--no-cache-dir", "-r", str(requirements)], cwd=target)
+              "-r", str(requirements)], cwd=target)
         _run([str(python), "-c", "import win32api, win32event, win32job"], cwd=target)
     except BaseException:
         if created and root.exists():
