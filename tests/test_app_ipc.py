@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import sys
 import tempfile
 import unittest
 import uuid
@@ -236,6 +237,58 @@ class WindowsRouterTests(RouterTests):
         with self.assertRaises(ValueError):
             await self.session.attach()
         self.verify.assert_not_called()
+
+
+@unittest.skipUnless(os.name == "nt", "Windows named-pipe identity check")
+class WindowsVerifyServerTests(unittest.IsolatedAsyncioTestCase):
+    """The real identity check, against a pipe this process serves itself."""
+
+    async def asyncSetUp(self):
+        self.path = r"\\.\pipe\codex-wechat-verify-" + uuid.uuid4().hex
+        self.transports = []
+        self.loop = asyncio.get_running_loop()
+
+        def protocol():
+            return asyncio.StreamReaderProtocol(asyncio.StreamReader())
+
+        self.servers = await self.loop.start_serving_pipe(protocol, self.path)
+
+    async def asyncTearDown(self):
+        for server in self.servers:
+            server.close()
+        for transport in self.transports:
+            transport.close()
+
+    async def _connected_handle(self):
+        transport, _ = await self.loop.create_pipe_connection(
+            lambda: asyncio.StreamReaderProtocol(asyncio.StreamReader()), self.path)
+        self.transports.append(transport)
+        return transport.get_extra_info("pipe").fileno()
+
+    @staticmethod
+    def _own_image():
+        # A venv python.exe is a redirector, so sys.executable is not the module
+        # the process actually runs; the identity check compares real images.
+        import win32api
+        import win32con
+        import win32process
+        process = win32api.OpenProcess(
+            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+            False, os.getpid())
+        try:
+            return win32process.GetModuleFileNameEx(process, 0)
+        finally:
+            process.Close()
+
+    async def test_accepts_the_executable_that_serves_the_pipe(self):
+        from app_ipc_windows import verify_server
+        verify_server(await self._connected_handle(), self._own_image())
+
+    async def test_rejects_a_pipe_served_by_another_executable(self):
+        from app_ipc_windows import verify_server
+        other = Path(os.environ["WINDIR"]) / "System32" / "cmd.exe"
+        with self.assertRaisesRegex(ValueError, "不是当前已注册的 Codex App"):
+            verify_server(await self._connected_handle(), other)
 
 
 @unittest.skipUnless(os.name == "nt", "Windows App endpoint selection")
