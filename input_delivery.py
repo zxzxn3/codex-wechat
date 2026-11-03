@@ -18,8 +18,26 @@ from errors import attachment_reason
 from diagnostics import error_fields, log_event
 
 class InputDelivery:
+    # While idle with a released thread, watch for a desktop that takes it over.
+    FOLLOW_POLL_SECONDS = 5
+    FOLLOW_RETRY_SECONDS = 60
+
     def __init__(self, bridge):
         self.bridge = bridge
+        self.next_follow_at = 0.0
+
+    def awaiting_desktop(self):
+        backend = self.bridge.backend
+        thread = self.bridge.state.get("thread")
+        return bool(thread and backend.released_thread == thread and backend.app is None)
+
+    async def follow_desktop(self):
+        """Re-attach to the App once it owns our idle thread; else back off."""
+        backend = self.bridge.backend
+        if time.monotonic() < self.next_follow_at or not backend.app_available():
+            return
+        if not await backend.follow_app(self.bridge.state.get("thread")):
+            self.next_follow_at = time.monotonic() + self.FOLLOW_RETRY_SECONDS
 
     def dispatch_input(self, job, phase, turn_id, backend):
         bridge = self.bridge
@@ -117,7 +135,13 @@ class InputDelivery:
             if bridge.active_turn() or bridge.backend.blocked or not bridge.state["inbox"]:
                 bridge.wake.clear()
                 bridge.steer_wake.set()
-                await bridge.wake.wait()
+                if self.awaiting_desktop():
+                    try:
+                        await asyncio.wait_for(bridge.wake.wait(), self.FOLLOW_POLL_SECONDS)
+                    except asyncio.TimeoutError:
+                        await self.follow_desktop()
+                else:
+                    await bridge.wake.wait()
                 continue
             bridge.running = True
             bridge.stopping = False
@@ -184,8 +208,8 @@ class InputDelivery:
                               queued=len(bridge.state["inbox"]),
                               request_id=job.get("requestId"))
                     # Hand the writer back so the App can open this thread while
-                    # the bridge is idle; the next turn resumes it.
-                    await backend.release_thread(thread_id)
+                    # the bridge is idle; the next turn resumes it or follows the App.
+                    await backend.release_thread(thread_id, follow=True)
                 else:
                     bridge.state.pop("currentInput", None)
                     bridge.save()
@@ -209,8 +233,11 @@ class InputDelivery:
                     bridge.record_input(job, InputPhase.UNCERTAIN if uncertain else
                                       InputPhase.ACCEPTED if phase == InputPhase.ACCEPTED else InputPhase.FAILED)
                     bridge.state.pop("currentInput", None)
+                    conflict = (isinstance(error, CodexRpcError) and error.code == -32600
+                                and "already has an active writer" in str(error.reason))
                     bridge.reply(bridge.prompt("INPUT_SUBMISSION_UNCERTAIN") if uncertain else
                                bridge.prompt("INPUT_RESULT_INTERRUPTED") if phase == InputPhase.ACCEPTED else
+                               bridge.prompt("SESSION_WRITER_BUSY") if conflict else
                                bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"reason": attachment_reason(error)})
                                if isinstance(error, MediaError) else bridge.prompt("TASK_FAILED"),
                                request_id=job.get("requestId"))

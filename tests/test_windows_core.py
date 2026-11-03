@@ -157,6 +157,48 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await backend.release_thread("thread-1"))
         backend.rpc.assert_not_awaited()
 
+    async def test_release_can_follow_the_desktop_that_took_the_thread(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.rpc = AsyncMock(return_value={})
+        backend.follow_app = AsyncMock(return_value=False)
+        self.assertTrue(await backend.release_thread("thread-1"))
+        backend.follow_app.assert_not_awaited()
+        self.assertTrue(await backend.release_thread("thread-1", follow=True))
+        backend.follow_app.assert_awaited_once_with("thread-1")
+
+    async def test_follow_app_drops_the_released_marker_only_when_it_attaches(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.released_thread = "thread-1"
+        backend.app_available = lambda: False
+        backend.attach_app = AsyncMock()
+        self.assertFalse(await backend.follow_app("thread-1"))
+        backend.attach_app.assert_not_awaited()
+        self.assertEqual(backend.released_thread, "thread-1")
+
+        candidate = SimpleNamespace(thread_id="thread-1", close=AsyncMock())
+        backend.app_available = lambda: True
+        backend.attach_app = AsyncMock(return_value=candidate)
+        self.assertTrue(await backend.follow_app("thread-1"))
+        self.assertIs(backend.app, candidate)
+        self.assertIsNone(backend.released_thread)
+        self.assertEqual(backend.selected_thread, "thread-1")
+
+    async def test_unusable_app_endpoint_does_not_replace_the_writer_conflict(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        candidate = SimpleNamespace(attach=AsyncMock(side_effect=ValueError("App 返回了其它会话")),
+                                    settings=AsyncMock(), close=AsyncMock())
+        import app_ipc
+        with patch.object(app_ipc, "AppSession", return_value=candidate):
+            self.assertIsNone(await backend.attach_app("thread-1", {}))
+        candidate.close.assert_awaited()
+        self.assertIsNone(backend.app)
+
     async def test_windows_probe_falls_back_to_the_system_proxy(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.transport.proc = SimpleNamespace(returncode=None)

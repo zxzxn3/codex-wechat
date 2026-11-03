@@ -15,6 +15,7 @@ import uuid
 
 from records import AgentMessage, Source, TurnResult
 from media import OUTPUT_HINT
+from diagnostics import error_reason
 from usage import UsageCache
 from questions import (
     ASYNC_QUESTION_METHOD,
@@ -146,6 +147,14 @@ class CodexBackend:
             # Missing App endpoint does not turn a native writer conflict into
             # a guessed attachment or a new independent writer.
             await candidate.close()
+            return None
+        except ValueError as error:
+            # Unusable or foreign App endpoint: keep the caller's own conflict
+            # reason instead of leaking an attach detail into the reply.
+            await candidate.close()
+            self.writer_event("backend.app_attach_failed", level="warning",
+                              thread=thread_id, status="failed",
+                              error_type=type(error).__name__, reason=error_reason(error))
             return None
         except BaseException:
             await candidate.close()
@@ -643,7 +652,7 @@ class CodexBackend:
             env.update(system_proxy())
         return endpoint, env
 
-    async def release_thread(self, thread_id):
+    async def release_thread(self, thread_id, *, follow=False):
         """Drop the writer this client holds for a thread.
 
         The app-server exposes no unload call; unsubscribing is the only way to
@@ -667,7 +676,47 @@ class CodexBackend:
             return False
         self.released_thread = thread_id
         self.writer_event("backend.writer_released", thread=thread_id, status="released")
+        if follow:
+            # The App may still be running: follow it so desktop turns keep
+            # reaching WeChat while this client holds no writer at all.
+            await self.follow_app(thread_id)
         return True
+
+    async def follow_app(self, thread_id):
+        """Follow the desktop's copy of a thread we just let go.
+
+        A released thread stops feeding this connection, so a desktop turn would
+        be invisible until the next inbound message. Re-attaching as an App
+        follower restores that stream without taking the writer back.
+        """
+        if not thread_id or not self.connected or self.active is not None or self.app is not None:
+            return False
+        if not self.app_available():
+            return False
+        app = await self.attach_app(thread_id, {})
+        if app is None:
+            return False
+        previous, self.app = self.app, app
+        if previous and previous is not app:
+            await previous.close()
+        if self.selected_thread != thread_id:
+            self.selection_epoch += 1
+            self.active = None
+            self.pending.clear()
+        self.selected_thread = thread_id
+        self.released_thread = None
+        self.writer_event("backend.app_followed", thread=thread_id, status="followed")
+        return True
+
+    def app_available(self):
+        from app_ipc import ipc_path
+        path = ipc_path(self.config)
+        if path is None:
+            return False
+        try:
+            return Path(path).exists()
+        except OSError:
+            return False
 
     def writer_event(self, event, **fields):
         report = getattr(self, "report", None)

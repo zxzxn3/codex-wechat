@@ -82,4 +82,4 @@ async def switch(bridge, name):
     except Exception:
         bridge.reply(bridge.prompt("BACKEND_CLEANUP_FAILED"))
     # The new backend only needs the writer while a turn runs.
-    await candidate.release_thread(selected)
+    await candidate.release_thread(selected, follow=True)

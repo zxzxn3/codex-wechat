@@ -71,7 +71,7 @@ async def activate(bridge, thread_id=None, overrides=None):
     bridge.save()
     # Adoption itself needs no writer: return it so the App can open this thread
     # while the bridge is idle. The next turn resumes it or follows the App.
-    await bridge.backend.release_thread(selected)
+    await bridge.backend.release_thread(selected, follow=True)
     return desktop
 
 

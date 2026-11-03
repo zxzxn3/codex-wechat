@@ -38,7 +38,7 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
                     side_effect=lambda thread_id=None, overrides=None: thread_id or "created")
                 bridge.backend.release_thread = AsyncMock(return_value=True)
                 await activate(bridge, "target")
-                bridge.backend.release_thread.assert_awaited_once_with("target")
+                bridge.backend.release_thread.assert_awaited_once_with("target", follow=True)
                 self.assertEqual(bridge.state["thread"], "target")
                 bridge.backend.release_thread.reset_mock()
                 await activate(bridge, "other")
