@@ -155,6 +155,18 @@ class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(MediaError, "curl 28"):
             await media.transfer(URL)
 
+    async def test_failures_are_logged_without_the_signed_url(self):
+        records = []
+        media, channel = self.media(SimpleNamespace(
+            transfer=AsyncMock(return_value=(b"", 0, 28, None))))
+        with patch("media.log_event", side_effect=lambda name, **fields: records.append((name, fields))):
+            with self.assertRaises(MediaError):
+                await media.transfer(URL)
+        self.assertEqual(records[0][0], "media.transfer_failed")
+        self.assertEqual(records[0][1]["kind"], "curl")
+        self.assertEqual(records[0][1]["curl_code"], 28)
+        self.assertNotIn("SECRET", str(records))
+
     async def test_timeout_and_cancel_are_distinguished(self):
         media, channel = self.media(SimpleNamespace(
             transfer=AsyncMock(side_effect=TimeoutError())))

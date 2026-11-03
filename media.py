@@ -7,10 +7,12 @@ import os
 from pathlib import Path
 import re
 import secrets
+import time
 import urllib.parse
 import uuid
 
 from configuration import DEFAULT_SOURCE_HINT
+from diagnostics import error_fields, log_event
 from platform_support import IS_WINDOWS
 
 CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
@@ -152,21 +154,45 @@ class Media:
 
     async def transfer(self, url, data=None):
         url = cdn_url(url)
+        started = time.monotonic()
         try:
             received, status, code, parameter = await self.channel.http.transfer(
                 url, data, limit=self.limit + 16)
-        except TimeoutError:
+        except TimeoutError as error:
+            self._log_transfer(False, started, kind="timeout", error=error)
             raise MediaError("附件传输达到总超时限制。") from None
-        except Exception:
+        except Exception as error:
             # Transport exception strings can contain the encrypted CDN query.
+            self._log_transfer(False, started, kind="transport", error=error)
             raise MediaError("附件 CDN 请求失败，未输出含令牌的 URL。") from None
         if code:
+            kind = "size_limit" if code == 63 else "curl"
+            self._log_transfer(False, started, kind=kind, curl_code=code)
             if code == 63:
                 raise MediaError("附件超过本地大小限制。")
             raise MediaError(f"附件 CDN 请求失败（curl {code}），未输出含令牌的 URL。")
         if status != 200:
+            self._log_transfer(False, started, kind="http_status", http_status=status)
             raise MediaError("微信 CDN 未返回 HTTP 200。")
+        self._log_transfer(True, started, kind="ok", http_status=status,
+                           bytes_=len(received))
         return received, parameter
+
+    @staticmethod
+    def _log_transfer(ok, started, *, kind, error=None, curl_code=None,
+                      http_status=None, bytes_=None):
+        fields = {"component": "media", "ok": ok, "kind": kind,
+                  "duration_ms": (time.monotonic() - started) * 1000}
+        if curl_code is not None:
+            fields["curl_code"] = curl_code
+        if http_status is not None:
+            fields["http_status"] = http_status
+        if bytes_ is not None:
+            fields["bytes"] = bytes_
+        if error is not None:
+            fields.update(error_fields(error))
+        log_event("media.transfer" if ok else "media.transfer_failed",
+                  level="info" if ok else "warning", **fields)
 
     async def incoming(self, items):
         if len(items) > MAX_ATTACHMENTS:
