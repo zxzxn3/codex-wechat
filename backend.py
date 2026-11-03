@@ -653,13 +653,26 @@ class CodexBackend:
         left alone because its events still arrive through IPC.
         """
         if not thread_id or not self.connected or self.active is not None or self.app is not None:
+            if thread_id:
+                self.writer_event("backend.writer_kept", thread=thread_id,
+                                  status=("followed" if self.app is not None else
+                                          "busy" if self.active is not None else "offline"))
             return False
         try:
             await self.rpc("thread/unsubscribe", {"threadId": thread_id})
-        except (CodexRpcError, OSError, RuntimeError):
+        except (CodexRpcError, OSError, RuntimeError) as error:
+            self.writer_event("backend.writer_release_failed", level="warning",
+                              thread=thread_id, status="failed",
+                              error_type=type(error).__name__)
             return False
         self.released_thread = thread_id
+        self.writer_event("backend.writer_released", thread=thread_id, status="released")
         return True
+
+    def writer_event(self, event, **fields):
+        report = getattr(self, "report", None)
+        if report:
+            report(event, **fields)
 
     async def list_threads(self, cursor=None, search=None):
         params = {"limit": 10, "sortKey": "updated_at", "cursor": cursor,
