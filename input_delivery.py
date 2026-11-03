@@ -176,6 +176,7 @@ class InputDelivery:
                         self.defer_restart(job)
                     continue
                 if answer is not None:
+                    bridge.last_turn_seconds = time.perf_counter() - started
                     await bridge.deliver_answer(answer, request_id=job.get("requestId"))
                     log_event("input.completed", component="input",
                               duration_ms=(time.perf_counter() - started) * 1000,

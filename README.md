@@ -133,7 +133,8 @@ Windows 使用 `codex-desktop.ps1 cli -- resume`。`desktop setup` / `ensure` �
 可覆盖范围以 `DEFAULT_PROMPTS` 中的名称为准。
 可使用 `/ack fields` 中的快照字段及该模板的局部字段，局部字段优先；替换只执行一次，
 字段名统一为小写英文snake_case，例如 `{input_tokens}`、`{output_tokens}`、
-`{total_tokens}`、`{context_remaining}`、`{model}`、`{ingress_ms}`、`{egress_ms}`。
+`{total_tokens}`、`{context_remaining}`、`{model}`、`{ingress_ms}`、`{egress_ms}`、
+`{elapsed}`（本回合从派发到结束的耗时，尚无样本时为 `-`）。
 完整共享字段以 `/ack fields` 或 `/finish fields` 为准；旧中文字段不再识别，已有自定义模板需改为新名称。
 显示标签及命令用法中的参数说明仍可使用中文，它们不是模板变量。
 未知字段保留原样，字面花括号写成 `{{`、`}}`。每项最多3000 UTF-8字节，未知名称、
