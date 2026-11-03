@@ -52,55 +52,31 @@ Windows 使用 `.ps1 stop`。命令会先尽力向最近一次微信会话发送
 
 本地共享连接优先复用原生 daemon，仍可显式配置独立连接。桥接退出只关闭自己的连接/代理进程，不结束共享 Codex 后台。
 
-Linux 与 Windows App 正常启动后，可直接在微信 `/switch` 到它持有的会话。遇到原生后台的
-active writer 冲突时，桥接通过同一 CODEX_HOME 下的 App IPC 跟随会话，不关闭 App、
+Linux 与 Windows App 正常启动后，可直接在微信 `/switch` 到它持有的会话，无需专用 App 启动入口。
+遇到原生后台的 active writer 冲突时，桥接通过 App IPC 跟随会话，不关闭 App、
 不抢占写入锁。已完成历史不回发，新消息、中途回复和最终回答仍走现有交付流程。
 App 退出或 IPC 断开时不自动重发输入；重新打开 App 后用 `/switch` 或 `/backend` 重连。
 自定义启动器只有显式配置后端 `env.CODEX_HOME` 才查找 IPC，不猜测它内部使用的目录。
-Linux 使用同一 CODEX_HOME 的私有 socket；Windows 使用本机命名管道，核对当前用户和已注册 App。
-Windows 仅跟随主 CODEX_HOME；Linux 显式 WebSocket 须配置 env.CODEX_HOME。内部协议随 App 版本变化。
+Linux 使用同一 CODEX_HOME 下的私有 socket；Windows 使用本机命名管道，连接前核对服务进程
+属于当前用户和已注册的 Codex App。Windows 仅跟随主 CODEX_HOME，不猜测独立后端目录。
+Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对应 App 的跟随，不猜测其目录。
+内部协议随 App 版本变化；更新 App 后若身份检查失败，请完全退出重开。
 
 **启动顺序限制**：IPC 只支持“先在 App 打开会话，再从微信连接”。若微信桥先通过原生
 后台连接会话，随后用独立后台的 App 打开同一会话，App 可能显示被锁定。反向接入需要
 桥接充当 IPC 持有者、向 App 同步状态并承接其操作，实现与维护成本较高，因此暂未支持。
-可按上述顺序使用，或让 App 通过下述入口连接同一共享后台。
+App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
+若旧版本曾通过 `--shortcut` 创建 Linux 用户桌面覆盖，请先核对
+`~/.local/share/applications/chatgpt.desktop` 中的 `X-Codex-WeChat=true`，仅移除项目创建且未自行修改的覆盖，恢复系统原入口。
 
-也可以让 Linux App 复用 CLI 的原生 daemon。先完全退出已有 App，再执行：
+CLI 仍可连接微信使用的原生后台：
 
 ```bash
-codex-wechat app
 codex-wechat cli -- resume
 ```
 
-若希望以后仍从原桌面图标启动，只需配置一次：
-
-```bash
-codex-wechat desktop setup --native --shortcut
-```
-
-这会为当前用户创建 App 桌面入口，保留系统图标和 MIME 关联，并通过稳定入口准备原生
-daemon；不修改系统包或代理启动器。删除它打印的用户桌面文件即可恢复系统入口。
-已有自定义桌面文件不会被覆盖。配置不会改变已打开的 App，首次必须退出重开。
-若原来配置了 WebSocket，`--native` 会切回原生 daemon，需要重启微信桥；已有原生配置无需重启。
-
-若入口不在 PATH，使用前述完整路径。Windows 继续使用显式 WebSocket 共享：
-
-```powershell
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-desktop.ps1" setup
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" app
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-desktop.ps1" cli -- resume
-```
-
-setup 保留其它配置；Linux 默认使用原生 daemon，已有 WebSocket 配置继续沿用，除非显式
-`--native`。`--backend {名称}` 选择后端，`--executable {绝对路径}` 指定 CLI/App 内置 CLI。
-Windows 的端口由系统分配后保存；两平台均可显式指定 `--url ws://127.0.0.1:{端口}`。
-不能以同一个 CODEX_HOME 代替连接同一个后台，不能通过删除写入锁解决冲突。
-Linux 原生 App 不接受强制独立后端的 `CODEX_CLI_PATH` / `CODEX_APP_SERVER_FORCE_CLI=1`；
-自定义启动器须显式提供后端 `env.CODEX_HOME`，避免 App 与启动器选择不同目录。
-
-**代理启动器只负责代理并转交命令。** 项目接入入口不读取系统代理、不维护代理配置；后台管理在运行层，App / CLI / 微信共用连接配置。代理环境在实际后台启动时继承，改变客户端环境不会修改已经运行的后台。
-
-App 的 WebSocket 接口属于版本相关实现，公开 App Server WebSocket 也仍为实验性。版本、依据及未验证组合见 [SOURCES](docs/SOURCES.md)。
+Windows 使用 `codex-desktop.ps1 cli -- resume`。`desktop setup` / `ensure` 仅配置和准备 CLI/微信的后台，
+不启动 App、不改代理或系统桌面入口。IPC 为版本相关内部协议，依据及未验收组合见 [SOURCES](docs/SOURCES.md)。
 
 ## 日常行为
 

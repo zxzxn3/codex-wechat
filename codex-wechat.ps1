@@ -1,8 +1,8 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('login', 'rebind', 'app', 'start', 'stop', 'status', 'service-start', 'service-stop',
+    [ValidateSet('login', 'rebind', 'start', 'stop', 'status', 'service-start', 'service-stop',
                  'service-restart', 'service-status', 'autostart', 'logs', 'uninstall', 'update', 'install', 'menu', 'components')]
     [string]$Command = 'status',
     [Parameter(Position = 1)]
@@ -32,12 +32,6 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     Split-Path -Parent (Split-Path -Parent $ScriptRoot)
 } else {
     $ScriptRoot
-}
-if ($Command -eq 'app') {
-    $desktop = Join-Path $InstallRoot 'codex-desktop.ps1'
-    $forward = @('app')
-    & $desktop @forward
-    exit $LASTEXITCODE
 }
 if ($Command -in @('update', 'install', 'menu', 'components')) {
     if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $Service -or $PurgeData -or $Json -or

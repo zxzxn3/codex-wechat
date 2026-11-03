@@ -15,11 +15,7 @@
 
 公开协议提供 stdio、WebSocket 和 Unix socket；CLI --remote 可接指定共享后台。
 WebSocket 仍为实验性；App 连接环境变量是版本相关内部接口，不是公开稳定承诺。
-本机 Linux App 的原生路径由 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1` 启用：仅在非 Windows、
-无 App 配置覆盖、无强制 CLI/可执行覆盖且 daemon 版本满足 App 内部检查时，连接当前
-CODEX_HOME 的 app-server-control socket；本版本最低接受 0.141.0。桥接启动入口先准备同一原生 daemon，并用
-App 内置 CLI 的 `app-server daemon version` 确认其可见；不改写 App 包，不停止已有后台。
-该入口是当前版本源码依据，离线测试不证明 App 所有运行条件均满足；真实共享仍需联调确认。
+App 由用户正常启动；桥接不设置它的后台连接变量，也不改写桌面入口。
 Linux App IPC 依据同一 app.asar：early-bootstrap-339 的 IpcClient/IpcRouter 和 owner/follower
 请求路由；early-bootstrap-824 的 4 字节小端长度帧、私有 ipc.sock；early-bootstrap-439 的
 会话快照/Immer 增量、请求处理及状态转换；early-bootstrap.js 的方法版本表。
@@ -29,10 +25,7 @@ App 更新兼容性仍需验证；不是公开 App Server 协议，不据字段�
 App webview app-initial 的 continuation 检查直接使用 input.text_elements.some；IPC 文本需
 显式补空数组，不能依赖原生服务端的默认值。首次真实投递已触发并从 error boundary 堆栈确认
 该字段缺失会导致 App 渲染失败；修复后的真实投递仍待验证。
-用户桌面入口遵循 [freedesktop Exec 规则](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html)，
-用同名用户文件覆盖系统入口，参数独立引用且保留 `%U`；没有 shell 拼接执行。
-Windows 原生 daemon 有自身脱离和管理能力，但不能据此认定 App 默认连接同一后台；
-App 共享路径明确配置，不能在失败时静默换为独立后台。
+原生共享后台继续用于 CLI 和微信；App 持有的会话只在明确的 writer 冲突后尝试 IPC 跟随。
 
 Windows IPC 适配另核对本机 App 26.1027.6604.0 的 early-bootstrap-824：Windows 端点为
 `\\.\pipe\codex-ipc`；early-bootstrap.js 的 follower 方法版本与上述 Linux 版本一致。
