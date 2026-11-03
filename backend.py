@@ -47,6 +47,7 @@ class CodexBackend:
         self.recent_tokens = deque(maxlen=PENDING_TOKEN_RECENT)
         self.active = None
         self.released_thread = None
+        self.attach_error = None
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
@@ -152,9 +153,13 @@ class CodexBackend:
             # Unusable or foreign App endpoint: keep the caller's own conflict
             # reason instead of leaking an attach detail into the reply.
             await candidate.close()
-            self.writer_event("backend.app_attach_failed", level="warning",
-                              thread=thread_id, status="failed",
-                              error_type=type(error).__name__, reason=error_reason(error))
+            reason = error_reason(error)
+            if reason != self.attach_error:
+                # The idle retry would otherwise repeat the same warning.
+                self.attach_error = reason
+                self.writer_event("backend.app_attach_failed", level="warning",
+                                  thread=thread_id, status="failed",
+                                  error_type=type(error).__name__, reason=reason)
             return None
         except BaseException:
             await candidate.close()
@@ -705,6 +710,7 @@ class CodexBackend:
             self.pending.clear()
         self.selected_thread = thread_id
         self.released_thread = None
+        self.attach_error = None
         self.writer_event("backend.app_followed", thread=thread_id, status="followed")
         return True
 

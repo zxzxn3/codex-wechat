@@ -67,8 +67,11 @@ Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对
 跟随（IPC follower），双向仍然可用。app-server 的释放是延迟的（约数十秒），刚交还后立刻打开
 可能仍显示锁定，稍等或重新进入即可。
 桥接空闲时会每 5 秒检查一次 App 的 IPC 是否出现：App 后启动并接管该会话后，桥接会自动
-重新跟随，桌面端的回信也会继续进入微信。IPC 只支持“App 作为写者”的方向；桥接不会反向
-充当 IPC 持有者。App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
+重新跟随，桌面端的回信也会继续进入微信。`\\.\pipe\codex-ipc` 由最先启动的 Codex 客户端
+托管——如果 VS Code 的 Codex 扩展先占用它，桥接会因为身份校验不通过而无法跟随（日志
+`backend.app_attach_failed`）；此时桌面端的回信不会进入微信，微信发消息会得到
+“会话正被桌面端占用”。IPC 只支持“App 作为写者”的方向；桥接不会反向充当 IPC 持有者。
+App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
 若旧版本曾通过 `--shortcut` 创建 Linux 用户桌面覆盖，请先核对
 `~/.local/share/applications/chatgpt.desktop` 中的 `X-Codex-WeChat=true`，仅移除项目创建且未自行修改的覆盖，恢复系统原入口。
 
