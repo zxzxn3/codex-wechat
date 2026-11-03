@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from backend import CodexBackend
-from codex_transport import CodexTransport
+from codex_transport import CodexTransport, CodexRpcError
 from pipe_websocket import PipeWebSocket
 from profiles import definitions
 from storage import Store
@@ -186,6 +186,16 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(backend.app, candidate)
         self.assertIsNone(backend.released_thread)
         self.assertEqual(backend.selected_thread, "thread-1")
+
+    async def test_attach_failure_never_escapes_following(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.app_available = lambda: True
+        backend.attach_app = AsyncMock(side_effect=CodexRpcError(
+            -32600, "App IPC: no-client-found"))
+        self.assertFalse(await backend.follow_app("thread-1"))
+        self.assertIsNone(backend.app)
 
     async def test_unusable_app_endpoint_does_not_replace_the_writer_conflict(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

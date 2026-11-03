@@ -157,11 +157,11 @@ class CodexBackend:
             # a guessed attachment or a new independent writer.
             await candidate.close()
             return None
-        except ValueError as error:
-            # Unusable or foreign App endpoint: keep the caller's own conflict
-            # reason instead of leaking an attach detail into the reply.
+        except (CodexRpcError, ValueError) as error:
+            # No capable owner, a foreign relay or an unusable endpoint: keep the
+            # caller's own conflict reason instead of an attach detail.
             await candidate.close()
-            reason = error_reason(error)
+            reason = error_reason(error) or type(error).__name__
             if reason != self.attach_error:
                 # The idle retry would otherwise repeat the same warning.
                 self.attach_error = reason
@@ -706,7 +706,15 @@ class CodexBackend:
             return False
         if not self.app_available():
             return False
-        app = await self.attach_app(thread_id, {})
+        try:
+            app = await self.attach_app(thread_id, {})
+        except (CodexRpcError, OSError, RuntimeError, asyncio.TimeoutError) as error:
+            # Following is best effort: it must never fail the caller's turn or
+            # the bridge startup.
+            self.writer_event("backend.app_attach_failed", level="warning",
+                              thread=thread_id, status="failed",
+                              error_type=type(error).__name__)
+            return False
         if app is None:
             return False
         previous, self.app = self.app, app
