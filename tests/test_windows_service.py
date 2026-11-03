@@ -330,6 +330,11 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("still has attached clients", text)
         self.assertIn("a shared Codex backend under the data root is left running", text)
 
+    def test_uninstall_removes_the_task_only_after_purging_data(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertGreater(text.index("Unregister-ScheduledTask"),
+                           text.index("Remove-Item -LiteralPath $DataRoot"))
+
     def test_powershell_entry_does_not_read_undefined_last_exit_code(self):
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
         uninstall = entry[entry.index("    'uninstall' {"):]

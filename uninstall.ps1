@@ -78,7 +78,12 @@ function Stop-SharedBackends {
             $port = 0
         }
         if ($port -gt 0 -and -not $Force) {
-            $attached = @(Get-NetTCPConnection -State Established -LocalPort $port -ErrorAction SilentlyContinue)
+            # A loopback connection appears twice; drop the backend's own row
+            # so the report names the clients that would be interrupted.
+            $attached = @(@(
+                Get-NetTCPConnection -State Established -LocalPort $port -ErrorAction SilentlyContinue
+                Get-NetTCPConnection -State Established -RemotePort $port -ErrorAction SilentlyContinue
+            ) | Where-Object { $_.OwningProcess -ne $id })
             if ($attached.Count -gt 0) {
                 $owners = @($attached | ForEach-Object {
                     $owner = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
@@ -117,13 +122,15 @@ if ($task) {
     if ($task.State -in @('Running', 'Queued')) {
         Stop-ScheduledTask -TaskName $TaskName
         Wait-TaskStopped
+        Write-Host "stopped scheduled task: $TaskName"
     }
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Write-Host "removed scheduled task: $TaskName"
 } else {
     Write-Host "scheduled task is not installed: $TaskName"
 }
 
+# Data removal cannot be undone, so it runs while the scheduled task is still
+# registered: a failure leaves a working installation, not a half-uninstalled
+# one. The task is unregistered only once the irreversible step has succeeded.
 if ($PurgeData) {
     $expectedLeaf = 'codex-wechat'
     $resolvedParent = [IO.Path]::GetFullPath((Split-Path -Parent $DataRoot))
@@ -143,5 +150,9 @@ if ($PurgeData) {
 } else {
     Write-Host "data retained: $DataRoot (use -PurgeData only when credentials and state are no longer needed)"
     Write-Host 'a shared Codex backend under the data root is left running'
+}
+if ($task) {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    Write-Host "removed scheduled task: $TaskName"
 }
 Write-Host 'project files and the virtual environment were not removed'
