@@ -132,6 +132,19 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(CodexTransport({}, "/tmp", **callbacks).shared)
             self.assertTrue(CodexTransport({"sharedDaemon": True}, "/tmp", **callbacks).shared)
 
+    async def test_release_thread_returns_the_writer_best_effort(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.rpc = AsyncMock(return_value={})
+        self.assertTrue(await backend.release_thread("thread-1"))
+        backend.rpc.assert_awaited_once_with("thread/unsubscribe", {"threadId": "thread-1"})
+        backend.rpc = AsyncMock(side_effect=RuntimeError("unsupported method"))
+        self.assertFalse(await backend.release_thread("thread-2"))
+        backend.transport.proc = SimpleNamespace(returncode=1)
+        backend.rpc = AsyncMock(return_value={})
+        self.assertFalse(await backend.release_thread("thread-3"))
+
     async def test_windows_probe_falls_back_to_the_system_proxy(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.transport.proc = SimpleNamespace(returncode=None)

@@ -642,6 +642,22 @@ class CodexBackend:
             env.update(system_proxy())
         return endpoint, env
 
+    async def release_thread(self, thread_id):
+        """Drop the writer this client holds for a thread it has left.
+
+        The app-server exposes no unload call; unsubscribing is the only way to
+        stop holding the writer, which is what leaves another client (the App)
+        looking at a locked thread. Best effort: an older server that does not
+        know the method must not fail the switch.
+        """
+        if not thread_id or not self.connected or self.active is not None:
+            return False
+        try:
+            await self.rpc("thread/unsubscribe", {"threadId": thread_id})
+        except (CodexRpcError, OSError, RuntimeError):
+            return False
+        return True
+
     async def list_threads(self, cursor=None, search=None):
         params = {"limit": 10, "sortKey": "updated_at", "cursor": cursor,
                   "sourceKinds": ["cli", "vscode", "appServer"]}

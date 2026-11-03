@@ -48,7 +48,7 @@ from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, WeCh
 from platform_support import IS_WINDOWS, data_root
 from diagnostics import error_fields, log_event, new_request_id
 from log_viewer import show_logs
-from prompts import (render_ack, status_fields)
+from prompts import (render_ack, status_fields, duration_label)
 
 ROOT = Path(__file__).resolve().parent
 
@@ -78,6 +78,7 @@ class Bridge:
         self.input_paused = False
         self.backend_recovering = False
         self.latency = Latency()
+        self.last_turn_seconds = None
         last_send = self.state.get("lastSendMs")
         if type(last_send) in (int, float) and last_send >= 0:
             self.latency.sends.append(float(last_send))
@@ -282,6 +283,7 @@ class Bridge:
             connection="本地后台" if self.backend.shared else "独立进程",
         )
         values.update(self.latency.values(ingress_ms))
+        values["elapsed"] = duration_label(self.last_turn_seconds)
         sample = self.latency.provider_sample
         values["provider_latency_ms"] = (sample[1].removesuffix("ms")
                               if sample and sample[0] == self.backend.connection_id

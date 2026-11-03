@@ -6,11 +6,28 @@ from unittest.mock import AsyncMock
 
 from codex_wechat import Bridge
 from commands import handle
-from prompts import prompt_text, render_ack, status_from_fields
+from prompts import prompt_text, render_ack, status_from_fields, duration_label
 from storage import Store
 
 
 class PromptFieldsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_turn_duration_label(self):
+        self.assertEqual(duration_label(None), "-")
+        self.assertEqual(duration_label(9.66), "9.7s")
+        self.assertEqual(duration_label(65.4), "1m05s")
+        self.assertEqual(duration_label(186.6), "3m07s")
+
+    async def test_elapsed_field_is_available_to_templates(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = Store(root)
+            try:
+                bridge = Bridge(store, {"user": "owner"}, {})
+                self.assertEqual(bridge.prompt_fields()["elapsed"], "-")
+                bridge.last_turn_seconds = 65.4
+                self.assertEqual(bridge.prompt_fields()["elapsed"], "1m05s")
+            finally:
+                store.close()
+
     async def test_shared_snapshot_and_no_recursive_expansion(self):
         with tempfile.TemporaryDirectory() as root:
             store = Store(root)

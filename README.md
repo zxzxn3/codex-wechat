@@ -63,8 +63,10 @@ Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对
 内部协议随 App 版本变化；更新 App 后若身份检查失败，请完全退出重开。
 
 **启动顺序限制**：IPC 只支持“先在 App 打开会话，再从微信连接”。若微信桥先通过原生
-后台连接会话，随后用独立后台的 App 打开同一会话，App 可能显示被锁定。反向接入需要
-桥接充当 IPC 持有者、向 App 同步状态并承接其操作，实现与维护成本较高，因此暂未支持。
+后台连接会话，随后用独立后台的 App 打开同一会话，App 可能显示被锁定。
+`/switch`、`/new` 与 `/backend` 成功后会请求旧会话的 `thread/unsubscribe`，把这个写入者
+交还；app-server 仍占用时（例如旧版本不认识该方法）只能等桥接重启释放。
+反向接入（桥接充当 IPC 持有者）尚未实现，实现与维护成本较高，因此暂未支持。
 App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
 若旧版本曾通过 `--shortcut` 创建 Linux 用户桌面覆盖，请先核对
 `~/.local/share/applications/chatgpt.desktop` 中的 `X-Codex-WeChat=true`，仅移除项目创建且未自行修改的覆盖，恢复系统原入口。
@@ -133,7 +135,8 @@ Windows 使用 `codex-desktop.ps1 cli -- resume`。`desktop setup` / `ensure` �
 可覆盖范围以 `DEFAULT_PROMPTS` 中的名称为准。
 可使用 `/ack fields` 中的快照字段及该模板的局部字段，局部字段优先；替换只执行一次，
 字段名统一为小写英文snake_case，例如 `{input_tokens}`、`{output_tokens}`、
-`{total_tokens}`、`{context_remaining}`、`{model}`、`{ingress_ms}`、`{egress_ms}`。
+`{total_tokens}`、`{context_remaining}`、`{model}`、`{ingress_ms}`、`{egress_ms}`、
+`{elapsed}`（本回合从派发到结束的耗时，尚无样本时为 `-`）。
 完整共享字段以 `/ack fields` 或 `/finish fields` 为准；旧中文字段不再识别，已有自定义模板需改为新名称。
 显示标签及命令用法中的参数说明仍可使用中文，它们不是模板变量。
 未知字段保留原样，字面花括号写成 `{{`、`}}`。每项最多3000 UTF-8字节，未知名称、

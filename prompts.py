@@ -299,6 +299,16 @@ def effort_label(value):
     return str(value).replace("_", " ").capitalize() if value else "默认"
 
 
+def duration_label(seconds):
+    """Format a turn duration for prompt templates; None means no sample yet."""
+    if not isinstance(seconds, (int, float)) or seconds < 0:
+        return "-"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, rest = divmod(int(round(seconds)), 60)
+    return f"{minutes}m{rest:02d}s"
+
+
 def model_label(model, effort):
     model = model or "默认模型"
     return f"{model} ({effort_label(effort)})"
