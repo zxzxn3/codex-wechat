@@ -171,11 +171,12 @@ async def connection_probe(endpoint, env):
     # measured setup time; never substitute time_total/time_starttransfer.
     if isinstance(elapsed, (int, float)) and math.isfinite(elapsed) and elapsed > 0:
         return f"{elapsed * 1000:.0f}ms"
-    if proc.returncode == 28:
+    if proc.returncode:
         # Say which path failed: a direct attempt and a proxied one fail for
-        # entirely different reasons, and "timeout" alone hides that.
-        return "timeout(" + probe_reason(env) + ")"
-    return "unavailable"
+        # entirely different reasons, and a bare label hides that.
+        kind = "timeout" if proc.returncode == 28 else "unreachable"
+        return kind + "(" + probe_reason(env) + ")"
+    return "unavailable(空响应)"
 
 
 def probe_reason(env):

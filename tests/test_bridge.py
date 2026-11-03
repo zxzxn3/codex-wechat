@@ -122,7 +122,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await self.bridge.control("/ping", received={"ingress_ms": 120})
         outbox = self.store.load("bridge")["outbox"]
         self.assertEqual([entry["text"] for entry in outbox],
-                         ["WeChat ─120/50ms", "Bridge ─unavailable─ Provider"])
+                         ["WeChat ─120/50ms", "Bridge ─unavailable(无可用目标)─ Provider"])
         self.assertNotIn("ping", outbox[-1])
         self.assertFalse(self.bridge.backend_started)
 

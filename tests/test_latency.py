@@ -45,6 +45,17 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
                 await connection_probe("https://api.example", {"HTTPS_PROXY": "  "}),
                 "timeout(直连,未配置代理)")
 
+    async def test_refused_connection_is_not_called_unavailable(self):
+        # curl 7 = could not connect, which a blocked direct route returns at once.
+        process = SimpleNamespace(returncode=7, communicate=AsyncMock(return_value=(
+            b'{"time_appconnect":0}', None)), stdin=None)
+        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+            self.assertEqual(await connection_probe("https://api.example", {}),
+                             "unreachable(直连,未配置代理)")
+            self.assertEqual(
+                await connection_probe("https://api.example", {"ALL_PROXY": "socks5://127.0.0.1:7897"}),
+                "unreachable(代理未响应)")
+
     async def test_missing_backend_or_rpc_timeout_is_explicit(self):
         backend = SimpleNamespace(probe_target=AsyncMock(return_value=None))
         self.assertEqual(await provider_latency(backend), "unavailable(无可用目标)")
