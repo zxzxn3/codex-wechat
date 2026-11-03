@@ -28,6 +28,17 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 本机实机确认气泡可见，但该结论只覆盖当时的登录会话。App/CLI/微信三端共享仍未实机验证，
 具体覆盖以验收报告为准。
 
+## 目录权限不能依赖 POSIX 0700
+
+Windows 把 POSIX 的 0700 翻译成"仅对象**所有者**"的 DACL。提权进程创建的对象所有者是
+`Administrators` 组，于是安装者本身没有权限：计划任务以普通身份启动 `pythonw` 时读不到
+`bootstrap_supervisor.py`，Python 只退 2 且不写 `service.log`，表现为"安装成功、服务静默失败"。
+
+规则：安装器与运行期统一用 `platform_support.make_private()`——显式授予"当前账户 + SYSTEM +
+Administrators"并断开继承；其下所有目录改为普通创建、继承父目录。临时目录用普通目录名而不是
+`tempfile.mkdtemp`（它固定 0700），否则 `os.replace` 会把私有 DACL 带到安装位置。安装收尾
+会以当前用户身份实际读一遍入口与 release，读不到就报错并给出 `icacls ... /reset` 修复命令。
+
 ## 诊断与实机验证
 
 结构化诊断位于 `%LOCALAPPDATA%\codex-wechat\logs\bridge.jsonl`，使用

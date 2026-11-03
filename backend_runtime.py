@@ -78,7 +78,7 @@ class BackendRuntime:
         ConnectionSpec.from_config({"websocketUrl": endpoint})
         command = resolve_command(command, env)
         root = Path(root)
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root.mkdir(parents=True, exist_ok=True)
         if IS_WINDOWS:
             # Adopt the old verified ownership record without stopping its server.
             from platform_support import data_root

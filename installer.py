@@ -672,6 +672,23 @@ def prepare_bootstrap_runtime(target: Path, *, requirements: Path) -> None:
 
 
 
+def _staging_directory(parent: Path, prefix: str) -> Path:
+    """Create a staging directory that inherits the parent's access rules.
+
+    tempfile.mkdtemp creates its directory with mode 0700, which Windows turns
+    into an owner-only DACL; `os.replace` then moves that DACL onto the
+    installed entries and locks the service account out.
+    """
+    for _ in range(10):
+        candidate = parent / (prefix + os.urandom(8).hex())
+        try:
+            candidate.mkdir()
+        except FileExistsError:
+            continue
+        return candidate
+    raise ValueError(f"无法在 {parent} 创建暂存目录")
+
+
 def install_release(
     target: Path,
     identifier: str,
@@ -680,13 +697,13 @@ def install_release(
     releases = target / RELEASES_DIR
     if releases.is_symlink():
         raise ValueError(f"版本目录不能是符号链接: {releases}")
-    releases.mkdir(parents=True, exist_ok=True, mode=0o700)
+    releases.mkdir(parents=True, exist_ok=True)
     final = release_path(target, identifier)
     if final.exists():
         if not release_matches(target, identifier, files):
             raise ValueError(f"现有版本内容与标识不一致: {final}")
         return final, False
-    staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=releases))
+    staging = _staging_directory(releases, ".staging-")
     try:
         _copy_release(staging, files)
         prepare_runtime(staging)
@@ -724,8 +741,8 @@ def stable_files_match(source: Path, target: Path) -> bool:
 
 def install_bootstrap(source: Path, target: Path) -> None:
     # Allocate/write every entry before replacing the first installed file.
-    with tempfile.TemporaryDirectory(prefix=".entry-", dir=target) as directory:
-        staging = Path(directory)
+    staging = _staging_directory(target, ".entry-")
+    try:
         for relative in _stable_files():
             source_path = source / relative
             destination = target / relative
@@ -735,6 +752,8 @@ def install_bootstrap(source: Path, target: Path) -> None:
                           stat.S_IMODE(source_path.stat().st_mode), root=staging)
         for relative in _stable_files():
             os.replace(staging / relative, target / relative)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def activate_release(target: Path, identifier: str) -> None:
@@ -854,7 +873,8 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
     release = None
     created = False
     try:
-        target.mkdir(parents=True, exist_ok=True, mode=0o700)
+        from platform_support import make_private
+        make_private(target)
         with InstallLock(target):
             check_install_target(source, target, update=update)
             fresh_files = project_files(source)

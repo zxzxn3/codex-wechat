@@ -38,8 +38,9 @@ def runtime_root(name):
 
 def configure(name, config, path, *, url=None, executable=None, native=False):
     from installer import InstallLock, _atomic_write
+    from platform_support import make_private
     target = path.parent
-    target.mkdir(parents=True, exist_ok=True)
+    make_private(target)
     with InstallLock(target):
         # Reread under the lock; preserve unrelated config and hot settings.
         config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}

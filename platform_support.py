@@ -29,6 +29,58 @@ def subprocess_options():
     return {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
 
 
+_ACCOUNT_IDENTITY = None
+
+
+def account_identity() -> str:
+    """Name the running account the way icacls needs it, preferring the SID."""
+    global _ACCOUNT_IDENTITY
+    if _ACCOUNT_IDENTITY:
+        return _ACCOUNT_IDENTITY
+    identity = None
+    try:
+        result = subprocess.run(
+            ["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True,
+            text=True, timeout=10, **subprocess_options())
+        fields = [value.strip().strip('"') for value in result.stdout.strip().split('","')]
+        if result.returncode == 0 and fields:
+            sid = fields[-1].strip('"')
+            if sid.startswith("S-1-"):
+                identity = "*" + sid
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if identity is None:
+        domain = os.environ.get("USERDOMAIN") or ""
+        identity = (domain + "\\" if domain else "") + (os.environ.get("USERNAME") or "")
+    _ACCOUNT_IDENTITY = identity
+    return identity
+
+
+def make_private(directory) -> None:
+    """Create a directory only this account and the system administrators use.
+
+    Windows turns POSIX 0700 into a DACL for the object *owner*, and an
+    elevated process owns what it creates through Administrators; the account
+    that actually runs the service is then locked out. Name the account
+    explicitly instead, on every platform.
+    """
+    directory = Path(directory)
+    if directory.is_dir():
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    if not IS_WINDOWS:
+        directory.chmod(0o700)
+        return
+    # Well-known SIDs keep this working on non-English Windows.
+    result = subprocess.run(
+        ["icacls", str(directory), "/inheritance:r", "/grant:r",
+         account_identity() + ":(OI)(CI)F",
+         "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"],
+        capture_output=True, text=True, **subprocess_options())
+    if result.returncode:
+        raise ValueError(f"无法设置目录权限，请用普通终端重试: {directory}")
+
+
 def resolve_command(command, env):
     """Never pass untrusted argv through cmd.exe or PowerShell interpolation."""
     if (not isinstance(command, (list, tuple)) or not command

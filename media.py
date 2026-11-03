@@ -172,7 +172,7 @@ class Media:
 
     def write(self, folder, name, data):
         directory = self.root / folder
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.mkdir(parents=True, exist_ok=True)
         if not IS_WINDOWS:
             directory.chmod(0o700)
             self.root.chmod(0o700)

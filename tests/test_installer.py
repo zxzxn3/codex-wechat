@@ -414,6 +414,39 @@ class InstallerCommandTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "分钟未完成"):
                     installer._run(["pip"], cwd=Path(directory))
 
+    @unittest.skipUnless(os.name == "nt", "Windows ACL semantics")
+    def test_staging_directory_inherits_access(self):
+        # mkdtemp's 0700 becomes an owner-only DACL; os.replace then moves it
+        # onto the installed entries and the service account cannot read them.
+        with tempfile.TemporaryDirectory() as directory:
+            staging = installer._staging_directory(Path(directory), ".staging-")
+            result = installer.subprocess.run(["icacls", str(staging)],
+                                              capture_output=True, text=True)
+            self.assertIn("(I)", result.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "Windows ACL semantics")
+    def test_private_directory_names_the_account(self):
+        try:
+            import win32api
+            import win32security
+        except ImportError:
+            self.skipTest("pywin32 未安装")
+        import platform_support
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "state"
+            platform_support.make_private(target)
+            token = win32security.OpenProcessToken(
+                win32api.GetCurrentProcess(), win32security.TOKEN_QUERY)
+            account = win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+            descriptor = win32security.GetNamedSecurityInfo(
+                str(target), win32security.SE_FILE_OBJECT,
+                win32security.DACL_SECURITY_INFORMATION)
+            dacl = descriptor.GetSecurityDescriptorDacl()
+            owners = {win32security.ConvertSidToStringSid(dacl.GetAce(index)[2])
+                      for index in range(dacl.GetAceCount())}
+            self.assertIn(win32security.ConvertSidToStringSid(account), owners)
+            (target / "probe").write_text("x", encoding="utf-8")
+
     def test_unreadable_install_entry_is_reported(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
