@@ -41,7 +41,7 @@ class CommandSplitTests(unittest.IsolatedAsyncioTestCase):
         original = dict(self.bridge.state)
         for command, argument in (
                 ("/switch", "target"), ("/new", ""), ("/compact", ""),
-                ("/effort", ""), ("/model", "2"), ("/cwd", "/tmp")):
+                ("/effort", "high"), ("/model", "2"), ("/cwd", "/tmp")):
             with self.subTest(command=command):
                 with self.assertRaises(UserFacingError) as raised:
                     await handle(self.bridge, command, argument)
