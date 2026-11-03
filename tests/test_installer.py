@@ -35,6 +35,10 @@ class InstallerTests(unittest.TestCase):
         self.enterContext(patch.object(installer, "install_command_link"))
         self.enterContext(patch.object(installer, "configure_windows"))
         self.enterContext(patch.object(installer, "next_steps"))
+        # The compatibility gate reads the active install's config; keep the
+        # developer's own data root out of these fixtures.
+        self.enterContext(patch.dict(
+            os.environ, {"CODEX_WECHAT_DATA_ROOT": str(self.base / "data")}))
 
     def make_project(self, root, *, version="one"):
         root.mkdir(parents=True, exist_ok=True)

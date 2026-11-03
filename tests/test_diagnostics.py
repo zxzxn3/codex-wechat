@@ -129,15 +129,16 @@ class DiagnosticsTests(unittest.TestCase):
 
     def test_follow_reads_rotated_tail_once_and_replacement_from_start(self):
         self.path.parent.mkdir(parents=True)
-        self.path.write_text("first\n", encoding="utf-8")
+        self.path.write_text("first\n", encoding="utf-8", newline="\n")
         positions = {}
         with redirect_stdout(StringIO()):
             _read_log_updates([self.path], positions, initial=True)
-        with self.path.open("a", encoding="utf-8") as stream:
+        with self.path.open("a", encoding="utf-8", newline="\n") as stream:
             stream.write("before rotation\n")
         backup = self.path.with_name(self.path.name + ".1")
         self.path.replace(backup)
-        self.path.write_text("replacement longer than the original file\n", encoding="utf-8")
+        self.path.write_text("replacement longer than the original file\n",
+                             encoding="utf-8", newline="\n")
         output = StringIO()
         with redirect_stdout(output):
             _read_log_updates([self.path, backup], positions)
@@ -148,11 +149,11 @@ class DiagnosticsTests(unittest.TestCase):
 
     def test_follow_does_not_skip_append_while_initial_tail_is_printed(self):
         self.path.parent.mkdir(parents=True)
-        self.path.write_text("old\n", encoding="utf-8")
+        self.path.write_text("old\n", encoding="utf-8", newline="\n")
         positions = {}
         def print_and_append(*args, **kwargs):
             if args == ("old",):
-                with self.path.open("a", encoding="utf-8") as stream:
+                with self.path.open("a", encoding="utf-8", newline="\n") as stream:
                     stream.write("raced append\n")
         with patch("log_viewer.print", side_effect=print_and_append):
             _read_log_updates([self.path], positions, initial=True)

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -20,6 +21,15 @@ from codex_transport import CodexRpcError, CodexTransport
 class ConfigLoaderExtraTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch("configuration.log_event"))
+        self.ticks = 0
+
+    def rewrite(self, path, payload):
+        path.write_text(json.dumps(payload))
+        # Change detection is (inode, mtime, size); Windows clock ticks can
+        # repeat, so equal-length rewrites need an explicit distinct stamp.
+        self.ticks += 1
+        stamp = 1_700_000_000_000_000_000 + self.ticks * 1_000_000
+        os.utime(path, ns=(stamp, stamp))
 
     def test_group_validation_retention_deletion_and_override_scope(self):
         with tempfile.TemporaryDirectory() as root:
@@ -32,14 +42,14 @@ class ConfigLoaderExtraTests(unittest.TestCase):
                 "compactionNotice": False,
                 "quotaWarningThresholds": {"primary": [50], "secondary": [25]},
             }
-            path.write_text(json.dumps(initial))
+            self.rewrite(path, initial)
             config = dict(initial)
             state = {"processingNotice": "chat ack", "completionNotice": "chat done"}
             loader = ConfigLoader(config, path)
 
             unrelated = dict(initial, sourceHint="hint-b",
                              slicing={"mode": "length", "targetChars": 800})
-            path.write_text(json.dumps(unrelated))
+            self.rewrite(path, unrelated)
             self.assertFalse(loader.reload(state))
             self.assertEqual(config["sourceHint"], "hint-b")
             self.assertEqual(loader.hot.slicing.target_chars, 800)
@@ -48,7 +58,7 @@ class ConfigLoaderExtraTests(unittest.TestCase):
             invalid = dict(unrelated, sourceHint="must-not-apply",
                            slicing={"mode": "length", "targetChars": 1},
                            compactionNotice=True)
-            path.write_text(json.dumps(invalid))
+            self.rewrite(path, invalid)
             self.assertFalse(loader.reload(state))
             self.assertEqual(config["sourceHint"], "hint-b")
             self.assertEqual(loader.hot.slicing.target_chars, 800)
@@ -59,7 +69,7 @@ class ConfigLoaderExtraTests(unittest.TestCase):
                            slicing={"mode": "length", "targetChars": 900})
             deleted.pop("processingNotice")
             deleted.pop("completionNotice")
-            path.write_text(json.dumps(deleted))
+            self.rewrite(path, deleted)
             self.assertTrue(loader.reload(state))
             self.assertNotIn("processingNotice", config)
             self.assertNotIn("completionNotice", config)
@@ -71,7 +81,7 @@ class ConfigLoaderExtraTests(unittest.TestCase):
             state["processingNotice"] = "new chat override"
             unrelated_hot = dict(deleted, quotaWarningThresholds={
                 "primary": [25], "secondary": [10]})
-            path.write_text(json.dumps(unrelated_hot))
+            self.rewrite(path, unrelated_hot)
             self.assertFalse(loader.reload(state))
             self.assertEqual(state["processingNotice"], "new chat override")
             self.assertEqual(loader.hot.notifications.quota_thresholds,

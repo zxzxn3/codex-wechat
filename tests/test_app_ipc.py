@@ -10,7 +10,9 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
-from app_ipc import AppSession, VERSIONS, app_inputs, apply_patches, ipc_path, turns
+import app_ipc
+from app_ipc import (AppSession, VERSIONS, app_inputs, apply_patches, ipc_path,
+                     turns)
 from backend import CodexBackend
 from codex_transport import CodexRpcError
 
@@ -51,7 +53,7 @@ class StateTests(unittest.TestCase):
         self.assertEqual([t["turnId"] for t in turns(state)], ["one", "two"])
 
     def test_home_is_not_guessed_for_custom_launcher_or_explicit_websocket(self):
-        with patch("app_ipc.os.name", "posix"):
+        with patch.object(app_ipc, "WINDOWS", False):
             self.assertIsNone(ipc_path({"command": ["codex-deepseek", "app-server"]}))
             self.assertEqual(ipc_path({"command": ["custom", "app-server"],
                 "env": {"CODEX_HOME": "/tmp/home"}}), Path("/tmp/home/ipc/ipc.sock"))

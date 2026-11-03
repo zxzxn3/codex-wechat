@@ -17,6 +17,9 @@ from codex_transport import CodexRpcError
 from diagnostics import log_event
 
 MAX_FRAME = 16 * 1024 * 1024
+# Module constant so callers and tests can describe the platform without
+# patching os.name, which pathlib also reads.
+WINDOWS = os.name == "nt"
 VERSIONS = {
     "initialize": 0, "thread-owner-discovery": 1,
     "thread-stream-following-changed": 1,
@@ -42,7 +45,7 @@ def ipc_path(config):
     if not home and Path(command[0]).name.lower() not in ("codex", "codex.exe"):
         return None
     home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
-    if os.name == "nt":
+    if WINDOWS:
         # Windows has a single App pipe per user, not one socket per CODEX_HOME.
         # Do not adopt a same-ID conversation from a separate backend home.
         primary = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
@@ -140,7 +143,7 @@ class AppSession:
         return bool(self.reader and not self.reader.done() and not self.closing)
 
     async def attach(self):
-        if os.name == "nt":
+        if WINDOWS:
             from app_ipc_windows import open_pipe
             self.stream, self.writer = await asyncio.wait_for(
                 open_pipe(self.path, limit=MAX_FRAME + 4), 8)
