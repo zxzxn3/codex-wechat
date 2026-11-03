@@ -93,7 +93,26 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
     -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable -Hidden
 if ($existing) {
     $settings.Enabled = [bool]$existing.Settings.Enabled
-    Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
+    # Re-registering needs write access to the task object, and a task created
+    # by an elevated installer is owned by Administrators. Skip the write when
+    # nothing changed so a normal user can still update the program.
+    $current = @($existing.Actions)
+    $unchanged = ($current.Count -eq 1 -and
+        [string]$current[0].Execute -eq [string]$action.Execute -and
+        [string]$current[0].Arguments -eq [string]$action.Arguments -and
+        [string]$current[0].WorkingDirectory -eq [string]$action.WorkingDirectory -and
+        [string]$existing.Principal.UserId -eq $user -and
+        [string]$existing.Principal.LogonType -eq 'Interactive')
+    if ($unchanged) {
+        Write-Host 'Task unchanged; access rules preserved.'
+    } else {
+        try {
+            Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
+        } catch {
+            throw ("Task $TaskName cannot be modified by this account (it was registered by an administrator). " +
+                   "Run the installer elevated, or delete the task once and re-create it as this user.")
+        }
+    }
 } else {
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 }
