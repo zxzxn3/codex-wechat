@@ -142,15 +142,16 @@ class PooledHTTP:
             url, headers, payload, timeout=timeout, polling=polling)
         return body + b"\n" + str(status).encode(), metrics
 
-    async def transfer(self, url, data, *, limit):
+    async def transfer(self, url, data, *, limit, connect_timeout=10):
         # CDN requests use the existing pool, but never API authentication headers.
         headers = {"Content-Type": "application/octet-stream"} if data is not None else {}
         body, status, metrics, response_headers = await self._exchange(
-            url, headers, data, timeout=60, limit=limit)
+            url, headers, data, timeout=60, limit=limit,
+            connect_timeout=connect_timeout)
         return body, status, metrics["curl_code"], response_headers.get("x-encrypted-param")
 
     async def _exchange(self, url, headers, payload, *, timeout, polling=False,
-                        limit=None):
+                        limit=None, connect_timeout=10):
         limit = MAX_RESPONSE_BYTES if limit is None else limit
         from curl_cffi.requests.exceptions import RequestException
         pool = self.poll if polling else self.outgoing
@@ -170,7 +171,7 @@ class PooledHTTP:
         try:
             try:
                 # curl_cffi defines tuple timeout as connect + remaining total.
-                connect = min(timeout, 10)
+                connect = min(timeout, connect_timeout)
                 async with asyncio.timeout(timeout + 2):
                     response = await session.request(
                         "POST" if payload is not None else "GET", url,

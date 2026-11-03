@@ -17,6 +17,11 @@ from platform_support import IS_WINDOWS
 
 CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_MAX_MIB = 20
+# A single stall should not fail the whole attachment; the download is a GET,
+# so one retry is safe. Six seconds already exceeds a normal CDN connect by
+# an order of magnitude on this link.
+CDN_ATTEMPTS = 2
+CDN_CONNECT_TIMEOUT = 6
 MAX_ATTACHMENTS = 10
 OUTPUT_HINT = "\n\n" + DEFAULT_SOURCE_HINT
 VIDEO_SUFFIXES = {
@@ -154,29 +159,46 @@ class Media:
 
     async def transfer(self, url, data=None):
         url = cdn_url(url)
-        started = time.monotonic()
-        try:
-            received, status, code, parameter = await self.channel.http.transfer(
-                url, data, limit=self.limit + 16)
-        except TimeoutError as error:
-            self._log_transfer(False, started, kind="timeout", error=error)
-            raise MediaError("附件传输达到总超时限制。") from None
-        except Exception as error:
-            # Transport exception strings can contain the encrypted CDN query.
-            self._log_transfer(False, started, kind="transport", error=error)
-            raise MediaError("附件 CDN 请求失败，未输出含令牌的 URL。") from None
-        if code:
-            kind = "size_limit" if code == 63 else "curl"
-            self._log_transfer(False, started, kind=kind, curl_code=code)
-            if code == 63:
-                raise MediaError("附件超过本地大小限制。")
-            raise MediaError(f"附件 CDN 请求失败（curl {code}），未输出含令牌的 URL。")
-        if status != 200:
-            self._log_transfer(False, started, kind="http_status", http_status=status)
-            raise MediaError("微信 CDN 未返回 HTTP 200。")
-        self._log_transfer(True, started, kind="ok", http_status=status,
-                           bytes_=len(received))
-        return received, parameter
+        for attempt in range(1, CDN_ATTEMPTS + 1):
+            retry = attempt < CDN_ATTEMPTS
+            started = time.monotonic()
+            try:
+                received, status, code, parameter = await self.channel.http.transfer(
+                    url, data, limit=self.limit + 16,
+                    connect_timeout=CDN_CONNECT_TIMEOUT)
+            except TimeoutError as error:
+                self._log_transfer(False, started, kind="timeout", error=error)
+                if retry:
+                    self._log_retry(attempt, "timeout")
+                    continue
+                raise MediaError("附件传输达到总超时限制。") from None
+            except Exception as error:
+                # Transport exception strings can contain the encrypted CDN query.
+                self._log_transfer(False, started, kind="transport", error=error)
+                if retry:
+                    self._log_retry(attempt, "transport")
+                    continue
+                raise MediaError("附件 CDN 请求失败，未输出含令牌的 URL。") from None
+            if code:
+                if code == 63:
+                    self._log_transfer(False, started, kind="size_limit", curl_code=code)
+                    raise MediaError("附件超过本地大小限制。")
+                self._log_transfer(False, started, kind="curl", curl_code=code)
+                if code == 28 and retry:
+                    self._log_retry(attempt, "curl")
+                    continue
+                raise MediaError(f"附件 CDN 请求失败（curl {code}），未输出含令牌的 URL。")
+            if status != 200:
+                self._log_transfer(False, started, kind="http_status", http_status=status)
+                raise MediaError("微信 CDN 未返回 HTTP 200。")
+            self._log_transfer(True, started, kind="ok", http_status=status,
+                               bytes_=len(received))
+            return received, parameter
+
+    @staticmethod
+    def _log_retry(attempt, kind):
+        log_event("media.transfer_retry", level="warning", component="media",
+                  attempt=attempt, kind=kind)
 
     @staticmethod
     def _log_transfer(ok, started, *, kind, error=None, curl_code=None,
