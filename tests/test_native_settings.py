@@ -28,6 +28,25 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 store.lock.close()
 
+    async def test_activation_returns_the_writer_so_the_app_can_open_the_thread(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = Store(Path(root) / "state")
+            try:
+                bridge = Bridge(store, {"user": "owner"}, {})
+                bridge.backend.read_thread = AsyncMock(return_value={"status": {"type": "idle"}})
+                bridge.backend.thread = AsyncMock(
+                    side_effect=lambda thread_id=None, overrides=None: thread_id or "created")
+                bridge.backend.release_thread = AsyncMock(return_value=True)
+                await activate(bridge, "target")
+                bridge.backend.release_thread.assert_awaited_once_with("target")
+                self.assertEqual(bridge.state["thread"], "target")
+                bridge.backend.release_thread.reset_mock()
+                await activate(bridge, "other")
+                self.assertEqual([call.args for call in bridge.backend.release_thread.await_args_list],
+                                 [("target",), ("other",)])
+            finally:
+                store.lock.close()
+
     async def test_settings_event_updates_only_selected_thread(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.selected_thread = "t"

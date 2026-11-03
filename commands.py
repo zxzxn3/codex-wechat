@@ -69,6 +69,9 @@ async def activate(bridge, thread_id=None, overrides=None):
     bridge.state.pop("sessionOptions", None)  # Retire legacy override replay after successful adoption.
     bridge.loaded = True
     bridge.save()
+    # Adoption itself needs no writer: return it so the App can open this thread
+    # while the bridge is idle. The next turn resumes it or follows the App.
+    await bridge.backend.release_thread(selected)
     return desktop
 
 
