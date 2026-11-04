@@ -11,8 +11,13 @@ PIPE_PATH = r"\\.\pipe\codex-ipc"
 APP_EXECUTABLE = "ChatGPT.exe"
 
 
-def verify_server(handle, executable):
-    """Authenticate the actual connected pipe, not an independently looked-up PID."""
+def verify_server(handle, executable, *, trust_router=False):
+    """Authenticate the actual connected pipe, not an independently looked-up PID.
+
+    With trust_router the caller has opted into a relay hosted by another local
+    Codex client (the VS Code extension also hosts `codex-ipc`): the same-user
+    check still applies, the executable check does not.
+    """
     import win32api
     import win32con
     import win32pipe
@@ -35,6 +40,8 @@ def verify_server(handle, executable):
             for token in (remote, local):
                 if token is not None:
                     token.Close()
+        if trust_router:
+            return
         image = win32process.GetModuleFileNameEx(process, 0)
         try:
             same = os.path.samefile(image, executable)
@@ -46,16 +53,18 @@ def verify_server(handle, executable):
         process.Close()
 
 
-async def open_pipe(path, *, limit):
+async def open_pipe(path, *, limit, trust_router=False):
     if str(path) != PIPE_PATH:
         raise ValueError("只允许本机 Codex App 的命名管道")
-    # Package discovery is bounded and must not block the bridge event loop.
-    core = await asyncio.to_thread(discover_app_codex, windows=True)
-    if not core:
-        raise ValueError("找不到已注册的 Codex App，无法确认 IPC 服务身份")
-    executable = Path(core).parent.parent / APP_EXECUTABLE
-    if not executable.is_file():
-        raise ValueError("找不到已注册的 Codex App 主程序；请完全退出并重新打开 App 后再试")
+    executable = None
+    if not trust_router:
+        # Package discovery is bounded and must not block the bridge event loop.
+        core = await asyncio.to_thread(discover_app_codex, windows=True)
+        if not core:
+            raise ValueError("找不到已注册的 Codex App，无法确认 IPC 服务身份")
+        executable = Path(core).parent.parent / APP_EXECUTABLE
+        if not executable.is_file():
+            raise ValueError("找不到已注册的 Codex App 主程序；请完全退出并重新打开 App 后再试")
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader(limit=limit)
     protocol = asyncio.StreamReaderProtocol(reader)
@@ -63,7 +72,7 @@ async def open_pipe(path, *, limit):
     writer = asyncio.StreamWriter(transport, protocol, reader, loop)
     try:
         pipe = transport.get_extra_info("pipe")
-        verify_server(pipe.fileno(), executable)
+        verify_server(pipe.fileno(), executable, trust_router=trust_router)
         return reader, writer
     except BaseException:
         writer.close()

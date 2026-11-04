@@ -65,6 +65,10 @@ Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对
 **启动顺序限制**：IPC 只支持“先在 App 打开会话，再从微信连接”。若微信桥先通过原生
 后台连接会话，随后用独立后台的 App 打开同一会话，App 可能显示被锁定。反向接入需要
 桥接充当 IPC 持有者、向 App 同步状态并承接其操作，实现与维护成本较高，因此暂未支持。
+Windows 的 `\\.\pipe\codex-ipc` 由最先启动的 Codex 客户端托管，VS Code 的 Codex 扩展也会
+托管它；默认只跟随由已注册 App 托管的通道，其它托管者会被身份校验拒绝。若接受该托管者
+转发本会话的风险，可在后端配置里显式写 `"appIpcTrustRouter": true`（默认 `false`，启用后
+日志记一条 `backend.app_ipc_router_trusted`），此时仍保留“服务进程必须属于当前用户”的校验。
 App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
 若旧版本曾通过 `--shortcut` 创建 Linux 用户桌面覆盖，请先核对
 `~/.local/share/applications/chatgpt.desktop` 中的 `X-Codex-WeChat=true`，仅移除项目创建且未自行修改的覆盖，恢复系统原入口。

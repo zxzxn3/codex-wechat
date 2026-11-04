@@ -131,6 +131,8 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         with patch("codex_connection.IS_WINDOWS", True):
             self.assertFalse(CodexTransport({}, "/tmp", **callbacks).shared)
             self.assertTrue(CodexTransport({"sharedDaemon": True}, "/tmp", **callbacks).shared)
+            with self.assertRaises(ValueError):
+                CodexTransport({"appIpcTrustRouter": "yes"}, "/tmp", **callbacks)
 
     async def test_windows_probe_falls_back_to_the_system_proxy(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
