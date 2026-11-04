@@ -10,7 +10,7 @@ import functools
 import sys
 import time
 import uuid
-from backend import CodexRpcError, DeferTurn
+from backend import CodexRpcError, DeferTurn, TurnStalled
 from commands import ensure_session
 from records import InputPhase
 from media import MediaError
@@ -208,6 +208,7 @@ class InputDelivery:
                                       InputPhase.ACCEPTED if phase == InputPhase.ACCEPTED else InputPhase.FAILED)
                     bridge.state.pop("currentInput", None)
                     bridge.reply(bridge.prompt("INPUT_SUBMISSION_UNCERTAIN") if uncertain else
+                               bridge.prompt("TURN_STALLED") if isinstance(error, TurnStalled) else
                                bridge.prompt("INPUT_RESULT_INTERRUPTED") if phase == InputPhase.ACCEPTED else
                                bridge.prompt("SESSION_WRITER_BUSY") if conflict else
                                bridge.prompt("ATTACHMENT_INCOMING_FAILED", {"reason": attachment_reason(error)})
