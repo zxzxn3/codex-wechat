@@ -4,9 +4,17 @@ import unittest
 from unittest.mock import patch
 
 from codex_connection import ConnectionSpec
-from platform_support import apply_system_proxy, local_endpoint, proxy_label
+from platform_support import apply_system_proxy, endpoint_host, local_endpoint, proxy_label
 
 PROXY = {"HTTPS_PROXY": "http://127.0.0.1:7897", "HTTP_PROXY": "http://127.0.0.1:7897"}
+# Fixtures must not inherit whatever proxy the machine or CI runner carries.
+AMBIENT = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
+           "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy")
+
+
+def no_ambient_proxy():
+    return patch.dict(os.environ, {k: v for k, v in os.environ.items() if k not in AMBIENT},
+                      clear=True)
 
 
 class SystemProxyTests(unittest.TestCase):
@@ -41,7 +49,7 @@ class SystemProxyTests(unittest.TestCase):
     def test_backend_environment_carries_the_system_proxy(self):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
         with patch("platform_support.system_proxy", return_value=dict(PROXY)), \
-                patch.dict(os.environ, {}, clear=False):
+                no_ambient_proxy():
             env = spec.environment({})
         self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:7897")
 
@@ -54,7 +62,7 @@ class SystemProxyTests(unittest.TestCase):
     def test_inheriting_the_system_proxy_is_recorded(self):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
         with patch("platform_support.system_proxy", return_value=dict(PROXY)), \
-                patch("codex_connection.log_event") as log:
+                no_ambient_proxy(), patch("codex_connection.log_event") as log:
             spec.environment({})
         log.assert_called_once_with("backend.proxy_inherited", component="backend",
                                     source="system", proxy="127.0.0.1:7897")
@@ -102,7 +110,7 @@ class SystemProxyTests(unittest.TestCase):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"],
                                            "useSystemProxy": False})
         with patch("platform_support.system_proxy", return_value=dict(PROXY)) as probe, \
-                patch("codex_connection.log_event") as log:
+                no_ambient_proxy(), patch("codex_connection.log_event") as log:
             env = spec.environment({})
         probe.assert_not_called()
         log.assert_not_called()
@@ -118,6 +126,36 @@ class SystemProxyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ConnectionSpec.from_config({"command": ["codex", "app-server"],
                                         "useSystemProxy": "no"})
+
+    def test_an_empty_no_proxy_does_not_leave_loopback_proxied(self):
+        env = {"NO_PROXY": ""}
+        with patch("platform_support.system_proxy", return_value=dict(PROXY)):
+            apply_system_proxy(env)
+        self.assertEqual(env["NO_PROXY"], "localhost,127.0.0.1,::1")
+
+    def test_a_user_no_proxy_is_kept(self):
+        env = {"NO_PROXY": "*.corp.example"}
+        with patch("platform_support.system_proxy", return_value=dict(PROXY)):
+            apply_system_proxy(env)
+        self.assertEqual(env["NO_PROXY"], "*.corp.example")
+
+    def test_a_scheme_less_local_base_url_is_still_local(self):
+        self.assertTrue(local_endpoint("127.0.0.1:8080"))
+        self.assertTrue(local_endpoint("localhost:11434"))
+        self.assertEqual(endpoint_host("localhost:11434"), "localhost")
+
+    def test_an_ipv6_proxy_label_keeps_its_brackets(self):
+        self.assertEqual(proxy_label("http://[::1]:8080"), "[::1]:8080")
+
+    def test_an_ambient_proxy_counts_as_an_explicit_choice(self):
+        spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
+        with patch.dict(os.environ, {"HTTPS_PROXY": "http://ambient:1"}), \
+                patch("platform_support.system_proxy", return_value=dict(PROXY)) as probe, \
+                patch("codex_connection.log_event") as log:
+            env = spec.environment({})
+        probe.assert_not_called()
+        log.assert_not_called()
+        self.assertEqual(env["HTTPS_PROXY"], "http://ambient:1")
 
 
 if __name__ == "__main__":

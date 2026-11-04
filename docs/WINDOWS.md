@@ -165,8 +165,11 @@ app-server，两边的回合才会互相可见。
   `urllib.request.getproxies()` 决定）并补进后端环境；显式设置的环境变量优先，检测不到就
   保持原样，`OPENAI_BASE_URL` 指向本机或内网时也不注入（本地网关不经互联网代理）。
   该行为默认开启，可用 `backends.<后端>.useSystemProxy: false` 关闭（关闭后完全按进程自身
-  环境走，等于回到改造前的行为）。原因是
-  Codex 只有 HTTP 客户端跟随系统代理，**Responses WebSocket 只读环境变量**：代理机器上第一条
+  环境走，等于回到改造前的行为）；后端定义只在进程启动时读取，改完发 `/restart` 生效。
+  注意：任何 `*_PROXY` 变量（包括 `ALL_PROXY`）都算用户显式选择，会跳过注入——若把
+  `ALL_PROXY` 设成 socks 而 WebSocket 客户端不支持 socks，这条路就静默回到旧行为。
+  之所以需要注入，是因为 Codex 只有 HTTP 客户端跟随系统代理，**Responses WebSocket 只读
+  环境变量**：代理机器上第一条
   消息会先按 15 秒一次重试 WebSocket，第六次失败后才回退 HTTP，实测第一条消息因此多等约
   100 秒（直连 114.9 秒 / 注入代理后 6.7 秒，同一提示词、同一版本）。注入时会记一条
   `backend.proxy_inherited`（只含 `host:port`），便于确认这次连接到底走了哪个代理。

@@ -98,15 +98,26 @@ def proxy_label(value):
     host = parts.hostname or ""
     if not host:
         return ""
+    if ":" in host:
+        host = f"[{host}]"
     return f"{host}:{port}" if port else host
+
+
+def endpoint_host(value):
+    """Host of a configured URL, tolerating a missing scheme."""
+    text = str(value).strip()
+    try:
+        host = urlsplit(text).hostname
+        if host is None and "://" not in text and " " not in text:
+            host = urlsplit("//" + text).hostname
+    except ValueError:
+        return ""
+    return host or ""
 
 
 def local_endpoint(url):
     """True for a model base URL that stays on this machine or the intranet."""
-    try:
-        host = urlsplit(str(url)).hostname or ""
-    except ValueError:
-        return False
+    host = endpoint_host(url)
     if not host:
         return False
     try:
@@ -142,7 +153,9 @@ def apply_system_proxy(env, *, enabled=True):
         return {}
     env["HTTPS_PROXY"] = proxy
     env["HTTP_PROXY"] = found.get("HTTP_PROXY") or proxy
-    env.setdefault("NO_PROXY", found.get("NO_PROXY") or "localhost,127.0.0.1,::1")
+    # An empty value is not a decision; a real one must survive.
+    env["NO_PROXY"] = (env.get("NO_PROXY") or found.get("NO_PROXY")
+                       or "localhost,127.0.0.1,::1")
     return {"HTTPS_PROXY": proxy, "HTTP_PROXY": env["HTTP_PROXY"],
             "NO_PROXY": env["NO_PROXY"]}
 
