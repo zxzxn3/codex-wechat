@@ -59,6 +59,7 @@ async def adopt(bridge, thread_id, overrides, thread):
 async def activate(bridge, thread_id=None, overrides=None):
     # Only this explicit command may override native settings. Never replay a mobile cache.
     saved = dict(overrides or {})
+    previous = bridge.state.get("thread")
     desktop = False
     thread = None
     if thread_id:
@@ -76,6 +77,9 @@ async def activate(bridge, thread_id=None, overrides=None):
             saved = {}
     bridge.loaded = False
     selected = await adopt(bridge, thread_id, saved, thread)
+    if previous and previous != selected:
+        # Leaving a thread must not keep its writer, or the App shows it locked.
+        await bridge.backend.release_thread(previous)
     bridge.state["thread"] = selected
     bridge.state.pop("sessionOptions", None)  # Retire legacy override replay after successful adoption.
     bridge.loaded = True

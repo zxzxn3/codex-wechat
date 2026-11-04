@@ -55,6 +55,7 @@ _TEXT_FIELDS = {
     "job_id": r"[A-Za-z0-9._-]{1,64}",
     "error_type": r"[A-Za-z_][A-Za-z0-9_]{0,60}",
     "error_code": r"[A-Za-z0-9._-]{1,16}",
+    "thread": r"[A-Za-z0-9._-]{1,64}",
     "api_error_kind": r"(?:auth_expired|rate_limit_hint|prepare_failed|unknown_error|other)",
     "platform": r"[a-z0-9_.-]{1,16}",
     "version": r"[A-Za-z0-9._-]{1,32}",
