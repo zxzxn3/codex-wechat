@@ -36,6 +36,13 @@ PENDING_TOKEN_ALPHABET = "023456789abcdefghjkmnpqrstuvwxyz"
 PENDING_TOKEN_LENGTH = 3
 PENDING_TOKEN_RECENT = 128
 
+# Writer ownership for the selected thread. NONE means this connection does not
+# hold it; only the two WAITING modes are retried at the start of the next turn.
+WRITER_NATIVE = "native"        # this connection holds the writer
+WRITER_FOLLOWED = "followed"    # the App holds it and its event stream feeds us
+WRITER_RELEASED = "released"    # handed back after a turn; take it back next turn
+WRITER_BUSY = "busy"            # the desktop holds it and we could not follow
+
 
 class DeferTurn(RuntimeError):
     """The desktop owns an active turn that did not accept this input."""
@@ -46,7 +53,10 @@ class CodexBackend:
         self.pending = {}
         self.recent_tokens = deque(maxlen=PENDING_TOKEN_RECENT)
         self.active = None
-        self.released_thread = None
+        # Who holds the writer for the selected thread. Exactly one field, so the
+        # four cases below cannot drift out of sync with each other.
+        self.writer_mode = None
+        self.writer_thread = None
         self.attach_error = None
         self.stop_requested = False
         self.info = {}
@@ -123,6 +133,45 @@ class CodexBackend:
         if app:
             await app.close()
         await self.transport.close()
+
+    def set_writer(self, mode, thread_id=None):
+        self.writer_mode, self.writer_thread = mode, thread_id
+
+    def writer_elsewhere(self, thread_id):
+        """True when the next turn must take the writer back for this thread."""
+        return (self.writer_thread == thread_id
+                and self.writer_mode in (WRITER_RELEASED, WRITER_BUSY))
+
+    async def attach_follower(self, thread_id, options, *, activate=True):
+        """Attach to the App's copy of a thread and make it the selection.
+
+        Both entry points use this (a resume writer conflict and a thread we
+        handed back), so session setup and event publishing cannot drift apart.
+        Callers that select a runtime turn first pass activate=False.
+        """
+        app = await self.attach_app(thread_id, options)
+        if app is None:
+            return None
+        previous_app, self.app = self.app, app
+        if previous_app and previous_app is not app:
+            await previous_app.close()
+        if self.selected_thread != thread_id:
+            self.selection_epoch += 1
+            self.active = None
+            self.pending.clear()
+        self.selected_thread = thread_id
+        self.attach_error = None
+        self.set_writer(WRITER_FOLLOWED, thread_id)
+        if activate:
+            self.activate_follower(app)
+        return app
+
+    @staticmethod
+    def activate_follower(app):
+        if not app.enabled:
+            # Without this the follower stays silent: broadcast() only publishes
+            # state changes while enabled, so desktop turns would never reach us.
+            app.activate()
 
     def transport_event(self, message):
         # The App owns this live stream. The other backend may still publish
@@ -551,7 +600,7 @@ class CodexBackend:
                 # Other RPC failures must never silently change transports.
                 if error.code != -32600 or "already has an active writer" not in error.reason:
                     raise
-                app = await self.attach_app(thread_id, options)
+                app = await self.attach_follower(thread_id, options, activate=False)
                 if app is None:
                     raise
                 result = app.thread_result()
@@ -577,14 +626,17 @@ class CodexBackend:
             self.active = None
             self.pending.clear()
         self.selected_thread = thread["id"]
-        previous_app, self.app = self.app, app
-        if previous_app and previous_app is not app:
-            await previous_app.close()
+        if app is None:
+            # Native writer path: any follower from the previous selection is gone.
+            previous_app, self.app = self.app, None
+            if previous_app:
+                await previous_app.close()
+            self.set_writer(WRITER_NATIVE, thread["id"])
         await self.refresh_runtime()
-        if app and not app.enabled:
+        if app is not None:
             # Requests are queued by activate(). Establish the selected runtime
             # turn first so a pending approval is not rejected as unsupported.
-            app.activate()
+            self.activate_follower(app)
         await self.refresh_usage()
         return result["thread"]["id"]
 
@@ -679,7 +731,7 @@ class CodexBackend:
                               thread=thread_id, status="failed",
                               error_type=type(error).__name__)
             return False
-        self.released_thread = thread_id
+        self.set_writer(WRITER_RELEASED, thread_id)
         self.writer_event("backend.writer_released", thread=thread_id, status="released")
         if follow:
             # The App may still be running: follow it so desktop turns keep
@@ -699,7 +751,7 @@ class CodexBackend:
         if not self.app_available():
             return False
         try:
-            app = await self.attach_app(thread_id, {})
+            app = await self.attach_follower(thread_id, {})
         except (CodexRpcError, OSError, RuntimeError, asyncio.TimeoutError) as error:
             # Following is best effort: it must never fail the caller's turn or
             # the bridge startup.
@@ -709,20 +761,6 @@ class CodexBackend:
             return False
         if app is None:
             return False
-        previous, self.app = self.app, app
-        if previous and previous is not app:
-            await previous.close()
-        if self.selected_thread != thread_id:
-            self.selection_epoch += 1
-            self.active = None
-            self.pending.clear()
-        self.selected_thread = thread_id
-        self.released_thread = None
-        self.attach_error = None
-        if not app.enabled:
-            # Without this the follower stays silent: broadcast() only publishes
-            # state changes while enabled, so desktop turns would never reach us.
-            app.activate()
         self.writer_event("backend.app_followed", thread=thread_id, status="followed")
         return True
 
@@ -777,7 +815,7 @@ class CodexBackend:
             self.active = None
             self.pending.clear()
         self.selected_thread = thread_id
-        self.released_thread = thread_id
+        self.set_writer(WRITER_BUSY, thread_id)
         return thread_id
 
     async def models(self, max_age=60):
@@ -855,15 +893,16 @@ class CodexBackend:
         self.active = current
         self.stop_requested = False
         try:
-            if self.released_thread == thread_id:
-                # The writer was returned after the previous turn: take it back,
-                # or follow the desktop if it claimed the thread meanwhile.
-                self.released_thread = None
+            if self.writer_elsewhere(thread_id):
+                # The writer was handed back (or never taken): take it back, or
+                # follow the desktop if it claimed the thread meanwhile.
+                previous = self.writer_mode
+                self.set_writer(None)
                 try:
                     await self.thread(thread_id)
                 except Exception:
                     # Keep watching: the desktop still owns the thread.
-                    self.released_thread = thread_id
+                    self.set_writer(previous, thread_id)
                     raise
             await self.refresh_runtime()
             current["cwd"] = self.info.get("cwd") or self.cwd

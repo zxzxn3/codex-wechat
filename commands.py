@@ -11,6 +11,7 @@ import autostart
 from profiles import backend_argument, backend_label, switch
 from errors import UserFacingError, attachment_reason, backend_reason
 from codex_transport import CodexRpcError
+from backend import WRITER_NATIVE
 from media import MediaError
 from records import InputPhase
 from latency import provider_latency
@@ -86,7 +87,7 @@ async def activate(bridge, thread_id=None, overrides=None):
     bridge.save()
     # Adoption itself needs no writer: return it so the App can open this thread
     # while the bridge is idle. The next turn resumes it or follows the App.
-    if bridge.backend.released_thread != selected:
+    if bridge.backend.writer_mode in (None, WRITER_NATIVE):
         await bridge.backend.release_thread(selected, follow=True)
     return desktop
 

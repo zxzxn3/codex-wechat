@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from codex_wechat import Bridge
-from backend import CodexBackend
+from backend import CodexBackend, WRITER_BUSY, WRITER_RELEASED
 from codex_transport import CodexRpcError
 from commands import activate
 from input_delivery import InputDelivery
@@ -64,7 +64,8 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(bridge.loaded)
                 self.assertEqual(bridge.state["thread"], "t")
                 self.assertEqual(bridge.backend.selected_thread, "t")
-                self.assertEqual(bridge.backend.released_thread, "t")
+                self.assertEqual(bridge.backend.writer_mode, WRITER_BUSY)
+                self.assertEqual(bridge.backend.writer_thread, "t")
                 self.assertEqual(bridge.backend.info["cwd"], "/cwd")
                 bridge.backend.release_thread.assert_not_awaited()
             finally:
@@ -94,13 +95,14 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.transport.proc = SimpleNamespace(returncode=None)
         backend.transport.reader = SimpleNamespace(done=lambda: False)
-        backend.released_thread = "t"
+        backend.set_writer(WRITER_RELEASED, "t")
         backend.input_items = AsyncMock(return_value=[])
         backend.thread = AsyncMock(side_effect=CodexRpcError(
             -32600, "thread t already has an active writer"))
         with self.assertRaises(CodexRpcError):
             await backend.run("t", "hello")
-        self.assertEqual(backend.released_thread, "t")
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+        self.assertEqual(backend.writer_thread, "t")
 
     async def test_settings_event_updates_only_selected_thread(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

@@ -10,7 +10,7 @@ import functools
 import sys
 import time
 import uuid
-from backend import CodexRpcError, DeferTurn
+from backend import CodexRpcError, DeferTurn, WRITER_RELEASED
 from commands import ensure_session
 from records import InputPhase
 from media import MediaError
@@ -33,7 +33,8 @@ class InputDelivery:
     def awaiting_desktop(self):
         backend = self.bridge.backend
         thread = self.bridge.state.get("thread")
-        return bool(thread and backend.released_thread == thread and backend.app is None)
+        return bool(thread and backend.writer_thread == thread
+                    and backend.writer_mode == WRITER_RELEASED)
 
     def writer_wait_left(self, job):
         retry_at = job.get("writerRetryAt")

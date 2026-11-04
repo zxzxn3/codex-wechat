@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from backend import CodexBackend
+from backend import CodexBackend, WRITER_BUSY, WRITER_FOLLOWED, WRITER_NATIVE, WRITER_RELEASED
 from codex_transport import CodexTransport, CodexRpcError
 from pipe_websocket import PipeWebSocket
 from profiles import definitions
@@ -139,13 +139,53 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.rpc = AsyncMock(return_value={})
         self.assertTrue(await backend.release_thread("thread-1"))
         backend.rpc.assert_awaited_once_with("thread/unsubscribe", {"threadId": "thread-1"})
-        self.assertEqual(backend.released_thread, "thread-1")
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+        self.assertEqual(backend.writer_thread, "thread-1")
         backend.rpc = AsyncMock(side_effect=RuntimeError("unsupported method"))
         self.assertFalse(await backend.release_thread("thread-2"))
-        self.assertEqual(backend.released_thread, "thread-1")
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+        self.assertEqual(backend.writer_thread, "thread-1")
         backend.transport.proc = SimpleNamespace(returncode=1)
         backend.rpc = AsyncMock(return_value={})
         self.assertFalse(await backend.release_thread("thread-3"))
+
+    async def test_resume_conflict_uses_the_same_follower_setup_as_following(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.rpc = AsyncMock(side_effect=CodexRpcError(
+            -32600, "thread t already has an active writer"))
+        backend.refresh_runtime = AsyncMock()
+        backend.refresh_usage = AsyncMock()
+        candidate = SimpleNamespace(
+            thread_id="t", enabled=False, activate=Mock(), close=AsyncMock(),
+            settings=AsyncMock(),
+            thread_result=lambda: {"thread": {"id": "t", "cwd": "/cwd"}, "cwd": "/cwd"})
+        backend.attach_app = AsyncMock(return_value=candidate)
+        self.assertEqual(await backend.thread("t"), "t")
+        self.assertIs(backend.app, candidate)
+        self.assertEqual(backend.writer_mode, WRITER_FOLLOWED)
+        self.assertEqual(backend.writer_thread, "t")
+        # The shared path must configure publishing, or desktop turns go silent.
+        candidate.activate.assert_called_once_with()
+
+    async def test_writer_states_track_who_holds_the_thread(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.rpc = AsyncMock(return_value={"thread": {"id": "t", "cwd": "/cwd"}, "cwd": "/cwd"})
+        backend.refresh_runtime = AsyncMock()
+        backend.refresh_usage = AsyncMock()
+        self.assertEqual(await backend.thread("t"), "t")
+        self.assertEqual(backend.writer_mode, WRITER_NATIVE)
+        self.assertFalse(backend.writer_elsewhere("t"))
+        self.assertTrue(await backend.release_thread("t"))
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+        self.assertTrue(backend.writer_elsewhere("t"))
+        self.assertFalse(backend.writer_elsewhere("other"))
+        self.assertEqual(await backend.adopt_thread("t", {}), "t")
+        self.assertEqual(backend.writer_mode, WRITER_BUSY)
+        self.assertTrue(backend.writer_elsewhere("t"))
 
     async def test_followed_app_thread_keeps_its_subscription(self):
         # A followed thread still needs its IPC events, so it is never released.
@@ -172,12 +212,12 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.transport.proc = SimpleNamespace(returncode=None)
         backend.transport.reader = SimpleNamespace(done=lambda: False)
-        backend.released_thread = "thread-1"
+        backend.set_writer(WRITER_RELEASED, "thread-1")
         backend.app_available = lambda: False
         backend.attach_app = AsyncMock()
         self.assertFalse(await backend.follow_app("thread-1"))
         backend.attach_app.assert_not_awaited()
-        self.assertEqual(backend.released_thread, "thread-1")
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
 
         candidate = SimpleNamespace(thread_id="thread-1", enabled=False,
                                     activate=Mock(), close=AsyncMock())
@@ -185,7 +225,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.attach_app = AsyncMock(return_value=candidate)
         self.assertTrue(await backend.follow_app("thread-1"))
         self.assertIs(backend.app, candidate)
-        self.assertIsNone(backend.released_thread)
+        self.assertEqual(backend.writer_mode, WRITER_FOLLOWED)
         self.assertEqual(backend.selected_thread, "thread-1")
         # Without activate() the follower never publishes state changes.
         candidate.activate.assert_called_once_with()
