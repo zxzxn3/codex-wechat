@@ -38,6 +38,10 @@ STOP_UNCONFIRMED = "停止未确认，任务可能仍在运行。请在桌面确
 
 BACKEND_CONNECT_FAILED = "后端连接失败: {reason}\n正在重连，未提交的待办已保留。"
 TASK_FAILED = "消息未提交: 后端处理失败。查看 `/status`。"
+TURN_STALLED = (
+    "本轮已中止: 长时间没有收到任何进展。\n"
+    "会话可能仍在桌面端运行；可用 `/status` 查看，再发消息会重新连接。"
+)
 TURN_FAILED = "任务未完成: Agent 执行失败。"
 TURN_INTERRUPTED = "任务已中断。"
 TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"

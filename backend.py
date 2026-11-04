@@ -15,7 +15,7 @@ import uuid
 
 from records import AgentMessage, Source, TurnResult
 from media import OUTPUT_HINT
-from diagnostics import error_reason
+from diagnostics import error_reason, log_event
 from usage import UsageCache
 from questions import (
     ASYNC_QUESTION_METHOD,
@@ -35,6 +35,10 @@ from codex_transport import CodexTransport, CodexRpcError
 PENDING_TOKEN_ALPHABET = "023456789abcdefghjkmnpqrstuvwxyz"
 PENDING_TOKEN_LENGTH = 3
 PENDING_TOKEN_RECENT = 128
+# A turn that reports nothing for this long is treated as stalled. Disconnects
+# already fail the turn; this covers "connection alive but events stopped",
+# which would otherwise freeze the delivery worker until the service restarts.
+TURN_IDLE_SECONDS = 900
 
 # Writer ownership for the selected thread. NONE means this connection does not
 # hold it; only the two WAITING modes are retried at the start of the next turn.
@@ -47,6 +51,10 @@ WRITER_BUSY = "busy"            # the desktop holds it and we could not follow
 class DeferTurn(RuntimeError):
     """The desktop owns an active turn that did not accept this input."""
 
+
+class TurnStalled(RuntimeError):
+    """The turn stopped reporting events; it was abandoned locally."""
+
 class CodexBackend:
     def __init__(self, config, cwd, notify):
         self.config, self.cwd, self.notify = config, cwd, notify
@@ -58,6 +66,8 @@ class CodexBackend:
         self.writer_mode = None
         self.writer_thread = None
         self.attach_error = None
+        self.last_event_at = time.monotonic()
+        self.turn_idle_seconds = TURN_IDLE_SECONDS
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
@@ -314,6 +324,7 @@ class CodexBackend:
 
     def event(self, msg):
         params = msg.get("params", {})
+        self.last_event_at = time.monotonic()
         if msg.get("method") == "serverRequest/resolved":
             for token, request in list(self.pending.items()):
                 if (request.get("id") == params.get("requestId") and
@@ -877,6 +888,40 @@ class CodexBackend:
             dispatch("accepted", turn_id)
         return True
 
+    async def await_turn(self, current):
+        """Wait for the turn, aborting it when nothing reports for too long.
+
+        A broken event stream leaves an owned turn pending forever, which freezes
+        the delivery worker and makes /stop look ineffective. Give up locally so
+        the next message can re-establish the session.
+        """
+        limit = self.turn_idle_seconds
+        while True:
+            idle = max(1.0, limit - (time.monotonic() - self.last_event_at))
+            try:
+                return await asyncio.wait_for(asyncio.shield(current["done"]), idle)
+            except asyncio.TimeoutError:
+                if current["done"].done():
+                    return current["done"].result()
+                if time.monotonic() - self.last_event_at < limit:
+                    continue
+                await self.abandon_turn(current)
+                raise TurnStalled("回合长时间没有进展，已在本地中止") from None
+
+    async def abandon_turn(self, current):
+        log_event("backend.turn_stalled", level="warning", component="backend",
+                  thread=current.get("thread"), turn=current.get("turn"),
+                  idle_ms=int((time.monotonic() - self.last_event_at) * 1000))
+        if self.active is current:
+            self.active = None
+        if not current["done"].done():
+            current["done"].cancel()
+        self.pending.clear()
+        app, self.app = self.app, None
+        if app is not None:
+            # The follower never published, so stop pretending to follow it.
+            await app.close()
+
     async def run(self, thread_id, text, attachments=None, *, client_id=None, dispatch=None,
                   allow_steer=True):
         # Claim preparation before model lookup; stop is remembered across awaits.
@@ -935,7 +980,7 @@ class CodexBackend:
             current["earlyEvents"].clear()
             if self.stop_requested and not current["done"].done():
                 await self.stop()
-            return await current["done"]
+            return await self.await_turn(current)
         except CodexRpcError as error:
             early_events = list(current["earlyEvents"])
             if error.definite_rejection:

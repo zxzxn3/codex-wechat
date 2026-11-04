@@ -2,11 +2,13 @@
 import asyncio
 from pathlib import Path
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from backend import CodexBackend, WRITER_BUSY, WRITER_FOLLOWED, WRITER_NATIVE, WRITER_RELEASED
+from backend import (CodexBackend, TurnStalled, WRITER_BUSY, WRITER_FOLLOWED,
+                     WRITER_NATIVE, WRITER_RELEASED)
 from codex_transport import CodexTransport, CodexRpcError
 from pipe_websocket import PipeWebSocket
 from profiles import definitions
@@ -251,6 +253,32 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await backend.attach_app("thread-1", {}))
         candidate.close.assert_awaited()
         self.assertIsNone(backend.app)
+
+    async def test_stalled_turn_is_abandoned_instead_of_hanging(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.turn_idle_seconds = 0.05
+        current = backend.new_turn("t", "turn-1", owned=True)
+        backend.active = current
+        follower = SimpleNamespace(close=AsyncMock())
+        backend.app = follower
+        backend.pending["tok"] = {"id": "1", "params": {}}
+        with self.assertRaises(TurnStalled):
+            await backend.await_turn(current)
+        self.assertIsNone(backend.active)
+        self.assertIsNone(backend.app)
+        follower.close.assert_awaited()
+        self.assertEqual(backend.pending, {})
+
+    async def test_stall_wait_restarts_when_events_resume(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.turn_idle_seconds = 0.2
+        current = backend.new_turn("t", "turn-1", owned=True)
+        backend.active = current
+        loop = asyncio.get_running_loop()
+        loop.call_later(0.1, lambda: setattr(backend, "last_event_at", time.monotonic()))
+        loop.call_later(0.25, lambda: setattr(backend, "last_event_at", time.monotonic()))
+        loop.call_later(0.35, current["done"].set_result, {"ok": True})
+        self.assertEqual(await backend.await_turn(current), {"ok": True})
 
     async def test_windows_probe_falls_back_to_the_system_proxy(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
