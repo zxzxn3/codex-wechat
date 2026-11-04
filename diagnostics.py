@@ -60,6 +60,7 @@ _TEXT_FIELDS = {
     "thread": r"[A-Za-z0-9._-]{1,64}",
     "api_error_kind": r"(?:auth_expired|rate_limit_hint|prepare_failed|unknown_error|other)",
     "platform": r"[a-z0-9_.-]{1,16}",
+    "proxy": r"[A-Za-z0-9._:\[\]-]{1,64}",
     "version": r"[A-Za-z0-9._-]{1,32}",
 }
 _NUMBER_FIELDS = {

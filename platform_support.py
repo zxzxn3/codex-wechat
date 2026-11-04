@@ -1,8 +1,10 @@
 """Small OS boundaries; Linux keeps its existing paths and defaults."""
+import ipaddress
 import os
 from pathlib import Path
 import shutil
 import subprocess
+from urllib.parse import urlsplit
 from urllib.request import getproxies
 from native_codex import discover_codex
 
@@ -86,6 +88,34 @@ PROXY_ENV_KEYS = ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy",
                   "HTTP_PROXY", "http_proxy")
 
 
+def proxy_label(value):
+    """Only host:port, so a credential in the setting never reaches the log."""
+    try:
+        parts = urlsplit(str(value))
+        port = parts.port
+    except ValueError:
+        return ""
+    host = parts.hostname or ""
+    if not host:
+        return ""
+    return f"{host}:{port}" if port else host
+
+
+def local_endpoint(url):
+    """True for a model base URL that stays on this machine or the intranet."""
+    try:
+        host = urlsplit(str(url)).hostname or ""
+    except ValueError:
+        return False
+    if not host:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host.casefold() == "localhost" or host.endswith(".local") or "." not in host
+    return address.is_loopback or address.is_private or address.is_link_local
+
+
 def apply_system_proxy(env):
     """Name the machine proxy in the environment a backend starts with.
 
@@ -95,17 +125,24 @@ def apply_system_proxy(env):
     environment alone, so on a proxied machine the first turn pays one connect
     timeout per retry before anything reaches the model. Naming the proxy here
     makes both paths use it; an environment that already carries a proxy wins.
+    Returns what it added, so the caller can record it.
     """
     if any(env.get(key) for key in PROXY_ENV_KEYS):
-        return env
+        return {}
+    base = env.get("OPENAI_BASE_URL") or env.get("openai_base_url")
+    if base and local_endpoint(base):
+        # A local model gateway never reaches the internet, and naming a proxy
+        # would divert it; leave that backend exactly as its owner set it up.
+        return {}
     found = system_proxy()
     proxy = found.get("HTTPS_PROXY") or found.get("ALL_PROXY") or found.get("HTTP_PROXY")
     if not proxy:
-        return env
+        return {}
     env["HTTPS_PROXY"] = proxy
     env["HTTP_PROXY"] = found.get("HTTP_PROXY") or proxy
     env.setdefault("NO_PROXY", found.get("NO_PROXY") or "localhost,127.0.0.1,::1")
-    return env
+    return {"HTTPS_PROXY": proxy, "HTTP_PROXY": env["HTTP_PROXY"],
+            "NO_PROXY": env["NO_PROXY"]}
 
 
 def make_private(directory) -> None:
