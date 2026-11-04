@@ -22,7 +22,7 @@ MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`\n`/
 
 BLOCKED_NOTE = "等待桌面处理"
 
-BUSY_CHANGE = "未切换: 任务未结束。等待完成或 `/stop`。"
+BUSY_CHANGE = "任务还在进行，等这一轮结束后再试；需要立刻操作可先发 `/stop`。"
 BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
 RESTART_STARTED = "正在重启微信桥..."
 RESTART_READY = "微信桥已重启。"

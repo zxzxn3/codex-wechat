@@ -111,6 +111,11 @@ Windows 使用 `codex-desktop.ps1 cli -- resume`。`desktop setup` / `ensure` �
 `/settings` 显示当前值。已发出的请求不中断，空闲池按新值与已空闲时长重新计时；
 删除此键恢复 60。附件传输也复用连接池并受此设置影响；`/ping` 保持独立建连。
 
+后端定义（`backends.<名字>`）只在进程启动时读取，改完要 `/restart` 才生效：
+`command`、`env`、`sharedDaemon`、`useSystemProxy`，以及 `threadOptions`。
+其中 `threadOptions` 只作用于**新建**会话（原样透传给 `thread/start`，用于设置原生线程
+参数）；已存在的会话保留它自己的设置，切回时不会重放这里的值。
+
 `quotaWarningThresholds` 必须分别配置主窗口和次窗口，当前分别对应 5 小时与 7 天限额：
 
 ```json

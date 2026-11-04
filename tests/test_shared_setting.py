@@ -84,7 +84,7 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
         with patch("commands.switch", AsyncMock()) as switch:
             await dispatch(bridge, "/settings shared on")
         # Switching mode restarts the backend, which would abort the live turn.
-        self.assertIn("任务未结束", bridge.state["outbox"][-1]["text"])
+        self.assertIn(bridge.prompt("BUSY_CHANGE"), bridge.state["outbox"][-1]["text"])
         switch.assert_not_called()
         self.assertFalse(self.path.exists())
 
