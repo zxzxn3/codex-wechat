@@ -62,22 +62,20 @@ Linux 使用同一 CODEX_HOME 下的私有 socket；Windows 使用本机命名�
 Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对应 App 的跟随，不猜测其目录。
 内部协议随 App 版本变化；更新 App 后若身份检查失败，请完全退出重开。
 
-**启动顺序限制**：IPC 只支持“先在 App 打开会话，再从微信连接”。若微信桥先通过原生
-后台连接会话，随后用独立后台的 App 打开同一会话，App 可能显示被锁定。
-`/switch`、`/new` 与 `/backend` 成功后会请求旧会话的 `thread/unsubscribe`，把这个写入者
-交还，所以离开过的会话不会再被长期占用；当前选中的会话仍由桥接持有，App 打不开它。
-app-server 的释放是延迟的（数十秒到一分钟），且旧版本不认识该方法时只能等桥接重启释放。
-反向接入（桥接充当 IPC 持有者）尚未实现，实现与维护成本较高，因此暂未支持。
-Windows 的 `\\.\pipe\codex-ipc` 由最先启动的 Codex 客户端托管，VS Code 的 Codex 扩展也会
-托管它；桥接只跟随由已注册 App 托管的通道，其它托管者会被身份校验拒绝（日志
-`backend.app_attach_failed`）。遇到这种情况优先卸载/退出那个客户端，见
-[WINDOWS.md](docs/WINDOWS.md) 的「自带 Codex 后端的第三方客户端会抢走会话写者」。
-
-**自带 Codex 后端的第三方客户端会抢走会话写者**：任何自带 Codex 后端并会打开会话的客户端
-（例如 VS Code 的 `openai.chatgpt` 扩展、其它包装器或启动器）都可能替用户持有
-`~/.codex/thread-writer-locks` 里的写者，并抢占 `codex-ipc` 的 router 身份。此时 App 打开
-同一会话会显示锁定、微信也会提示会话被占用，而桥接本身没有错。排查与处置见
-[WINDOWS.md](docs/WINDOWS.md) 的「自带 Codex 后端的第三方客户端会抢走会话写者」。
+**会话写者**：桥接只在一轮真正运行时持有写者，派发答案后立刻交还（`thread/unsubscribe`），
+所以空闲时 App 随时可以打开同一会话；下一轮消息会重新获取，App 在此期间接管时会自动改为
+跟随（IPC follower），双向仍然可用。app-server 的释放是延迟的（约数十秒），刚交还后立刻打开
+可能仍显示锁定，稍等或重新进入即可。
+桥接空闲时会每 5 秒检查一次 App 的 IPC 是否出现：App 后启动并接管该会话后，桥接会自动
+重新跟随，桌面端的回信也会继续进入微信。`\\.\pipe\codex-ipc` 由最先启动的 Codex 客户端
+托管——VS Code 的 Codex 扩展也会托管它。桥接只跟随由已注册 App 托管的通道，其它托管者
+会被身份校验拒绝（日志 `backend.app_attach_failed`）：此时桌面端的回信不会进入微信，
+微信发来的消息会先排队，等 App 关闭该会话后自动发送，最多等待 10 分钟。遇到这种情况应
+卸载/退出那个客户端，见 [WINDOWS.md](docs/WINDOWS.md) 的「自带 Codex 后端的第三方客户端
+会抢走会话写者」。
+IPC 只支持“App 作为写者”的方向；桥接不会反向充当 IPC 持有者。
+反向接入（桥接作为 owner 向 App 广播会话状态并承接它的 follower 请求）尚未实现：需要复刻
+App 的 conversationState/增量与 revision 语义，属于版本相关的内部协议，实现与维护成本较高。
 App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
 若旧版本曾通过 `--shortcut` 创建 Linux 用户桌面覆盖，请先核对
 `~/.local/share/applications/chatgpt.desktop` 中的 `X-Codex-WeChat=true`，仅移除项目创建且未自行修改的覆盖，恢复系统原入口。

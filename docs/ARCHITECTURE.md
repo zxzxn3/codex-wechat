@@ -35,8 +35,7 @@ IPC steer 在发出前核对快照中的 expectedTurnId；App 内部 follower �
 因此不能承诺与原生 turn/steer 相同的跨客户端竞态保证。项目不再维护专用 App 启动入口；
 默认使用正常 App 入口时，仍需先在 App 打开目标会话，再从微信跟随，反向接入尚未实现。
 切换会话时会请求旧会话的 `thread/unsubscribe`，交还 Bridge 持有的写入者；这是 app-server
-暴露的唯一释放手段（没有 `thread/unload`），失败只记 `backend.writer_release_failed`、
-不阻断切换，成功记 `backend.writer_released`。当前选中的会话仍由桥接持有。
+暴露的唯一释放手段（没有 `thread/unload`），失败只记日志、不阻断切换。
 后台与代理职责仍各自独立，不把微信后台是否就绪作为普通 App 启动的前置条件。
 
 ## 输入与输出

@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from backend import CodexBackend, TurnStalled
+from backend import (CodexBackend, TurnStalled, WRITER_BUSY, WRITER_FOLLOWED,
+                     WRITER_NATIVE, WRITER_RELEASED)
 from codex_transport import CodexTransport, CodexRpcError
 from pipe_websocket import PipeWebSocket
 from profiles import definitions
@@ -140,26 +141,17 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.rpc = AsyncMock(return_value={})
         self.assertTrue(await backend.release_thread("thread-1"))
         backend.rpc.assert_awaited_once_with("thread/unsubscribe", {"threadId": "thread-1"})
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+        self.assertEqual(backend.writer_thread, "thread-1")
         backend.rpc = AsyncMock(side_effect=RuntimeError("unsupported method"))
         self.assertFalse(await backend.release_thread("thread-2"))
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+        self.assertEqual(backend.writer_thread, "thread-1")
         backend.transport.proc = SimpleNamespace(returncode=1)
         backend.rpc = AsyncMock(return_value={})
         self.assertFalse(await backend.release_thread("thread-3"))
 
-    async def test_release_thread_returns_the_writer_best_effort(self):
-        backend = CodexBackend({}, "/tmp", lambda _: None)
-        backend.transport.proc = SimpleNamespace(returncode=None)
-        backend.transport.reader = SimpleNamespace(done=lambda: False)
-        backend.rpc = AsyncMock(return_value={})
-        self.assertTrue(await backend.release_thread("thread-1"))
-        backend.rpc.assert_awaited_once_with("thread/unsubscribe", {"threadId": "thread-1"})
-        backend.rpc = AsyncMock(side_effect=RuntimeError("unsupported method"))
-        self.assertFalse(await backend.release_thread("thread-2"))
-        backend.transport.proc = SimpleNamespace(returncode=1)
-        backend.rpc = AsyncMock(return_value={})
-        self.assertFalse(await backend.release_thread("thread-3"))
-
-    async def test_unusable_app_endpoint_keeps_the_writer_conflict(self):
+    async def test_resume_conflict_uses_the_same_follower_setup_as_following(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.transport.proc = SimpleNamespace(returncode=None)
         backend.transport.reader = SimpleNamespace(done=lambda: False)
@@ -168,17 +160,99 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.refresh_runtime = AsyncMock()
         backend.refresh_usage = AsyncMock()
         candidate = SimpleNamespace(
-            attach=AsyncMock(side_effect=CodexRpcError(-32600, "App IPC: no-client-found")),
-            settings=AsyncMock(), close=AsyncMock())
+            thread_id="t", enabled=False, activate=Mock(), close=AsyncMock(),
+            settings=AsyncMock(),
+            thread_result=lambda: {"thread": {"id": "t", "cwd": "/cwd"}, "cwd": "/cwd"})
+        backend.attach_app = AsyncMock(return_value=candidate)
+        self.assertEqual(await backend.thread("t"), "t")
+        self.assertIs(backend.app, candidate)
+        self.assertEqual(backend.writer_mode, WRITER_FOLLOWED)
+        self.assertEqual(backend.writer_thread, "t")
+        # The shared path must configure publishing, or desktop turns go silent.
+        candidate.activate.assert_called_once_with()
+
+    async def test_writer_states_track_who_holds_the_thread(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.rpc = AsyncMock(return_value={"thread": {"id": "t", "cwd": "/cwd"}, "cwd": "/cwd"})
+        backend.refresh_runtime = AsyncMock()
+        backend.refresh_usage = AsyncMock()
+        self.assertEqual(await backend.thread("t"), "t")
+        self.assertEqual(backend.writer_mode, WRITER_NATIVE)
+        self.assertFalse(backend.writer_elsewhere("t"))
+        self.assertTrue(await backend.release_thread("t"))
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+        self.assertTrue(backend.writer_elsewhere("t"))
+        self.assertFalse(backend.writer_elsewhere("other"))
+        self.assertEqual(await backend.adopt_thread("t", {}), "t")
+        self.assertEqual(backend.writer_mode, WRITER_BUSY)
+        self.assertTrue(backend.writer_elsewhere("t"))
+
+    async def test_followed_app_thread_keeps_its_subscription(self):
+        # A followed thread still needs its IPC events, so it is never released.
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.app = SimpleNamespace(thread_id="thread-1", connected=True)
+        backend.rpc = AsyncMock(return_value={})
+        self.assertFalse(await backend.release_thread("thread-1"))
+        backend.rpc.assert_not_awaited()
+
+    async def test_release_can_follow_the_desktop_that_took_the_thread(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.rpc = AsyncMock(return_value={})
+        backend.follow_app = AsyncMock(return_value=False)
+        self.assertTrue(await backend.release_thread("thread-1"))
+        backend.follow_app.assert_not_awaited()
+        self.assertTrue(await backend.release_thread("thread-1", follow=True))
+        backend.follow_app.assert_awaited_once_with("thread-1")
+
+    async def test_follow_app_drops_the_released_marker_only_when_it_attaches(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.set_writer(WRITER_RELEASED, "thread-1")
+        backend.app_available = lambda: False
+        backend.attach_app = AsyncMock()
+        self.assertFalse(await backend.follow_app("thread-1"))
+        backend.attach_app.assert_not_awaited()
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+
+        candidate = SimpleNamespace(thread_id="thread-1", enabled=False,
+                                    activate=Mock(), close=AsyncMock())
+        backend.app_available = lambda: True
+        backend.attach_app = AsyncMock(return_value=candidate)
+        self.assertTrue(await backend.follow_app("thread-1"))
+        self.assertIs(backend.app, candidate)
+        self.assertEqual(backend.writer_mode, WRITER_FOLLOWED)
+        self.assertEqual(backend.selected_thread, "thread-1")
+        # Without activate() the follower never publishes state changes.
+        candidate.activate.assert_called_once_with()
+
+    async def test_attach_failure_never_escapes_following(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.app_available = lambda: True
+        backend.attach_app = AsyncMock(side_effect=CodexRpcError(
+            -32600, "App IPC: no-client-found"))
+        self.assertFalse(await backend.follow_app("thread-1"))
+        self.assertIsNone(backend.app)
+
+    async def test_unusable_app_endpoint_does_not_replace_the_writer_conflict(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        candidate = SimpleNamespace(attach=AsyncMock(side_effect=ValueError("App 返回了其它会话")),
+                                    settings=AsyncMock(), close=AsyncMock())
         import app_ipc
         with patch.object(app_ipc, "AppSession", return_value=candidate):
-            # The desktop owns the thread but nothing can serve it: the caller's
-            # conflict must survive so the session is still adopted.
-            with self.assertRaises(CodexRpcError) as raised:
-                await backend.thread("t")
-            self.assertIsNone(backend.app)
-        self.assertIn("active writer", str(raised.exception))
+            self.assertIsNone(await backend.attach_app("thread-1", {}))
         candidate.close.assert_awaited()
+        self.assertIsNone(backend.app)
 
     async def test_stalled_turn_is_abandoned_instead_of_hanging(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

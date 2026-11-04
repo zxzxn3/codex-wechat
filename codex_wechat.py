@@ -160,6 +160,8 @@ class Bridge:
         backend.on_external_result = self.external_results.put_nowait
         backend.on_message = lambda message: self.output.deliver_message(message) \
             if getattr(self, "backend", None) is backend else None
+        backend.report = lambda event, **fields: log_event(
+            event, component="backend", backend=name, **fields)
         return backend
 
     def current_input_hint(self):

@@ -11,6 +11,7 @@ import autostart
 from profiles import backend_argument, backend_label, switch
 from errors import UserFacingError, attachment_reason, backend_reason
 from codex_transport import CodexRpcError
+from backend import WRITER_NATIVE
 from media import MediaError
 from records import InputPhase
 from latency import provider_latency
@@ -45,8 +46,8 @@ def info(bridge, action=None, *, include_backend=False):
 async def adopt(bridge, thread_id, overrides, thread):
     """Resume the target, or adopt it without a writer when the desktop owns it.
 
-    A desktop holding the thread must not fail the session: the bridge would
-    stay unloaded, pause input and retry recovery forever.
+    A desktop that holds the thread and cannot be followed must not fail the
+    session: the bridge would stay unloaded, pause input and retry forever.
     """
     try:
         return await bridge.backend.thread(thread_id, overrides)
@@ -84,6 +85,10 @@ async def activate(bridge, thread_id=None, overrides=None):
     bridge.state.pop("sessionOptions", None)  # Retire legacy override replay after successful adoption.
     bridge.loaded = True
     bridge.save()
+    # Adoption itself needs no writer: return it so the App can open this thread
+    # while the bridge is idle. The next turn resumes it or follows the App.
+    if bridge.backend.writer_mode in (None, WRITER_NATIVE):
+        await bridge.backend.release_thread(selected, follow=True)
     return desktop
 
 

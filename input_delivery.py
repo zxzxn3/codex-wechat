@@ -10,7 +10,7 @@ import functools
 import sys
 import time
 import uuid
-from backend import CodexRpcError, DeferTurn, TurnStalled
+from backend import CodexRpcError, DeferTurn, TurnStalled, WRITER_RELEASED
 from commands import ensure_session
 from records import InputPhase
 from media import MediaError
@@ -18,8 +18,61 @@ from errors import attachment_reason
 from diagnostics import error_fields, log_event
 
 class InputDelivery:
+    # While idle with a released thread, watch for a desktop that takes it over.
+    FOLLOW_POLL_SECONDS = 5
+    FOLLOW_RETRY_SECONDS = 60
+    # A desktop holding the thread is usually a user action, not an error: keep
+    # the message queued until it lets go, but never forever.
+    WRITER_WAIT_SECONDS = 600
+    WRITER_RETRY_SECONDS = 30
+
     def __init__(self, bridge):
         self.bridge = bridge
+        self.next_follow_at = 0.0
+
+    def awaiting_desktop(self):
+        backend = self.bridge.backend
+        thread = self.bridge.state.get("thread")
+        return bool(thread and backend.writer_thread == thread
+                    and backend.writer_mode == WRITER_RELEASED)
+
+    def writer_wait_left(self, job):
+        retry_at = job.get("writerRetryAt")
+        if not isinstance(retry_at, (int, float)):
+            return 0
+        return max(0.0, retry_at - time.time())
+
+    def queue_writer_conflict(self, bridge, job):
+        """Keep the message while the desktop holds the thread, then give up."""
+        now = time.time()
+        queued_at = job.get("writerQueuedAt")
+        if not isinstance(queued_at, (int, float)):
+            queued_at = job["writerQueuedAt"] = now
+        if now - queued_at > self.WRITER_WAIT_SECONDS:
+            return False
+        job["writerRetryAt"] = now + self.WRITER_RETRY_SECONDS
+        job["phase"] = InputPhase.PREPARING
+        job["mode"] = "queue"
+        if bridge.state.get("currentInput") is job:
+            bridge.state.pop("currentInput")
+        if not any(item is job for item in bridge.state["inbox"]):
+            bridge.state["inbox"].insert(0, job)
+        if not job.get("writerNotified"):
+            job["writerNotified"] = True
+            bridge.reply(bridge.prompt("SESSION_WRITER_QUEUED"),
+                         request_id=job.get("requestId"))
+        log_event("input.writer_wait", component="input", status="queue",
+                  phase=job["phase"], mode="queue", request_id=job.get("requestId"))
+        bridge.save()
+        return True
+
+    async def follow_desktop(self):
+        """Re-attach to the App once it owns our idle thread; else back off."""
+        backend = self.bridge.backend
+        if time.monotonic() < self.next_follow_at or not backend.app_available():
+            return
+        if not await backend.follow_app(self.bridge.state.get("thread")):
+            self.next_follow_at = time.monotonic() + self.FOLLOW_RETRY_SECONDS
 
     def dispatch_input(self, job, phase, turn_id, backend):
         bridge = self.bridge
@@ -117,7 +170,21 @@ class InputDelivery:
             if bridge.active_turn() or bridge.backend.blocked or not bridge.state["inbox"]:
                 bridge.wake.clear()
                 bridge.steer_wake.set()
-                await bridge.wake.wait()
+                if self.awaiting_desktop():
+                    try:
+                        await asyncio.wait_for(bridge.wake.wait(), self.FOLLOW_POLL_SECONDS)
+                    except asyncio.TimeoutError:
+                        await self.follow_desktop()
+                else:
+                    await bridge.wake.wait()
+                continue
+            wait = self.writer_wait_left(bridge.state["inbox"][0])
+            if wait > 0:
+                bridge.wake.clear()
+                try:
+                    await asyncio.wait_for(bridge.wake.wait(), min(wait, self.FOLLOW_POLL_SECONDS))
+                except asyncio.TimeoutError:
+                    pass
                 continue
             bridge.running = True
             bridge.stopping = False
@@ -167,7 +234,8 @@ class InputDelivery:
                     self.defer_restart(job)
                     continue
                 bridge.steer_wake.set()
-                answer = await backend.run(bridge.state["thread"], job["text"],
+                thread_id = bridge.state["thread"]
+                answer = await backend.run(thread_id, job["text"],
                     attachments=job["preparedAttachments"], client_id=job["clientId"],
                     allow_steer=job.get("mode", "steer") != "queue",
                     dispatch=functools.partial(bridge.dispatch_input, job, backend=backend))
@@ -182,6 +250,9 @@ class InputDelivery:
                               duration_ms=(time.perf_counter() - started) * 1000,
                               queued=len(bridge.state["inbox"]),
                               request_id=job.get("requestId"))
+                    # Hand the writer back so the App can open this thread while
+                    # the bridge is idle; the next turn resumes it or follows the App.
+                    await backend.release_thread(thread_id, follow=True)
                 else:
                     bridge.state.pop("currentInput", None)
                     bridge.save()
@@ -200,6 +271,8 @@ class InputDelivery:
             except Exception as error:
                 conflict = (isinstance(error, CodexRpcError) and error.code == -32600
                             and "already has an active writer" in str(error.reason))
+                if conflict and not bridge.stopping and self.queue_writer_conflict(bridge, job):
+                    continue
                 if bridge.state.get("currentInput") is job:
                     phase = job["phase"]
                     uncertain = phase == InputPhase.DISPATCHING and not (

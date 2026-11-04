@@ -236,12 +236,15 @@ class AppSession:
                 "hostId": "local", "conversationId": self.thread_id, "following": following}))
 
     async def read(self):
+        stage, method, failure = "frame", None, None
         try:
             while True:
+                stage = "frame"
                 size = struct.unpack("<I", await self.stream.readexactly(4))[0]
                 if not 0 < size <= MAX_FRAME:
                     raise ValueError("App IPC frame exceeds budget")
                 message = json.loads(await self.stream.readexactly(size))
+                stage = "handle"
                 if message.get("type") == "response":
                     future = self.requests.get(message.get("requestId"))
                     if future and not future.done():
@@ -250,16 +253,20 @@ class AppSession:
                     await self.send(dict(type="client-discovery-response",
                         requestId=message["requestId"], response={"canHandle": False}))
                 elif message.get("type") == "broadcast":
+                    stage = "broadcast"
+                    method = message.get("method")
                     await self.broadcast(message)
-        except (OSError, ValueError, KeyError, IndexError, TypeError, RuntimeError, asyncio.IncompleteReadError):
-            pass
+        except (OSError, ValueError, KeyError, IndexError, TypeError, RuntimeError, asyncio.IncompleteReadError) as error:
+            failure = error
         finally:
             error = RuntimeError("App IPC 连接断开；未自动重发，可重试 /switch 或 /backend")
             for future in list(self.requests.values()):
                 if not future.done():
                     future.set_exception(error)
             if self.enabled and not self.closing:
-                log_event("app_ipc.disconnected", level="warning", component="app_ipc", connected=False)
+                log_event("app_ipc.disconnected", level="warning", component="app_ipc",
+                          connected=False, phase=stage, method=method,
+                          error_type=type(failure).__name__ if failure else "PeerClosed")
                 self.on_disconnect(error)
 
     async def broadcast(self, message):
