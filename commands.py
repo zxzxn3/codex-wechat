@@ -3,15 +3,17 @@ from functools import wraps
 from lifecycle import can_change_session
 from pathlib import Path
 import asyncio
+import json
+import os
 import sys
 import time
 import uuid
 import autostart
 
-from profiles import backend_argument, backend_label, switch
+from profiles import backend_argument, backend_label, definitions, switch, writer_conflict
 from errors import UserFacingError, attachment_reason, backend_reason
 from codex_transport import CodexRpcError
-from backend import WRITER_NATIVE
+from backend import WRITER_BUSY, WRITER_NATIVE
 from media import MediaError
 from records import InputPhase
 from latency import provider_latency
@@ -52,7 +54,7 @@ async def adopt(bridge, thread_id, overrides, thread):
     try:
         return await bridge.backend.thread(thread_id, overrides)
     except CodexRpcError as error:
-        if not (error.code == -32600 and "already has an active writer" in str(error.reason)):
+        if not writer_conflict(error):
             raise
         return await bridge.backend.adopt_thread(thread_id, thread)
 
@@ -114,11 +116,76 @@ def effort_choices(model):
     return [item["reasoningEffort"] for item in model.get("supportedReasoningEfforts", [])]
 
 
+def write_config(path, config):
+    """Replace the file in one step so a crash never leaves a partial configuration."""
+    temp = path.with_name(path.name + ".tmp")
+    temp.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+
+
+async def set_shared_daemon(bridge, enabled):
+    """Apply the shared-daemon choice, then persist it only once it works.
+
+    Nothing is written until the reconnect succeeds, so a failed switch leaves
+    the file and the running mode agreeing with each other.
+    """
+    path = bridge.settings.path
+    try:
+        if path is None:
+            raise OSError("没有可写入的配置文件")
+        config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
+        if not isinstance(config, dict):
+            raise ValueError("配置必须是 JSON 对象")
+        backend = config.setdefault("backend", {})
+        if not isinstance(backend, dict):
+            raise ValueError("backend 必须是对象")
+    except (OSError, ValueError):
+        raise UserFacingError(bridge.prompt("SETTINGS_SHARED_FAILED")) from None
+    config["backend"]["sharedDaemon"] = enabled
+    running = bridge.config.setdefault("backend", {})
+    if not isinstance(running, dict):
+        raise UserFacingError(bridge.prompt("SETTINGS_SHARED_FAILED"))
+    previous_value = running.get("sharedDaemon")
+    running["sharedDaemon"] = enabled
+    bridge.backend_configs = definitions(bridge.config)
+    previous = bridge.backend
+    if not enabled:
+        # A daemon keeps every thread it loaded locked, so hand this one back first.
+        await previous.release_thread(bridge.state.get("thread"))
+    await previous.close()
+    bridge.backend_started = False
+    try:
+        await switch(bridge, bridge.backend_name, force=True, adopt_busy=True)
+    except BaseException:
+        if previous_value is None:
+            running.pop("sharedDaemon", None)
+        else:
+            running["sharedDaemon"] = previous_value
+        bridge.backend_configs = definitions(bridge.config)
+        raise
+    values = {"value": bridge.prompt("VALUE_ON" if bridge.backend.shared else "VALUE_OFF")}
+    text = bridge.prompt("SETTINGS_SHARED", values)
+    try:
+        write_config(path, config)
+    except OSError:
+        text += "\n" + bridge.prompt("SETTINGS_SHARED_UNSAVED")
+    if bridge.backend.shared_fallback:
+        text += "\n" + bridge.prompt("SETTINGS_SHARED_FALLBACK",
+                                     {"reason": bridge.backend.shared_fallback})
+    if bridge.backend.writer_mode == WRITER_BUSY:
+        text += "\n" + bridge.prompt("SETTINGS_SHARED_BUSY")
+    bridge.reply(text)
+
+
 async def command_settings(bridge, command, argument, received=None):
     if argument:
         parts = argument.split()
-        if len(parts) != 2 or parts[0] != "autostart" or parts[1] not in ("on", "off"):
+        if (len(parts) != 2 or parts[0] not in ("autostart", "shared")
+                or parts[1] not in ("on", "off")):
             bridge.reply(bridge.prompt("SETTINGS_USAGE"))
+            return
+        if parts[0] == "shared":
+            await set_shared_daemon(bridge, parts[1] == "on")
             return
         try:
             if (parts[1] == "on" and not autostart.IS_WINDOWS
@@ -145,6 +212,7 @@ async def command_settings(bridge, command, argument, received=None):
         slicing=bridge.slicing,
         notifications=bridge.notifications,
         autostart=autostart_text,
+        shared=bridge.prompt("VALUE_ON" if bridge.backend.shared else "VALUE_OFF"),
         connection_idle_seconds=bridge.settings.hot.connection_idle_seconds,
         text=bridge.prompt,
     ))

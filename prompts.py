@@ -102,7 +102,12 @@ COMMAND_FAILURE_LABELS = {
 }
 COMMAND_FAILURE = "{action}: {reason}"
 
-SETTINGS_USAGE = "用法: `/settings [autostart on|off]`"
+SETTINGS_USAGE = "用法: `/settings [autostart|shared] on|off`"
+SETTINGS_SHARED = "共享后台: {value}"
+SETTINGS_SHARED_FAILED = "未保存共享后台设置: 配置文件不可写"
+SETTINGS_SHARED_FALLBACK = "共享后台不可用: {reason}；本次已退回独立进程，Codex CLI 的回合不会进入微信"
+SETTINGS_SHARED_BUSY = "会话暂时仍被后台占用，下一条消息会自动接管"
+SETTINGS_SHARED_UNSAVED = "已切换，但设置未能写入配置文件，重启后会恢复原模式"
 BACKEND_INVALID = "未切换后端: 名称无效\n可用: {available}"
 BACKEND_SESSION_BUSY = (
     "未切换后端: 目标后端的上次会话正在工作或等待处理。\n"
@@ -230,7 +235,7 @@ FINISH_USAGE = ACK_USAGE.replace("/ack", "/finish")
 FINISH_TOO_LONG = ACK_TOO_LONG.replace("接收提示", "结束提示")
 
 HELP_STATUS = '当前状态'
-HELP_SETTINGS = '查看设置或修改登录自启'
+HELP_SETTINGS = '查看设置或修改登录自启、共享后台'
 HELP_SESSIONS = '列出、搜索或翻页会话'
 HELP_NEW = '新建'
 HELP_COMPACT = '压缩当前会话上下文'
@@ -582,7 +587,7 @@ def status_summary(**kwargs):
 
 
 def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None,
-                     completion_notice="", source_hint=None, autostart=None,
+                     completion_notice="", source_hint=None, autostart=None, shared=None,
                      connection_idle_seconds=None, text=prompt_text):
     off = text('VALUE_OFF')
     lines = [f"{text('LABEL_ACK')}: {notice or off}",
@@ -590,6 +595,8 @@ def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None
              f"{text('LABEL_ATTACHMENTS')}: {attachment_mib} MiB"]
     if autostart is not None:
         lines.append(f"{text('LABEL_AUTOSTART')}: {autostart}")
+    if shared is not None:
+        lines.append(f"{text('LABEL_SHARED')}: {shared}")
     if connection_idle_seconds is not None:
         value = (f"{connection_idle_seconds}s" if connection_idle_seconds else
                  text('VALUE_CONNECTION_IDLE_UNLIMITED'))
