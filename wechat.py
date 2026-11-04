@@ -161,13 +161,22 @@ class WeChat:
         return result
 
     async def send(self, entry):
-        return await self.request("ilink/bot/sendmessage", {"msg": {
+        result = await self.request("ilink/bot/sendmessage", {"msg": {
             "from_user_id": "", "to_user_id": entry["user"],
             "client_id": entry["id"], "message_type": 2, "message_state": 2,
             "context_token": entry["context"],
             "item_list": [entry["item"]] if "item" in entry else
                          [{"type": 1, "text_item": {"text": entry["text"]}}]}},
             timeout=SEND_TIMEOUT, request_id=entry.get("requestId"))
+        # A 200 alone does not prove delivery: record whether the server
+        # acknowledged the message with an id, so a silent drop is visible.
+        keys = result if isinstance(result, dict) else {}
+        acknowledged = any(key in keys for key in (
+            "msgid", "msg_id", "message_id", "messageId", "msgId"))
+        log_event("wechat.send_ack", component="wechat",
+                  status="acked" if acknowledged else "no_id", count=len(keys),
+                  request_id=entry.get("requestId"))
+        return result
 
     async def typing_ticket(self, user, context=None):
         body = {"ilink_user_id": user}
