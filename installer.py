@@ -48,6 +48,9 @@ RELEASE_FORMAT = 1
 CURRENT_FILE = "current"
 PREVIOUS_FILE = "previous"
 RELEASES_DIR = "releases"
+# An update keeps the newest release plus the one a running bridge was started
+# from; that older one is removed by the next update, once nothing can use it.
+RELEASE_KEEP = 1
 LOCK_FILE = ".install-lock"
 MANIFEST_FILE = ".release.json"
 LEGACY_ID = "legacy"
@@ -759,6 +762,37 @@ def activate_release(target: Path, identifier: str) -> None:
     _write_pointer(target, CURRENT_FILE, identifier)
 
 
+def prune_releases(target: Path, *, keep) -> list[str]:
+    """Delete releases that nothing can still be running from.
+
+    An update never restarts a running bridge, so the release it was started from
+    is kept for one more update: its files may still be mapped and Python may
+    still import from it. Everything else is renamed aside first, so a delete that
+    fails half-way can never leave a directory that looks like a usable release.
+    """
+    releases = target / RELEASES_DIR
+    if releases.is_symlink() or not releases.is_dir():
+        return []
+    kept = {name for name in keep if name}
+    for stale in releases.glob(".trash-*"):
+        shutil.rmtree(stale, ignore_errors=True)
+    removed = []
+    for entry in sorted(releases.iterdir()):
+        if entry.name in kept or entry.name.startswith(".") or entry.is_symlink():
+            continue
+        if not entry.is_dir():
+            continue
+        trash = releases / (".trash-" + entry.name)
+        try:
+            os.replace(entry, trash)
+        except OSError:
+            # Still in use or read-only: leave it intact for the next update.
+            continue
+        shutil.rmtree(trash, ignore_errors=True)
+        removed.append(entry.name)
+    return removed
+
+
 def _linux_command_link() -> Path:
     return Path.home() / ".local/bin/codex-wechat"
 
@@ -892,6 +926,13 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
             configure_windows(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier)
+            try:
+                pruned = prune_releases(target, keep=(identifier, current))
+            except OSError as error:
+                detail(f"旧版本清理跳过: {error}")
+            else:
+                for name in pruned:
+                    detail(f"已移除旧版本: {name}")
     except BaseException:
         # Only delete a release we created and never activated; no restoration.
         if created and release is not None and read_pointer(target, CURRENT_FILE) != identifier:

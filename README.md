@@ -22,7 +22,7 @@ Windows PowerShell：
 
 需要 Python 3.11+。系统工具与缺失策略集中于 installer.py，Python 包在 requirements 文件中声明；缺少 Codex 不妨碍安装，但模型任务在补齐前不可用。可使用独立 CLI 或 App 内置原生 CLI。二维码优先用 qrencode，缺少时安装轻量 Python 回退。
 
-安装不扫码、不收集模型密钥、不自动启动程序、不为新用户开启自启。更新保留用户配置和自启状态，不重启正在使用的桥接。新版本先独立准备和检查，危险操作集中在最后激活；不提供安装回滚命令。
+安装不扫码、不收集模型密钥、不自动启动程序、不为新用户开启自启。更新保留用户配置和自启状态，不重启正在使用的桥接。新版本先独立准备和检查，危险操作集中在最后激活；不提供安装回滚命令。每个版本自带独立的 Python 环境；更新后只保留最近一个版本，更新不会重启桥接，因此它当前正在运行的上一版本会在下一次更新时清理。
 
 要用 Codex CLI 与微信双向收发，装完后在微信发送 `/settings shared on`（持久保存，`/settings shared off` 关闭）。该开关默认 Windows 为 false、Linux 为 true；开启后 Codex App 打开桥接当前会话会显示锁定，详见 [docs/WINDOWS.md](docs/WINDOWS.md)。
 

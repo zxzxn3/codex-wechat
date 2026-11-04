@@ -262,6 +262,24 @@ class InstallerTests(unittest.TestCase):
                 installer.install(self.source, self.target)
         self.assertFalse((self.target / installer.CURRENT_FILE).exists())
 
+    def test_prune_keeps_the_newest_and_the_release_that_may_still_run(self):
+        releases = self.target / installer.RELEASES_DIR
+        for name in ("aaa111", "bbb222", "ccc333"):
+            (releases / name).mkdir(parents=True)
+        (releases / ".staging-1234").mkdir()
+        (releases / ".trash-old").mkdir()
+        removed = installer.prune_releases(self.target, keep=("ccc333", "bbb222"))
+        self.assertEqual(removed, ["aaa111"])
+        self.assertEqual(sorted(entry.name for entry in releases.iterdir()),
+                         [".staging-1234", "bbb222", "ccc333"])
+
+    def test_prune_leaves_a_release_it_cannot_move(self):
+        releases = self.target / installer.RELEASES_DIR
+        (releases / "aaa111").mkdir(parents=True)
+        with patch("installer.os.replace", side_effect=OSError("locked")):
+            self.assertEqual(installer.prune_releases(self.target, keep=()), [])
+        self.assertTrue((releases / "aaa111").is_dir())
+
     def test_rollback_is_not_an_installer_operation(self):
         with self.assertRaises(SystemExit):
             installer.parser().parse_args(["rollback"])
