@@ -24,6 +24,8 @@ Windows PowerShell：
 
 安装不扫码、不收集模型密钥、不自动启动程序、不为新用户开启自启。更新保留用户配置和自启状态，不重启正在使用的桥接。新版本先独立准备和检查，危险操作集中在最后激活；不提供安装回滚命令。
 
+要用 Codex CLI 与微信双向收发，装完后在微信发送 `/settings shared on`（持久保存，`/settings shared off` 关闭）。该开关默认 Windows 为 false、Linux 为 true；开启后 Codex App 打开桥接当前会话会显示锁定，详见 [docs/WINDOWS.md](docs/WINDOWS.md)。
+
 ## 第一次使用
 
 Linux：

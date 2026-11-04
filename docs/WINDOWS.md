@@ -116,6 +116,37 @@ Administrators"并断开继承；其下所有目录改为普通创建、继承�
 - 回合静默兜底：断连本身会使回合立即失败（`connection_lost`），所以超时只覆盖"连接活着但
   事件停止"这一种情况，默认 900 秒无任何事件才中止。
 
+## 共享 daemon 模式（Windows 默认关闭）
+
+Windows 默认让桥接自己启动一个 `codex app-server`（"独立进程"）。开启共享 daemon 后，
+桥接改为通过 `codex app-server proxy` 连接本机的 app-server daemon，与 Codex CLI 共用同一个
+app-server。**这是 Codex CLI 双向的唯一途径**：CLI 没有 IPC follower 可以借笔，只有共用一个
+app-server，两边的回合才会互相可见。
+
+| 能力 | 独立进程（默认） | 共享 daemon |
+|---|---|---|
+| 微信 ↔ Codex App | 双向（App 先持笔，桥接用 IPC follower 借笔） | App 先打开会话时仍可跟随；桥接先发过消息后该会话在 App 里显示锁定 |
+| 微信 ↔ Codex CLI | 不可用（只能轮流用，CLI 释放写者要 65–100 秒） | 双向 |
+
+- 切换：`/settings shared on|off`，写入 `config.json` 的 `backend.sharedDaemon` 并立即重连，
+  重启后保持。`/settings` 与 `/status` 都会显示当前模式。
+- daemon 放手有延迟：刚退订后的私有 app-server 仍可能被 `-32600 active writer` 拒绝。因此模式
+  切换会先重试约 5 秒，仍占用就以"不持笔"的方式采纳该会话（`/settings` 回复里会说明），
+  下一条微信消息排队等写者，锁一放开就发出（最多等 10 分钟，重试间隔 30 秒起退避到 2 分钟；
+  每次重试都会重发一次接收提示，作为"仍在尝试"的信号）。`/backend` 切换不含这个让步，
+  目标被占用时仍然直接报错。
+- 共享模式**不会**在回合结束时退订：退订就收不到另一个客户端的回合（CLI 的消息进不了微信）。
+  代价是桥接选中的那个会话在 App 里一直是锁定状态，直到桥接切到别的会话或 daemon 停止。
+- 但**离开**一个会话（`/switch`、`/settings shared off`）必须退订，否则 daemon 会一直占着
+  桥接历史上选过的每一个会话，App 里会累积打不开的会话。
+- 共享 daemon 起不来时（例如只装了 Codex App、没有独立 CLI：`daemon start` 会报
+  `this CLI has no complete local package`；或当前进程不允许拉起脱离父进程的后台进程：
+  `os error 5`）自动退回独立进程，并在 `/status` 与日志 `backend.shared_unavailable` 里写明
+  原因。配置里的 `sharedDaemon: true` 不会被改写。
+- 模型请求在共享模式下由 daemon 进程发出，因此 daemon 必须继承代理环境变量：要么在带代理的
+  shell 里启动它，要么把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 写进 `backend.env`，
+  由桥接启动 daemon 时传下去。
+
 ## 本机环境观察（不代表其它机器）
 
 以下只描述 2026-11-04 这台机器的网络环境，不是产品行为，也不应写成对外的通用结论。
