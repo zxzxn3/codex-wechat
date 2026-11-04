@@ -6,7 +6,8 @@
   "backends": {
     "codex": {
       "env": {},
-      "threadOptions": {}
+      "threadOptions": {},
+      "useSystemProxy": true
     }
   },
   "slicing": {

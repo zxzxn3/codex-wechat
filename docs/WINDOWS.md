@@ -163,7 +163,9 @@ app-server，两边的回合才会互相可见。
   （或旧的 `backend.env`），由桥接启动 daemon 时传下去。
 - 没写 `*_PROXY` 时桥接会读本机代理设置（Windows 的 WinINET、其它平台由
   `urllib.request.getproxies()` 决定）并补进后端环境；显式设置的环境变量优先，检测不到就
-  保持原样，`OPENAI_BASE_URL` 指向本机或内网时也不注入（本地网关不经互联网代理）。原因是
+  保持原样，`OPENAI_BASE_URL` 指向本机或内网时也不注入（本地网关不经互联网代理）。
+  该行为默认开启，可用 `backends.<后端>.useSystemProxy: false` 关闭（关闭后完全按进程自身
+  环境走，等于回到改造前的行为）。原因是
   Codex 只有 HTTP 客户端跟随系统代理，**Responses WebSocket 只读环境变量**：代理机器上第一条
   消息会先按 15 秒一次重试 WebSocket，第六次失败后才回退 HTTP，实测第一条消息因此多等约
   100 秒（直连 114.9 秒 / 注入代理后 6.7 秒，同一提示词、同一版本）。注入时会记一条

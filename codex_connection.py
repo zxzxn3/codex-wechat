@@ -17,6 +17,7 @@ class ConnectionSpec:
     endpoint: str | None = None
     startup: tuple[str, ...] = ()
     runtime: str = "auto"
+    system_proxy: bool = True
 
     @classmethod
     def from_config(cls, config):
@@ -56,7 +57,10 @@ class ConnectionSpec:
             raise ValueError("websocketStartupCommand 必须是字符串数组")
         if shared and not endpoint and list(command[-1:]) != ["app-server"] and list(command[-2:]) != ["app-server", "proxy"]:
             raise ValueError("sharedDaemon 模式的 command 须以 app-server 结尾")
-        return cls(tuple(command), shared, endpoint, tuple(startup), runtime)
+        system_proxy = config.get("useSystemProxy", True)
+        if type(system_proxy) is not bool:
+            raise ValueError("useSystemProxy 必须是布尔值")
+        return cls(tuple(command), shared, endpoint, tuple(startup), runtime, system_proxy)
 
     def environment(self, config):
         env = dict(os.environ)
@@ -66,7 +70,7 @@ class ConnectionSpec:
         env.update(config.get("env", {}))
         # Codex only reads a proxy for sampling from the environment; without it
         # the first turn of a proxied machine burns every WebSocket retry.
-        applied = apply_system_proxy(env)
+        applied = apply_system_proxy(env, enabled=self.system_proxy)
         if applied:
             log_event("backend.proxy_inherited", component="backend", source="system",
                       proxy=proxy_label(applied["HTTPS_PROXY"]))

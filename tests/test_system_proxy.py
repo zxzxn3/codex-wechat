@@ -98,6 +98,27 @@ class SystemProxyTests(unittest.TestCase):
         self.assertFalse(local_endpoint(""))
         self.assertFalse(local_endpoint("not a url"))
 
+    def test_the_user_can_switch_the_injection_off(self):
+        spec = ConnectionSpec.from_config({"command": ["codex", "app-server"],
+                                           "useSystemProxy": False})
+        with patch("platform_support.system_proxy", return_value=dict(PROXY)) as probe, \
+                patch("codex_connection.log_event") as log:
+            env = spec.environment({})
+        probe.assert_not_called()
+        log.assert_not_called()
+        self.assertNotIn("HTTPS_PROXY", env)
+
+    def test_the_switch_defaults_to_on(self):
+        spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
+        self.assertTrue(spec.system_proxy)
+        self.assertEqual(ConnectionSpec.from_config(
+            {"command": ["codex", "app-server"], "useSystemProxy": True}).system_proxy, True)
+
+    def test_the_switch_rejects_a_non_boolean(self):
+        with self.assertRaises(ValueError):
+            ConnectionSpec.from_config({"command": ["codex", "app-server"],
+                                        "useSystemProxy": "no"})
+
 
 if __name__ == "__main__":
     unittest.main()

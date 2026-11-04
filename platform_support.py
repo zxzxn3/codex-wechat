@@ -116,7 +116,7 @@ def local_endpoint(url):
     return address.is_loopback or address.is_private or address.is_link_local
 
 
-def apply_system_proxy(env):
+def apply_system_proxy(env, *, enabled=True):
     """Name the machine proxy in the environment a backend starts with.
 
     Codex sends the first sampling request of every turn over a WebSocket and
@@ -127,6 +127,8 @@ def apply_system_proxy(env):
     makes both paths use it; an environment that already carries a proxy wins.
     Returns what it added, so the caller can record it.
     """
+    if not enabled:
+        return {}
     if any(env.get(key) for key in PROXY_ENV_KEYS):
         return {}
     base = env.get("OPENAI_BASE_URL") or env.get("openai_base_url")
