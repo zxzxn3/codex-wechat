@@ -101,7 +101,9 @@ class CodexTransport:
                         raise SharedDaemonUnavailable(str(failure)) from error
                     last_error = str(error) if isinstance(error, RuntimeError) else type(error).__name__
                     await self.close()
-                    await asyncio.sleep(0.5)
+                    # A fresh daemon needs about 0.7s before its socket answers;
+                    # poll faster than that so the wait is not rounded up to it.
+                    await asyncio.sleep(0.25)
             raise SharedDaemonUnavailable(f"共享后台自动启动后仍未连接成功：{last_error}")
         await self.connect(command, env)
 

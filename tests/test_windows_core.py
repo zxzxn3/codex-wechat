@@ -160,19 +160,41 @@ class DaemonLaunchTests(unittest.IsolatedAsyncioTestCase):
                 raise BackendStartupError("后台准备失败（退出码 1）")
             return b""
 
+        detached = Mock(return_value=4242)
         with patch.object(backend_runtime, "run", runner), \
+                patch.object(backend_runtime, "create_process_outside_job", detached):
+            await self.runtime().ensure_native(["codex.exe", "app-server"],
+                                               {"HTTP_PROXY": "p"}, is_windows=True)
+        self.assertEqual(len(calls), 1)  # the fallback does not shell out
+        detached.assert_called_once()
+        self.assertIn('set "HTTP_PROXY=p"', detached.call_args.args[0])
+
+    async def test_the_shell_fallback_is_used_when_com_is_unavailable(self):
+        calls = []
+
+        async def runner(command, *, env, cwd, timeout):
+            calls.append(command)
+            if len(calls) == 1:
+                raise BackendStartupError("后台准备失败（退出码 1）")
+            return b""
+
+        with patch.object(backend_runtime, "run", runner), \
+                patch.object(backend_runtime, "create_process_outside_job",
+                             Mock(side_effect=ImportError("no pywin32"))), \
+                patch.object(backend_runtime, "log_event"), \
                 patch.object(backend_runtime.shutil, "which", return_value="/bin/powershell.exe"):
             await self.runtime().ensure_native(["codex.exe", "app-server"],
                                                {"HTTP_PROXY": "p"}, is_windows=True)
         self.assertEqual(len(calls), 2)
         self.assertIn("Invoke-CimMethod", calls[1][-1])
-        self.assertIn('set "HTTP_PROXY=p"', calls[1][-1])
 
     async def test_the_direct_reason_survives_a_failed_retry(self):
         async def runner(command, *, env, cwd, timeout):
             raise BackendStartupError("后台准备失败（退出码 1）")
 
         with patch.object(backend_runtime, "run", runner), \
+                patch.object(backend_runtime, "create_process_outside_job",
+                             Mock(side_effect=ImportError("no pywin32"))), \
                 patch.object(backend_runtime.shutil, "which", return_value="/bin/powershell.exe"), \
                 patch.object(backend_runtime, "log_event"):
             with self.assertRaises(BackendStartupError) as caught:

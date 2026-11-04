@@ -56,6 +56,37 @@ def wmi_command_line(command, env):
     return "cmd.exe /d /c " + " & ".join(steps)
 
 
+def create_process_outside_job(command_line, cwd):
+    """Create a process through WMI, which is not inside this process's job.
+
+    Blocks for well under a tenth of a second; the PowerShell equivalent costs
+    about a second because it has to start a shell first.
+    """
+    import pythoncom
+
+    pythoncom.CoInitialize()
+    try:
+        return _create_via_wmi(command_line, cwd)
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def _create_via_wmi(command_line, cwd):
+    # A separate scope: COM objects must be released before CoUninitialize.
+    import win32com.client
+
+    service = win32com.client.Dispatch("WbemScripting.SWbemLocator").ConnectServer(
+        ".", "root\\cimv2")
+    params = service.Get("Win32_Process").Methods_("Create").InParameters.SpawnInstance_()
+    params.CommandLine = command_line
+    if cwd:
+        params.CurrentDirectory = cwd
+    result = service.ExecMethod("Win32_Process", "Create", params)
+    if result.ReturnValue:
+        raise BackendStartupError(f"后台宿主拒绝了启动请求（{result.ReturnValue}）")
+    return result.ProcessId
+
+
 class BackendRuntime:
     def __init__(self, config, cwd):
         self.config, self.cwd = config, cwd
@@ -86,10 +117,17 @@ class BackendRuntime:
 
     async def start_detached(self, command, env):
         """Start a command from outside this process's Windows job object."""
+        line = wmi_command_line(command, env)
+        try:
+            await asyncio.to_thread(create_process_outside_job, line, str(self.cwd))
+            return
+        except Exception:  # pywin32 absent or the COM call refused; keep a slower way in
+            log_event("backend.detached_com_unavailable", level="warning",
+                      component="backend")
         powershell = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
         if not powershell:
             raise BackendStartupError("找不到 PowerShell，无法在任务之外启动共享后台。")
-        script = _WMI_CREATE.format(command=wmi_command_line(command, env).replace("'", "''"),
+        script = _WMI_CREATE.format(command=line.replace("'", "''"),
                                     cwd=str(self.cwd).replace("'", "''"))
         await run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
                   env=env, cwd=self.cwd, timeout=25)
