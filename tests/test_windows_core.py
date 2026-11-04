@@ -360,6 +360,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_release_can_follow_the_desktop_that_took_the_thread(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.shared = False
         backend.transport.proc = SimpleNamespace(returncode=None)
         backend.transport.reader = SimpleNamespace(done=lambda: False)
         backend.rpc = AsyncMock(return_value={})
@@ -408,8 +409,10 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         candidate = SimpleNamespace(attach=AsyncMock(side_effect=ValueError("App 返回了其它会话")),
                                     settings=AsyncMock(), close=AsyncMock())
         import app_ipc
-        with patch.object(app_ipc, "AppSession", return_value=candidate):
-            self.assertIsNone(await backend.attach_app("thread-1", {}))
+        with tempfile.NamedTemporaryFile() as endpoint:
+            with patch.object(app_ipc, "ipc_path", return_value=Path(endpoint.name)), \
+                    patch.object(app_ipc, "AppSession", return_value=candidate):
+                self.assertIsNone(await backend.attach_app("thread-1", {}))
         candidate.close.assert_awaited()
         self.assertIsNone(backend.app)
 
