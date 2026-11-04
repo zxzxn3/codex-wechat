@@ -9,7 +9,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from backend import (CodexBackend, TurnStalled, WRITER_BUSY, WRITER_FOLLOWED,
                      WRITER_NATIVE, WRITER_RELEASED)
+import backend_runtime
 from codex_transport import CodexTransport, CodexRpcError, SharedDaemonUnavailable
+from errors import BackendStartupError
 from pipe_websocket import PipeWebSocket
 from profiles import definitions, resume_or_adopt
 from storage import Store
@@ -124,6 +126,59 @@ class PipeWebSocketTests(unittest.IsolatedAsyncioTestCase):
         self.stdout.feed_eof()
         with self.assertRaises(RuntimeError):
             await self.client.recv()
+
+
+class DaemonLaunchTests(unittest.IsolatedAsyncioTestCase):
+    """Starting the daemon from a launcher whose job forbids breakaway."""
+
+    def runtime(self):
+        return backend_runtime.BackendRuntime({}, "/cwd")
+
+    def test_only_home_and_network_variables_cross_the_hop(self):
+        line = backend_runtime.wmi_command_line(
+            [r"C:\Program Files\codex.exe", "app-server", "daemon", "start"],
+            {"HTTP_PROXY": "http://127.0.0.1:7897", "NO_PROXY": "127.0.0.1,localhost",
+             "CODEX_HOME": r"C:\home", "PATH": r"C:\bin", "SECRET_TOKEN": "abc"})
+        self.assertTrue(line.startswith("cmd.exe /d /c set "))
+        self.assertIn('set "HTTP_PROXY=http://127.0.0.1:7897"', line)
+        self.assertIn(r'set "CODEX_HOME=C:\home"', line)
+        self.assertNotIn("PATH", line)
+        self.assertNotIn("SECRET", line)
+        self.assertTrue(line.endswith(r'"C:\Program Files\codex.exe" app-server daemon start'))
+
+    def test_a_value_that_changes_the_command_is_refused(self):
+        with self.assertRaises(BackendStartupError):
+            backend_runtime.wmi_command_line(["codex.exe", "app-server", "daemon", "start"],
+                                             {"NO_PROXY": 'a" & calc'})
+
+    async def test_a_blocked_launch_retries_outside_the_job(self):
+        calls = []
+
+        async def runner(command, *, env, cwd, timeout):
+            calls.append(command)
+            if len(calls) == 1:
+                raise BackendStartupError("后台准备失败（退出码 1）")
+            return b""
+
+        with patch.object(backend_runtime, "run", runner), \
+                patch.object(backend_runtime.shutil, "which", return_value="/bin/powershell.exe"):
+            await self.runtime().ensure_native(["codex.exe", "app-server"],
+                                               {"HTTP_PROXY": "p"}, is_windows=True)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("Invoke-CimMethod", calls[1][-1])
+        self.assertIn('set "HTTP_PROXY=p"', calls[1][-1])
+
+    async def test_the_direct_reason_survives_a_failed_retry(self):
+        async def runner(command, *, env, cwd, timeout):
+            raise BackendStartupError("后台准备失败（退出码 1）")
+
+        with patch.object(backend_runtime, "run", runner), \
+                patch.object(backend_runtime.shutil, "which", return_value="/bin/powershell.exe"), \
+                patch.object(backend_runtime, "log_event"):
+            with self.assertRaises(BackendStartupError) as caught:
+                await self.runtime().ensure_native(["codex.exe", "app-server"], {},
+                                                   is_windows=True)
+        self.assertIn("退出码 1", str(caught.exception))
 
 
 class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):

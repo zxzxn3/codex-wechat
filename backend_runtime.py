@@ -7,9 +7,22 @@ from urllib.parse import urlsplit
 
 import daemon_control
 from codex_connection import ConnectionSpec
+from diagnostics import log_event
 from errors import BackendStartupError
 from platform_support import IS_WINDOWS, PROJECT_ROOT, curl_command, resolve_command, subprocess_options
 from subprocess_io import communicate
+
+# A WMI-created process inherits WmiPrvSE's environment, not the caller's, so the
+# variables that must survive the hop are stated again on its command line.
+DETACHED_ENV_KEYS = ("CODEX_HOME", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                     "NO_PROXY", "OPENAI_BASE_URL")
+# `cmd.exe` re-joins these tokens, so values that would change its meaning are
+# refused instead of quoted and guessed at.
+_UNSAFE_ENV_VALUE = re.compile(r'.*["&%^<>|\r\n\x00]', re.DOTALL)
+_WMI_CREATE = (
+    "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+    "-Arguments @{{ CommandLine = '{command}'; CurrentDirectory = '{cwd}' }}; "
+    "exit $r.ReturnValue")
 
 
 async def run(command, *, env, cwd, timeout):
@@ -25,6 +38,24 @@ async def run(command, *, env, cwd, timeout):
     return stdout
 
 
+def wmi_command_line(command, env):
+    """Re-state the variables a WMI-created process cannot inherit.
+
+    ``cmd.exe`` is the cheapest way to set them for one command, and the value
+    check keeps a hostile configuration from changing what that command means.
+    """
+    steps = []
+    for key in DETACHED_ENV_KEYS:
+        value = env.get(key)
+        if not value:
+            continue
+        if _UNSAFE_ENV_VALUE.match(value):
+            raise BackendStartupError(f"无法通过后台宿主传递环境变量 {key}：包含不支持的字符")
+        steps.append(f'set "{key}={value}"')
+    steps.append(" ".join(f'"{item}"' if " " in item else item for item in command))
+    return "cmd.exe /d /c " + " & ".join(steps)
+
+
 class BackendRuntime:
     def __init__(self, config, cwd):
         self.config, self.cwd = config, cwd
@@ -36,9 +67,32 @@ class BackendRuntime:
 
     async def ensure_native(self, command, env, *, is_windows):
         if is_windows:
-            await run([*command, "daemon", "start"], env=env, cwd=self.cwd, timeout=20)
+            start = [*command, "daemon", "start"]
+            try:
+                await run(start, env=env, cwd=self.cwd, timeout=20)
+            except (BackendStartupError, OSError, TimeoutError) as error:
+                # A scheduled task runs inside a job that forbids breakaway, and
+                # the Codex CLI refuses to detach its daemon from such a launcher.
+                # WMI starts it outside that job; the direct reason is still the
+                # one worth reporting when that fails too.
+                try:
+                    await self.start_detached(start, env)
+                except (BackendStartupError, OSError, TimeoutError) as detached:
+                    log_event("backend.detached_start_failed", level="warning",
+                              component="backend", error_type=type(detached).__name__)
+                    raise error from None
             return None
         return await self._systemd_start([*command, "daemon", "start"], env, identity=command)
+
+    async def start_detached(self, command, env):
+        """Start a command from outside this process's Windows job object."""
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
+        if not powershell:
+            raise BackendStartupError("找不到 PowerShell，无法在任务之外启动共享后台。")
+        script = _WMI_CREATE.format(command=wmi_command_line(command, env).replace("'", "''"),
+                                    cwd=str(self.cwd).replace("'", "''"))
+        await run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                  env=env, cwd=self.cwd, timeout=25)
 
     async def _systemd_start(self, command, env, *, identity=None):
         executable = shutil.which(command[0], path=env.get("PATH"))
