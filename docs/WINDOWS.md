@@ -131,6 +131,14 @@ Administrators"并断开继承；其下所有目录改为普通创建、继承�
 - 本机处置：`Disable-NetAdapterBinding -Name "WLAN" -ComponentID ms_tcpip6`。处置前后同一测试
   （发布版 venv、清空 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`）从 4.16 秒降到 0.12–0.18 秒；
   需要 IPv6 时用 `Enable-NetAdapterBinding` 恢复。该网络 IPv6 本来不可用，禁用没有实际损失。
+- 本机代理只存在于注册表（WinINET，`127.0.0.1:7897`），用户级/机器级**没有** `*_PROXY`
+  环境变量。Codex CLI 的 Responses WebSocket 只读环境变量，于是每次新建连接先失败 5 次
+  （`responses_websocket: failed to connect`）再回退 HTTPS：能用，但多约 10 秒。
+- 本机处置：在 PowerShell `profile.ps1` 里加一个 `codex` 包装函数，调用前设
+  `HTTPS_PROXY/HTTP_PROXY/ALL_PROXY` 与 `NO_PROXY`（排除 `localhost`、`127.0.0.1`、
+  `ilinkai.weixin.qq.com`、`*.weixin.qq.com`），调用后恢复。实测同一 `codex exec`：
+  无代理变量时出现 5 次重连与回退告警；经包装后一次成功、无重连。共享 daemon 模式下
+  模型请求在 daemon 进程内发出，因此 daemon 也必须在该包装过的 shell 里重启才会继承代理。
 - 复现方法：清空代理变量后，用发布版 venv 的 python 依次请求
   `https://ilinkai.weixin.qq.com/`，对比默认解析与显式 `CurlOpt.DNS_SERVERS="192.168.0.1"`
   的耗时；再直接连 IP，验证开销只在名字解析。若本机没有这个黑洞，两侧耗时应当接近。
