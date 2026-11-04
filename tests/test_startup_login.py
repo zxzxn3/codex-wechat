@@ -15,10 +15,12 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
                    AsyncMock(return_value=SimpleNamespace(installed=True))), \
              patch("codex_wechat.startup_store", AsyncMock(return_value=store)), \
              patch("codex_wechat.startup_account", AsyncMock()) as account, \
-             patch("codex_wechat.service_adapter.start", AsyncMock()) as start:
+             patch("codex_wechat.service_adapter.start", AsyncMock()) as start, \
+             patch("codex_wechat.show_log_path") as log_hint:
             await start_background_service(SimpleNamespace(action="service-start"))
         account.assert_awaited_once_with(store)
         start.assert_awaited_once()
+        log_hint.assert_called_once_with()
         store.close.assert_called_once()
 
     async def test_existing_binding_never_triggers_login_even_without_terminal(self):
