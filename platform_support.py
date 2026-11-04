@@ -82,6 +82,32 @@ def system_proxy():
     return found
 
 
+PROXY_ENV_KEYS = ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy",
+                  "HTTP_PROXY", "http_proxy")
+
+
+def apply_system_proxy(env):
+    """Name the machine proxy in the environment a backend starts with.
+
+    Codex sends the first sampling request of every turn over a WebSocket and
+    only falls back to HTTP after the retries run out. Its HTTP client already
+    follows the machine proxy, but the WebSocket connector reads the
+    environment alone, so on a proxied machine the first turn pays one connect
+    timeout per retry before anything reaches the model. Naming the proxy here
+    makes both paths use it; an environment that already carries a proxy wins.
+    """
+    if any(env.get(key) for key in PROXY_ENV_KEYS):
+        return env
+    found = system_proxy()
+    proxy = found.get("HTTPS_PROXY") or found.get("ALL_PROXY") or found.get("HTTP_PROXY")
+    if not proxy:
+        return env
+    env["HTTPS_PROXY"] = proxy
+    env["HTTP_PROXY"] = found.get("HTTP_PROXY") or proxy
+    env.setdefault("NO_PROXY", found.get("NO_PROXY") or "localhost,127.0.0.1,::1")
+    return env
+
+
 def make_private(directory) -> None:
     """Create a directory only this account and the system administrators use.
 

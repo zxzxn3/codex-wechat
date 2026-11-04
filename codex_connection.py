@@ -4,7 +4,7 @@ import os
 import re
 from urllib.parse import urlsplit
 
-from platform_support import IS_WINDOWS
+from platform_support import IS_WINDOWS, apply_system_proxy
 
 SUPPORTED_TRANSPORTS = ("stdio", "native-daemon", "loopback-websocket")
 
@@ -63,7 +63,9 @@ class ConnectionSpec:
         for key in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_HOME"):
             env.pop(key, None)
         env.update(config.get("env", {}))
-        return env
+        # Codex only reads a proxy for sampling from the environment; without it
+        # the first turn of a proxied machine burns every WebSocket retry.
+        return apply_system_proxy(env)
 
     def proxy_command(self):
         command = list(self.command)

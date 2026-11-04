@@ -161,6 +161,11 @@ app-server，两边的回合才会互相可见。
 - 模型请求在共享模式下由 daemon 进程发出，因此 daemon 必须继承代理环境变量：要么在带代理的
   shell 里启动它，要么把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 写进 `backends.<后端>.env`
   （或旧的 `backend.env`），由桥接启动 daemon 时传下去。
+- 没写 `*_PROXY` 时桥接会读本机代理设置（Windows 的 WinINET、其它平台由
+  `urllib.request.getproxies()` 决定）并补进后端环境；显式设置的环境变量优先，检测不到就
+  保持原样。原因是 Codex 只有 HTTP 客户端跟随系统代理，**Responses WebSocket 只读环境变量**：
+  代理机器上第一条消息会先按 15 秒一次重试 WebSocket，第六次失败后才回退 HTTP，实测第一条
+  消息因此多等约 100 秒（直连 114.9 秒 / 注入代理后 6.7 秒，同一提示词、同一版本）。
 - 切换模式会重建后端连接，因此任务进行中（或有排队、正在切换会话）会被拒绝，等待结束或
   `/stop` 后再试。
 
@@ -182,6 +187,8 @@ app-server，两边的回合才会互相可见。
 - 本机代理只存在于注册表（WinINET，`127.0.0.1:7897`），用户级/机器级**没有** `*_PROXY`
   环境变量。Codex CLI 的 Responses WebSocket 只读环境变量，于是每次新建连接先失败 5 次
   （`responses_websocket: failed to connect`）再回退 HTTPS：能用，但多约 10 秒。
+  桥接自 2026-11-04 起会自己把本机代理写进 daemon 环境，所以经微信发的消息不再付这笔钱；
+  直接 `codex` / App 仍按各自环境走，必要时保留下面的包装函数。
 - 本机处置：在 PowerShell `profile.ps1` 里加一个 `codex` 包装函数，调用前设
   `HTTPS_PROXY/HTTP_PROXY/ALL_PROXY` 与 `NO_PROXY`（排除 `localhost`、`127.0.0.1`、
   `ilinkai.weixin.qq.com`、`*.weixin.qq.com`），调用后恢复。实测同一 `codex exec`：
