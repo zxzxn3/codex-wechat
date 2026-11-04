@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 from contextlib import contextmanager
 
-from platform_support import IS_WINDOWS
+from platform_support import IS_WINDOWS, make_private
 
 if IS_WINDOWS:
     import msvcrt
@@ -35,9 +35,7 @@ def locked_file(path):
 class Store:
     def __init__(self, root, *, lock=True):
         self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if not IS_WINDOWS:
-            self.root.chmod(0o700)
+        make_private(self.root)
         self.lock = None
         if not lock:
             return

@@ -1,8 +1,10 @@
 """Per-user Windows supervisor for the codex-wechat bridge.
 
 The Task Scheduler starts this process for the current interactive user.  The
-supervisor owns one bridge child, restarts it after exit code 75, and keeps the
+supervisor owns one bridge child, restarts it after a crash, and keeps the
 child in a kill-on-close Job Object so stopping the task cannot leave an orphan.
+A user restart returns 76 so the bootstrap supervisor re-resolves the active
+release; this module never parses the install layout itself.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import time
 from pathlib import Path
 
 RESTART_EXIT_CODE = 75
+RELEASE_SWITCH_EXIT_CODE = 76
 CONFIG_EXIT_CODE = 78
 FAILURE_WINDOW_SECONDS = 300.0
 MAX_FAILURES = 5
@@ -68,6 +71,18 @@ def remove_owner_status(path: Path, token: str) -> None:
             Path(path).unlink()
         except OSError:
             pass
+
+
+def discard_owner_status(path: Path) -> None:
+    """Drop a record left by a stop or crash that skipped the normal cleanup.
+
+    Only called while the single-instance guard is held, so no live supervisor
+    owns the record.
+    """
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _rotate_log(path: Path) -> None:
@@ -162,7 +177,8 @@ class ChildJob:
         if os.name != "nt":
             return
         import win32job
-        handle = win32job.CreateJobObject(None, None)
+        # pywin32 requires a string name (unlike Win32's nullable lpName).
+        handle = win32job.CreateJobObject(None, "Local\\CodexWeChatChild-" + secrets.token_hex(16))
         try:
             info = win32job.QueryInformationJobObject(
                 handle, win32job.JobObjectExtendedLimitInformation)
@@ -296,9 +312,7 @@ async def _stop_process(process, timeout: float = 5.0) -> None:
         await process.wait()
 
 
-def restart_delay(returncode: int | None, backoff: float) -> float:
-    if returncode == RESTART_EXIT_CODE:
-        return 0.2
+def restart_delay(backoff: float) -> float:
     return min(max(1.0, backoff), 60.0)
 
 
@@ -331,6 +345,7 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
     _append_log(log_path, f"starting for {project}")
     job = ChildJob()
     status_path = owner_status_path(state_dir)
+    discard_owner_status(status_path)
     token = secrets.token_urlsafe(32)
     python = bridge_python(project, str(python) if python else None)
     command = bridge_command(project, state_dir, config, python)
@@ -376,20 +391,20 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
             if returncode == CONFIG_EXIT_CODE:
                 _append_log(log_path, "bridge configuration failed; not restarting")
                 return CONFIG_EXIT_CODE
+            if returncode == RESTART_EXIT_CODE:
+                # Only the bootstrap knows the install layout; hand the restart back.
+                _append_log(log_path, "user restart requested; handing back to the bootstrap")
+                return RELEASE_SWITCH_EXIT_CODE
             now = time.monotonic()
             failures[:] = [stamp for stamp in failures
                            if now - stamp < FAILURE_WINDOW_SECONDS]
             if not failures:
                 backoff = 1.0
-            if returncode is None or returncode != RESTART_EXIT_CODE:
-                if note_failure(failures, now):
-                    _append_log(log_path, "bridge failure limit reached; giving up")
-                    return 1
-            delay = restart_delay(returncode, backoff)
-            if returncode == RESTART_EXIT_CODE:
-                backoff = 1.0
-            else:
-                backoff = min(backoff * 2, 60.0)
+            if note_failure(failures, now):
+                _append_log(log_path, "bridge failure limit reached; giving up")
+                return 1
+            delay = restart_delay(backoff)
+            backoff = min(backoff * 2, 60.0)
             _append_log(log_path, f"restarting in {delay:g}s")
             await asyncio.sleep(delay)
     finally:

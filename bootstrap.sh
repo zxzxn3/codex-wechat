@@ -29,7 +29,7 @@ main() {
     "$python_command" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || {
         echo '需要 Python 3.11+，安装后重跑相同命令。' >&2; return 1;
     }
-    installer_url=$("$python_command" -c '
+    installer_base_url=$("$python_command" -c '
 import re, sys
 from urllib.parse import quote, urlsplit
 url = urlsplit(sys.argv[1]); path = url.path.strip("/").removesuffix(".git")
@@ -38,8 +38,10 @@ if (url.scheme != "https" or url.netloc.lower() != "github.com" or url.query or 
     or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*", path)
     or not ref or ref.startswith("-") or any(c.isspace() or ord(c) < 32 for c in ref)):
     sys.exit("需要公开 GitHub HTTPS 仓库地址和分支或标签名称。")
-print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe="") + "/installer.py")
+print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
 ' "$repo" "$source_ref")
+    installer_url="$installer_base_url/installer.py"
+    release_url="$installer_base_url/release.py"
     if ((dry_run)); then
         printf '演练模式，不下载或修改文件。\n来源 %s\n分支或标签 %s\n' "$repo" "$source_ref"
         echo '因 --dry-run，真实安装目录检查按通过处理；不代表安装环境已通过检查。'
@@ -60,6 +62,8 @@ print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe="") + 
     trap "$(printf 'rm -rf -- %q' "$task_temporary")" EXIT
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
         --connect-timeout 15 --max-time 120 "$installer_url" -o "$task_temporary/installer.py"
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+        --connect-timeout 15 --max-time 120 "$release_url" -o "$task_temporary/release.py"
     local -a installer_arguments=("$task_temporary/installer.py" bootstrap --repo "$repo" --ref "$source_ref")
     [[ -z "$target" ]] || installer_arguments+=(--dir "$target")
     if [[ -n "$component" ]]; then

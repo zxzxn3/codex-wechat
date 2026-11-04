@@ -3,11 +3,30 @@
 本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，能力边界见
 [CAPABILITIES](CAPABILITIES.md)，外部依据见 [SOURCES](SOURCES.md)。
 
+## 兼容策略
+
+项目尚未首次公开发布。发布前不承诺兼容旧开发版的安装布局、配置、持久状态、命令或内部
+实现；可以直接删除迁移层，升级按全新安装处理。
+
+首次公开发布后，后续版本必须兼容用户已部署的配置与持久状态、安装/升级/卸载路径、用户
+可见命令与配置语义，以及有外部依赖的文件格式。内部模块和实现可以自由重构，不属于兼容
+契约；上游 Codex/微信接口和当前版本化更新机制始终需要保持兼容。
+
 ## 离线测试
 
 ```bash
 cd ~/.local/share/codex-wechat
-PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
+CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" PYTHONDONTWRITEBYTECODE=1 \
+    .venv/bin/python -m unittest discover -s tests -v
+```
+
+诊断日志默认写在 `data_root()/logs/bridge.jsonl`，不隔离会把测试事件混进已安装实例
+正在使用的日志，真实问题的排查会被测试噪音污染。`CODEX_WECHAT_DATA_ROOT` 指向临时
+目录即可，测试本身不依赖该目录内容。Windows PowerShell：
+
+```powershell
+$env:CODEX_WECHAT_DATA_ROOT = Join-Path $env:TEMP ("cw-tests-" + [guid]::NewGuid())
+py -3 -m unittest discover -s tests -v
 ```
 
 Windows、真实微信/CDN、App/daemon 联调不属于离线测试；mock 通过不能写成真实平台或端到端通过。
@@ -60,7 +79,7 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 
 ## 变更检查
 
-- 改持久状态：同步恢复逻辑、旧版 fixture 和恢复测试；当前没有通用状态版本或迁移框架。
+- 改持久状态：同步恢复逻辑和恢复测试；首次公开发布后，再维护跨版本迁移与旧格式 fixture。
 - 改协议字段：同步 SOURCES、ARCHITECTURE、诊断事件和失败边界。
 - 改提示或配置：保持 `prompts.py` 默认目录和英文 snake_case 字段；无效配置整组保留旧值。
 - 改 Windows/服务/安装：至少做静态入口检查；有实机时再跑真实回归。

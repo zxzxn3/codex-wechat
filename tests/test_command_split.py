@@ -6,7 +6,7 @@ from pathlib import Path
 
 import commands
 from codex_wechat import Bridge
-from command_specs import COMMANDS, HELP, REGISTRY
+from command_specs import COMMANDS, HELP_ALL, REGISTRY
 from commands import HANDLERS, handle
 from errors import UserFacingError
 from storage import Store
@@ -31,7 +31,7 @@ class CommandSplitTests(unittest.IsolatedAsyncioTestCase):
             handler = HANDLERS[spec.name]
             self.assertTrue(callable(handler), spec.name)
             self.assertTrue(inspect.iscoroutinefunction(handler), spec.name)
-            self.assertIn(spec.usage, HELP, spec.name)
+            self.assertIn(spec.help_usage or spec.usage, HELP_ALL, spec.name)
             self.assertTrue(spec.description, spec.name)
             for alias in spec.aliases:
                 self.assertIs(REGISTRY[alias], spec, alias)
@@ -41,7 +41,7 @@ class CommandSplitTests(unittest.IsolatedAsyncioTestCase):
         original = dict(self.bridge.state)
         for command, argument in (
                 ("/switch", "target"), ("/new", ""), ("/compact", ""),
-                ("/effort", ""), ("/model", "2"), ("/cwd", "/tmp")):
+                ("/effort", "high"), ("/model", "2"), ("/cwd", "/tmp")):
             with self.subTest(command=command):
                 with self.assertRaises(UserFacingError) as raised:
                     await handle(self.bridge, command, argument)

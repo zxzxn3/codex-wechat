@@ -11,13 +11,14 @@ from codex_wechat import Bridge, parse_control
 from backend import CodexBackend, CodexRpcError
 from media import OUTPUT_HINT, MediaError
 from latency import Latency
-from command_specs import HELP
-from commands import handle, info
+from command_specs import HELP, HELP_ALL
+from commands import dispatch, handle, info, reload_backend_definitions
 from configuration import (DEFAULT_ACK_TEMPLATE, DEFAULT_COMPLETION_TEMPLATE,
                            completion_template, processing_template)
 from prompts import (
     PING_REPLY,
     RESTART_NOT_SERVICE,
+    UNSUPPORTED_MESSAGE_TYPE,
     render_ack,
     session_summary,
     setting_summary,
@@ -26,13 +27,15 @@ from prompts import (
 )
 from storage import Store
 from wechat import trusted_url
+from profiles import backend_label, definitions, ensure_backend_config
 
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Store(self.temp.name)
-        self.bridge = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
+        self.bridge = Bridge(self.store, {"user": "owner"}, {"backends": {
+            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
 
     def tearDown(self):
         self.store.lock.close()
@@ -51,9 +54,26 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         saved = self.store.load("bridge")
         self.assertEqual([x["id"] for x in saved["inbox"]], ["1"])
         self.assertEqual(saved["cursor"], "next")
-        restarted = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
+        restarted = Bridge(self.store, {"user": "owner"}, {"backends": {
+            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         await restarted.receive({"msgs": [self.message()]})
         self.assertEqual(len(restarted.state["inbox"]), 1)
+
+    async def test_private_unsupported_message_type_is_answered_once(self):
+        message = {"message_id": "unsupported", "from_user_id": "owner",
+                   "message_type": 9, "context_token": "context", "item_list": []}
+        await self.bridge.receive({"msgs": [message, message]})
+        self.assertEqual([entry["text"] for entry in self.store.load("bridge")["outbox"]],
+                         [UNSUPPORTED_MESSAGE_TYPE])
+
+    async def test_group_and_outbound_types_stay_silent(self):
+        group = {"message_id": "group-unsupported", "from_user_id": "owner",
+                 "message_type": 9, "context_token": "context",
+                 "group_id": "group", "item_list": []}
+        outbound = {"message_id": "outbound", "from_user_id": "owner",
+                    "message_type": 2, "context_token": "context", "item_list": []}
+        await self.bridge.receive({"msgs": [group, outbound]})
+        self.assertFalse(self.store.load("bridge")["outbox"])
 
     async def test_item_timestamp_supplies_missing_message_timestamp(self):
         message = self.message("latency")
@@ -73,8 +93,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_command_parser_trims_surrounding_whitespace(self):
         self.assertEqual(parse_control("/restart \t"), ("/restart", ""))
         self.assertEqual(parse_control("  /switch   2  "), ("/switch", "2"))
-        self.assertEqual(parse_control("/send /tmp/a b.txt"),
-                         ("/send", "/tmp/a b.txt"))
+        self.assertEqual(parse_control("/get /tmp/a b.txt"),
+                         ("/get", "/tmp/a b.txt"))
         self.assertEqual(parse_control("   "), ("", ""))
 
     async def test_private_state_and_utf8_chunks(self):
@@ -120,17 +140,17 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.state["context"] = "context"
         self.bridge.latency.sends.append(50)
         await self.bridge.control("/ping", received={"ingress_ms": 120})
-        entry = self.store.load("bridge")["outbox"][-1]
-        self.assertEqual(entry["text"], "WeChat ─120/50ms─ Bridge ─unavailable─ Provider")
-        self.assertNotIn("ping", entry)
-        self.assertEqual(len(self.store.load("bridge")["outbox"]), 1)
+        outbox = self.store.load("bridge")["outbox"]
+        self.assertEqual([entry["text"] for entry in outbox],
+                         ["微信 ─120/50ms", "桥接 ─unavailable(无可用目标)─ 提供方"])
+        self.assertNotIn("ping", outbox[-1])
         self.assertFalse(self.bridge.backend_started)
 
     async def test_settings_remain_available_without_backend(self):
         self.bridge.state["context"] = "context"
         with patch("commands.autostart.status", AsyncMock(return_value=True)):
             await self.bridge.control("/settings")
-        self.assertIn("附件上限", self.store.load("bridge")["outbox"][-1]["text"])
+        self.assertIn("media.maxMiB", self.store.load("bridge")["outbox"][-1]["text"])
         self.assertFalse(self.bridge.backend_started)
 
     async def test_latency_shows_only_wechat_channel(self):
@@ -138,9 +158,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         stats.sends.append(50)
         values = stats.values(120)
         self.assertEqual(values, {"ingress_ms": "120", "egress_ms": "50"})
-        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, {"input_tokens": "12.3K"}),
-                         "`IN < 12.3K`")
-        self.assertEqual(render_ack(PING_REPLY, values), "WeChat ─120/50ms")
+        self.assertEqual(render_ack(DEFAULT_ACK_TEMPLATE, {
+            "turn_total_tokens": "12.3K", "ingress_ms": "120"}),
+            "`IN < ~12.3K (120ms)`")
+        self.assertEqual(render_ack(PING_REPLY, values), "微信 ─120/50ms")
         self.assertEqual(stats.values(), {"ingress_ms": "-", "egress_ms": "50"})
 
     async def test_last_send_sample_survives_bridge_restart(self):
@@ -156,8 +177,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.acknowledge({"ingress_ms": 120})
         self.assertEqual(self.store.load("bridge")["outbox"][-1]["text"], "120|80ms")
 
-        await self.bridge.control("/ack text")
+        await self.bridge.control('/settings ack ""')
         self.assertEqual(processing_template(self.bridge.config, self.bridge.state), "")
+        self.assertEqual(self.store.load("bridge")["outbox"][-1]["text"],
+                         '```\nack: \n```')
         before = len(self.bridge.state["outbox"])
         self.bridge.acknowledge({"ingress_ms": 120})
         self.assertEqual(len(self.bridge.state["outbox"]), before)
@@ -171,8 +194,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_user_prompt_formats(self):
         self.assertEqual(session_summary(
             "已切换会话", name="微信附件", model="example", effort="high", cwd="~/project",
-            status="空闲"),
-            "已切换会话\n```\n会话: 微信附件\n状态: 空闲\n模型: example (High)\n目录: ~/project\n```")
+            status="空闲", session_id="01a13162-8d25-7883-ae2b-c70389dc9d58"),
+            "已切换会话\n```\n会话: 微信附件\nID: 01a13162\n状态: 空闲\n"
+            "模型: example (High)\n目录: ~/project\n```")
         self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="model"),
                          "模型: example (High)")
         self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="effort"),
@@ -182,8 +206,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE,
                                           completion_notice=DEFAULT_COMPLETION_TEMPLATE,
                                           attachment_mib=20),
-                         "```\n接收提示: `IN < {input_tokens}`\n"
-                         "结束提示: `OUT > {output_tokens}`\n附件上限: 20 MiB\n```")
+                         "```\nack: IN < ~{turn_total_tokens} ({ingress_ms}ms)\n"
+                         "finish: OUT > {turn_output_tokens} in {elapsed}\n"
+                         "media.maxMiB: 20\n```\n\n"
+                         "以上设置可通过 `/settings [option] [value]` 更改。")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",
@@ -201,14 +227,29 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for unwanted in ("审批: 0", "发送失败: 0", "Session", "·", "->", "→"):
             self.assertNotIn(unwanted, status)
         self.assertTrue(HELP.startswith("`/status` 当前状态"))
-        for command in ("/status", "/switch {编号、ID或搜索词}", "/backend {名称}",
-                        "/approve", "/sendimage"):
+        for command in ("/status", "/backend {名称}", "`/settings` 查看设置"):
             self.assertIn(command, HELP)
+        for command in ("/approve", "/deny", "/answer", "/get", "/getfile",
+                        "/cwd", "/switch", "/ping"):
+            self.assertNotIn(f"`{command} ", HELP)
+            self.assertNotIn(f"`{command}`", HELP)
+            self.assertTrue(f"`{command} " in HELP_ALL or f"`{command}`" in HELP_ALL)
         self.assertNotIn("```", HELP)
         self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")), "后端连接中断")
         self.assertEqual(attachment_reason(MediaError("附件超过本地大小限制")), "文件超过大小限制")
 
+    def test_reason_tables_keep_first_match_priority(self):
+        # Rules are ordered data now; an earlier rule must win over a later one.
+        self.assertEqual(
+            attachment_reason(MediaError("附件超过大小限制，cdn 请求失败")), "文件超过大小限制")
+        self.assertEqual(
+            attachment_reason(MediaError("cdn 请求失败，但缺少下载引用")), "微信附件服务未响应")
+        self.assertEqual(
+            backend_reason(RuntimeError("websocket 连接失败：依赖缺失")), "后端连接中断")
+        self.assertEqual(attachment_reason(MediaError("没有匹配的文本")), "附件处理失败")
+
     async def test_desktop_session_info_uses_status_without_followup_note(self):
+        self.bridge.state["thread"] = "01a13162-8d25-7883-ae2b-c70389dc9d58"
         self.bridge.backend.info = {
             "name": "微信附件", "model": "example", "effort": "high", "cwd": "/tmp/project"
         }
@@ -220,10 +261,16 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             text,
-            "已连接桌面会话\n```\n会话: 微信附件\n状态: 运行中\n"
+            "已连接桌面会话\n```\n会话: 微信附件\nID: 01a13162\n状态: 运行中\n"
             "模型: example (High)\n目录: /tmp/project\n```")
         self.assertNotIn("/stop", text)
         self.assertNotIn("补充消息", text)
+
+    async def test_status_shows_short_session_id(self):
+        self.bridge.state["thread"] = "01a13162-8d25-7883-ae2b-c70389dc9d58"
+        self.bridge.state["context"] = "context"
+        await self.bridge.control("/s")
+        self.assertIn("ID: 01a13162", self.bridge.state["outbox"][-1]["text"])
 
     async def test_restart_refuses_non_service_owner(self):
         owner = AsyncMock(side_effect=ValueError("not service owner"))
@@ -250,7 +297,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(text.startswith("```\n1."))
         self.assertIn("1. 当前会话  [当前  工作中", text)
         self.assertIn("2. Super-agent 调研  [工作中]", text)
-        self.assertIn("```\n`/switch {编号、ID或搜索词}`", text)
+        self.assertIn("```\n`/switch {编号、ID前缀或搜索词}`", text)
         self.assertNotIn("thread-current", text)
         self.assertNotIn("[active]", text)
 
@@ -327,6 +374,67 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bridge.state["outbox"][-1]["text"].splitlines()[0],
                          "已切换会话")
 
+    async def test_switch_accepts_unique_id_prefix(self):
+        target = "01a13162-8d25-7883-ae2b-c70389dc9d58"
+        self.bridge.state.update(context="context", thread="current")
+        self.bridge.backend.list_threads = AsyncMock(return_value={
+            "data": [{"id": target, "name": "目标会话"},
+                     {"id": "deadbeef-0000-0000-0000-000000000000",
+                      "name": "其他会话"}]})
+        self.bridge.backend.read_thread = AsyncMock(return_value={
+            "id": target, "status": {"type": "inactive"}})
+        self.bridge.backend.thread = AsyncMock(return_value=target)
+        await handle(self.bridge, "/switch", "01a13162")
+        self.bridge.backend.thread.assert_awaited_once_with(target, {})
+        self.assertEqual(self.bridge.state["thread"], target)
+
+    async def test_switch_ambiguous_id_prefix_lists_choices(self):
+        first = "01a13162-8d25-7883-ae2b-c70389dc9d58"
+        second = "01a1dead-0000-0000-0000-000000000000"
+        self.bridge.state.update(context="context", thread="current")
+        self.bridge.backend.list_threads = AsyncMock(return_value={
+            "data": [{"id": first, "name": "会话一"},
+                     {"id": second, "name": "会话二"}]})
+        self.bridge.backend.thread = AsyncMock()
+        await handle(self.bridge, "/switch", "01a1")
+        self.bridge.backend.thread.assert_not_awaited()
+        text = self.bridge.state["outbox"][-1]["text"]
+        self.assertIn("1. 会话一", text)
+        self.assertIn("2. 会话二", text)
+        self.assertIn("找到 2 个匹配会话", text)
+        self.assertEqual(self.bridge.state["sessionChoices"], [first, second])
+
+    async def test_switch_id_prefix_truncation_asks_for_more_characters(self):
+        ids = [f"01a1{i:04x}-0000-0000-0000-000000000000" for i in range(11)]
+        self.bridge.state.update(context="context", thread="current")
+        self.bridge.backend.list_threads = AsyncMock(return_value={
+            "data": [{"id": identity, "name": f"会话 {i}"}
+                     for i, identity in enumerate(ids)]})
+        self.bridge.backend.thread = AsyncMock()
+        await handle(self.bridge, "/switch", "01a1")
+        self.bridge.backend.thread.assert_not_awaited()
+        text = self.bridge.state["outbox"][-1]["text"]
+        self.assertEqual(len(self.bridge.state["sessionChoices"]), 10)
+        self.assertIn("共匹配 11 个会话", text)
+        self.assertIn("仅显示前 10 个", text)
+        self.assertNotIn("/sessions 01a1", text)
+
+    async def test_hex_like_title_search_still_falls_back_to_title_search(self):
+        target = "deadbeef-0000-0000-0000-000000000000"
+        self.bridge.state.update(context="context", thread="current")
+
+        async def threads(cursor=None, search=None):
+            if search is None:
+                return {"data": [{"id": "other", "name": "其他"}]}
+            return {"data": [{"id": target, "name": "dead 笔记"}]}
+
+        self.bridge.backend.list_threads = threads
+        self.bridge.backend.read_thread = AsyncMock(return_value={
+            "id": target, "status": {"type": "inactive"}})
+        self.bridge.backend.thread = AsyncMock(return_value=target)
+        await handle(self.bridge, "/switch", "dead")
+        self.bridge.backend.thread.assert_awaited_once_with(target, {})
+
     async def test_switch_ambiguous_search_lists_choices_without_activating(self):
         self.bridge.state.update(context="context", thread="current")
         self.bridge.backend.list_threads = AsyncMock(return_value={"data": [
@@ -364,10 +472,72 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.state["context"] = "context"
         await handle(self.bridge, "/backend", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
-        self.assertIn("后端: codex", text)
+        self.assertIn("后端: Codex", text)
         self.assertIn("可用: codex | deepseek", text)
         self.assertIn("```\n`/backend {名称}`", text)
         self.assertNotIn("切换：`/backend DeepSeek`", text)
+
+    async def test_backend_query_reloads_persisted_definitions(self):
+        path = Path(self.temp.name) / "config.json"
+        path.write_text('{"backends": {"deepseek": {"command": ["old", "app-server"]}}}',
+                        encoding="utf-8")
+        self.bridge.settings.path = path
+        reload_backend_definitions(self.bridge)
+        self.assertEqual(self.bridge.backend_configs["deepseek"]["command"],
+                         ["old", "app-server"])
+        path.write_text('{"backends": {"deepseek": {"command": ["new", "app-server"]}}}',
+                        encoding="utf-8")
+        self.bridge.state["context"] = "context"
+        await handle(self.bridge, "/backend", "")
+        self.assertEqual(self.bridge.backend_configs["deepseek"]["command"],
+                         ["new", "app-server"])
+
+    async def test_backend_switch_reconnects_a_changed_current_definition(self):
+        path = Path(self.temp.name) / "config.json"
+        path.write_text('{"backends": {"codex": {"useSystemProxy": true}}}',
+                        encoding="utf-8")
+        self.bridge.settings.path = path
+        reload_backend_definitions(self.bridge)
+        path.write_text('{"backends": {"codex": {"useSystemProxy": false}}}',
+                        encoding="utf-8")
+        with patch("commands.switch", AsyncMock()) as switch:
+            await handle(self.bridge, "/backend", "codex")
+        switch.assert_awaited_once_with(self.bridge, "codex", force=True)
+
+    async def test_custom_backend_is_data_driven_and_display_label_is_optional(self):
+        config = {"backends": {"kimi": {"label": "Kimi", "command": ["fake-kimi", "app-server"]}}}
+        bridge = Bridge(self.store, {"user": "owner"}, config)
+        self.assertEqual(bridge.backend_name, "kimi")
+        self.assertEqual(bridge.prompt_fields()["backend"], "Kimi")
+        self.assertEqual(backend_label("kimi", config["backends"]), "Kimi")
+        self.assertEqual(backend_label("kimi", {"kimi": {}}), "kimi")
+
+    async def test_custom_backend_requires_an_explicit_command(self):
+        with self.assertRaisesRegex(ValueError, "command 必须配置"):
+            definitions({"backends": {"kimi": {"label": "Kimi"}}})
+
+    async def test_missing_backend_command_fails_without_switching(self):
+        self.bridge.backend_configs["missing"] = {
+            "command": ["definitely-not-a-real-codex-binary", "app-server"],
+            "sharedDaemon": False,
+        }
+        self.bridge.state["context"] = "context"
+        await dispatch(self.bridge, "/backend missing")
+        self.assertEqual(self.bridge.backend_name, "codex")
+        self.assertIn("切换后端失败", self.bridge.state["outbox"][-1]["text"])
+
+    def test_backend_seed_adds_defaults_when_config_has_none(self):
+        config = {}
+        self.assertTrue(ensure_backend_config(config))
+        self.assertIn("codex", config["backends"])
+        self.assertIn("deepseek", config["backends"])
+
+    def test_backend_migration_fills_known_backend_defaults(self):
+        config = {"backends": {"deepseek": {"useSystemProxy": False}}}
+        self.assertTrue(ensure_backend_config(config))
+        self.assertEqual(config["backends"]["deepseek"]["command"],
+                         ["codex-deepseek", "app-server"])
+        self.assertEqual(config["backends"]["deepseek"]["label"], "DeepSeek")
 
     async def test_stop_during_input_preflight_never_starts_turn(self):
         backend = CodexBackend({"sharedDaemon": False}, self.temp.name, lambda _: None)
@@ -492,6 +662,6 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             outside.write_text("private")
             with self.assertRaises(MediaError):
                 self.bridge.media.snapshot(str(outside), workspace, automatic=True)
-            # An explicit user /send remains a separate, intentional operation.
+            # An explicit user /get remains a separate, intentional operation.
             asset = self.bridge.media.snapshot(str(outside), workspace)
             self.assertEqual(Path(asset["path"]).read_text(), "private")

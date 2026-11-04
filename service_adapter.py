@@ -103,7 +103,7 @@ async def stop_and_wait(timeout=20):
 async def start():
     current = await status()
     if not current.installed:
-        raise ValueError("本项目尚未安装后台服务，请手动运行 codex-wechat start")
+        raise ValueError("本项目尚未注册后台服务，请重新运行安装器")
     if current.running:
         return current
     if IS_WINDOWS:

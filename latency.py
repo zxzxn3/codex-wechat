@@ -25,6 +25,7 @@ _PHASE_PAIRS = {
 }
 _POST_TLS_PHASES = {"response_wait_ms", "download_ms"}
 NETWORK_TIMING_FIELDS = frozenset(CURL_TIMING_FIELDS.values()) | frozenset(_PHASE_PAIRS)
+_PROXY_VARIABLES = ("http_proxy", "https_proxy", "all_proxy")
 # Keep response body + HTTP code on stdout. Only explicitly selected numeric
 # milestones go to stderr; never use curl's broad %{json} diagnostic object.
 # Optional proxy telemetry stays on a separate line: curl <8.7 prints an
@@ -170,16 +171,29 @@ async def connection_probe(endpoint, env):
     # measured setup time; never substitute time_total/time_starttransfer.
     if isinstance(elapsed, (int, float)) and math.isfinite(elapsed) and elapsed > 0:
         return f"{elapsed * 1000:.0f}ms"
-    return "timeout" if proc.returncode == 28 else "unavailable"
+    if proc.returncode:
+        # Say which path failed: a direct attempt and a proxied one fail for
+        # entirely different reasons, and a bare label hides that.
+        kind = "timeout" if proc.returncode == 28 else "unreachable"
+        return kind + "(" + probe_reason(env) + ")"
+    return "unavailable(空响应)"
+
+
+def probe_reason(env):
+    """Name the network path a probe used, for failure reports only."""
+    configured = {key.lower() for key, value in env.items() if str(value).strip()}
+    return ("代理未响应" if any(name in configured for name in _PROXY_VARIABLES)
+            else "直连,未配置代理")
 
 
 async def provider_latency(backend):
     try:
         target = await asyncio.wait_for(backend.probe_target(), 3)
         if target is None:
-            return "unavailable"
+            return "unavailable(无可用目标)"
         return await connection_probe(*target)
     except TimeoutError:
-        return "timeout"
-    except (OSError, ValueError, RuntimeError):
-        return "unavailable"
+        return "timeout(读取后端配置)"
+    except (OSError, ValueError, RuntimeError) as error:
+        # The class is the only clue a user can report back; texts are unsafe.
+        return f"unavailable({type(error).__name__})"

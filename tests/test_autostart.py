@@ -12,6 +12,29 @@ from storage import Store
 
 
 class AutostartTests(unittest.IsolatedAsyncioTestCase):
+    async def test_windows_reads_the_task_without_starting_powershell(self):
+        with patch.object(autostart, "IS_WINDOWS", True), \
+                patch.object(autostart, "windows_task_flags", return_value=(True, True)), \
+                patch.object(autostart, "_windows_request", AsyncMock()) as script:
+            self.assertTrue(await autostart.status())
+            self.assertTrue(await autostart.installed())
+        script.assert_not_called()
+
+    async def test_windows_falls_back_to_the_launcher_script(self):
+        with patch.object(autostart, "IS_WINDOWS", True), \
+                patch.object(autostart, "windows_task_flags", side_effect=OSError("no scheduler")), \
+                patch.object(autostart, "_windows_request", AsyncMock(return_value=False)) as script, \
+                patch.object(autostart, "log_event"):
+            self.assertFalse(await autostart.status())
+        script.assert_awaited_once_with("status")
+
+    async def test_windows_without_the_task_reports_unavailable(self):
+        with patch.object(autostart, "IS_WINDOWS", True), \
+                patch.object(autostart, "windows_task_flags", return_value=(False, False)):
+            with self.assertRaises(ValueError):
+                await autostart.status()
+            self.assertFalse(await autostart.installed())
+
     async def test_linux_reads_native_state_and_checks_installation_identity(self):
         for value, expected in (("enabled", True), ("disabled", False), ("linked", False)):
             output = f"FragmentPath={autostart.INSTALL_ROOT / autostart.UNIT}\nUnitFileState={value}"
@@ -34,13 +57,13 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
             ("link", str((autostart.INSTALL_ROOT / autostart.UNIT).resolve())), ("daemon-reload",)])
         self.assertFalse(any("stop" in arg or "--now" in arg for arg in args))
 
-    async def test_enable_uses_installed_source_without_starting(self):
+    async def test_enable_only_toggles_an_installed_service(self):
         native = AsyncMock()
         with patch.object(autostart, "IS_WINDOWS", False), \
                 patch.object(autostart, "_linux_status", AsyncMock(side_effect=[False, True])), \
                 patch.object(autostart, "systemctl", native):
             self.assertTrue(await autostart.set_enabled(True))
-        native.assert_awaited_once_with("enable", str((autostart.INSTALL_ROOT / autostart.UNIT).resolve()))
+        native.assert_awaited_once_with("enable", autostart.UNIT)
 
     async def test_invalid_installation_prevents_mutation(self):
         native = AsyncMock()
@@ -85,10 +108,24 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
                 with patch("commands.autostart.status", AsyncMock(return_value=True)), \
                         patch("commands.autostart.set_enabled", AsyncMock(return_value=False)) as setter:
                     await dispatch(bridge, "/settings")
-                    self.assertIn("自启: 开启", bridge.state["outbox"][-1]["text"])
-                    await dispatch(bridge, "/settings autostart off")
-                    self.assertEqual(bridge.state["outbox"][-1]["text"], "自启: 关闭")
+                    self.assertIn("autostart: true", bridge.state["outbox"][-1]["text"])
+                    settings_text = bridge.state["outbox"][-1]["text"]
+                    self.assertIn(
+                        "\n\n以上设置可通过 `/settings [option] [value]` 更改。",
+                        settings_text)
+                    self.assertLess(settings_text.index("slicing.smart:"),
+                                    settings_text.index("sourceHint:"))
+                    self.assertLess(settings_text.index("sourceHint:"),
+                                    settings_text.index("[无法直接修改]"))
+                    self.assertLess(settings_text.index("[无法直接修改]"),
+                                    settings_text.index("quotaWarningThresholds.primary:"))
+                    self.assertLess(settings_text.index("quotaWarningThresholds.primary:"),
+                                    settings_text.index("以上设置"))
+                    await dispatch(bridge, "/settings autostart false")
+                    self.assertEqual(bridge.state["outbox"][-1]["text"], "autostart: false")
                     await dispatch(bridge, "/settings autostart maybe")
+                    self.assertIn("用法", bridge.state["outbox"][-1]["text"])
+                    await dispatch(bridge, "/settings autostart on")
                     self.assertIn("用法", bridge.state["outbox"][-1]["text"])
                     setter.assert_awaited_once_with(False)
                 bridge.ensure_backend.assert_not_called()
@@ -103,25 +140,23 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
             try:
                 bridge = Bridge(store, {"user": "owner"}, {})
                 bridge.state["context"] = "context"
-                with patch("commands.autostart.set_enabled", AsyncMock(side_effect=RuntimeError("denied"))), \
-                        patch("commands.autostart.installed", AsyncMock(return_value=True)):
-                    await dispatch(bridge, "/settings autostart on")
+                with patch("commands.autostart.set_enabled", AsyncMock(side_effect=RuntimeError("denied"))):
+                    await dispatch(bridge, "/settings autostart true")
                 self.assertIn("未确认", bridge.state["outbox"][-1]["text"])
             finally:
                 store.lock.close()
 
-    async def test_settings_first_enable_uses_safe_handoff(self):
+    async def test_settings_enable_only_toggles_autostart(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "state")
             try:
                 bridge = Bridge(store, {"user": "owner"}, {})
                 bridge.state["context"] = "context"
-                bridge.enable_background_service = AsyncMock()
-                with patch("commands.autostart.IS_WINDOWS", False), \
-                        patch("commands.autostart.installed", AsyncMock(return_value=False)), \
-                        patch("commands.autostart.set_enabled", AsyncMock()) as setter:
-                    await dispatch(bridge, "/settings autostart on")
-                bridge.enable_background_service.assert_awaited_once()
-                setter.assert_not_called()
+                bridge.running = True
+                with patch("commands.autostart.set_enabled", AsyncMock(return_value=True)) as setter:
+                    await dispatch(bridge, "/settings autostart true")
+                setter.assert_awaited_once_with(True)
+                self.assertEqual(bridge.state["outbox"][-1]["text"], "autostart: true")
+                self.assertFalse(bridge.restarting)
             finally:
                 store.lock.close()

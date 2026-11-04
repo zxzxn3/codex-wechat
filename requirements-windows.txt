@@ -1,0 +1,2 @@
+# Native Windows service, Job Object, mutex and IPC bindings.
+pywin32; sys_platform == "win32"

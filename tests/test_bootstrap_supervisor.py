@@ -6,14 +6,14 @@ import tempfile
 import unittest
 
 import bootstrap_supervisor
+from unittest.mock import patch
 
 
 class BootstrapSupervisorTests(unittest.TestCase):
-    def test_legacy_layout_uses_install_root(self):
+    def test_missing_current_pointer_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "windows_service.py").write_text("", encoding="utf-8")
-            self.assertEqual(bootstrap_supervisor.active_release(root), root.resolve())
+            with self.assertRaisesRegex(ValueError, "version pointer is missing"):
+                bootstrap_supervisor.active_release(Path(directory))
 
     def test_current_pointer_selects_immutable_release(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -54,6 +54,83 @@ class BootstrapSupervisorTests(unittest.TestCase):
             (root / "current").write_text("abc123\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "releases directory must not be a symlink"):
                 bootstrap_supervisor.active_release(root)
+
+
+class BootstrapSupervisorLoopTests(unittest.TestCase):
+    def _root(self, directory, *identifiers):
+        root = Path(directory) / "app"
+        for identifier in identifiers:
+            release = root / "releases" / identifier
+            (release / ".venv" / "Scripts").mkdir(parents=True)
+            (release / ".venv" / "Scripts" / "python.exe").write_text("", encoding="utf-8")
+            (release / "windows_service.py").write_text("", encoding="utf-8")
+        return root
+
+    def _argv(self, directory, root):
+        return ["supervise", "--install-root", str(root),
+                "--state-dir", str(Path(directory) / ".state"),
+                "--config", str(Path(directory) / "config.json"),
+                "--log", str(Path(directory) / "service.log")]
+
+    def test_switch_code_reloads_the_release_selected_by_the_pointer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(directory, "first", "second")
+            pointer = root / "current"
+            pointer.write_text("first\n", encoding="utf-8")
+            first = (root / "releases" / "first").resolve()
+            loaded = []
+
+            class Module:
+                RELEASE_SWITCH_EXIT_CODE = 76
+
+                async def supervise(self, project, *_args, **_kwargs):
+                    if project == first:
+                        pointer.write_text("second\n", encoding="utf-8")
+                        return 76
+                    return 0
+
+            def load(release):
+                loaded.append(release.name)
+                return Module()
+
+            with patch.dict(os.environ, {}), \
+                 patch.object(bootstrap_supervisor.time, "sleep"), \
+                 patch.object(bootstrap_supervisor, "load_supervisor", load):
+                code = bootstrap_supervisor.main(self._argv(directory, root))
+
+            self.assertEqual(code, 0)
+            self.assertEqual(loaded, ["first", "second"])
+            log = (Path(directory) / "service.log").read_text(encoding="utf-8")
+            self.assertIn("version pointer changed; loading second", log)
+
+    def test_broken_pointer_keeps_the_running_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(directory, "first")
+            pointer = root / "current"
+            pointer.write_text("first\n", encoding="utf-8")
+            runs = []
+
+            class Module:
+                RELEASE_SWITCH_EXIT_CODE = 76
+
+                async def supervise(self, project, *_args, **_kwargs):
+                    runs.append(project.name)
+                    if len(runs) == 1:
+                        pointer.write_text("missing\n", encoding="utf-8")
+                        return 76
+                    return 0
+
+            with patch.dict(os.environ, {}), \
+                 patch.object(bootstrap_supervisor.time, "sleep"), \
+                 patch.object(bootstrap_supervisor, "load_supervisor",
+                              lambda release: Module()):
+                code = bootstrap_supervisor.main(self._argv(directory, root))
+
+            self.assertEqual(code, 0)
+            self.assertEqual(runs, ["first", "first"])
+            log = (Path(directory) / "service.log").read_text(encoding="utf-8")
+            # The same broken pointer is reported once, not on every restart.
+            self.assertEqual(log.count("release switch:"), 1)
 
 
 if __name__ == "__main__":

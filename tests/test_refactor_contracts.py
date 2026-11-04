@@ -29,11 +29,11 @@ class StabilityTests(unittest.IsolatedAsyncioTestCase):
 
     def test_restart_and_media_have_independent_lanes(self):
         self.assertEqual(command_lane("/restart", ""), "local")
-        self.assertEqual(command_lane("/send", "file"), "media")
+        self.assertEqual(command_lane("/get", "file"), "media")
 
     def test_ping_missing_sample_has_no_unit(self):
-        self.assertEqual(ping_channel({"ingress_ms": "120", "egress_ms": "-"}), "WeChat ─120ms/-")
-        self.assertEqual(ping_channel({"ingress_ms": "-", "egress_ms": "-"}), "WeChat ─-/-")
+        self.assertEqual(ping_channel({"ingress_ms": "120", "egress_ms": "-"}), "微信 ─120ms/-")
+        self.assertEqual(ping_channel({"ingress_ms": "-", "egress_ms": "-"}), "微信 ─-/-")
 
     def test_usage_cache_reads_only_changed_files(self):
         with tempfile.TemporaryDirectory() as root:

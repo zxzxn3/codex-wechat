@@ -83,8 +83,7 @@ class RemoteUpdateTests(unittest.TestCase):
 
     def test_installed_command_uses_saved_source_and_explicit_local_source_wins(self):
         self.target.mkdir()
-        (self.target / "codex_wechat.py").write_text("legacy")
-        (self.target / "installer.py").write_text("legacy")
+        (self.target / "current").write_text("a" * 16)
         (self.target / installer.UPDATE_SOURCE_FILE).write_text(json.dumps(self.choice))
         with patch.object(installer, "SOURCE_ROOT", self.target), \
              patch.object(installer, "default_target", return_value=self.target), \

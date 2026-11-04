@@ -8,6 +8,7 @@ import socket
 import daemon_control
 from backend_runtime import BackendRuntime
 from codex_connection import ConnectionSpec
+from diagnostics import error_fields, log_event
 from subprocess_io import communicate
 from platform_support import IS_WINDOWS, subprocess_options
 from version import APP_VERSION
@@ -37,6 +38,15 @@ class CodexRpcError(RuntimeError):
         stage = f"（{method}）" if method else ""
         detail = f"：{self.reason}" if self.reason else ""
         super().__init__(f"Codex RPC 错误 {code}{stage}{detail}")
+
+class SharedDaemonUnavailable(RuntimeError):
+    """The shared daemon cannot be reached or started; callers may use a private server."""
+    def __init__(self, reason, *, cause=None):
+        super().__init__(str(reason))
+        self.cause = cause
+        self.cause_type = type(cause).__name__ if cause is not None else None
+        self.cause_code = getattr(cause, "code", None)
+        self.retry_after = getattr(cause, "retry_after", None)
 
 class CodexTransport:
     def __init__(self, config, cwd, *, on_request, on_event, on_connect, on_disconnect):
@@ -75,7 +85,11 @@ class CodexTransport:
                 raise  # A protocol rejection is not evidence that the daemon is absent.
             except (TimeoutError, RuntimeError, OSError):
                 await self.close()
-            unit = await self.start_shared_daemon(command[:-1], env)
+            try:
+                unit = await self.start_shared_daemon(command[:-1], env)
+            except (TimeoutError, RuntimeError, OSError) as error:
+                await self.close()
+                raise SharedDaemonUnavailable(str(error), cause=error) from error
             deadline = asyncio.get_running_loop().time() + 30
             last_error = "连接超时"
             while asyncio.get_running_loop().time() < deadline:
@@ -89,11 +103,14 @@ class CodexTransport:
                     state = await daemon_control.status(unit) if unit else {}
                     failure = daemon_control.failure(state, command) if unit else None
                     if failure:
-                        raise failure from error
+                        await self.close()
+                        raise SharedDaemonUnavailable(str(failure), cause=failure) from error
                     last_error = str(error) if isinstance(error, RuntimeError) else type(error).__name__
                     await self.close()
-                    await asyncio.sleep(0.5)
-            raise RuntimeError(f"共享后台自动启动后仍未连接成功：{last_error}（{unit}）；请检查启动器/登录状态后重试 /backend")
+                    # A fresh daemon needs about 0.7s before its socket answers;
+                    # poll faster than that so the wait is not rounded up to it.
+                    await asyncio.sleep(0.25)
+            raise SharedDaemonUnavailable(f"共享后台自动启动后仍未连接成功：{last_error}")
         await self.connect(command, env)
 
     async def start_shared_daemon(self, command, env):
@@ -215,8 +232,11 @@ class CodexTransport:
                     await self.on_request(msg)
                 else:
                     self.on_event(msg)
-        except (ValueError, OSError, RuntimeError):
-            pass
+        except (ValueError, OSError, RuntimeError) as error:
+            # A failing handler ends this loop as well, so record what happened;
+            # otherwise the disconnect below reads as a network problem.
+            log_event("codex.read_failed", level="warning", component="transport",
+                      **error_fields(error))
         finally:
             error = RuntimeError("共享 Codex 连接断开，可重试 /backend 自动连接或启动后台；未重放任务"
                                  if self.shared else "Codex 连接断开，请重启微信桥；未自动重放任务")

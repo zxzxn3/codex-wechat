@@ -1,4 +1,4 @@
-"""Version-scoped Linux App follower protocol; never owns an App process.
+"""Version-scoped App follower protocol; never owns an App process.
 
 Framing and method versions come from App 26.1027.51404. This is not the
 public app-server protocol. Only a discovered owner may receive a request.
@@ -17,6 +17,9 @@ from codex_transport import CodexRpcError
 from diagnostics import log_event
 
 MAX_FRAME = 16 * 1024 * 1024
+# Module constant so callers and tests can describe the platform without
+# patching os.name, which pathlib also reads.
+WINDOWS = os.name == "nt"
 VERSIONS = {
     "initialize": 0, "thread-owner-discovery": 1,
     "thread-stream-following-changed": 1,
@@ -37,13 +40,22 @@ RESPONSES = {
 
 def ipc_path(config):
     """Do not guess the home selected inside an arbitrary launcher."""
-    if os.name == "nt" or config.get("websocketUrl"):
-        return None
     home = config.get("env", {}).get("CODEX_HOME")
     command = config.get("command", ["codex", "app-server"])
-    if not home and Path(command[0]).name != "codex":
+    if not home and Path(command[0]).name.lower() not in ("codex", "codex.exe"):
         return None
-    return Path(home or Path.home() / ".codex").expanduser() / "ipc" / "ipc.sock"
+    home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+    if WINDOWS:
+        # Windows has a single App pipe per user, not one socket per CODEX_HOME.
+        # Do not adopt a same-ID conversation from a separate backend home.
+        primary = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+        if home.resolve() != primary.resolve():
+            return None
+        from app_ipc_windows import PIPE_PATH
+        return Path(PIPE_PATH)
+    if config.get("websocketUrl") and not config.get("env", {}).get("CODEX_HOME"):
+        return None
+    return home / "ipc" / "ipc.sock"
 
 
 def apply_patches(state, patches):
@@ -131,20 +143,37 @@ class AppSession:
         return bool(self.reader and not self.reader.done() and not self.closing)
 
     async def attach(self):
+        if WINDOWS:
+            from app_ipc_windows import open_pipe
+            self.stream, self.writer = await asyncio.wait_for(
+                open_pipe(self.path, limit=MAX_FRAME + 4), 8)
+        else:
+            self.stream, self.writer = await self.open_unix()
+        await self.attach_protocol()
+
+    async def open_unix(self):
         # Same-user private socket only; no symlink endpoints or shared directories.
         parent, endpoint = self.path.parent.lstat(), self.path.lstat()
         if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.getuid()
                 or parent.st_mode & 0o022 or not stat.S_ISSOCK(endpoint.st_mode)
                 or endpoint.st_uid != os.getuid()):
             raise ValueError("App IPC 路径不属于当前用户或权限不安全")
-        self.stream, self.writer = await asyncio.wait_for(asyncio.open_unix_connection(
+        return await asyncio.wait_for(asyncio.open_unix_connection(
             str(self.path), limit=MAX_FRAME + 4), 3)
+
+    async def attach_protocol(self):
         self.reader = asyncio.create_task(self.read())
         result = await self.request("initialize", {"clientType": "codex-wechat"})
-        self.client = result["clientId"]
+        client = result.get("clientId")
+        if not isinstance(client, str) or not client:
+            raise ValueError("App IPC initialize 响应缺少 clientId")
+        self.client = client
         result = await self.request("thread-owner-discovery", {
             "hostId": "local", "conversationId": self.thread_id}, discover=True)
-        self.owner = result["owner"]
+        owner = result.get("owner")
+        if not isinstance(owner, str) or not owner:
+            raise ValueError("App IPC owner discovery 响应缺少 owner")
+        self.owner = owner
         await self.follow(True)
         await asyncio.wait_for(self.snapshot_ready.wait(), 5)
         if self.state.get("id") != self.thread_id or self.state.get("hostId", "local") != "local":
@@ -192,8 +221,13 @@ class AppSession:
             if method != "initialize" and not discover and response.get("handledByClientId") != self.owner:
                 raise RuntimeError("App IPC 响应来源改变；投递结果未确认")
             if discover:
-                return {"owner": response["handledByClientId"]}
-            result = response.get("result", {})
+                owner = response.get("handledByClientId")
+                if not isinstance(owner, str) or not owner:
+                    raise CodexRpcError(-32603, "App IPC owner discovery 响应缺少 handledByClientId", method)
+                return {"owner": owner}
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise CodexRpcError(-32603, "App IPC 响应 result 格式无效", method)
             if method == "initialize":
                 return result
             if response.get("method") != method and result.get("method") != method:
@@ -213,12 +247,15 @@ class AppSession:
                 "hostId": "local", "conversationId": self.thread_id, "following": following}))
 
     async def read(self):
+        stage, method, failure = "frame", None, None
         try:
             while True:
+                stage = "frame"
                 size = struct.unpack("<I", await self.stream.readexactly(4))[0]
                 if not 0 < size <= MAX_FRAME:
                     raise ValueError("App IPC frame exceeds budget")
                 message = json.loads(await self.stream.readexactly(size))
+                stage = "handle"
                 if message.get("type") == "response":
                     future = self.requests.get(message.get("requestId"))
                     if future and not future.done():
@@ -227,16 +264,20 @@ class AppSession:
                     await self.send(dict(type="client-discovery-response",
                         requestId=message["requestId"], response={"canHandle": False}))
                 elif message.get("type") == "broadcast":
+                    stage = "broadcast"
+                    method = message.get("method")
                     await self.broadcast(message)
-        except (OSError, ValueError, KeyError, IndexError, TypeError, RuntimeError, asyncio.IncompleteReadError):
-            pass
+        except (OSError, ValueError, KeyError, IndexError, TypeError, RuntimeError, asyncio.IncompleteReadError) as error:
+            failure = error
         finally:
             error = RuntimeError("App IPC 连接断开；未自动重发，可重试 /switch 或 /backend")
             for future in list(self.requests.values()):
                 if not future.done():
                     future.set_exception(error)
             if self.enabled and not self.closing:
-                log_event("app_ipc.disconnected", level="warning", component="app_ipc", connected=False)
+                log_event("app_ipc.disconnected", level="warning", component="app_ipc",
+                          connected=False, phase=stage, method=method,
+                          error_type=type(failure).__name__ if failure else "PeerClosed")
                 self.on_disconnect(error)
 
     async def broadcast(self, message):
@@ -364,8 +405,15 @@ class AppSession:
                              if t.get("turnId")], "nextCursor": None}
         if method == "turn/start":
             params = {**params, "input": app_inputs(params["input"])}
-            return (await self.request("thread-follower-start-turn", {**base,
-                "turnStart": {"request": params, "context": {}}}))["result"]
+            response = await self.request("thread-follower-start-turn", {**base,
+                "turnStart": {"request": params, "context": {}}})
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise CodexRpcError(-32603, "App IPC turn/start 响应缺少 result", method)
+            turn = result.get("turn")
+            if not isinstance(turn, dict) or not isinstance(turn.get("id"), str) or not turn["id"]:
+                raise CodexRpcError(-32603, "App IPC turn/start 响应缺少 turn.id", method)
+            return result
         if method == "turn/steer":
             active = next((t for t in reversed(turns(self.state)) if t.get("status") == "inProgress"), None)
             if not active or active.get("turnId") != params.get("expectedTurnId"):
@@ -374,9 +422,13 @@ class AppSession:
                 "cwd": self.state.get("cwd"), "context": {
                     "workspaceRoots": [self.state.get("cwd") or "/"],
                     "collaborationMode": self.state.get("latestCollaborationMode")}}
-            return (await self.request("thread-follower-steer-turn", {**base,
+            response = await self.request("thread-follower-steer-turn", {**base,
                 "input": app_inputs(params["input"]), "restoreMessage": restore,
-                "clientUserMessageId": params.get("clientUserMessageId")}))["result"]
+                "clientUserMessageId": params.get("clientUserMessageId")})
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise CodexRpcError(-32603, "App IPC turn/steer 响应缺少 result", method)
+            return result
         if method == "turn/interrupt":
             return await self.request("thread-follower-interrupt-turn", {**base,
                 "mode": "user-stop", "expectedTurnId": params["turnId"]})

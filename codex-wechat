@@ -36,7 +36,7 @@ if [ -f "$CURRENT_FILE" ]; then
     export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"
 fi
 case "${1:-}" in
-    app|cli)
+    cli)
         ACTION="$1"; shift
         exec "$INSTALL_ROOT/codex-desktop" "$ACTION" -- "$@"
         ;;

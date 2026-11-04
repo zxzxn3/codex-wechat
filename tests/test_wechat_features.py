@@ -250,7 +250,7 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(split_answer(
             'answer\nWECHAT_MEDIA: {"path":"/tmp/clip.mp4","kind":"video"}')[1],
             [{"path": "/tmp/clip.mp4", "kind": "video"}])
-        self.assertIn("/sendvideo", REGISTRY)
+        self.assertIn("/getfile", REGISTRY)
 
     async def test_remember_quote_is_bounded(self):
         state = {}

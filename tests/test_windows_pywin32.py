@@ -78,6 +78,9 @@ class WindowsPywin32Tests(unittest.TestCase):
             job.close()
         self.assertEqual(info["BasicLimitInformation"]["LimitFlags"],
                          0x00003000)
+        attributes, name = job_module.CreateJobObject.call_args.args
+        self.assertIsNone(attributes)
+        self.assertTrue(isinstance(name, str) and name.startswith("Local\\CodexWeChatChild-"))
         configure.assert_called_once_with(
             handle, 9, info)
         self.assertEqual(handle.closed, 1)
@@ -130,7 +133,9 @@ class WindowsPywin32Tests(unittest.TestCase):
 
     def test_windows_dependency_is_declared_for_windows_only(self):
         requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text()
-        self.assertIn('pywin32; sys_platform == "win32"', requirements)
+        self.assertIn('-r requirements-windows.txt', requirements)
+        native = (Path(__file__).resolve().parents[1] / "requirements-windows.txt").read_text()
+        self.assertIn('pywin32; sys_platform == "win32"', native)
 
 
 if __name__ == "__main__":

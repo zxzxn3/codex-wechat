@@ -1,5 +1,4 @@
 """Offline contracts for the Windows per-user service; no Windows calls."""
-import asyncio
 import json
 import os
 from pathlib import Path
@@ -69,6 +68,27 @@ class ServiceControlTests(unittest.IsolatedAsyncioTestCase):
                     service_control._require_windows_owner()
 
 
+    def test_windows_owner_accepts_only_the_recorded_venv_launcher_chain(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "owner.json"
+            path.write_text(json.dumps({"token": "secret-token", "child_pid": 1234,
+                                        "supervisor_pid": 4321}), encoding="utf-8")
+            parent = {os.getpid(): 1234, 1234: 4321}
+            with patch.dict(os.environ, {"AGENT_WECHAT_SERVICE_OWNER": str(path),
+                                        "AGENT_WECHAT_SERVICE_TOKEN": "secret-token"}), \
+                    patch.object(windows_service, "parent_pid", side_effect=parent.get), \
+                    patch.object(service_control, "_is_venv_launcher", return_value=True) as launcher:
+                service_control._require_windows_owner()
+                launcher.assert_called_once_with(1234)
+                launcher.return_value = False
+                with self.assertRaises(ValueError):
+                    service_control._require_windows_owner()
+                launcher.return_value = True
+                parent[1234] = 9999
+                with self.assertRaises(ValueError):
+                    service_control._require_windows_owner()
+
+
 class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.enterContext(patch.object(windows_service, "ChildJob"))
@@ -93,10 +113,9 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(path.exists())
 
     def test_restart_delay(self):
-        self.assertEqual(windows_service.restart_delay(75, 30), 0.2)
-        self.assertEqual(windows_service.restart_delay(1, 4), 4)
-        self.assertEqual(windows_service.restart_delay(1, 0.05), 1)
-        self.assertEqual(windows_service.restart_delay(1, 100), 60)
+        self.assertEqual(windows_service.restart_delay(4), 4)
+        self.assertEqual(windows_service.restart_delay(0.05), 1)
+        self.assertEqual(windows_service.restart_delay(100), 60)
 
     def test_failure_window_allows_five_then_resets_after_five_minutes(self):
         failures = []
@@ -122,7 +141,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             second.acquire()
             second.release()
 
-    async def test_supervisor_restarts_exit_75_and_removes_owner_status(self):
+    async def test_user_restart_returns_switch_code_and_removes_owner_status(self):
         class Process:
             pid = 1234
             returncode = 75
@@ -138,23 +157,21 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         spawn = AsyncMock(side_effect=lambda *args, **kwargs: (
             calls.append(1) or (Process(), Stream())
         ))
-
-        async def stop_loop(_delay):
-            if len(calls) >= 2:
-                raise asyncio.CancelledError
+        sleep = AsyncMock()
 
         with tempfile.TemporaryDirectory() as temp:
             state = Path(temp) / ".state"
             log = Path(temp) / "service.log"
             owner = windows_service.owner_status_path(state)
             with patch.object(windows_service, "_spawn_bridge", spawn), \
-                 patch.object(windows_service.asyncio, "sleep", stop_loop):
-                with self.assertRaises(asyncio.CancelledError):
-                    await windows_service.supervise(
-                        ROOT, state, Path(temp) / "config.json", log)
-            self.assertEqual(spawn.await_count, 2)
+                 patch.object(windows_service.asyncio, "sleep", sleep):
+                result = await windows_service.supervise(
+                    ROOT, state, Path(temp) / "config.json", log)
+            self.assertEqual(result, windows_service.RELEASE_SWITCH_EXIT_CODE)
+            self.assertEqual(spawn.await_count, 1)
+            sleep.assert_not_awaited()
             self.assertFalse(owner.exists())
-            self.assertIn("bridge started", log.read_text(encoding="utf-8"))
+            self.assertIn("handing back to the bootstrap", log.read_text(encoding="utf-8"))
 
     async def test_supervisor_exits_without_restart_on_normal_or_config_exit(self):
         class Stream:
@@ -217,31 +234,40 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 1)
         self.assertEqual(spawn.await_count, 5)
 
-    async def test_user_restart_does_not_consume_failure_budget(self):
+    async def test_startup_discards_a_stale_owner_record(self):
         class Process:
             pid = 1234
-
-            def __init__(self, returncode):
-                self.returncode = returncode
+            returncode = 0
 
             async def wait(self):
-                return self.returncode
+                return 0
 
         class Stream:
             def close(self):
                 pass
 
-        codes = iter([75, 75, 75, 75, 75, 75, 0])
-        spawn = AsyncMock(side_effect=lambda *args, **kwargs: (
-            Process(next(codes)), Stream()))
         with tempfile.TemporaryDirectory() as temp:
-            with patch.object(windows_service, "_spawn_bridge", spawn), \
-                 patch.object(windows_service.asyncio, "sleep", AsyncMock()):
+            state = Path(temp) / ".state"
+            state.mkdir()
+            status_path = windows_service.owner_status_path(state)
+            status_path.write_text(json.dumps({
+                "version": 1, "supervisor_pid": 111, "child_pid": 222,
+                "token": "stale", "state_dir": str(state), "started_at": 0}),
+                encoding="utf-8")
+            seen = []
+
+            async def spawn(command, project, env, log_path):
+                # The new supervisor must not inherit the previous owner record.
+                seen.append(status_path.exists())
+                return Process(), Stream()
+
+            with patch.object(windows_service, "_spawn_bridge", spawn):
                 result = await windows_service.supervise(
-                    ROOT, Path(temp) / ".state",
-                    Path(temp) / "config.json", Path(temp) / "service.log")
+                    ROOT, state, Path(temp) / "config.json",
+                    Path(temp) / "service.log")
         self.assertEqual(result, 0)
-        self.assertEqual(spawn.await_count, 7)
+        self.assertEqual(seen, [False])
+        self.assertFalse(status_path.exists())
 
     def test_scripts_pin_current_user_task_and_power_settings(self):
         install = (ROOT / "install.ps1").read_text(encoding="utf-8")
@@ -290,6 +316,31 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("if ($PurgeData)", text)
         self.assertIn("data retained", text)
         self.assertIn("project files and the virtual environment were not removed", text)
+
+    def test_uninstall_checks_exact_task_ownership_before_stopping(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertIn("ExpectedActionExecutables", text)
+        self.assertIn("$execute = [string]$actions[0].Execute", text)
+        self.assertIn("$ExpectedActionExecutables -contains $execute", text)
+        self.assertIn("[char]::IsWhiteSpace($actionText[$prefix.Length])", text)
+        self.assertNotIn("Join-Path $Project 'windows_service.py'", text)
+
+    def test_uninstall_stops_shared_backend_only_when_purging(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertEqual(text.count("Stop-SharedBackends"), 2)
+        self.assertGreater(text.rindex("Stop-SharedBackends"),
+                           text.index("if ($PurgeData)"))
+        self.assertLess(text.rindex("Stop-SharedBackends"),
+                        text.index("Remove-Item -LiteralPath $DataRoot"))
+        self.assertIn("shared-backend-process.json", text)
+        self.assertIn("recorded identity no longer matches", text)
+        self.assertIn("still has attached clients", text)
+        self.assertIn("a shared Codex backend under the data root is left running", text)
+
+    def test_uninstall_removes_the_task_only_after_purging_data(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertGreater(text.index("Unregister-ScheduledTask"),
+                           text.index("Remove-Item -LiteralPath $DataRoot"))
 
     def test_powershell_entry_does_not_read_undefined_last_exit_code(self):
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")

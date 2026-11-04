@@ -7,14 +7,23 @@ import os
 from pathlib import Path
 import re
 import secrets
+import time
 import urllib.parse
 import uuid
 
 from configuration import DEFAULT_SOURCE_HINT
+from diagnostics import error_fields, log_event
 from platform_support import IS_WINDOWS
 
 CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_MAX_MIB = 20
+MEDIA_MAX_MIB_MIN = 1
+MEDIA_MAX_MIB_MAX = 100
+# This path serves both downloads and uploads. A single GET retry is safe;
+# upload POST retry remains under verification because idempotency is unproven.
+# Six seconds already exceeds a normal CDN connect by an order of magnitude here.
+CDN_ATTEMPTS = 2
+CDN_CONNECT_TIMEOUT = 6
 MAX_ATTACHMENTS = 10
 OUTPUT_HINT = "\n\n" + DEFAULT_SOURCE_HINT
 VIDEO_SUFFIXES = {
@@ -29,6 +38,36 @@ VIDEO_BRANDS = {
 
 class MediaError(ValueError):
     pass
+
+
+class _TransferFailure:
+    """One failed CDN attempt and whether repeating it can help."""
+
+    __slots__ = ("kind", "message", "retryable", "error", "curl_code", "http_status")
+
+    def __init__(self, kind, *, message, retryable, error=None,
+                 curl_code=None, http_status=None):
+        self.kind = kind
+        self.message = message
+        self.retryable = retryable
+        self.error = error
+        self.curl_code = curl_code
+        self.http_status = http_status
+
+
+def _classify_transfer(status, code):
+    """Describe a completed response; None means the body arrived normally."""
+    if code == 63:
+        return _TransferFailure("size_limit", curl_code=code, retryable=False,
+                                message="附件超过本地大小限制。")
+    if code:
+        return _TransferFailure("curl", curl_code=code, retryable=code == 28,
+                                message=f"附件 CDN 请求失败（curl {code}），"
+                                        "未输出含令牌的 URL。")
+    if status != 200:
+        return _TransferFailure("http_status", http_status=status, retryable=False,
+                                message="微信 CDN 未返回 HTTP 200。")
+    return None
 
 
 def image_extension(data):
@@ -130,12 +169,14 @@ class Media:
         self.root = (store.root / "media").resolve()
         self.channel = channel
         self.limit = int((config or {}).get("maxMiB", DEFAULT_MAX_MIB)) * 1024 * 1024
-        if not 0 < self.limit <= 100 * 1024 * 1024:
-            raise MediaError("media.maxMiB 必须在 1 到 100 之间。")
+        if not (MEDIA_MAX_MIB_MIN * 1024 * 1024 <= self.limit
+                <= MEDIA_MAX_MIB_MAX * 1024 * 1024):
+            raise MediaError(
+                f"media.maxMiB 必须在 {MEDIA_MAX_MIB_MIN} 到 {MEDIA_MAX_MIB_MAX} 之间。")
 
     def write(self, folder, name, data):
         directory = self.root / folder
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.mkdir(parents=True, exist_ok=True)
         if not IS_WINDOWS:
             directory.chmod(0o700)
             self.root.chmod(0o700)
@@ -152,21 +193,48 @@ class Media:
 
     async def transfer(self, url, data=None):
         url = cdn_url(url)
-        try:
-            received, status, code, parameter = await self.channel.http.transfer(
-                url, data, limit=self.limit + 16)
-        except TimeoutError:
-            raise MediaError("附件传输达到总超时限制。") from None
-        except Exception:
-            # Transport exception strings can contain the encrypted CDN query.
-            raise MediaError("附件 CDN 请求失败，未输出含令牌的 URL。") from None
-        if code:
-            if code == 63:
-                raise MediaError("附件超过本地大小限制。")
-            raise MediaError(f"附件 CDN 请求失败（curl {code}），未输出含令牌的 URL。")
-        if status != 200:
-            raise MediaError("微信 CDN 未返回 HTTP 200。")
-        return received, parameter
+        for attempt in range(1, CDN_ATTEMPTS + 1):
+            started = time.monotonic()
+            try:
+                received, status, code, parameter = await self.channel.http.transfer(
+                    url, data, limit=self.limit + 16,
+                    connect_timeout=CDN_CONNECT_TIMEOUT)
+            except TimeoutError as error:
+                failure = _TransferFailure("timeout", error=error, retryable=True,
+                                           message="附件传输达到总超时限制。")
+            except Exception as error:
+                # Transport exception strings can contain the encrypted CDN query.
+                failure = _TransferFailure("transport", error=error, retryable=True,
+                                           message="附件 CDN 请求失败，未输出含令牌的 URL。")
+            else:
+                failure = _classify_transfer(status, code)
+                if failure is None:
+                    self._log_transfer(True, started, kind="ok",
+                                       http_status=status, bytes_=len(received))
+                    return received, parameter
+            self._log_transfer(False, started, kind=failure.kind, error=failure.error,
+                               curl_code=failure.curl_code,
+                               http_status=failure.http_status)
+            if not (failure.retryable and attempt < CDN_ATTEMPTS):
+                raise MediaError(failure.message) from None
+            log_event("media.transfer_retry", level="warning", component="media",
+                      attempt=attempt, kind=failure.kind)
+
+    @staticmethod
+    def _log_transfer(ok, started, *, kind, error=None, curl_code=None,
+                      http_status=None, bytes_=None):
+        fields = {"component": "media", "ok": ok, "kind": kind,
+                  "duration_ms": (time.monotonic() - started) * 1000}
+        if curl_code is not None:
+            fields["curl_code"] = curl_code
+        if http_status is not None:
+            fields["http_status"] = http_status
+        if bytes_ is not None:
+            fields["bytes"] = bytes_
+        if error is not None:
+            fields.update(error_fields(error))
+        log_event("media.transfer" if ok else "media.transfer_failed",
+                  level="info" if ok else "warning", **fields)
 
     async def incoming(self, items):
         if len(items) > MAX_ATTACHMENTS:
@@ -228,14 +296,14 @@ class Media:
                 workspace = Path(cwd).expanduser().resolve()
                 if (workspace in (Path.home(), Path(workspace.anchor)) or not path.is_relative_to(workspace)
                         or any(part.startswith(".") for part in path.relative_to(workspace).parts)):
-                    raise MediaError("自动回传仅限当前工作目录内的非隐藏文件或媒体目录；其他路径请明确使用 /send。")
+                    raise MediaError("自动回传仅限当前工作目录内的非隐藏文件或媒体目录；其他路径请明确使用 /get。")
                 if IS_WINDOWS:
                     import stat
                     for parent in (path, *path.parents):
                         if parent == workspace:
                             break
                         if parent.stat().st_file_attributes & (stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM):
-                            raise MediaError("自动回传不允许隐藏或系统文件；请明确使用 /send。")
+                            raise MediaError("自动回传不允许隐藏或系统文件；请明确使用 /get。")
             if not path.is_file():
                 raise MediaError("附件路径不是普通文件。")
             with path.open("rb") as stream:
@@ -249,7 +317,7 @@ class Media:
             raise MediaError("图片仅支持 PNG、JPEG、GIF、WebP；其他格式请作为文件发送。")
         detected_video = video_extension(path.name, data)
         if kind == "video" and not detected_video:
-            raise MediaError("视频格式无法识别；请使用 /sendfile 作为文件发送。")
+            raise MediaError("视频格式无法识别；请使用 /getfile 作为文件发送。")
         selected = ("image" if detected and kind != "file" else
                     "video" if detected_video and kind != "file" else "file")
         frozen = self.write("outgoing", path.name, data)

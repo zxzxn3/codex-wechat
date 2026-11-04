@@ -2,18 +2,24 @@
   "sourceHint": "[User from WeChat.]",
   "connectionIdleSeconds": 60,
   "prompts": {},
-  "processingNotice": "`IN < {input_tokens}`",
+  "processingNotice": "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`",
   "backends": {
     "codex": {
+      "label": "Codex",
+      "command": [
+        "codex",
+        "app-server"
+      ],
       "env": {},
-      "threadOptions": {}
+      "threadOptions": {},
+      "useSystemProxy": true
     }
   },
   "slicing": {
-    "mode": "smart",
+    "smart": true,
     "targetChars": 600
   },
-  "compactionNotice": false,
+  "compactionNotice": true,
   "quotaWarningThresholds": {
     "primary": [
       50,

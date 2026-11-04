@@ -11,7 +11,7 @@ import sys
 import time
 import uuid
 
-from lifecycle import can_restart, can_handoff_service
+from lifecycle import can_restart
 import service_adapter
 import service_control
 import wechat_auth
@@ -27,11 +27,11 @@ from commands import (
     parse_control,
 )
 from command_specs import REGISTRY, CONTROL_LANES, command_lane
-from configuration import ConfigLoader, ConfigurationError, HotSettings
+from configuration import ConfigLoader, ConfigurationError, HotSettings, write_config
 from prompts import (prompt_text)
 from quota import quota_warnings
 from records import InputPhase
-from profiles import backend_label, definitions, snapshot
+from profiles import backend_label, definitions, ensure_backend_config, snapshot
 from rebind import run_rebind
 from media import Media, MAX_ATTACHMENTS
 from latency import Latency, message_timestamps
@@ -46,16 +46,38 @@ from wechat_content import (
 )
 from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, WeChatPollTimeout, backend_reason
 from platform_support import IS_WINDOWS, data_root
-from diagnostics import error_fields, log_event, new_request_id
+from diagnostics import error_fields, log_event, log_path, new_request_id
 from log_viewer import show_logs
-from prompts import (render_ack, status_fields)
+from prompts import (render_ack, status_fields, duration_label)
 
 ROOT = Path(__file__).resolve().parent
+
+
+def mark_active_release():
+    """Keep the release a running bridge was loaded from out of pruning."""
+    if ROOT.parent.name != "releases":
+        return
+    target = ROOT.parent.parent / "active-release"
+    try:
+        temporary = target.with_name(target.name + ".tmp")
+        temporary.write_text(ROOT.name + "\n", encoding="utf-8")
+        if not IS_WINDOWS:
+            temporary.chmod(0o600)
+        os.replace(temporary, target)
+    except OSError:
+        pass
+
+
+def show_log_path():
+    """Point foreground users at the full structured log without copying it."""
+    if sys.stdout.isatty():
+        print(f"完整日志: {log_path()}", flush=True)
 
 
 class Bridge:
     def __init__(self, store, account, config, backend_factory=CodexBackend, channel=None, config_path=None):
         self.store, self.account, self.config = store, account, config
+        ensure_backend_config(self.config)
         self.settings = ConfigLoader(config, config_path)
         self.state = store.load("bridge", {"cursor": "", "thread": None,
             "inbox": [], "outbox": [], "seen": [], "running": False})
@@ -70,7 +92,10 @@ class Bridge:
         self.media = Media(store, self.channel, config.get("media"))
         self.backend_factory = backend_factory
         self.backend_configs = definitions(config)
-        self.backend_name = self.state.get("backendName", "codex")
+        saved_backend = self.state.get("backendName")
+        self.backend_name = (saved_backend if saved_backend is not None else
+                             "codex" if "codex" in self.backend_configs else
+                             next(iter(self.backend_configs)))
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
         self.controls = {lane: asyncio.Queue(maxsize=20) for lane in CONTROL_LANES}
@@ -78,6 +103,7 @@ class Bridge:
         self.input_paused = False
         self.backend_recovering = False
         self.latency = Latency()
+        self.last_turn_seconds = None
         last_send = self.state.get("lastSendMs")
         if type(last_send) in (int, float) and last_send >= 0:
             self.latency.sends.append(float(last_send))
@@ -96,7 +122,6 @@ class Bridge:
         self.model_choices = []
         self.session_catalog = None
         self.restarting = False
-        self.shutdown_requested = lambda: None
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:
             self.outbox_drained.set()
@@ -159,6 +184,8 @@ class Bridge:
         backend.on_external_result = self.external_results.put_nowait
         backend.on_message = lambda message: self.output.deliver_message(message) \
             if getattr(self, "backend", None) is backend else None
+        backend.report = lambda event, **fields: log_event(
+            event, component="backend", backend=name, **fields)
         return backend
 
     def current_input_hint(self):
@@ -219,7 +246,8 @@ class Bridge:
         messages = quota_warnings(records, payload, scope, self.notifications.quota_thresholds,
                                   text=self.prompt)
         for message in messages:
-            self.reply(self.prompt("QUOTA_WARNING", {"backend": backend_label(self.backend_name),
+            self.reply(self.prompt("QUOTA_WARNING", {"backend": backend_label(
+                self.backend_name, self.backend_configs),
                                                      "content": message}), persist=False)
         if messages or before != json.dumps(records, sort_keys=True):
             self.save()
@@ -245,6 +273,9 @@ class Bridge:
         return active if active and not active["done"].done() else None
 
     def acknowledge(self, job):
+        # Every delivery attempt re-sends the receipt: while a desktop holds the
+        # writer the retries back off, so the repeats stay few and tell the user
+        # the message is still being tried.
         template = notice(self)
         if template:
             self.reply(render_ack(template, self.prompt_fields(job.get("ingress_ms"))),
@@ -263,11 +294,12 @@ class Bridge:
             status = "后端连接未就绪"
         values = status_fields(
             status=status,
-            backend=backend_label(self.backend_name),
+            backend=backend_label(self.backend_name, self.backend_configs),
             queued=len(self.state["inbox"]),
             pending=len(self.backend.pending),
             failed=self.state["consecutiveSendFailures"],
             name=details.get("name"),
+            session_id=self.state.get("thread"),
             model=details.get("model"),
             provider=details.get("provider"),
             effort=details.get("effort"),
@@ -280,8 +312,10 @@ class Bridge:
             usage=details.get("usage"),
             rate_limits=rate_limits,
             connection="本地后台" if self.backend.shared else "独立进程",
+            shared_fallback=self.backend.shared_fallback,
         )
         values.update(self.latency.values(ingress_ms))
+        values["elapsed"] = duration_label(self.last_turn_seconds)
         sample = self.latency.provider_sample
         values["provider_latency_ms"] = (sample[1].removesuffix("ms")
                               if sample and sample[0] == self.backend.connection_id
@@ -376,6 +410,14 @@ class Bridge:
                       kind="voice" if 3 in kinds else "text" if 1 in kinds else "other",
                       chars=len(message_text(msg)), count=len(msg.get("item_list", [])))
             if msg.get("message_type") != 1:
+                # Type 2 is this bridge's outbound message shape; never answer it.
+                if (msg.get("message_type") == 2 or not msg.get("context_token")
+                        or identity in self.state["seen"]):
+                    continue
+                wechat_auth.accept_context(self.state, msg["context_token"])
+                self.state["seen"].append(identity)
+                self.reject_input(request_id, "unsupported", "unsupported_type")
+                self.reply(self.prompt("UNSUPPORTED_MESSAGE_TYPE"), request_id=request_id)
                 continue
             if not msg.get("context_token"):
                 # Cannot safely reply without a context token; don't execute.
@@ -427,8 +469,7 @@ class Bridge:
                                                "requestId": request_id})
                     if queued:
                         count = len(self.state["inbox"])
-                        self.reply(self.prompt("QUEUE_CONFIRMED", {"count": count,
-                                                         "unit": "task" if count == 1 else "tasks"}),
+                        self.reply(self.prompt("QUEUE_CONFIRMED", {"count": count, "unit": "条"}),
                                    persist=False, request_id=request_id)
             else:
                 status = "too_long" if len(text) > 20000 else "unsupported"
@@ -457,31 +498,6 @@ class Bridge:
 
     async def control(self, text, *, received=None):
         await dispatch(self, text, received=received)
-
-
-    async def enable_background_service(self):
-        """First opt-in can hand an idle foreground bridge to its new service."""
-        import autostart
-        default = data_root()
-        if (self.store.root.resolve() != (default / ".state").resolve() or
-                (self.settings.path is not None and
-                 self.settings.path.resolve() != (default / "config.json").resolve())):
-            raise UserFacingError(self.prompt("AUTOSTART_CUSTOM_PATH"))
-        if not can_handoff_service(self):
-            raise UserFacingError(self.prompt("AUTOSTART_BUSY"))
-        self.restarting = True
-        try:
-            await autostart.set_enabled(True, start_if_missing=False)
-            self.reply(self.prompt("LABEL_AUTOSTART") + ": " + self.prompt("VALUE_ON"))
-            await asyncio.wait_for(self.outbox_drained.wait(), 20)
-            await service_control.systemctl("--no-block", "start", service_control.UNIT)
-            self.shutdown_requested()
-            await asyncio.Event().wait()
-        finally:
-            if not asyncio.current_task().cancelling():
-                self.restarting = False
-                self.wake.set()
-                self.steer_wake.set()
 
 
     async def restart_service(self):
@@ -634,6 +650,7 @@ class Bridge:
             log_event("bridge.start", component="bridge", backend=self.backend_name,
                       connected=self.backend.connected)
             print("微信桥已启动；Ctrl+C 停止。", flush=True)
+            show_log_path()
             await asyncio.gather(*tasks)
         finally:
             for task in tasks:
@@ -681,7 +698,8 @@ async def startup_account(store):
             raise ConfigurationError("微信凭据不完整；运行 " + wechat_auth.rebind_command() + " 重新绑定。")
         return account
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        raise ConfigurationError("尚未绑定微信，请在交互终端运行 codex-wechat start 完成扫码。")
+        raise ConfigurationError("尚未绑定微信。请在终端运行 "
+                                 + wechat_auth.start_command() + "，然后按提示扫码。")
     print("尚未绑定微信，请在当前终端扫码；绑定后会继续启动。", flush=True)
     await login(store, starting=True)
     account = store.load("account")
@@ -768,9 +786,26 @@ async def stop_background_service(state_dir, config_path):
     print("后台服务已停止。")
 
 
+async def start_background_service(args):
+    """Start the installed service; bind interactively if this terminal can show QR."""
+    current = await service_adapter.status()
+    if not current.installed:
+        raise ConfigurationError("尚未注册后台服务，请重新运行安装器。")
+    store = await startup_store(args)
+    try:
+        # service-start is still terminal-driven; a background task cannot show
+        # a QR code. Use the same binding gate as foreground start.
+        await startup_account(store)
+        await service_adapter.start()
+        print("后台服务已启动。")
+    finally:
+        store.close()
+
+
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("login", "start", "stop", "status", "rebind", "logs"))
+    parser.add_argument("action", choices=(
+        "login", "start", "stop", "status", "rebind", "logs", "service-start"))
     parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
     parser.add_argument("--stop-active", action="store_true")
@@ -790,6 +825,9 @@ async def main():
         return
     if args.action == "stop":
         await stop_background_service(args.state_dir, args.config)
+        return
+    if args.action == "service-start":
+        await start_background_service(args)
         return
     if args.action == "rebind":
         await run_rebind(
@@ -812,6 +850,8 @@ async def main():
             config = json.loads(args.config.read_text(encoding="utf-8-sig")) if args.config.exists() else {}
             if not isinstance(config, dict):
                 raise ValueError("配置必须是 JSON 对象。")
+            if ensure_backend_config(config):
+                write_config(args.config, config)
             bridge = Bridge(store, account, config, config_path=args.config)
         except ValueError as error:
             raise ConfigurationError(str(error)) from None
@@ -819,12 +859,15 @@ async def main():
         cwd.mkdir(parents=True, exist_ok=True)
         loop = asyncio.get_running_loop()
         main_task = asyncio.current_task()
-        bridge.shutdown_requested = main_task.cancel
         for signum in (signal.SIGINT, signal.SIGTERM):
             if IS_WINDOWS:
                 signal.signal(signum, lambda *_: loop.call_soon_threadsafe(main_task.cancel))
             else:
                 loop.add_signal_handler(signum, main_task.cancel)
+        # Only a process that holds the bridge state lock and is ready to run
+        # may replace the release-protection marker.
+        if args.action == "start":
+            mark_active_release()
         await bridge.run()
 
 

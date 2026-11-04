@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -7,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from codex_wechat import Bridge
 from backend import CodexBackend
-from command_specs import COMMANDS, HELP, REGISTRY, command_lane
+from command_specs import COMMANDS, HELP_ALL, REGISTRY, command_lane
 from commands import HANDLERS, handle, parse_control, validate
 from configuration import (ConfigLoader, DEFAULT_COMPLETION_TEMPLATE,
                            completion_template, processing_template)
@@ -20,6 +21,15 @@ from codex_transport import CodexRpcError, CodexTransport
 class ConfigLoaderExtraTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch("configuration.log_event"))
+        self.ticks = 0
+
+    def rewrite(self, path, payload):
+        path.write_text(json.dumps(payload))
+        # Change detection is (inode, mtime, size); Windows clock ticks can
+        # repeat, so equal-length rewrites need an explicit distinct stamp.
+        self.ticks += 1
+        stamp = 1_700_000_000_000_000_000 + self.ticks * 1_000_000
+        os.utime(path, ns=(stamp, stamp))
 
     def test_group_validation_retention_deletion_and_override_scope(self):
         with tempfile.TemporaryDirectory() as root:
@@ -28,27 +38,27 @@ class ConfigLoaderExtraTests(unittest.TestCase):
                 "processingNotice": "file ack",
                 "completionNotice": "file done",
                 "sourceHint": "hint-a",
-                "slicing": {"mode": "smart", "targetChars": 600},
+                "slicing": {"smart": True, "targetChars": 600},
                 "compactionNotice": False,
                 "quotaWarningThresholds": {"primary": [50], "secondary": [25]},
             }
-            path.write_text(json.dumps(initial))
+            self.rewrite(path, initial)
             config = dict(initial)
             state = {"processingNotice": "chat ack", "completionNotice": "chat done"}
             loader = ConfigLoader(config, path)
 
             unrelated = dict(initial, sourceHint="hint-b",
-                             slicing={"mode": "length", "targetChars": 800})
-            path.write_text(json.dumps(unrelated))
+                             slicing={"smart": False, "targetChars": 800})
+            self.rewrite(path, unrelated)
             self.assertFalse(loader.reload(state))
             self.assertEqual(config["sourceHint"], "hint-b")
             self.assertEqual(loader.hot.slicing.target_chars, 800)
             self.assertEqual(state["processingNotice"], "chat ack")
 
             invalid = dict(unrelated, sourceHint="must-not-apply",
-                           slicing={"mode": "length", "targetChars": 1},
+                           slicing={"smart": False, "targetChars": 1},
                            compactionNotice=True)
-            path.write_text(json.dumps(invalid))
+            self.rewrite(path, invalid)
             self.assertFalse(loader.reload(state))
             self.assertEqual(config["sourceHint"], "hint-b")
             self.assertEqual(loader.hot.slicing.target_chars, 800)
@@ -56,22 +66,23 @@ class ConfigLoaderExtraTests(unittest.TestCase):
             self.assertEqual(state["completionNotice"], "chat done")
 
             deleted = dict(unrelated, sourceHint="hint-c",
-                           slicing={"mode": "length", "targetChars": 900})
+                           slicing={"smart": False, "targetChars": 900})
             deleted.pop("processingNotice")
             deleted.pop("completionNotice")
-            path.write_text(json.dumps(deleted))
+            self.rewrite(path, deleted)
             self.assertTrue(loader.reload(state))
             self.assertNotIn("processingNotice", config)
             self.assertNotIn("completionNotice", config)
             self.assertNotIn("processingNotice", state)
             self.assertNotIn("completionNotice", state)
-            self.assertEqual(processing_template(config, state), "`IN < {input_tokens}`")
+            self.assertEqual(processing_template(config, state),
+                             "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`")
             self.assertEqual(completion_template(config, state), DEFAULT_COMPLETION_TEMPLATE)
 
             state["processingNotice"] = "new chat override"
             unrelated_hot = dict(deleted, quotaWarningThresholds={
                 "primary": [25], "secondary": [10]})
-            path.write_text(json.dumps(unrelated_hot))
+            self.rewrite(path, unrelated_hot)
             self.assertFalse(loader.reload(state))
             self.assertEqual(state["processingNotice"], "new chat override")
             self.assertEqual(loader.hot.notifications.quota_thresholds,
@@ -83,7 +94,7 @@ class CommandMetadataExtraTests(unittest.TestCase):
         self.assertEqual(set(HANDLERS), {
             spec.name for spec in COMMANDS if spec.route != "input"})
         for spec in COMMANDS:
-            self.assertIn(spec.usage, HELP)
+            self.assertIn(spec.help_usage or spec.usage, HELP_ALL)
             for alias in spec.aliases:
                 self.assertIs(REGISTRY[alias], spec)
             if spec.route != "input":
@@ -96,7 +107,7 @@ class CommandMetadataExtraTests(unittest.TestCase):
         self.assertEqual(command_lane("/cwd", "/tmp"), "backend")
         self.assertEqual(command_lane("/restart", ""), "local")
         self.assertEqual(command_lane("/stop", ""), "urgent")
-        self.assertEqual(command_lane("/send", "file"), "media")
+        self.assertEqual(command_lane("/get", "file"), "media")
         self.assertEqual(command_lane("/ping", ""), "probe")
         self.assertEqual(parse_control("  /switch \t 2  "), ("/switch", "2"))
         with self.assertRaises(UserFacingError):
@@ -167,7 +178,7 @@ class MediaSnapshotExtraTests(unittest.IsolatedAsyncioTestCase):
                     "message_type": 1,
                     "context_token": "context-old",
                     "item_list": [{"type": 1, "text_item": {
-                        "text": "/sendfile /origin/file.txt"}}],
+                        "text": "/getfile /origin/file.txt"}}],
                 }]})
                 text, received = bridge.controls["media"].get_nowait()
                 bridge.state["context"] = "context-new"

@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 import json
+import os
 import sys
 from prompts import validate_prompt_overrides
 from diagnostics import error_fields, log_event
@@ -10,9 +11,14 @@ DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
                    "compactionNotice", "quotaWarningThresholds", "prompts", "connectionIdleSeconds")
 DEFAULT_CONNECTION_IDLE_SECONDS = 60
-DEFAULT_COMPLETION_TEMPLATE = "`OUT > {output_tokens}`"
-DEFAULT_ACK_TEMPLATE = "`IN < {input_tokens}`"
+CONNECTION_IDLE_MIN = 0
+CONNECTION_IDLE_MAX = 3600
+DEFAULT_COMPLETION_TEMPLATE = "`OUT > {turn_output_tokens} in {elapsed}`"
+DEFAULT_ACK_TEMPLATE = "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`"
+SLICING_TARGET_MIN = 80
+SLICING_TARGET_MAX = 20000
 TEXT_LIMIT_BYTES = 3000
+SOURCE_HINT_LIMIT_BYTES = 4000
 QUOTA_WINDOWS = ("primary", "secondary")
 DEFAULT_QUOTA_THRESHOLDS = {
     "primary": (50, 25, 10, 5, 1),
@@ -24,9 +30,17 @@ class ConfigurationError(ValueError):
     """A persistent startup configuration problem requiring user correction."""
 
 
+def write_config(path, config):
+    """Replace the file in one step so a crash never leaves a partial configuration."""
+    temp = Path(path).with_name(Path(path).name + ".tmp")
+    temp.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8")
+    os.replace(temp, path)
+
+
 @dataclass(frozen=True)
 class Notifications:
-    compaction: bool = False
+    compaction: bool = True
     quota_thresholds: dict[str, tuple[int, ...]] = field(
         default_factory=lambda: dict(DEFAULT_QUOTA_THRESHOLDS))
 
@@ -60,14 +74,16 @@ class Slicing:
     @classmethod
     def from_config(cls, value=None):
         value = {} if value is None else value
-        if not isinstance(value, dict) or set(value) - {"mode", "targetChars"}:
-            raise ValueError("slicing 仅支持 mode 和 targetChars")
-        mode = value.get("mode", cls.mode)
+        if not isinstance(value, dict) or set(value) - {"smart", "targetChars"}:
+            raise ValueError("slicing 仅支持 smart 和 targetChars")
+        smart = value.get("smart", cls.mode == "smart")
+        if type(smart) is not bool:
+            raise ValueError("slicing.smart 必须是布尔值")
+        mode = "smart" if smart else "length"
         target = value.get("targetChars", cls.target_chars)
-        if mode not in ("smart", "length"):
-            raise ValueError("slicing.mode 必须是 smart 或 length")
-        if type(target) is not int or not 80 <= target <= 20000:
-            raise ValueError("slicing.targetChars 必须是 80–20000 的整数")
+        if type(target) is not int or not SLICING_TARGET_MIN <= target <= SLICING_TARGET_MAX:
+            raise ValueError(
+                f"slicing.targetChars 必须是 {SLICING_TARGET_MIN}–{SLICING_TARGET_MAX} 的整数")
         return cls(mode, target)
 
 
@@ -85,12 +101,14 @@ class HotSettings:
                 or "completionNotice" in config and not isinstance(config["completionNotice"], str)):
             raise ValueError("提示模板类型无效")
         hint = config.get("sourceHint", DEFAULT_SOURCE_HINT)
-        if not isinstance(hint, str) or len(hint.encode()) > 4000:
-            raise ValueError("sourceHint 必须是最多 4000 字节的文本")
+        if not isinstance(hint, str) or len(hint.encode()) > SOURCE_HINT_LIMIT_BYTES:
+            raise ValueError(
+                f"sourceHint 必须是最多 {SOURCE_HINT_LIMIT_BYTES} 字节的文本")
         templates = validate_prompt_overrides(config.get("prompts", {}), limit=TEXT_LIMIT_BYTES)
         idle = config.get("connectionIdleSeconds", DEFAULT_CONNECTION_IDLE_SECONDS)
-        if type(idle) is not int or not 0 <= idle <= 3600:
-            raise ValueError("connectionIdleSeconds 必须是 0–3600 的整数")
+        if type(idle) is not int or not CONNECTION_IDLE_MIN <= idle <= CONNECTION_IDLE_MAX:
+            raise ValueError(
+                f"connectionIdleSeconds 必须是 {CONNECTION_IDLE_MIN}–{CONNECTION_IDLE_MAX} 的整数")
         return cls(Slicing.from_config(config.get("slicing")), Notifications.from_config(config), hint,
                    templates, idle)
 

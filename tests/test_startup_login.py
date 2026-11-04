@@ -1,13 +1,26 @@
 """First-launch login is interactive only; never contact the real WeChat API."""
 import asyncio
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from codex_wechat import startup_account
+from codex_wechat import startup_account, start_background_service
 from configuration import ConfigurationError
 
 
 class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
+    async def test_service_start_uses_the_same_binding_gate(self):
+        store = Mock()
+        with patch("codex_wechat.service_adapter.status",
+                   AsyncMock(return_value=SimpleNamespace(installed=True))), \
+             patch("codex_wechat.startup_store", AsyncMock(return_value=store)), \
+             patch("codex_wechat.startup_account", AsyncMock()) as account, \
+             patch("codex_wechat.service_adapter.start", AsyncMock()) as start:
+            await start_background_service(SimpleNamespace(action="service-start"))
+        account.assert_awaited_once_with(store)
+        start.assert_awaited_once()
+        store.close.assert_called_once()
+
     async def test_existing_binding_never_triggers_login_even_without_terminal(self):
         account = {"token": "fixture", "user": "owner"}
         store = Mock(load=Mock(side_effect=lambda name, default=None: account if name == "account" else {}))

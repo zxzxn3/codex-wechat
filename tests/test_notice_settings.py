@@ -5,12 +5,27 @@ import tempfile
 import unittest
 
 from codex_wechat import Bridge
-from commands import handle, notice
+from commands import dispatch, handle, notice
 from configuration import HotSettings, Notifications, completion_template
 from storage import Store
 
 
 class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_notice_views_use_the_settings_subcommands(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = Store(Path(root) / "state")
+            try:
+                bridge = Bridge(store, {"user": "owner"}, {})
+                bridge.state["context"] = "ctx"
+                await handle(bridge, "/settings", "ack")
+                self.assertIn("`/settings ack {模板}`",
+                              bridge.state["outbox"][-1]["text"])
+                await handle(bridge, "/settings", "finish")
+                self.assertIn("`/settings finish {模板}`",
+                              bridge.state["outbox"][-1]["text"])
+            finally:
+                store.lock.close()
+
     async def test_chat_update_completion_and_file_reload(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "config.json"
@@ -20,9 +35,9 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
             try:
                 bridge = Bridge(store, {"user": "owner"}, initial, config_path=path)
                 bridge.state["context"] = "ctx"
-                await handle(bridge, "/ack", "text hello")
+                await handle(bridge, "/settings", "ack hello")
                 self.assertEqual(notice(bridge), "hello")
-                await handle(bridge, "/finish", "text done {model}")
+                await handle(bridge, "/settings", "finish done {model}")
                 await bridge.deliver_answer("answer", notify_completion=True)
                 self.assertEqual(bridge.state["outbox"][-1]["text"], "done 默认模型")
                 path.write_text(json.dumps({"processingNotice": "new file", "completionNotice": "file done"}))
@@ -30,7 +45,7 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(completion_template(bridge.config, bridge.state), "file done")
                 path.write_text("{invalid")
                 self.assertEqual(notice(bridge), "new file")
-                await handle(bridge, "/finish", "text")
+                await handle(bridge, "/settings", 'finish ""')
                 self.assertEqual(completion_template(bridge.config, bridge.state), "")
                 self.assertFalse(bridge.backend_started)
             finally:
@@ -79,7 +94,61 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 "primary": [25, 10, 5],
                 "secondary": [50, 25, 10, 5, 1],
             }}))
-        self.assertIn("限额警告: 5小时=25%/10%/5%；7天=50%/25%/10%/5%/1%", text)
+        self.assertIn("quotaWarningThresholds.primary: [25,10,5]", text)
+        self.assertIn("quotaWarningThresholds.secondary: [50,25,10,5,1]", text)
+
+
+class NumericSettingsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_numeric_settings_are_persisted_and_applied(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "config.json"
+            store = Store(Path(root) / "state")
+            try:
+                bridge = Bridge(store, {"user": "owner"}, {}, config_path=path)
+                bridge.state["context"] = "ctx"
+                await handle(bridge, "/settings", "connectionIdleSeconds 5")
+                self.assertEqual(bridge.settings.hot.connection_idle_seconds, 5)
+                self.assertEqual(json.loads(path.read_text())["connectionIdleSeconds"], 5)
+                await handle(bridge, "/settings", "slicing.targetChars 900")
+                self.assertEqual(bridge.slicing.target_chars, 900)
+                self.assertEqual(json.loads(path.read_text())["slicing"]["targetChars"], 900)
+                await handle(bridge, "/settings", "slicing.smart false")
+                self.assertEqual(bridge.slicing.mode, "length")
+                self.assertIs(json.loads(path.read_text())["slicing"]["smart"], False)
+                await handle(bridge, "/settings", "media.maxMiB 30")
+                self.assertEqual(bridge.media.limit, 30 * 1024 * 1024)
+                self.assertEqual(json.loads(path.read_text())["media"]["maxMiB"], 30)
+                await handle(bridge, "/settings", "compactionNotice false")
+                self.assertFalse(bridge.notifications.compaction)
+                self.assertFalse(json.loads(path.read_text())["compactionNotice"])
+                await handle(bridge, "/settings", "sourceHint hello")
+                self.assertEqual(bridge.source_hint, "hello")
+                self.assertEqual(json.loads(path.read_text())["sourceHint"], "hello")
+                await handle(bridge, "/settings", 'sourceHint ""')
+                self.assertEqual(bridge.source_hint, "")
+                self.assertEqual(json.loads(path.read_text())["sourceHint"], "")
+                self.assertIn("sourceHint: \n", bridge.state["outbox"][-1]["text"])
+                await dispatch(bridge, "/settings connectionIdleSeconds 3601")
+                self.assertIn("3600", bridge.state["outbox"][-1]["text"])
+                self.assertEqual(bridge.settings.hot.connection_idle_seconds, 5)
+                await dispatch(bridge, "/settings slicing.targetChars nope")
+                self.assertIn("80–20000", bridge.state["outbox"][-1]["text"])
+                self.assertEqual(bridge.slicing.target_chars, 900)
+                await dispatch(bridge, "/settings slicing.smart maybe")
+                self.assertIn("用法", bridge.state["outbox"][-1]["text"])
+                self.assertEqual(bridge.slicing.mode, "length")
+                await dispatch(bridge, "/settings media.maxMiB 101")
+                self.assertIn("1–100", bridge.state["outbox"][-1]["text"])
+                self.assertEqual(bridge.media.limit, 30 * 1024 * 1024)
+                await dispatch(bridge, "/settings compactionNotice on")
+                self.assertIn("用法", bridge.state["outbox"][-1]["text"])
+                self.assertFalse(bridge.notifications.compaction)
+                await dispatch(bridge, "/settings sourceHint nope")
+                self.assertEqual(bridge.source_hint, "nope")
+                await handle(bridge, "/settings", 'sourceHint ""')
+                self.assertEqual(bridge.source_hint, "")
+            finally:
+                store.lock.close()
 
 
 class ConnectionIdleSettingsTests(unittest.IsolatedAsyncioTestCase):
@@ -114,9 +183,10 @@ class ConnectionIdleSettingsTests(unittest.IsolatedAsyncioTestCase):
     async def test_settings_summary_shows_effective_value(self):
         from prompts import settings_summary
         text = settings_summary(notice="", attachment_mib=10, connection_idle_seconds=2)
-        self.assertIn("连接空闲: 2s", text)
+        self.assertIn("ack: \n", text)
+        self.assertIn("connectionIdleSeconds: 2", text)
         text = settings_summary(notice="", attachment_mib=10, connection_idle_seconds=0)
-        self.assertIn("连接空闲: 不按空闲回收", text)
+        self.assertIn("connectionIdleSeconds: 0", text)
 
     async def test_values_are_bounded_integers(self):
         for value in (-1, 3601, True, "60", 1.5, None):

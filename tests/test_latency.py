@@ -31,13 +31,38 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
         process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
             b'{"time_appconnect":0}', None)), stdin=None)
         with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-            self.assertEqual(await connection_probe("https://api.example", {}), "timeout")
+            self.assertEqual(await connection_probe("https://api.example", {}),
+                             "timeout(直连,未配置代理)")
+
+    async def test_timeout_names_the_failing_path(self):
+        process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
+            b'{"time_appconnect":0}', None)), stdin=None)
+        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+            self.assertEqual(
+                await connection_probe("https://api.example", {"HTTPS_PROXY": "http://127.0.0.1:7897"}),
+                "timeout(代理未响应)")
+            self.assertEqual(
+                await connection_probe("https://api.example", {"HTTPS_PROXY": "  "}),
+                "timeout(直连,未配置代理)")
+
+    async def test_refused_connection_is_not_called_unavailable(self):
+        # curl 7 = could not connect, which a blocked direct route returns at once.
+        process = SimpleNamespace(returncode=7, communicate=AsyncMock(return_value=(
+            b'{"time_appconnect":0}', None)), stdin=None)
+        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+            self.assertEqual(await connection_probe("https://api.example", {}),
+                             "unreachable(直连,未配置代理)")
+            self.assertEqual(
+                await connection_probe("https://api.example", {"ALL_PROXY": "socks5://127.0.0.1:7897"}),
+                "unreachable(代理未响应)")
 
     async def test_missing_backend_or_rpc_timeout_is_explicit(self):
         backend = SimpleNamespace(probe_target=AsyncMock(return_value=None))
-        self.assertEqual(await provider_latency(backend), "unavailable")
+        self.assertEqual(await provider_latency(backend), "unavailable(无可用目标)")
         backend.probe_target.side_effect = TimeoutError()
-        self.assertEqual(await provider_latency(backend), "timeout")
+        self.assertEqual(await provider_latency(backend), "timeout(读取后端配置)")
+        backend.probe_target.side_effect = RuntimeError("boom")
+        self.assertEqual(await provider_latency(backend), "unavailable(RuntimeError)")
 
     async def test_cancellation_reaps_probe(self):
         entered = asyncio.Event()

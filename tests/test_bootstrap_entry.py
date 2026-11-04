@@ -28,22 +28,15 @@ class BootstrapEntryTests(unittest.TestCase):
             path.write_text(f"{relative}\n", encoding="utf-8")
         return root
 
-    def test_fresh_and_legacy_installs_choose_the_correct_operation_without_touching_data(self):
-        for existing in (False, True):
-            target = self.root / str(existing)
-            if existing:
-                target.mkdir()
-                (target / "codex_wechat.py").write_text("old")
-                (target / "installer.py").write_text("old")
-                (target / "config.json").write_text("keep")
-            with patch.object(installer, "fetch_update_source") as fetch, \
-                 patch.object(installer, "_common_install", return_value=0) as common, \
-                 patch.object(installer, "remember_update_source"):
-                self.assertEqual(installer.bootstrap(target, self.choice), 0)
-                self.assertEqual(common.call_args.kwargs, {"dry_run": False, "update": existing})
-                self.assertEqual(fetch.call_args.args[0], self.choice)
-            if existing:
-                self.assertEqual((target / "config.json").read_text(), "keep")
+    def test_fresh_install_does_not_treat_an_unversioned_directory_as_an_install(self):
+        target = self.root / "target"
+        target.mkdir()
+        (target / "codex_wechat.py").write_text("old")
+        (target / "installer.py").write_text("old")
+        with patch.object(installer, "fetch_update_source") as fetch:
+            with self.assertRaisesRegex(ValueError, "非空"):
+                installer.bootstrap(target, self.choice)
+            fetch.assert_not_called()
 
     def test_unrelated_directory_is_not_adopted_or_downloaded_over(self):
         self.target.mkdir()
@@ -114,3 +107,9 @@ class BootstrapEntryTests(unittest.TestCase):
             self.assertEqual(result.returncode == 0, valid, result.stderr)
             if valid:
                 self.assertIn("不下载或修改文件", result.stdout)
+
+    def test_network_entry_fetches_the_release_helper(self):
+        shell = (Path(__file__).resolve().parents[1] / "bootstrap.sh").read_text(encoding="utf-8")
+        powershell = (Path(__file__).resolve().parents[1] / "bootstrap.ps1").read_text(encoding="utf-8")
+        self.assertIn("release.py", shell)
+        self.assertIn("release.py", powershell)

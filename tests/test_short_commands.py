@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from codex_wechat import Bridge
-from command_specs import REGISTRY, command_lane, HELP
+from command_specs import REGISTRY, command_lane, HELP, HELP_ALL
 from commands import dispatch
 from storage import Store
 
@@ -23,13 +23,19 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_aliases_and_protected_commands_share_one_registry(self):
         for short, full in (("/s", "/status"), ("/q", "/queue"), ("/m", "/model"),
-                            ("/e", "/effort"), ("/p", "/ping"), ("/h", "/help")):
+                            ("/e", "/effort"), ("/p", "/ping"), ("/h", "/help"),
+                            ("/a", "/answer")):
             self.assertIs(REGISTRY[short], REGISTRY[full])
             self.assertEqual(command_lane(short, ""), command_lane(full, ""))
-            self.assertIn(f"`{short}`", HELP)
+            self.assertIn(f"`{short}`", HELP_ALL)
         for name in ("/settings", "/sessions", "/switch", "/new", "/stop", "/restart",
-                     "/backend", "/cwd", "/approve", "/deny", "/send", "/answer", "/compact"):
+                     "/backend", "/cwd", "/approve", "/deny", "/get", "/getfile", "/compact"):
             self.assertFalse(REGISTRY[name].aliases)
+        self.assertNotIn("/ack", REGISTRY)
+        self.assertNotIn("/finish", REGISTRY)
+        self.assertIn("`/settings` 查看设置", HELP)
+        self.assertIn("`/help` 查看常用命令；`/help all` 查看全部", HELP)
+        self.assertNotIn("`/help [all]`", HELP)
 
     async def test_status_alias_is_local_and_rejects_extra_args(self):
         self.bridge.ensure_backend = AsyncMock()
@@ -37,6 +43,16 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("状态", self.bridge.state["outbox"][-1]["text"])
         await dispatch(self.bridge, "/s invalid")
         self.assertIn("用法", self.bridge.state["outbox"][-1]["text"])
+        self.bridge.ensure_backend.assert_not_called()
+
+    async def test_help_all_lists_the_complete_catalogue_and_rejects_other_arguments(self):
+        self.bridge.ensure_backend = AsyncMock()
+        await dispatch(self.bridge, "/help")
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], HELP)
+        await dispatch(self.bridge, "/h all")
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], HELP_ALL)
+        await dispatch(self.bridge, "/help invalid")
+        self.assertIn("`/help` 或 `/help all`", self.bridge.state["outbox"][-1]["text"])
         self.bridge.ensure_backend.assert_not_called()
 
     async def test_model_alias_passes_arguments_to_canonical_handler(self):
@@ -53,7 +69,7 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
                 {"type": 1, "text_item": {"text": "/q /stop is literal"}}]}]})
         jobs = self.store.load("bridge")["inbox"]
         self.assertEqual([(job["text"], job["mode"]) for job in jobs], [("/stop is literal", "queue")])
-        self.assertEqual(self.bridge.state["outbox"][-1]["text"], "Queue 1 task")
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], "已排队: 1 条")
         self.assertTrue(all(lane.empty() for lane in self.bridge.controls.values()))
 
     async def test_queue_confirmation_plural_counts_only_waiting_tasks(self):
@@ -64,6 +80,6 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
                 "message_id": f"queued-{number}", "from_user_id": "owner",
                 "message_type": 1, "context_token": "context", "item_list": [
                     {"type": 1, "text_item": {"text": f"/queue work {number}"}}]}]})
-            expected = "Queue 1 task" if number == 1 else "Queue 2 tasks"
+            expected = f"已排队: {number} 条"
             self.assertEqual(self.bridge.state["outbox"][-1]["text"], expected)
         self.assertEqual(len(self.bridge.state["inbox"]), 2)

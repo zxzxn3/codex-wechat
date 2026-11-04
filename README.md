@@ -22,23 +22,30 @@ Windows PowerShell：
 
 需要 Python 3.11+。系统工具与缺失策略集中于 installer.py，Python 包在 requirements 文件中声明；缺少 Codex 不妨碍安装，但模型任务在补齐前不可用。可使用独立 CLI 或 App 内置原生 CLI。二维码优先用 qrencode，缺少时安装轻量 Python 回退。
 
-安装不扫码、不收集模型密钥、不自动启动程序、不为新用户开启自启。更新保留用户配置和自启状态，不重启正在使用的桥接。新版本先独立准备和检查，危险操作集中在最后激活；不提供安装回滚命令。
+安装不扫码、不收集模型密钥、不自动启动程序、不为新用户开启自启。Windows 安装/更新注册计划任务，Linux 注册 systemd 用户服务，但都不 enable 或 start；自启默认关闭，只有 `/settings autostart true` 才启用登录自启。更新保留用户配置和自启状态，不重启正在使用的桥接。新版本先独立准备和检查，危险操作集中在最后激活；不提供安装回滚命令。每个版本自带独立的 Python 环境；更新会清理旧版本，但正在运行的 release 通过 `active-release` 标记保留。只有已取得状态锁并准备运行的 `start` 进程写入该标记，`status`/`logs` 不会改写它。
+
+Linux 若当前没有可用的 systemd 用户管理器，安装器会明确提示后台服务未注册；前台 `start` 仍可使用。
+
+要用 Codex CLI 与微信双向收发，装完后在微信发送 `/settings shared true`（持久保存，`/settings shared false` 关闭）。该开关默认 Windows 为 false、Linux 为 true；开启后 Codex App 打开桥接当前会话会显示锁定，详见 [docs/WINDOWS.md](docs/WINDOWS.md)。
 
 ## 第一次使用
 
 Linux：
 
 ```bash
-~/.local/share/codex-wechat/codex-wechat start
+~/.local/share/codex-wechat/codex-wechat service-start
 ```
 
 Windows：
 
 ```powershell
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" start
+& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start
 ```
 
-未绑定时仅交互式 start 显示二维码；扫码后继续启动。已绑定则直接运行，后台或重定向环境不会等待不可见的扫码。在微信发送 `/help` 查看当前指令。需要自启时使用 `/settings autostart on`；关闭自启不终止当前进程。
+未绑定时，`service-start` 会在当前终端显示二维码；扫码后后台服务启动，终端可以关闭。
+如果安装器提示后台服务未注册，可改用 `start` 在前台运行。
+
+微信已绑定后，桥接会直接运行。Codex 已接入微信聊天；发送 `/help` 查看命令。前台运行时，`Ctrl+C` 或关闭终端会停止桥接；由后台服务启动时可以关闭终端，微信会继续可用。当前只处理扫码账号的私聊；群聊不会响应。服务已在安装时注册，`service-start` 可以在不开启自启时手动启动；需要登录自启时使用 `/settings autostart true`，关闭自启不终止当前进程。自启设置本身不停止当前前台，也不启动后台服务；要把前台切到后台，请先停止前台，再运行 `service-start`。
 
 停止已安装的后台服务：
 
@@ -52,74 +59,79 @@ Windows 使用 `.ps1 stop`。命令会先尽力向最近一次微信会话发送
 
 本地共享连接优先复用原生 daemon，仍可显式配置独立连接。桥接退出只关闭自己的连接/代理进程，不结束共享 Codex 后台。
 
-Linux App 正常启动后，也可直接在微信 `/switch` 到它持有的会话。遇到原生后台的
-active writer 冲突时，桥接通过同一 CODEX_HOME 下的 App IPC 跟随会话，不关闭 App、
+Linux 与 Windows App 正常启动后，可直接在微信 `/switch` 到它持有的会话，无需专用 App 启动入口。
+遇到原生后台的 active writer 冲突时，桥接通过 App IPC 跟随会话，不关闭 App、
 不抢占写入锁。已完成历史不回发，新消息、中途回复和最终回答仍走现有交付流程。
 App 退出或 IPC 断开时不自动重发输入；重新打开 App 后用 `/switch` 或 `/backend` 重连。
 自定义启动器只有显式配置后端 `env.CODEX_HOME` 才查找 IPC，不猜测它内部使用的目录。
-此路径目前仅实现 Linux，内部协议随 App 版本变化；Windows 仍用下述共享入口。
+Linux 使用同一 CODEX_HOME 下的私有 socket；Windows 使用本机命名管道，连接前核对服务进程
+属于当前用户和已注册的 Codex App。Windows 仅跟随主 CODEX_HOME，不猜测独立后端目录。
+Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对应 App 的跟随，不猜测其目录。
+内部协议随 App 版本变化；更新 App 后若身份检查失败，请完全退出重开。
 
-**启动顺序限制**：IPC 只支持“先在 App 打开会话，再从微信连接”。若微信桥先通过原生
-后台连接会话，随后用独立后台的 App 打开同一会话，App 可能显示被锁定。反向接入需要
-桥接充当 IPC 持有者、向 App 同步状态并承接其操作，实现与维护成本较高，因此暂未支持。
-可按上述顺序使用，或让 App 通过下述入口连接同一共享后台。
+**会话写者**：桥接只在一轮真正运行时持有写者，派发答案后立刻交还（`thread/unsubscribe`），
+所以空闲时 App 随时可以打开同一会话；下一轮消息会重新获取，App 在此期间接管时会自动改为
+跟随（IPC follower），双向仍然可用。app-server 的释放是延迟的（约数十秒），刚交还后立刻打开
+可能仍显示锁定，稍等或重新进入即可。
+桥接空闲时会每 5 秒检查一次 App 的 IPC 是否出现：App 后启动并接管该会话后，桥接会自动
+重新跟随，桌面端的回信也会继续进入微信。`\\.\pipe\codex-ipc` 由最先启动的 Codex 客户端
+托管——VS Code 的 Codex 扩展也会托管它。桥接只跟随由已注册 App 托管的通道，其它托管者
+会被身份校验拒绝（日志 `backend.app_attach_failed`）：此时桌面端的回信不会进入微信，
+微信发来的消息会先排队，等 App 关闭该会话后自动发送，最多等待 10 分钟。遇到这种情况应
+卸载/退出那个客户端，见 [WINDOWS.md](docs/WINDOWS.md) 的「自带 Codex 后端的第三方客户端
+会抢走会话写者」。
+IPC 只支持“App 作为写者”的方向；桥接不会反向充当 IPC 持有者。
+反向接入（桥接作为 owner 向 App 广播会话状态并承接它的 follower 请求）尚未实现：需要复刻
+App 的 conversationState/增量与 revision 语义，属于版本相关的内部协议，实现与维护成本较高。
+App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
 
-也可以让 Linux App 复用 CLI 的原生 daemon。先完全退出已有 App，再执行：
+CLI 仍可连接微信使用的原生后台：
 
 ```bash
-codex-wechat app
 codex-wechat cli -- resume
 ```
 
-若希望以后仍从原桌面图标启动，只需配置一次：
-
-```bash
-codex-wechat desktop setup --native --shortcut
-```
-
-这会为当前用户创建 App 桌面入口，保留系统图标和 MIME 关联，并通过稳定入口准备原生
-daemon；不修改系统包或代理启动器。删除它打印的用户桌面文件即可恢复系统入口。
-已有自定义桌面文件不会被覆盖。配置不会改变已打开的 App，首次必须退出重开。
-若原来配置了 WebSocket，`--native` 会切回原生 daemon，需要重启微信桥；已有原生配置无需重启。
-
-若入口不在 PATH，使用前述完整路径。Windows 继续使用显式 WebSocket 共享：
-
-```powershell
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-desktop.ps1" setup
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" app
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-desktop.ps1" cli -- resume
-```
-
-setup 保留其它配置；Linux 默认使用原生 daemon，已有 WebSocket 配置继续沿用，除非显式
-`--native`。`--backend {名称}` 选择后端，`--executable {绝对路径}` 指定 CLI/App 内置 CLI。
-Windows 的端口由系统分配后保存；两平台均可显式指定 `--url ws://127.0.0.1:{端口}`。
-不能以同一个 CODEX_HOME 代替连接同一个后台，不能通过删除写入锁解决冲突。
-Linux 原生 App 不接受强制独立后端的 `CODEX_CLI_PATH` / `CODEX_APP_SERVER_FORCE_CLI=1`；
-自定义启动器须显式提供后端 `env.CODEX_HOME`，避免 App 与启动器选择不同目录。
-
-**代理启动器只负责代理并转交命令。** 项目接入入口不读取系统代理、不维护代理配置；后台管理在运行层，App / CLI / 微信共用连接配置。代理环境在实际后台启动时继承，改变客户端环境不会修改已经运行的后台。
-
-App 的 WebSocket 接口属于版本相关实现，公开 App Server WebSocket 也仍为实验性。版本、依据及未验证组合见 [SOURCES](docs/SOURCES.md)。
+Windows 使用 `codex-desktop.ps1 cli -- resume`。`desktop setup` / `ensure` 仅配置和准备 CLI/微信的后台，
+不启动 App、不改代理或系统桌面入口。IPC 为版本相关内部协议，依据及未验收组合见 [SOURCES](docs/SOURCES.md)。
 
 ## 日常行为
 
 - 普通消息默认 steer；`/queue {prompt}` 在空闲后独立执行，且不挡后续 steer。`/unqueue` 撤回最后一条仍在等待的 queue（包括 steer 回退），不影响已开始的任务；剩余数量与 `/queue` 一样只计待办。
 - `/sessions` 可翻页；`/sessions {搜索词}` 按标题检索。`/switch {搜索词}` 在唯一匹配时
-  直接切换，多个匹配会列出候选，可再用 `/switch {编号}` 选择；也支持编号和会话 ID。
+  直接切换，多个匹配会列出候选，可再用 `/switch {编号}` 选择；也支持编号和 4–32 位会话 ID 前缀。
   后端、模型、思考强度与目录同样可切换；控制指令由程序处理。
 - 中途完整回复直接发往微信，不等整轮结束，不发送逐字增量、推理或工具流水。
-- 图片、视频与文件用手机原生附件发送。附件 skill 可从安装菜单单独安装；其它路径可显式 `/send`。
+- 图片、视频与文件用手机原生附件发送。附件 skill 可从安装菜单单独安装；其它路径可从电脑显式 `/get`。
 - 引用文字和局部引用会作为上下文交给 Agent；带转写文本的微信语音可直接作为输入。
 - 原生提问与审批使用专门指令回应；桌面请求只处理实际送到此连接的部分，不冒充已接管全部请求。桌面 async 提问只从结构化 `agentMessage.questions` 识别，不把正文中的类似标记当成题目。
 - `/stop` 中断当前共享轮次并清待办，不能撤销已发生的操作；`/restart` 保留确定未提交输入。
 - 重启后不自动重放已接受或提交结果不确定的输入；当前不补发断线期间的所有历史回答。
 
-提示、切片、限额阈值、压缩通知及来源 hint 在同一 config.json 中热加载。接收/结束提示也可在微信即时修改；已提交输入和已入发件箱的文本不追溯改变。`/ack fields` 列出模板字段，使用缓存快照，不额外请求模型。
+提示、切片、限额阈值、压缩通知及来源 hint 在同一 config.json 中热加载。接收/结束提示也可在微信即时修改；已提交输入和已入发件箱的文本不追溯改变。`/settings ack fields` 列出模板字段，使用缓存快照，不额外请求模型。可写项包括 `ack`、`finish`、`sourceHint`、`autostart`、`shared`、`compactionNotice`、`slicing.smart`，以及数值项 `connectionIdleSeconds`、`media.maxMiB`、`slicing.targetChars`；其余设置项在 config.json 中修改。
 `connectionIdleSeconds` 控制微信 API 连接空闲保留秒数，默认 60，允许 0–3600。
 0 表示不主动按空闲时间回收；服务退出、对端或代理断开、连接故障仍会关闭连接，不保证永久有效。
 在 config.json 中设置如 `"connectionIdleSeconds": 2`，下次热配置读取时生效，无需重启；
 `/settings` 显示当前值。已发出的请求不中断，空闲池按新值与已空闲时长重新计时；
 删除此键恢复 60。附件传输也复用连接池并受此设置影响；`/ping` 保持独立建连。
+
+后端定义（`backends.<名字>`）在进程启动时读取，并在每次 `/backend` 前重新读取：
+`label`、`command`、`env`、`sharedDaemon`、`useSystemProxy`，以及 `threadOptions`。
+自定义非 WebSocket 后端必须显式配置 `command`；内置 `codex` 的默认命令由模板提供。
+`label` 是可选的显示名；后端 key 仍是切换和路由使用的稳定名称。默认定义来自
+`config.default.json`，只在配置没有后端时写入；已有 `backends`
+只补齐已知后端的缺失字段，显式值优先。默认模板里的 `platforms` 只用于筛选默认项，
+不会限制用户在 `config.json` 中显式配置的 backend。
+切到其他后端时会使用新定义；如果修改的是当前后端，再次执行 `/backend` 会重连该后端。
+`/settings` 只处理热配置，不会重读这些后端定义。
+其中 `threadOptions` 只作用于**新建**会话（原样透传给 `thread/start`，用于设置原生线程
+参数）；已存在的会话保留它自己的设置，切回时不会重放这里的值。
+`useSystemProxy` 在 Linux 上还会读取 GNOME 的 manual 代理；环境变量优先，PAC/自动代理
+不会猜测。这样经 systemd 或直接启动时不必依赖 `~/.local/bin/codex` 包装器先注入代理。
+设为 `false` 时不自动探测，并清除从桥接进程继承的代理变量；后端 `env` 中显式配置的
+代理仍然优先保留。
+上游 `respect_system_proxy` 当前只覆盖 macOS/Windows，不能替代这条 Linux 路径。
+该探测只作用于 `codex-wechat` 启动的后端；直接运行普通 `codex` 仍由它自己的启动环境决定，
+Linux 上仍需包装器或显式代理环境变量。
 
 `quotaWarningThresholds` 必须分别配置主窗口和次窗口，当前分别对应 5 小时与 7 天限额：
 
@@ -143,7 +155,7 @@ App 的 WebSocket 接口属于版本相关实现，公开 App Server WebSocket �
 ```json
 {
   "prompts": {
-    "QUEUE_CONFIRMED": "Queue {count} {unit}",
+    "QUEUE_CONFIRMED": "已排队: {count} {unit}",
     "RESTART_STARTED": "Restarting...",
     "LABEL_MODEL": "Model",
     "HELP_STATUS": "当前状态"
@@ -154,20 +166,23 @@ App 的 WebSocket 接口属于版本相关实现，公开 App Server WebSocket �
 动作、错误、压缩、限额及重绑通知在生成时读取新值；状态/设置标签、会话动作及帮助说明也支持。
 这不是完整翻译层：状态值（如“运行中”）、连接类型、会话标记及少量内置回退文字仍固定；
 可覆盖范围以 `DEFAULT_PROMPTS` 中的名称为准。
-可使用 `/ack fields` 中的快照字段及该模板的局部字段，局部字段优先；替换只执行一次，
+可使用 `/settings ack fields` 中的快照字段及该模板的局部字段，局部字段优先；替换只执行一次，
 字段名统一为小写英文snake_case，例如 `{input_tokens}`、`{output_tokens}`、
-`{total_tokens}`、`{context_remaining}`、`{model}`、`{ingress_ms}`、`{egress_ms}`。
-完整共享字段以 `/ack fields` 或 `/finish fields` 为准；旧中文字段不再识别，已有自定义模板需改为新名称。
+`{total_tokens}`、`{turn_input_tokens}`、`{turn_output_tokens}`、`{turn_total_tokens}`、
+`{context_remaining}`、`{model}`、`{ingress_ms}`、`{egress_ms}`、
+`{elapsed}`（本回合从派发到结束的耗时，尚无样本时为 `-`）。
+完整共享字段以 `/settings ack fields` 或 `/settings finish fields` 为准；旧中文字段不再识别，已有自定义模板需改为新名称。
 显示标签及命令用法中的参数说明仍可使用中文，它们不是模板变量。
 未知字段保留原样，字面花括号写成 `{{`、`}}`。每项最多3000 UTF-8字节，未知名称、
 非文本值、损坏JSON或非法格式会拒绝整组热更新并保留旧设置。只支持 `{字段}`，不支持属性、
 下标或格式表达式。修改的是配置覆盖；修改Python默认值仍需重启。
 
-接收/结束提示继续使用原有 `processingNotice`、`completionNotice` 与 `/ack`、`/finish`，
+接收/结束提示继续使用原有 `processingNotice`、`completionNotice` 与
+`/settings ack`、`/settings finish`，
 不在 `prompts` 中重复设置。命令、分页结构、审批token、原生问题和Agent正文仍由程序或来源生成，
 不作全文替换；已入发件箱的文本不重写。安装器、扫码/重绑终端流程及控制台日志不在此热修改范围。
 
-AI 正文及中途回复按结构智能切片；控制回复仅在传输超限时拆分。`/ping` 测微信观测延迟和供应商 TCP/TLS 建连阶段，不调用模型，不代表模型响应速度或手机显示 RTT。
+AI 正文及中途回复按结构智能切片；控制回复仅在传输超限时拆分。`/ping` 分两条回复：先回微信链路耗时，再回报供应商 TCP/TLS 建连阶段，不调用模型，不代表模型响应速度或手机显示 RTT；连接阶段失败时标注路径（`直连,未配置代理` 或 `代理未响应`），没有代理环境变量时按本机系统代理测量，不改变桥接自身出站。
 
 已知局限：实测“按住语音转文字、松开自动发送”时，手机虽显示已发送，桥接仍可能收不到；
 诊断中未观察到该消息入站，原因尚未确定。可改用“点击语音转文字，文字进入输入框后手动发送”，

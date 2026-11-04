@@ -14,6 +14,22 @@ from wechat_http import PooledHTTP
 
 URL = "https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=SECRET"
 
+_isolated = None
+
+
+def setUpModule():
+    # These fixtures drive real transfers, which log; keep them out of the bridge log.
+    global _isolated
+    import diagnostics
+    _isolated = tempfile.TemporaryDirectory()
+    diagnostics.configure(path=Path(_isolated.name) / "bridge.jsonl")
+
+
+def tearDownModule():
+    import diagnostics
+    diagnostics.reset()
+    _isolated.cleanup()
+
 
 class FakeResponse:
     def __init__(self, status=200, headers=None, infos=None):
@@ -154,6 +170,40 @@ class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
         channel.http.transfer.return_value = (b"", 0, 28, None)
         with self.assertRaisesRegex(MediaError, "curl 28"):
             await media.transfer(URL)
+
+    async def test_failures_are_logged_without_the_signed_url(self):
+        records = []
+        media, channel = self.media(SimpleNamespace(
+            transfer=AsyncMock(return_value=(b"", 0, 28, None))))
+        with patch("media.log_event", side_effect=lambda name, **fields: records.append((name, fields))):
+            with self.assertRaises(MediaError):
+                await media.transfer(URL)
+        self.assertEqual(records[0][0], "media.transfer_failed")
+        self.assertEqual(records[0][1]["kind"], "curl")
+        self.assertEqual(records[0][1]["curl_code"], 28)
+        self.assertNotIn("SECRET", str(records))
+
+    async def test_one_transient_stall_is_retried(self):
+        media, channel = self.media(SimpleNamespace(transfer=AsyncMock(side_effect=[
+            (b"", 0, 28, None), (b"body", 200, 0, "parameter")])))
+        with patch("media.log_event"):
+            received, parameter = await media.transfer(URL)
+        self.assertEqual((received, parameter), (b"body", "parameter"))
+        self.assertEqual(channel.http.transfer.await_count, 2)
+
+    async def test_size_limit_and_server_errors_are_not_retried(self):
+        media, channel = self.media(SimpleNamespace(
+            transfer=AsyncMock(return_value=(b"", 0, 63, None))))
+        with patch("media.log_event"):
+            with self.assertRaisesRegex(MediaError, "大小限制"):
+                await media.transfer(URL)
+        self.assertEqual(channel.http.transfer.await_count, 1)
+        channel.http.transfer.reset_mock()
+        channel.http.transfer.return_value = (b"", 500, 0, None)
+        with patch("media.log_event"):
+            with self.assertRaisesRegex(MediaError, "HTTP 200"):
+                await media.transfer(URL)
+        self.assertEqual(channel.http.transfer.await_count, 1)
 
     async def test_timeout_and_cancel_are_distinguished(self):
         media, channel = self.media(SimpleNamespace(

@@ -3,15 +3,19 @@ from functools import wraps
 from lifecycle import can_change_session
 from pathlib import Path
 import asyncio
+import json
 import sys
 import time
 import uuid
 import autostart
 
-from profiles import backend_argument, backend_label, switch
+from profiles import (backend_argument, backend_label, definitions, ensure_backend_config,
+                      switch, writer_conflict)
 from errors import UserFacingError, attachment_reason, backend_reason
 from codex_transport import CodexRpcError
-from media import MediaError
+from codex_connection import ConnectionSpec
+from backend import WRITER_BUSY, WRITER_NATIVE
+from media import MEDIA_MAX_MIB_MAX, MEDIA_MAX_MIB_MIN, MediaError
 from records import InputPhase
 from latency import provider_latency
 from diagnostics import error_fields, log_event, request_context
@@ -19,10 +23,15 @@ from diagnostics import error_fields, log_event, request_context
 from prompts import (
     MAX_NOTICE_BYTES, COMMAND_FAILURE_LABELS, panel, display_path, effort_label,
     session_age, session_name, session_summary, setting_summary, settings_summary,
-    ping_channel, status_from_fields, prompt_text,
+    ping_channel, status_from_fields, prompt_text, VALUE_EMPTY,
 )
 from command_specs import REGISTRY, COMMANDS, help_text
-from configuration import processing_template, completion_template
+from configuration import (
+    CONNECTION_IDLE_MAX, CONNECTION_IDLE_MIN, HotSettings,
+    SOURCE_HINT_LIMIT_BYTES,
+    SLICING_TARGET_MAX, SLICING_TARGET_MIN,
+    completion_template, processing_template, write_config,
+)
 
 
 def notice(bridge):
@@ -34,18 +43,36 @@ def info(bridge, action=None, *, include_backend=False):
     details = bridge.backend.info
     status = bridge.prompt_fields()["status"]
     text = session_summary(action, name=details.get("name"), model=details.get("model"),
+                           session_id=bridge.state.get("thread"),
                            effort=details.get("effort"), cwd=details.get("cwd") or bridge.backend.cwd,
-                           backend=backend_label(bridge.backend_name) if include_backend else None,
+                           backend=backend_label(
+                               bridge.backend_name, bridge.backend_configs) if include_backend else None,
                            status=status, text=bridge.prompt)
     if bridge.backend.blocked:
         return text + "\n" + bridge.prompt("BLOCKED_NOTE")
     return text
 
 
+async def adopt(bridge, thread_id, overrides, thread):
+    """Resume the target, or adopt it without a writer when the desktop owns it.
+
+    A desktop that holds the thread and cannot be followed must not fail the
+    session: the bridge would stay unloaded, pause input and retry forever.
+    """
+    try:
+        return await bridge.backend.thread(thread_id, overrides)
+    except CodexRpcError as error:
+        if not writer_conflict(error):
+            raise
+        return await bridge.backend.adopt_thread(thread_id, thread)
+
+
 async def activate(bridge, thread_id=None, overrides=None):
     # Only this explicit command may override native settings. Never replay a mobile cache.
     saved = dict(overrides or {})
+    previous = bridge.state.get("thread")
     desktop = False
+    thread = None
     if thread_id:
         thread = await bridge.backend.read_thread(thread_id)
         status = thread.get("status", {}).get("type")
@@ -60,11 +87,17 @@ async def activate(bridge, thread_id=None, overrides=None):
             # Adopt the desktop's current settings instead of applying stale mobile overrides.
             saved = {}
     bridge.loaded = False
-    selected = await bridge.backend.thread(thread_id, saved)
+    selected = await adopt(bridge, thread_id, saved, thread)
+    if previous and previous != selected:
+        # Leaving a thread must not keep its writer, or the App shows it locked.
+        await bridge.backend.release_thread(previous)
     bridge.state["thread"] = selected
-    bridge.state.pop("sessionOptions", None)  # Retire legacy override replay after successful adoption.
     bridge.loaded = True
     bridge.save()
+    # Adoption itself needs no writer: return it so the App can open this thread
+    # while the bridge is idle. The next turn resumes it or follows the App.
+    if bridge.backend.writer_state(selected) in (None, WRITER_NATIVE):
+        await bridge.backend.release_thread(selected, follow=True)
     return desktop
 
 
@@ -90,30 +123,224 @@ def effort_choices(model):
     return [item["reasoningEffort"] for item in model.get("supportedReasoningEfforts", [])]
 
 
+def backend_section(config, name):
+    """The per-backend definition `definitions()` applies last for this name."""
+    backends = config.setdefault("backends", {})
+    if not isinstance(backends, dict):
+        raise ValueError("backends 必须是对象")
+    section = backends.setdefault(name, {})
+    if not isinstance(section, dict):
+        raise ValueError("backends 的每一项必须是对象")
+    return section
+
+
+NUMERIC_SETTINGS = {
+    "connectionIdleSeconds": (CONNECTION_IDLE_MIN, CONNECTION_IDLE_MAX),
+    "media.maxMiB": (MEDIA_MAX_MIB_MIN, MEDIA_MAX_MIB_MAX),
+    "slicing.targetChars": (SLICING_TARGET_MIN, SLICING_TARGET_MAX),
+}
+SETTING_PATHS = {
+    "compactionNotice": ("compactionNotice",),
+    "connectionIdleSeconds": ("connectionIdleSeconds",),
+    "media.maxMiB": ("media", "maxMiB"),
+    "sourceHint": ("sourceHint",),
+    "slicing.smart": ("slicing", "smart"),
+    "slicing.targetChars": ("slicing", "targetChars"),
+}
+
+
+def numeric_setting_value(bridge, name, value):
+    minimum, maximum = NUMERIC_SETTINGS[name]
+    if not value.isascii() or not value.isdecimal():
+        raise UserFacingError(bridge.prompt("SETTINGS_NUMBER", {
+            "name": name, "minimum": minimum, "maximum": maximum}))
+    number = int(value)
+    if not minimum <= number <= maximum:
+        raise UserFacingError(bridge.prompt("SETTINGS_NUMBER", {
+            "name": name, "minimum": minimum, "maximum": maximum}))
+    return number
+
+
+async def write_hot_setting(bridge, name, value):
+    path = bridge.settings.path
+    try:
+        if path is None:
+            raise OSError("没有可写入的配置文件")
+        config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
+        if not isinstance(config, dict):
+            raise ValueError("配置必须是 JSON 对象")
+        section = config
+        for part in SETTING_PATHS[name][:-1]:
+            child = section.get(part)
+            if child is None:
+                child = {}
+                section[part] = child
+            if not isinstance(child, dict):
+                raise ValueError(f"{part} 必须是对象")
+            section = child
+        section[SETTING_PATHS[name][-1]] = value
+        HotSettings.from_config(config)
+        write_config(path, config)
+    except (OSError, ValueError):
+        raise UserFacingError(bridge.prompt("SETTINGS_WRITE_FAILED")) from None
+    bridge.reload_config()
+
+
+def text_setting_value(bridge, argument, max_bytes, too_long_key):
+    value = "" if argument in ('""', "''") else argument
+    if len(value.encode()) > max_bytes:
+        raise UserFacingError(bridge.prompt(too_long_key, {"max_bytes": max_bytes}))
+    return value
+
+
+async def set_numeric_setting(bridge, name, value):
+    number = numeric_setting_value(bridge, name, value)
+    await write_hot_setting(bridge, name, number)
+    if name == "media.maxMiB":
+        bridge.media.limit = number * 1024 * 1024
+    current = (bridge.settings.hot.connection_idle_seconds
+               if name == "connectionIdleSeconds"
+               else bridge.media.limit // (1024 * 1024) if name == "media.maxMiB"
+               else bridge.slicing.target_chars)
+    if current != number:
+        raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
+    bridge.reply(panel(f"{name}: {number}"))
+
+
+async def set_compaction_notice(bridge, value):
+    if value not in ("true", "false"):
+        bridge.reply(bridge.prompt("SETTINGS_USAGE"))
+        return
+    enabled = value == "true"
+    await write_hot_setting(bridge, "compactionNotice", enabled)
+    if bridge.notifications.compaction != enabled:
+        raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
+    bridge.reply(panel(f"compactionNotice: {value}"))
+
+
+async def set_slicing_smart(bridge, value):
+    if value not in ("true", "false"):
+        bridge.reply(bridge.prompt("SETTINGS_USAGE"))
+        return
+    mode = "smart" if value == "true" else "length"
+    await write_hot_setting(bridge, "slicing.smart", value == "true")
+    if bridge.slicing.mode != mode:
+        raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
+    bridge.reply(panel(f"slicing.smart: {value}"))
+
+
+async def set_source_hint(bridge, argument):
+    if not argument:
+        bridge.reply(panel(f"sourceHint: {bridge.source_hint or VALUE_EMPTY}"))
+        return
+    value = text_setting_value(
+        bridge, argument, SOURCE_HINT_LIMIT_BYTES, "SOURCE_HINT_TOO_LONG")
+    await write_hot_setting(bridge, "sourceHint", value)
+    if bridge.source_hint != value:
+        raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
+    bridge.reply(panel(f"sourceHint: {value or VALUE_EMPTY}"))
+
+
+async def set_shared_daemon(bridge, enabled):
+    """Apply the shared-daemon choice, then persist it only once it works.
+
+    Nothing is written until the reconnect succeeds, so a failed switch leaves
+    the file and the running mode agreeing with each other. The value goes to
+    `backends[name]`; `codex-desktop setup` writes there, so a change stored
+    anywhere else would be silently overridden on the next start.
+    """
+    path = bridge.settings.path
+    name = bridge.backend_name
+    if not can_change_session(bridge):
+        # Switching mode restarts the backend, which would abort a live turn.
+        raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
+    try:
+        if path is None:
+            raise OSError("没有可写入的配置文件")
+        config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
+        if not isinstance(config, dict):
+            raise ValueError("配置必须是 JSON 对象")
+        section = backend_section(config, name)
+        running = backend_section(bridge.config, name)
+    except (OSError, ValueError):
+        raise UserFacingError(bridge.prompt("SETTINGS_SHARED_FAILED")) from None
+    section["sharedDaemon"] = enabled
+    previous_value = running.get("sharedDaemon")
+    running["sharedDaemon"] = enabled
+    bridge.backend_configs = definitions(bridge.config)
+    previous = bridge.backend
+    async with bridge.session_lock:
+        if not enabled:
+            # A daemon keeps every thread it loaded locked, so hand this one back.
+            await previous.release_thread(bridge.state.get("thread"))
+        await previous.close()
+        bridge.backend_started = False
+        try:
+            await switch(bridge, name, force=True, adopt_busy=True)
+        except BaseException:
+            if previous_value is None:
+                running.pop("sharedDaemon", None)
+            else:
+                running["sharedDaemon"] = previous_value
+            bridge.backend_configs = definitions(bridge.config)
+            raise
+    values = {"value": "true" if bridge.backend.shared else "false"}
+    text = bridge.prompt("SETTINGS_SHARED", values)
+    try:
+        write_config(path, config)
+    except OSError:
+        text += "\n" + bridge.prompt("SETTINGS_SHARED_UNSAVED")
+    if bridge.backend.shared_fallback:
+        text += "\n" + bridge.prompt("SETTINGS_SHARED_FALLBACK",
+                                     {"reason": bridge.backend.shared_fallback})
+    if bridge.backend.writer_state(bridge.state.get("thread")) == WRITER_BUSY:
+        text += "\n" + bridge.prompt("SETTINGS_SHARED_BUSY")
+    bridge.reply(text)
+
+
 async def command_settings(bridge, command, argument, received=None):
     if argument:
-        parts = argument.split()
-        if len(parts) != 2 or parts[0] != "autostart" or parts[1] not in ("on", "off"):
+        parts = argument.split(maxsplit=1)
+        name = parts[0]
+        value = parts[1].strip() if len(parts) > 1 else ""
+        if name in ("ack", "finish"):
+            await command_notice(bridge, "/" + name, value)
+            return
+        if name in NUMERIC_SETTINGS:
+            if not value:
+                bridge.reply(bridge.prompt("SETTINGS_USAGE"))
+                return
+            await set_numeric_setting(bridge, name, value)
+            return
+        if name == "compactionNotice":
+            await set_compaction_notice(bridge, value)
+            return
+        if name == "slicing.smart":
+            await set_slicing_smart(bridge, value)
+            return
+        if name == "sourceHint":
+            await set_source_hint(bridge, value)
+            return
+        if name not in ("autostart", "shared") or value not in ("true", "false"):
             bridge.reply(bridge.prompt("SETTINGS_USAGE"))
             return
+        if name == "shared":
+            await set_shared_daemon(bridge, value == "true")
+            return
         try:
-            if (parts[1] == "on" and not autostart.IS_WINDOWS
-                    and not await autostart.installed()):
-                await bridge.enable_background_service()
-                return
-            enabled = await autostart.set_enabled(parts[1] == "on")
+            enabled = await autostart.set_enabled(value == "true")
         except UserFacingError:
             raise
         except (TimeoutError, ValueError, RuntimeError, OSError):
             raise UserFacingError(bridge.prompt("AUTOSTART_FAILED")) from None
-        bridge.reply(bridge.prompt("LABEL_AUTOSTART") + ": " +
-                     bridge.prompt("VALUE_ON" if enabled else "VALUE_OFF"))
+        bridge.reply(bridge.prompt("SETTINGS_AUTOSTART", {
+            "value": "true" if enabled else "false"}))
         return
     try:
-        autostart_text = bridge.prompt("VALUE_ON" if await autostart.status() else "VALUE_OFF")
+        autostart_text = "true" if await autostart.status() else "false"
     except (TimeoutError, ValueError, RuntimeError, OSError):
-        autostart_text = bridge.prompt("VALUE_UNAVAILABLE")
-    bridge.reply(settings_summary(
+        autostart_text = "unknown"
+    summary = settings_summary(
         notice=notice(bridge),
         completion_notice=completion_template(bridge.reload_config(), bridge.state),
         source_hint=bridge.source_hint,
@@ -121,14 +348,16 @@ async def command_settings(bridge, command, argument, received=None):
         slicing=bridge.slicing,
         notifications=bridge.notifications,
         autostart=autostart_text,
+        shared="true" if bridge.backend.shared else "false",
         connection_idle_seconds=bridge.settings.hot.connection_idle_seconds,
         text=bridge.prompt,
-    ))
+    )
+    bridge.reply(summary)
     return
 
 
 async def command_backend_view(bridge, command, argument, received=None):
-    current = backend_argument(bridge.backend_name)
+    current = backend_label(bridge.backend_name, bridge.backend_configs)
     names = list(bridge.backend_configs)
     available = " | ".join(backend_argument(name) for name in names)
     bridge.reply(bridge.prompt("BACKEND_SUMMARY", {
@@ -138,32 +367,50 @@ async def command_backend_view(bridge, command, argument, received=None):
     return
 
 
+def reload_backend_definitions(bridge):
+    """Refresh backend definitions from the persisted config before switching."""
+    path = bridge.settings.path
+    if path is None:
+        return
+    try:
+        fresh = json.loads(path.read_text(encoding="utf-8-sig"))
+        if not isinstance(fresh, dict):
+            raise ValueError("配置必须是对象")
+        candidate = dict(bridge.config)
+        if "backends" in fresh:
+            candidate["backends"] = fresh["backends"]
+        else:
+            candidate.pop("backends", None)
+        ensure_backend_config(candidate)
+        backends = definitions(candidate)
+        for value in backends.values():
+            ConnectionSpec.from_config(value)
+    except (OSError, ValueError):
+        raise UserFacingError(bridge.prompt("CONFIG_RELOAD_FAILED")) from None
+    if "backends" in candidate:
+        bridge.config["backends"] = candidate["backends"]
+    else:
+        bridge.config.pop("backends", None)
+    bridge.backend_configs = backends
+
+
 async def command_notice(bridge, command, argument, received=None):
-    label = bridge.prompt("LABEL_ACK" if command == "/ack" else "LABEL_FINISH")
+    label = "ack" if command == "/ack" else "finish"
     key = "processingNotice" if command == "/ack" else "completionNotice"
     prefix = "ACK" if command == "/ack" else "FINISH"
-    usage = bridge.prompt(prefix + "_USAGE")
     if argument == "fields":
         bridge.reply(panel(*(f"{{{name}}}" for name in bridge.prompt_fields())))
         return
     template = (notice(bridge) if command == "/ack" else
                 completion_template(bridge.reload_config(), bridge.state))
     if not argument:
-        bridge.reply(bridge.prompt(prefix + "_VIEW", {"template": template or bridge.prompt("VALUE_OFF")}))
+        bridge.reply(bridge.prompt(prefix + "_VIEW", {"template": template or VALUE_EMPTY}))
         return
-    if argument == "text":
-        value = ""
-    elif argument.startswith("text "):
-        value = argument[5:].strip()
-        if value in ('""', "''"):
-            value = ""
-    else:
-        raise UserFacingError(usage)
-    if len(value.encode()) > MAX_NOTICE_BYTES:
-        raise UserFacingError(bridge.prompt(prefix + "_TOO_LONG", {"max_bytes": MAX_NOTICE_BYTES}))
+    value = text_setting_value(
+        bridge, argument, MAX_NOTICE_BYTES, prefix + "_TOO_LONG")
     bridge.state[key] = value
     bridge.save()
-    bridge.reply(panel(label + ": " + (value or bridge.prompt("VALUE_OFF"))))
+    bridge.reply(panel(label + ": " + (value or VALUE_EMPTY)))
     return
 
 
@@ -206,6 +453,58 @@ def _session_lines(bridge, threads):
     if not threads:
         lines.append(bridge.prompt("NO_SESSIONS"))
     return lines
+
+
+def _session_choices(bridge, matches, query, *, id_prefix=False):
+    shown = matches[:10]
+    bridge.state["sessionChoices"] = [thread["id"] for thread in shown]
+    bridge.state["sessionSearch"] = query
+    bridge.save()
+    text = panel(*_session_lines(bridge, shown)) + "\n" + bridge.prompt(
+        "SESSION_SEARCH_MULTIPLE", {"count": len(matches)})
+    if len(matches) > len(shown):
+        text += "\n" + (bridge.prompt("SESSION_ID_PREFIX_MORE", {
+            "count": len(matches), "shown": len(shown)})
+            if id_prefix else bridge.prompt("SESSION_SEARCH_MORE", {
+                "count": len(shown), "query": query}))
+    bridge.reply(text)
+
+
+def _id_prefix(value):
+    text = str(value or "").strip().lower()
+    compact = text.replace("-", "")
+    if not 4 <= len(compact) <= 32:
+        return None
+    if not all(char in "0123456789abcdef" for char in compact):
+        return None
+    return text
+
+
+async def _id_prefix_matches(bridge, prefix):
+    # searchTerm filters titles only; enumerate the bounded thread list locally.
+    catalog = await _session_catalog(bridge, None)
+    compact = prefix.replace("-", "")
+    matches = {}
+    for thread in catalog:
+        identity = str(thread.get("id") or "").lower()
+        if identity.startswith(prefix) or identity.replace("-", "").startswith(compact):
+            matches[identity] = thread
+    return list(matches.values())
+
+
+async def _search_session_target(bridge, argument):
+    matches = await _session_catalog(bridge, argument)
+    exact = next((thread for thread in matches
+                  if thread["id"] == argument), None)
+    if exact is not None:
+        return exact["id"]
+    if len(matches) == 1:
+        return matches[0]["id"]
+    if not matches:
+        raise UserFacingError(bridge.prompt(
+            "SESSION_SEARCH_EMPTY", {"query": argument}))
+    _session_choices(bridge, matches, argument)
+    return None
 
 
 async def command_sessions(bridge, command, argument, received=None):
@@ -277,7 +576,12 @@ def session_control(handler):
 
 @session_control
 async def _change_backend(bridge, command, argument, received=None):
-    await switch(bridge, argument)
+    previous = bridge.backend_configs.get(bridge.backend_name)
+    reload_backend_definitions(bridge)
+    target = next((name for name in bridge.backend_configs
+                   if name.casefold() == argument.casefold()), None)
+    force = target == bridge.backend_name and bridge.backend_configs.get(target) != previous
+    await switch(bridge, argument, force=force)
     bridge.reply(info(bridge, bridge.prompt("BACKEND_SWITCHED"), include_backend=True))
     return
 
@@ -291,35 +595,29 @@ async def command_new(bridge, command, argument, received=None):
 
 @session_control
 async def command_switch(bridge, command, argument, received=None):
-    target = argument
+    prefix = None if _is_thread_id(argument) else _id_prefix(argument)
+    target = None
     if argument.isdecimal():
         choices = bridge.state.get("sessionChoices", [])
         index = int(argument) - 1
-        if not 0 <= index < len(choices):
+        if 0 <= index < len(choices):
+            target = choices[index]
+        elif prefix is None:
             raise UserFacingError(bridge.prompt("SESSION_INDEX_INVALID"))
-        target = choices[index]
-    elif not _is_thread_id(argument):
-        matches = await _session_catalog(bridge, argument)
-        exact = next((thread for thread in matches
-                      if thread["id"] == argument), None)
-        if exact is not None:
-            matches = [exact]
+    elif _is_thread_id(argument):
+        target = argument
+    elif prefix is not None:
+        matches = await _id_prefix_matches(bridge, prefix)
         if len(matches) == 1:
             target = matches[0]["id"]
-        elif not matches:
-            raise UserFacingError(bridge.prompt(
-                "SESSION_SEARCH_EMPTY", {"query": argument}))
-        else:
-            shown = matches[:10]
-            bridge.state["sessionChoices"] = [thread["id"] for thread in shown]
-            bridge.state["sessionSearch"] = argument
-            bridge.save()
-            text = panel(*_session_lines(bridge, shown)) + "\n" + bridge.prompt(
-                "SESSION_SEARCH_MULTIPLE", {"count": len(matches)})
-            if len(matches) > len(shown):
-                text += "\n" + bridge.prompt("SESSION_SEARCH_MORE", {
-                    "count": len(shown), "query": argument})
-            bridge.reply(text)
+        elif matches:
+            _session_choices(bridge, matches, argument, id_prefix=True)
+            return
+    if target is None:
+        if prefix is None and argument.isdecimal():
+            raise UserFacingError(bridge.prompt("SESSION_INDEX_INVALID"))
+        target = await _search_session_target(bridge, argument)
+        if target is None:
             return
     desktop = await activate(bridge, target)
     bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop else bridge.prompt("SESSION_SWITCHED")))
@@ -357,31 +655,34 @@ async def _change_model(bridge, command, argument, received=None):
     await _apply_settings(bridge, command, overrides)
 
 
-@session_control
-async def command_effort(bridge, command, argument, received=None):
+async def _current_effort_choices(bridge):
     await ensure_session(bridge)
     models = await model_entries(bridge)
-    overrides = {}
     current = next((m for m in models
                     if m["model"] == bridge.backend.info.get("model")), None)
     if current is None:
         raise UserFacingError(bridge.prompt("MODEL_NOT_IN_CATALOG"))
-    choices = effort_choices(current)
-    if not argument:
-        current_effort = bridge.backend.info.get("effort")
-        bridge.reply(bridge.prompt("EFFORT_SUMMARY", {
-            "current": effort_label(current_effort),
-            "choices": " | ".join(effort_label(value) for value in choices) or "无",
-        }))
-        return
+    return effort_choices(current)
+
+
+async def command_effort_view(bridge, command, argument, received=None):
+    choices = await _current_effort_choices(bridge)
+    bridge.reply(bridge.prompt("EFFORT_SUMMARY", {
+        "current": effort_label(bridge.backend.info.get("effort")),
+        "choices": " | ".join(effort_label(value) for value in choices) or "无",
+    }))
+
+
+@session_control
+async def _change_effort(bridge, command, argument, received=None):
+    choices = await _current_effort_choices(bridge)
     selected_effort = next(
         (value for value in choices
          if value.casefold() == argument.casefold()), None)
     if selected_effort is None:
         raise UserFacingError(bridge.prompt("EFFORT_INVALID", {
             "choices": " | ".join(effort_label(value) for value in choices) or "无"}))
-    overrides["effort"] = selected_effort
-    await _apply_settings(bridge, command, overrides)
+    await _apply_settings(bridge, command, {"effort": selected_effort})
 
 
 @session_control
@@ -420,6 +721,7 @@ def _is_thread_id(value):
 
 async def command_backend(bridge, command, argument, received=None):
     if not argument:
+        reload_backend_definitions(bridge)
         return await command_backend_view(bridge, command, argument, received)
     return await _change_backend(bridge, command, argument, received)
 
@@ -430,6 +732,12 @@ async def command_model(bridge, command, argument, received=None):
     return await _change_model(bridge, command, argument, received)
 
 
+async def command_effort(bridge, command, argument, received=None):
+    if not argument:
+        return await command_effort_view(bridge, command, argument, received)
+    return await _change_effort(bridge, command, argument, received)
+
+
 async def command_cwd(bridge, command, argument, received=None):
     if not argument:
         return await command_cwd_view(bridge, command, argument, received)
@@ -437,7 +745,10 @@ async def command_cwd(bridge, command, argument, received=None):
 
 
 async def command_help(bridge, command, argument, received=None):
-    bridge.reply(help_text(text=bridge.prompt))
+    if argument not in ("", "all"):
+        bridge.reply(bridge.prompt("HELP_USAGE"))
+        return
+    bridge.reply(help_text(show_all=argument == "all", text=bridge.prompt))
 
 
 async def command_ping(bridge, command, argument, received=None):
@@ -446,6 +757,9 @@ async def command_ping(bridge, command, argument, received=None):
     else:
         ingress = received.get("ingress_ms") if received else None
         channel = ping_channel(bridge.latency.values(ingress), text=bridge.prompt)
+        # The provider probe can block for the full connect timeout, so answer
+        # the channel leg first and report the connection phase afterwards.
+        bridge.reply(channel)
         backend = bridge.backend
         connection = backend.connection_id
         provider = await provider_latency(backend)
@@ -454,15 +768,14 @@ async def command_ping(bridge, command, argument, received=None):
         bridge.reply(bridge.prompt("PING_ROUTE", {"channel": channel, "provider_latency": provider}))
 
 
-async def command_send(bridge, command, argument, received=None):
+async def command_get(bridge, command, argument, received=None):
     try:
         if not argument:
             bridge.reply(bridge.prompt("MEDIA_USAGE"))
             return
         if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
             argument = argument[1:-1]
-        await bridge.queue_file(argument, {"/sendfile": "file", "/sendimage": "image",
-                                           "/sendvideo": "video"}.get(command, "auto"),
+        await bridge.queue_file(argument, {"/getfile": "file"}.get(command, "auto"),
                               origin=(received or {}).get("media"))
         bridge.reply(bridge.prompt("ATTACHMENT_QUEUED"))
     except (MediaError, ValueError, OSError) as error:
@@ -497,7 +810,7 @@ async def command_unqueue(bridge, command, argument, received=None):
             bridge.save()
             count = len(inbox)  # Same waiting-only count as /queue; currentInput is excluded.
             bridge.reply(bridge.prompt("UNQUEUE_CANCELLED", {
-                "count": count, "unit": "task" if count == 1 else "tasks"}))
+                "count": count, "unit": "条"}))
             return
     bridge.reply(bridge.prompt("UNQUEUE_EMPTY"))
 
@@ -562,10 +875,9 @@ _HANDLER_FUNCTIONS = {
     "model": command_model,
     "effort": command_effort,
     "cwd": command_cwd,
-    "notice": command_notice,
     "approval": command_approval,
     "answer": command_answer,
-    "send": command_send,
+    "get": command_get,
     "restart": command_restart,
     "help": command_help,
 }

@@ -9,6 +9,7 @@ current
 previous
 .install-lock
 .update-source.json
+active-release
 workspace/
 shared/
 logs/
@@ -21,5 +22,6 @@ __pycache__/
 dist/
 .coverage
 coverage.xml
+docs/coverage.html
 htmlcov/
 .ruff_cache/

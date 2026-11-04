@@ -100,7 +100,7 @@ class QuotaTests(unittest.TestCase):
             records, self.snapshot(40), "backend", thresholds, now=10), [])
 
     def test_configuration_defaults_and_validation(self):
-        self.assertFalse(Notifications.from_config({}).compaction)
+        self.assertTrue(Notifications.from_config({}).compaction)
         self.assertEqual(Notifications.from_config({}).quota_thresholds, {
             "primary": (50, 25, 10, 5, 1),
             "secondary": (50, 25, 10, 5, 1),

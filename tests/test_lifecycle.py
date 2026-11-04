@@ -2,11 +2,13 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
 
+import commands
+from errors import UserFacingError
 from codex_wechat import Bridge
 from lifecycle import (
     can_change_session,
-    can_handoff_service,
     can_prepare_input,
     can_restart,
     can_steer_input,
@@ -46,6 +48,23 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertGate(can_change_session, False, "session lock")
         self.assertGate(can_change_session, True, "released")
 
+    async def test_effort_query_is_available_during_work_but_changes_are_blocked(self):
+        self.bridge.running = True
+        self.bridge.backend.info = {"model": "fixture", "effort": "high"}
+        self.bridge.backend.models = AsyncMock(return_value=[{
+            "model": "fixture", "supportedReasoningEfforts": [{"reasoningEffort": "high"}]}])
+        self.bridge.reply = replies = Mock()
+        with patch.object(commands, "ensure_session", AsyncMock()), \
+                patch.object(commands, "_apply_settings", AsyncMock()) as apply:
+            await commands.command_effort(self.bridge, "/effort", "")
+            replies.assert_called_once()
+            apply.assert_not_awaited()
+            self.bridge.backend.models.reset_mock()
+            with self.assertRaises(UserFacingError):
+                await commands.command_effort(self.bridge, "/effort", "high")
+            self.bridge.backend.models.assert_not_awaited()
+            apply.assert_not_awaited()
+
     async def test_restart_allows_queued_work_but_not_submitted_work(self):
         self.bridge.state["inbox"] = [{"id": "queued"}]
         self.assertGate(can_restart, True, "queued work does not block restart")
@@ -61,16 +80,6 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertGate(can_restart, False, "session lock")
             self.bridge.backend_recovering = True
             self.assertGate(can_restart, True, "recovery owns the lock")
-
-    async def test_handoff_rejects_pending_backend_and_respects_recovery(self):
-        self.assertGate(can_handoff_service, True, "idle")
-        self.bridge.backend.pending["token"] = {"id": "request"}
-        self.assertGate(can_handoff_service, False, "pending approval")
-        self.bridge.backend.pending.clear()
-        async with self.bridge.session_lock:
-            self.assertGate(can_handoff_service, False, "session lock")
-            self.bridge.backend_recovering = True
-            self.assertGate(can_handoff_service, True, "recovery owns the lock")
 
     async def test_input_preparation_is_independent_of_authentication(self):
         self.assertGate(can_prepare_input, True, "idle")

@@ -4,8 +4,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
+import autostart
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,8 +43,12 @@ class AutostartScriptContractTests(unittest.TestCase):
             self.assertIn("[StringComparison]::OrdinalIgnoreCase", text)
             self.assertTrue("[char]::IsWhiteSpace($actionText[$prefix.Length])" in text
                             or "[char]::IsWhiteSpace($text[$prefix.Length])" in text)
+            self.assertIn("ExpectedActionExecutables", text)
+        self.assertIn("$actions[0].Execute", self.entry)
+        self.assertIn("$execute = [string]$actions[0].Execute", self.install)
         self.assertIn("$actions.Count -ne 1", self.entry)
         self.assertIn("$actions.Count -eq 1", self.install)
+        self.assertNotIn("Join-Path $Project 'windows_service.py'", self.install)
 
     def test_installer_keeps_autostart_and_immediate_start_independent(self):
         lowered = self.install.lower()
@@ -62,6 +69,20 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertIn("bootstrap_supervisor.py", self.entry)
         self.assertIn(r"releases\$ReleaseId", self.entry)
         self.assertIn("[IO.FileAttributes]::ReparsePoint", self.entry)
+
+    def test_fast_path_requires_the_exact_stable_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(autostart, "INSTALL_ROOT", root):
+                action = SimpleNamespace(
+                    Execute=str(root / ".bootstrap-venv/Scripts/pythonw.exe"),
+                    Arguments=f'"{root / "bootstrap_supervisor.py"}" supervise --state-dir "state"')
+                self.assertTrue(autostart._owned_supervisor_action(action))
+                action.Arguments = f'"{root / "other" / "bootstrap_supervisor.py"}" supervise'
+                self.assertFalse(autostart._owned_supervisor_action(action))
+                action.Arguments = f'"{root / "bootstrap_supervisor.py"}" supervise'
+                action.Execute = str(root / ".bootstrap-venv/Scripts/other.exe")
+                self.assertFalse(autostart._owned_supervisor_action(action))
 
     def test_autostart_parameters_are_rejected_by_other_commands(self):
         shell = powershell()

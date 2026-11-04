@@ -47,8 +47,12 @@ $TaskTemporary = Join-Path ([IO.Path]::GetTempPath()) ('codex-wechat-bootstrap-'
 New-Item -ItemType Directory -Path $TaskTemporary | Out-Null
 try {
     $Installer = Join-Path $TaskTemporary 'installer.py'
-    $InstallerUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' + [Uri]::EscapeDataString($Ref) + '/installer.py'
+    $Release = Join-Path $TaskTemporary 'release.py'
+    $InstallerBaseUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' + [Uri]::EscapeDataString($Ref)
+    $InstallerUri = $InstallerBaseUri + '/installer.py'
+    $ReleaseUri = $InstallerBaseUri + '/release.py'
     Invoke-WebRequest -UseBasicParsing -Uri $InstallerUri -OutFile $Installer -TimeoutSec 120
+    Invoke-WebRequest -UseBasicParsing -Uri $ReleaseUri -OutFile $Release -TimeoutSec 120
     $InstallerArguments = @($Installer, 'bootstrap', '--repo', $Repo, '--ref', $Ref)
     if ($Component) {
         $InstallerArguments[1] = 'components'

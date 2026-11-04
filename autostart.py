@@ -4,8 +4,13 @@ import json
 from pathlib import Path
 import sys
 
+from diagnostics import log_event
 from platform_support import INSTALL_ROOT, IS_WINDOWS, subprocess_options
 from service_control import UNIT, systemctl
+
+WINDOWS_TASK = "CodexWeChat"
+SUPERVISOR_SCRIPT = "bootstrap_supervisor.py"
+TASK_TRIGGER_LOGON = 9
 
 
 async def _windows_request(mode):
@@ -37,9 +42,65 @@ async def _windows_request(mode):
 
 async def installed():
     if IS_WINDOWS:
-        await _windows_request("status")
-        return True
+        try:
+            return (await asyncio.to_thread(windows_task_flags))[0]
+        except Exception:  # no scheduler API or a foreign task: ask the script
+            await _windows_request("status")
+            return True
     return await _linux_status() is not None
+
+
+def windows_task_flags():
+    """(installed, enabled) straight from the task definition.
+
+    Asking the launcher script costs about three seconds because it starts
+    PowerShell; the scheduler's own COM API answers in about forty milliseconds.
+    The ownership check stays conservative: anything that does not look like the
+    task this project installs reports "not installed", and the caller falls back.
+    """
+    import pythoncom
+
+    pythoncom.CoInitialize()
+    try:
+        return _read_task_flags()
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def _owned_supervisor_action(action):
+    """Match the exact stable supervisor action installed by this project."""
+    root = Path(INSTALL_ROOT)
+    expected = f'"{root / SUPERVISOR_SCRIPT}" supervise'
+    arguments = str(getattr(action, "Arguments", "") or "")
+    if not arguments.casefold().startswith(expected.casefold()):
+        return False
+    if (len(arguments) > len(expected)
+            and not arguments[len(expected)].isspace()):
+        return False
+    executables = {
+        str(root / ".bootstrap-venv/Scripts/pythonw.exe").casefold(),
+        str(root / ".bootstrap-venv/Scripts/python.exe").casefold(),
+    }
+    return str(getattr(action, "Execute", "") or "").casefold() in executables
+
+
+def _read_task_flags():
+    import win32com.client
+
+    service = win32com.client.Dispatch("Schedule.Service")
+    service.Connect()
+    try:
+        task = service.GetFolder("\\").GetTask(WINDOWS_TASK)
+    except Exception:
+        return False, False
+    definition = task.Definition
+    actions = definition.Actions
+    if actions.Count != 1 or not _owned_supervisor_action(actions.Item(1)):
+        return False, False
+    triggers = [definition.Triggers.Item(index) for index in range(1, definition.Triggers.Count + 1)]
+    logon = [trigger for trigger in triggers if trigger.Type == TASK_TRIGGER_LOGON]
+    enabled = bool(task.Enabled) and any(bool(trigger.Enabled) for trigger in logon)
+    return True, enabled
 
 
 async def _linux_status():
@@ -56,26 +117,36 @@ async def _linux_status():
 
 
 async def status():
-    return await _windows_request("status") if IS_WINDOWS else bool(await _linux_status())
+    if not IS_WINDOWS:
+        return bool(await _linux_status())
+    try:
+        installed_flag, enabled = await asyncio.to_thread(windows_task_flags)
+    except Exception:
+        # No scheduler API here: the launcher script is slower but authoritative.
+        log_event("autostart.task_read_failed", level="warning", component="autostart")
+        return await _windows_request("status")
+    if not installed_flag:
+        # Missing, or a CodexWeChat task that belongs to another installation.
+        raise ValueError("尚未安装本项目的计划任务，或该任务属于另一个目录。")
+    return enabled
 
 
-async def set_enabled(enabled, *, start_if_missing=True):
+async def set_enabled(enabled):
     if type(enabled) is not bool:
         raise ValueError("自启只接受 on 或 off。")
     if IS_WINDOWS:
         actual = await _windows_request("on" if enabled else "off")
     else:
-        previous = await _linux_status()  # Never modify a different installation's service.
-        if previous is None and not enabled:
+        installed = await _linux_status()
+        if installed is None and not enabled:
             return False
-        if (previous is None and enabled and INSTALL_ROOT.resolve() !=
-                (Path.home() / ".local/share/codex-wechat").resolve()):
-            raise ValueError("首次注册 Linux 服务要求项目位于 ~/.local/share/codex-wechat。")
+        if installed is None:
+            raise ValueError("尚未注册本项目的用户服务，请重新运行安装器。")
         source = str((INSTALL_ROOT / UNIT).resolve())
         if not Path(source).is_file():
             raise ValueError("本项目的服务模板不存在。")
         if enabled:
-            await systemctl("enable", source)
+            await systemctl("enable", UNIT)
         else:
             await systemctl("disable", UNIT)
             # disable also removes explicit unit links. Keep demand-start usable.
@@ -84,8 +155,6 @@ async def set_enabled(enabled, *, start_if_missing=True):
         actual = await _linux_status()
     if actual != enabled:
         raise RuntimeError("自启设置未生效，请在电脑检查用户服务。")
-    if not IS_WINDOWS and previous is None and enabled and start_if_missing:
-        await systemctl("--no-block", "start", UNIT)
     return actual
 
 

@@ -2,9 +2,10 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import wechat
+import wechat_auth
 from storage import Store
 
 
@@ -20,7 +21,7 @@ class FakeWeChat:
         if endpoint.startswith("ilink/bot/get_bot_qrcode"):
             return {"qrcode": "fixture", "qrcode_img_content": "https://example.invalid"}
         if endpoint.startswith("ilink/bot/get_qrcode_status"):
-            if self.status == "binded_redirect":
+            if self.status in ("binded_redirect", "expired", "waiting"):
                 return {"status": self.status}
             return {
                 "status": "confirmed",
@@ -140,6 +141,27 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.account, self.old)
         callback.assert_not_called()
         self.assertEqual(self.store.load("account"), self.old)
+
+    async def test_expired_qr_keeps_ctrl_c_and_names_the_start_entry(self):
+        with self.assertRaises(RuntimeError) as caught:
+            await self.login(self.old, status="expired")
+        message = str(caught.exception)
+        self.assertIn("Ctrl+C", message)
+        self.assertIn(wechat_auth.start_command(), message)
+
+    async def test_expired_rebind_qr_names_the_rebind_entry(self):
+        with self.assertRaises(RuntimeError) as caught:
+            await self.login(self.old, status="expired", rebind=True)
+        self.assertIn(wechat_auth.rebind_command(), str(caught.exception))
+
+    async def test_login_timeout_keeps_ctrl_c_and_names_the_start_entry(self):
+        with patch.object(wechat.time, "monotonic", side_effect=[0, 0, 151]), \
+                patch.object(wechat.asyncio, "sleep", new=AsyncMock()):
+            with self.assertRaises(RuntimeError) as caught:
+                await self.login(self.old, status="waiting")
+        message = str(caught.exception)
+        self.assertIn("Ctrl+C", message)
+        self.assertIn(wechat_auth.start_command(), message)
 
 
 if __name__ == "__main__":

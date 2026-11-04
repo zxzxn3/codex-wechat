@@ -15,6 +15,7 @@ import uuid
 
 from records import AgentMessage, Source, TurnResult
 from media import OUTPUT_HINT
+from diagnostics import error_reason, log_event
 from usage import UsageCache
 from questions import (
     ASYNC_QUESTION_METHOD,
@@ -29,15 +30,30 @@ from prompts import (prompt_text)
 from platform_support import IS_WINDOWS
 from prompts import (command_approval, file_approval)
 
-from codex_transport import CodexTransport, CodexRpcError
+from codex_transport import CodexTransport, CodexRpcError, SharedDaemonUnavailable
 
 PENDING_TOKEN_ALPHABET = "023456789abcdefghjkmnpqrstuvwxyz"
 PENDING_TOKEN_LENGTH = 3
 PENDING_TOKEN_RECENT = 128
+# A turn that reports nothing for this long is treated as stalled. Disconnects
+# already fail the turn; this covers "connection alive but events stopped",
+# which would otherwise freeze the delivery worker until the service restarts.
+TURN_IDLE_SECONDS = 900
+
+# Writer ownership for the selected thread. NONE means this connection does not
+# hold it; only the two WAITING modes are retried at the start of the next turn.
+WRITER_NATIVE = "native"        # this connection holds the writer
+WRITER_FOLLOWED = "followed"    # the App holds it and its event stream feeds us
+WRITER_RELEASED = "released"    # handed back after a turn; take it back next turn
+WRITER_BUSY = "busy"            # the desktop holds it and we could not follow
 
 
 class DeferTurn(RuntimeError):
     """The desktop owns an active turn that did not accept this input."""
+
+
+class TurnStalled(RuntimeError):
+    """The turn stopped reporting events; it was abandoned locally."""
 
 class CodexBackend:
     def __init__(self, config, cwd, notify):
@@ -45,6 +61,10 @@ class CodexBackend:
         self.pending = {}
         self.recent_tokens = deque(maxlen=PENDING_TOKEN_RECENT)
         self.active = None
+        self.writer_states = {}
+        self.attach_error = None
+        self.last_event_at = time.monotonic()
+        self.turn_idle_seconds = TURN_IDLE_SECONDS
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
@@ -72,6 +92,7 @@ class CodexBackend:
         self.model_catalog = None
         self.models_checked_at = 0
         self.app = None
+        self.shared_fallback = None
         self.transport = CodexTransport(config, cwd,
             on_request=self.server_request, on_event=self.transport_event,
             on_connect=self.reset_connection, on_disconnect=self.connection_lost)
@@ -103,7 +124,21 @@ class CodexBackend:
         return self.transport.connected and (not self.app or self.app.connected)
 
     async def start(self):
-        await self.transport.start()
+        try:
+            await self.transport.start()
+        except SharedDaemonUnavailable as error:
+            # An explicit shared choice stays in the configuration; this run only
+            # needs to keep working, so reuse the private server instead.
+            await self.close()
+            self.shared_fallback = str(error)[:200] or type(error).__name__
+            log_event("backend.shared_unavailable", level="warning", component="backend",
+                      reason=self.shared_fallback, error_type=type(error).__name__,
+                      cause_type=error.cause_type, cause_code=error.cause_code,
+                      retry_after=error.retry_after)
+            self.transport = CodexTransport({**self.config, "sharedDaemon": False}, self.cwd,
+                on_request=self.server_request, on_event=self.transport_event,
+                on_connect=self.reset_connection, on_disconnect=self.connection_lost)
+            await self.transport.start()
 
     async def rpc(self, method, params):
         if self.app and method != "thread/resume" and params.get("threadId") == self.app.thread_id:
@@ -119,7 +154,58 @@ class CodexBackend:
         app, self.app = self.app, None
         if app:
             await app.close()
+        self.writer_states.clear()
         await self.transport.close()
+
+    def set_writer(self, mode, thread_id=None):
+        if thread_id:
+            if mode is None:
+                self.writer_states.pop(thread_id, None)
+            else:
+                self.writer_states[thread_id] = mode
+
+    def writer_state(self, thread_id):
+        if not thread_id:
+            return None
+        state = self.writer_states.get(thread_id)
+        if state is not None:
+            return state
+        return None
+
+    def writer_elsewhere(self, thread_id):
+        """True when the next turn must take the writer back for this thread."""
+        return self.writer_state(thread_id) in (WRITER_RELEASED, WRITER_BUSY)
+
+    async def attach_follower(self, thread_id, options, *, activate=True):
+        """Attach to the App's copy of a thread and make it the selection.
+
+        Both entry points use this (a resume writer conflict and a thread we
+        handed back), so session setup and event publishing cannot drift apart.
+        Callers that select a runtime turn first pass activate=False.
+        """
+        app = await self.attach_app(thread_id, options)
+        if app is None:
+            return None
+        previous_app, self.app = self.app, app
+        if previous_app and previous_app is not app:
+            await previous_app.close()
+        if self.selected_thread != thread_id:
+            self.selection_epoch += 1
+            self.active = None
+            self.pending.clear()
+        self.selected_thread = thread_id
+        self.attach_error = None
+        self.set_writer(WRITER_FOLLOWED, thread_id)
+        if activate:
+            self.activate_follower(app)
+        return app
+
+    @staticmethod
+    def activate_follower(app):
+        if not app.enabled:
+            # Without this the follower stays silent: broadcast() only publishes
+            # state changes while enabled, so desktop turns would never reach us.
+            app.activate()
 
     def transport_event(self, message):
         # The App owns this live stream. The other backend may still publish
@@ -131,7 +217,7 @@ class CodexBackend:
     async def attach_app(self, thread_id, options):
         from app_ipc import AppSession, ipc_path
         path = ipc_path(self.config)
-        if path is None or not path.exists():
+        if path is None or (not IS_WINDOWS and not path.exists()):
             return None
         candidate = None
         candidate = AppSession(path, thread_id,
@@ -141,6 +227,34 @@ class CodexBackend:
         try:
             await candidate.attach()
             await candidate.settings(options)
+        except FileNotFoundError:
+            # Missing App endpoint does not turn a native writer conflict into
+            # a guessed attachment or a new independent writer.
+            await candidate.close()
+            return None
+        except OSError as error:
+            # A stale socket or a refused connection is still an unavailable
+            # endpoint, not a writer conflict that may be adopted safely.
+            await candidate.close()
+            reason = error_reason(error) or type(error).__name__
+            if reason != self.attach_error:
+                self.attach_error = reason
+                self.writer_event("backend.app_attach_failed", level="warning",
+                                  thread=thread_id, status="failed",
+                                  error_type=type(error).__name__, reason=reason)
+            return None
+        except (CodexRpcError, ValueError) as error:
+            # No capable owner, a foreign relay or an unusable endpoint: keep the
+            # caller's own conflict reason instead of an attach detail.
+            await candidate.close()
+            reason = error_reason(error) or type(error).__name__
+            if reason != self.attach_error:
+                # The idle retry would otherwise repeat the same warning.
+                self.attach_error = reason
+                self.writer_event("backend.app_attach_failed", level="warning",
+                                  thread=thread_id, status="failed",
+                                  error_type=type(error).__name__, reason=reason)
+            return None
         except BaseException:
             await candidate.close()
             raise
@@ -245,6 +359,9 @@ class CodexBackend:
 
     def event(self, msg):
         params = msg.get("params", {})
+        self.last_event_at = time.monotonic()
+        if self.active and params.get("threadId") == self.active.get("thread"):
+            self.active["last_progress_at"] = self.last_event_at
         if msg.get("method") == "serverRequest/resolved":
             for token, request in list(self.pending.items()):
                 if (request.get("id") == params.get("requestId") and
@@ -442,6 +559,7 @@ class CodexBackend:
         return {"thread": thread_id, "turn": turn_id, "messages": [], "owned": owned,
                 "starting": False,
                 "earlyEvents": [],
+                "last_progress_at": time.monotonic(),
                 "source": self.source(thread_id),
                 "cwd": self.info.get("cwd") or self.cwd,
                 "done": asyncio.get_running_loop().create_future()}
@@ -531,7 +649,7 @@ class CodexBackend:
                 # Other RPC failures must never silently change transports.
                 if error.code != -32600 or "already has an active writer" not in error.reason:
                     raise
-                app = await self.attach_app(thread_id, options)
+                app = await self.attach_follower(thread_id, options, activate=False)
                 if app is None:
                     raise
                 result = app.thread_result()
@@ -557,14 +675,17 @@ class CodexBackend:
             self.active = None
             self.pending.clear()
         self.selected_thread = thread["id"]
-        previous_app, self.app = self.app, app
-        if previous_app and previous_app is not app:
-            await previous_app.close()
+        if app is None:
+            # Native writer path: any follower from the previous selection is gone.
+            previous_app, self.app = self.app, None
+            if previous_app:
+                await previous_app.close()
+            self.set_writer(WRITER_NATIVE, thread["id"])
         await self.refresh_runtime()
-        if app and not app.enabled:
+        if app is not None:
             # Requests are queued by activate(). Establish the selected runtime
             # turn first so a pending approval is not rejected as unsupported.
-            app.activate()
+            self.activate_follower(app)
         await self.refresh_usage()
         return result["thread"]["id"]
 
@@ -628,7 +749,98 @@ class CodexBackend:
                {"PATH", "HOME", "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE",
                 "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LOCALAPPDATA"}}
         env.update({k: v for k, v in selected.items() if k in proxy_keys})
+        # A backend without proxy variables follows the machine setting, so the
+        # probe mirrors that rather than reporting a direct path it never uses.
+        proxy_variables = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                           "http_proxy", "https_proxy", "all_proxy"}
+        if (getattr(self.transport.spec, "system_proxy", True)
+                and not any(env.get(name) for name in proxy_variables)):
+            from platform_support import system_proxy
+            env.update(system_proxy())
         return endpoint, env
+
+    async def release_thread(self, thread_id, *, follow=False):
+        """Drop the writer this client holds for a thread.
+
+        The app-server exposes no unload call; unsubscribing is the only way to
+        stop holding the writer, which is what leaves another client (the App)
+        looking at a locked thread. Best effort: an older server that does not
+        know the method must not fail the caller, and a followed App thread is
+        left alone because its events still arrive through IPC.
+
+        A shared daemon serialises writers itself and broadcasts turns to every
+        client that has the thread loaded, so ``follow`` keeps the subscription:
+        unsubscribing there would drop the stream that carries another client's
+        turns. Leaving a thread must still release it, or the daemon would keep
+        every session this bridge ever selected locked for the App.
+        """
+        if not thread_id or not self.connected or self.active is not None or self.app is not None:
+            if thread_id:
+                self.writer_event("backend.writer_kept", thread=thread_id,
+                                  status=("followed" if self.app is not None else
+                                          "busy" if self.active is not None else "offline"))
+            return False
+        if self.shared and follow:
+            # Another client may still own the thread we just adopted; keep that
+            # state so the next turn takes the writer back instead of assuming it.
+            if self.writer_state(thread_id) != WRITER_BUSY:
+                self.set_writer(WRITER_NATIVE, thread_id)
+            self.writer_event("backend.writer_kept", thread=thread_id, status="shared")
+            return False
+        try:
+            await self.rpc("thread/unsubscribe", {"threadId": thread_id})
+        except (CodexRpcError, OSError, RuntimeError) as error:
+            self.writer_event("backend.writer_release_failed", level="warning",
+                              thread=thread_id, status="failed",
+                              error_type=type(error).__name__)
+            return False
+        self.set_writer(WRITER_RELEASED, thread_id)
+        self.writer_event("backend.writer_released", thread=thread_id, status="released")
+        if follow:
+            # The App may still be running: follow it so desktop turns keep
+            # reaching WeChat while this client holds no writer at all.
+            await self.follow_app(thread_id)
+        return True
+
+    async def follow_app(self, thread_id):
+        """Follow the desktop's copy of a thread we just let go.
+
+        A released thread stops feeding this connection, so a desktop turn would
+        be invisible until the next inbound message. Re-attaching as an App
+        follower restores that stream without taking the writer back.
+        """
+        if not thread_id or not self.connected or self.active is not None or self.app is not None:
+            return False
+        if not self.app_available():
+            return False
+        try:
+            app = await self.attach_follower(thread_id, {})
+        except (TimeoutError, CodexRpcError, OSError, RuntimeError) as error:
+            # Following is best effort: it must never fail the caller's turn or
+            # the bridge startup.
+            self.writer_event("backend.app_attach_failed", level="warning",
+                              thread=thread_id, status="failed",
+                              error_type=type(error).__name__)
+            return False
+        if app is None:
+            return False
+        self.writer_event("backend.app_followed", thread=thread_id, status="followed")
+        return True
+
+    def app_available(self):
+        from app_ipc import ipc_path
+        path = ipc_path(self.config)
+        if path is None:
+            return False
+        try:
+            return Path(path).exists()
+        except OSError:
+            return False
+
+    def writer_event(self, event, **fields):
+        report = getattr(self, "report", None)
+        if report:
+            report(event, **fields)
 
     async def list_threads(self, cursor=None, search=None):
         params = {"limit": 10, "sortKey": "updated_at", "cursor": cursor,
@@ -640,6 +852,34 @@ class CodexBackend:
     async def read_thread(self, thread_id):
         result = await self.rpc("thread/read", {"threadId": thread_id})
         return result["thread"]
+
+    async def adopt_thread(self, thread_id, thread=None):
+        """Take a thread as the selection without holding or following its writer.
+
+        Used when the desktop owns it and its IPC cannot be followed: the bridge
+        stays usable, keeps retrying, and reports the conflict per message
+        instead of failing backend recovery in a loop.
+        """
+        thread = thread or {}
+        previous = self.info if self.info.get("id") == thread_id else {}
+        self.info = {"id": thread_id, "name": thread.get("name"),
+                     "path": thread.get("path"),
+                     "model": thread.get("model", previous.get("model")),
+                     "provider": thread.get("modelProvider", previous.get("provider")),
+                     "effort": thread.get("reasoningEffort", previous.get("effort")),
+                     "cwd": thread.get("cwd") or previous.get("cwd") or self.cwd,
+                     "approval": thread.get("approvalPolicy", previous.get("approval")),
+                     "sandbox": thread.get("sandbox", previous.get("sandbox")),
+                     "collaboration": thread.get("collaborationMode",
+                                                 previous.get("collaboration")),
+                     "usage": self.usage_by_thread.get(thread_id, previous.get("usage"))}
+        if self.selected_thread != thread_id:
+            self.selection_epoch += 1
+            self.active = None
+            self.pending.clear()
+        self.selected_thread = thread_id
+        self.set_writer(WRITER_BUSY, thread_id)
+        return thread_id
 
     async def models(self, max_age=60):
         if self.model_catalog is not None and time.monotonic() - self.models_checked_at < max_age:
@@ -700,6 +940,43 @@ class CodexBackend:
             dispatch("accepted", turn_id)
         return True
 
+    async def await_turn(self, current):
+        """Wait for the turn, aborting it when nothing reports for too long.
+
+        A broken event stream leaves an owned turn pending forever, which freezes
+        the delivery worker and makes /stop look ineffective. Give up locally so
+        the next message can re-establish the session.
+        """
+        limit = self.turn_idle_seconds
+        while True:
+            last_progress = current.get("last_progress_at", self.last_event_at)
+            idle = max(1.0, limit - (time.monotonic() - last_progress))
+            try:
+                return await asyncio.wait_for(asyncio.shield(current["done"]), idle)
+            except TimeoutError:
+                if current["done"].done():
+                    return current["done"].result()
+                last_progress = current.get("last_progress_at", self.last_event_at)
+                if time.monotonic() - last_progress < limit:
+                    continue
+                await self.abandon_turn(current)
+                raise TurnStalled("回合长时间没有进展，已在本地中止") from None
+
+    async def abandon_turn(self, current):
+        log_event("backend.turn_stalled", level="warning", component="backend",
+                  thread=current.get("thread"), turn=current.get("turn"),
+                  idle_ms=int((time.monotonic() - current.get(
+                      "last_progress_at", self.last_event_at)) * 1000))
+        if self.active is current:
+            self.active = None
+        if not current["done"].done():
+            current["done"].cancel()
+        self.pending.clear()
+        app, self.app = self.app, None
+        if app is not None:
+            # The follower never published, so stop pretending to follow it.
+            await app.close()
+
     async def run(self, thread_id, text, attachments=None, *, client_id=None, dispatch=None,
                   allow_steer=True):
         # Claim preparation before model lookup; stop is remembered across awaits.
@@ -716,6 +993,17 @@ class CodexBackend:
         self.active = current
         self.stop_requested = False
         try:
+            if self.writer_elsewhere(thread_id):
+                # The writer was handed back (or never taken): take it back, or
+                # follow the desktop if it claimed the thread meanwhile.
+                previous = self.writer_state(thread_id)
+                self.set_writer(None, thread_id)
+                try:
+                    await self.thread(thread_id)
+                except Exception:
+                    # Keep watching: the desktop still owns the thread.
+                    self.set_writer(previous, thread_id)
+                    raise
             await self.refresh_runtime()
             current["cwd"] = self.info.get("cwd") or self.cwd
             inputs = await self.input_items(text, attachments)
@@ -747,7 +1035,8 @@ class CodexBackend:
             current["earlyEvents"].clear()
             if self.stop_requested and not current["done"].done():
                 await self.stop()
-            return await current["done"]
+            current["last_progress_at"] = time.monotonic()
+            return await self.await_turn(current)
         except CodexRpcError as error:
             early_events = list(current["earlyEvents"])
             if error.definite_rejection:

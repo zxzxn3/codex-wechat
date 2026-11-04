@@ -3,7 +3,7 @@ import asyncio
 from dataclasses import replace
 import tempfile
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from codex_wechat import Bridge
 from backend import CodexRpcError, DeferTurn
@@ -192,7 +192,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         b.controls["urgent"].put_nowait(("/stop", None))
         await asyncio.wait_for(b.controls["local"].join(), 1)
         await asyncio.wait_for(b.controls["urgent"].join(), 1)
-        self.assertTrue(any(e.get("text", "").startswith("WeChat ─") for e in b.state["outbox"]))
+        self.assertTrue(any(e.get("text", "").startswith("微信 ─") for e in b.state["outbox"]))
         self.assertFalse(b.state["inbox"])
 
     async def test_late_results_do_not_cross_selection_or_connection(self):
@@ -251,6 +251,21 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lastSendMs", saved)
         self.assertGreaterEqual(saved["lastSendMs"], 0)
         task.cancel()
+
+    async def test_a_retried_message_repeats_the_receipt_as_it_backs_off(self):
+        # The repeated receipt is the user-visible "still trying" signal, so the
+        # retry cadence - not the receipt - is what has to stay quiet.
+        self.bridge.backend.transport.proc = None
+        job = self.job("a")
+        self.bridge.acknowledge(job)
+        self.bridge.acknowledge(job)
+        self.assertEqual(len(self.bridge.state["outbox"]), 2)
+        delays = []
+        with patch("input_delivery.time.time", return_value=1000.0):
+            for _ in range(4):
+                self.assertTrue(self.bridge.inputs.queue_writer_conflict(self.bridge, job))
+                delays.append(job["writerRetryAt"] - 1000.0)
+        self.assertEqual(delays, [30, 60, 120, 120])
 
     async def test_usage_before_resume_response_is_kept_per_thread(self):
         backend = self.bridge.backend

@@ -142,11 +142,11 @@ def split_text(text, settings=None, *, semantic=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file", nargs="?", type=Path, help="UTF-8 text; default stdin")
-    parser.add_argument("--mode", choices=("smart", "length"), default=Slicing.mode)
+    parser.add_argument("--smart", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--target-chars", type=int, default=Slicing.target_chars)
     parser.add_argument("--json", action="store_true", help="emit an array of exact message bodies")
     args = parser.parse_args()
-    settings = Slicing.from_config({"mode": args.mode, "targetChars": args.target_chars})
+    settings = Slicing.from_config({"smart": args.smart, "targetChars": args.target_chars})
     text = args.file.read_text(encoding="utf-8") if args.file else sys.stdin.read()
     parts = split_text(text, settings, semantic=True)
     if args.json:

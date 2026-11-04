@@ -8,7 +8,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from errors import WeChatAuthExpired, WeChatPollTimeout
+from errors import WeChatApiError, WeChatAuthExpired, WeChatPollTimeout
 from diagnostics import error_fields, log_event
 from latency import timeout_stage
 from wechat_http import PooledHTTP
@@ -119,12 +119,12 @@ class WeChat:
                 raise RuntimeError("微信响应无法解析") from None
             if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
                 code = result.get("errcode") or result.get("ret")
+                kind = api_error_kind(code, result.get("errmsg") or result.get("msg"))
                 metadata["error_code"] = code
-                metadata["api_error_kind"] = api_error_kind(
-                    code, result.get("errmsg") or result.get("msg"))
+                metadata["api_error_kind"] = kind
                 if auth and str(code) == "-14":
                     raise WeChatAuthExpired()
-                raise RuntimeError(f"微信 API 错误 {code}")
+                raise WeChatApiError(code, kind)
             # Poll and typing successes are routine traffic; failures remain visible.
             ok, level = True, "debug" if route in (
                 "ilink/bot/getupdates", "ilink/bot/getconfig", "ilink/bot/sendtyping") else "info"
@@ -161,13 +161,22 @@ class WeChat:
         return result
 
     async def send(self, entry):
-        return await self.request("ilink/bot/sendmessage", {"msg": {
+        result = await self.request("ilink/bot/sendmessage", {"msg": {
             "from_user_id": "", "to_user_id": entry["user"],
             "client_id": entry["id"], "message_type": 2, "message_state": 2,
             "context_token": entry["context"],
             "item_list": [entry["item"]] if "item" in entry else
                          [{"type": 1, "text_item": {"text": entry["text"]}}]}},
             timeout=SEND_TIMEOUT, request_id=entry.get("requestId"))
+        # A 200 alone does not prove delivery: record whether the server
+        # acknowledged the message with an id, so a silent drop is visible.
+        keys = result if isinstance(result, dict) else {}
+        acknowledged = any(key in keys for key in (
+            "msgid", "msg_id", "message_id", "messageId", "msgId"))
+        log_event("wechat.send_ack", component="wechat",
+                  status="acked" if acknowledged else "no_id", count=len(keys),
+                  request_id=entry.get("requestId"))
+        return result
 
     async def typing_ticket(self, user, context=None):
         body = {"ilink_user_id": user}
@@ -204,6 +213,8 @@ async def login(store, *, starting=False, rebind=False,
 
 async def _login(client, store, *, starting, rebind, before_identity_change, persist):
     previous = store.load("account")
+    retry_command = (wechat_auth.rebind_command() if rebind
+                     else wechat_auth.start_command())
     local_tokens = ([str(previous["token"])]
                     if previous and previous.get("token") else [])
     qr = await client.request("ilink/bot/get_bot_qrcode?bot_type=3",
@@ -241,8 +252,9 @@ async def _login(client, store, *, starting, rebind, before_identity_change, per
                 before_identity_change(previous, account)
             if persist:
                 store.save("account", account)
-                print("绑定成功。只接受此次扫码用户的私聊；" +
-                      ("正在继续启动桥接。" if starting else "运行 start 启动桥接。"))
+                message = ("绑定成功。正在继续启动桥接。" if starting else
+                           "绑定成功。运行 " + wechat_auth.start_command() + " 启动桥接。")
+                print(message)
             return LoginResult(account, previous, identity_changed)
         if status == "scaned_but_redirect":
             host = data.get("redirect_host", "")
@@ -265,6 +277,8 @@ async def _login(client, store, *, starting, rebind, before_identity_change, per
             print("服务端确认此微信机器人已绑定；本地凭据保持不变。", flush=True)
             return LoginResult(previous, previous, False, already_connected=True)
         elif status in ("expired", "verify_code_blocked"):
-            raise RuntimeError("二维码已过期或验证受限；请重新运行 login")
+            raise RuntimeError("二维码已过期或验证受限。请按 Ctrl+C 退出，然后重新运行 "
+                               + retry_command + "。")
         await asyncio.sleep(1)
-    raise RuntimeError("扫码等待超时，请重新运行 login")
+    raise RuntimeError("扫码等待超时。请按 Ctrl+C 退出，然后重新运行 "
+                       + retry_command + "。")

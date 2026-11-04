@@ -28,5 +28,5 @@ WECHAT_MEDIA: {"path":"/absolute/path/to/file","kind":"auto"}
 Automatic return accepts only non-hidden files under the current working
 directory or the bridge's private media directory. When the working directory
 is the home directory or `/`, only the media directory is accepted. For a
-requested file outside those boundaries, tell the user to use `/send <path>`;
+requested file outside those boundaries, tell the user to use `/get <path>`;
 do not emit a marker that the bridge will reject.

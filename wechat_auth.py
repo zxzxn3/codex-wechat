@@ -9,13 +9,24 @@ AUTH_REQUIRED = "reauth_required"
 IDENTITY_CHANGED = "identity_changed"
 
 
-def rebind_command(*, stop_active=False):
-    """An actionable local command independent of PATH and shell aliases."""
+def _entry_command(action):
     if IS_WINDOWS:
         path = str(INSTALL_ROOT / "codex-wechat.ps1").replace("'", "''")
-        return "& '" + path + "' rebind" + (" -StopActive" if stop_active else "")
-    return shlex.join([str(INSTALL_ROOT / "codex-wechat"), "rebind",
-                       *(["--stop-active"] if stop_active else [])])
+        return "& '" + path + "' " + action
+    return shlex.join([str(INSTALL_ROOT / "codex-wechat"), action])
+
+
+def start_command():
+    """Start the interactive entry that matches the current platform."""
+    return _entry_command("start")
+
+
+def rebind_command(*, stop_active=False):
+    """An actionable local command independent of PATH and shell aliases."""
+    command = _entry_command("rebind")
+    if not stop_active:
+        return command
+    return command + (" -StopActive" if IS_WINDOWS else " --stop-active")
 
 
 def identity(account):

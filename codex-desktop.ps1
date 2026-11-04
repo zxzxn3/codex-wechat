@@ -23,13 +23,6 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 }
 $script = Join-Path $project 'desktop.py'
 if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
-    # A failed update may have prepared a newer stable entry before activation.
-    # An older App-capable release still owns its own compatible dispatcher.
-    $legacy = Join-Path $project 'codex-desktop.ps1'
-    if ($project -ne $installRoot -and (Test-Path -LiteralPath $legacy -PathType Leaf)) {
-        & $legacy @args
-        exit $LASTEXITCODE
-    }
     throw 'Desktop entry is missing.'
 }
 $before = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT','Process')

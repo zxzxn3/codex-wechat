@@ -34,7 +34,7 @@ class UnqueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([job["id"] for job in saved["inbox"]], ["first", "steer"])
         self.assertEqual(saved["inputRecords"][-1]["id"], "last")
         self.assertEqual(saved["inputRecords"][-1]["phase"], InputPhase.CANCELLED)
-        self.assertEqual(saved["outbox"][-1]["text"], "已撤回。Queue 2 tasks")
+        self.assertEqual(saved["outbox"][-1]["text"], "已撤回，剩余 2 条。")
         self.bridge.ensure_backend.assert_not_called()
 
     async def test_does_not_cancel_current_or_submitted_work(self):
@@ -61,9 +61,9 @@ class UnqueueTests(unittest.IsolatedAsyncioTestCase):
     async def test_zero_and_one_remaining_use_correct_count(self):
         self.bridge.state["inbox"] = [{"mode": "queue"}, {"mode": "queue"}]
         await dispatch(self.bridge, "/unqueue")
-        self.assertEqual(self.bridge.state["outbox"][-1]["text"], "已撤回。Queue 1 task")
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], "已撤回，剩余 1 条。")
         await dispatch(self.bridge, "/unqueue")
-        self.assertEqual(self.bridge.state["outbox"][-1]["text"], "已撤回。Queue 0 tasks")
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], "已撤回，剩余 0 条。")
 
     async def test_urgent_local_command_rejects_arguments(self):
         self.assertEqual(command_lane("/unqueue", ""), "urgent")

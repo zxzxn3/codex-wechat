@@ -7,9 +7,9 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from codex_wechat import Bridge
-from codex_transport import CodexTransport
+from codex_transport import CodexTransport, SharedDaemonUnavailable
 import daemon_control
-from errors import BackendStartupError, UserFacingError, backend_reason
+from errors import UserFacingError, backend_reason
 from latency import Latency
 from records import InputPhase
 from storage import Store
@@ -133,9 +133,11 @@ class DaemonRecoveryTests(unittest.IsolatedAsyncioTestCase):
         transport.close = AsyncMock()
         transport.start_shared_daemon = AsyncMock(return_value="unit.service")
         with patch("daemon_control.status", AsyncMock(return_value=state)):
-            with self.assertRaises(BackendStartupError) as caught:
+            with self.assertRaises(SharedDaemonUnavailable) as caught:
                 await transport.start()
-        self.assertEqual(caught.exception.retry_after, 30)
-        self.assertIn("密钥环", backend_reason(caught.exception))
+        self.assertIn("密钥环", str(caught.exception))
+        failure = daemon_control.failure(state, ["codex-deepseek", "app-server"])
+        self.assertEqual(failure.retry_after, 30)
+        self.assertIn("密钥环", backend_reason(failure))
         other = daemon_control.failure(state, ["codex", "app-server"])
         self.assertNotIn("DeepSeek", str(other))

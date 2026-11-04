@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from codex_wechat import Bridge
+from errors import WeChatApiError
 from profiles import restore
 from storage import Store
 
@@ -14,7 +15,8 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Store(Path(self.temp.name) / "state")
-        self.bridge = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
+        self.bridge = Bridge(self.store, {"user": "owner"}, {"backends": {
+            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         self.bridge.state["context"] = "context"
 
     def tearDown(self):
@@ -74,6 +76,34 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
+    async def test_api_rejection_is_not_retried_and_waits_for_a_new_context(self):
+        bridge = self.bridge
+        bridge.reply("answer")
+        calls = 0
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            raise WeChatApiError(-2, "prepare_failed")
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event") as log_event:
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("wechatContextPending"):
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertEqual(calls, 1)  # no retry amplification
+                self.assertTrue(bridge.state["wechatContextPending"])
+                self.assertEqual(len(bridge.state["failedOutbox"]), 1)
+                rejected = next(call for call in log_event.call_args_list
+                                if call.args and call.args[0] == "output.send_rejected")
+                self.assertEqual(rejected.kwargs["api_error_kind"], "prepare_failed")
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
     async def test_failure_count_is_not_capped_or_reset_by_session_or_restart(self):
         bridge = self.bridge
         for index in range(25):
@@ -86,7 +116,8 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         restore(bridge.state, {"thread": "other"})
         bridge.backend_name = "deepseek"
         bridge.save()
-        restarted = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
+        restarted = Bridge(self.store, {"user": "owner"}, {"backends": {
+            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         self.assertEqual(restarted.prompt_fields()["send_failures"], 25)
         self.assertEqual(len(restarted.state["failedOutbox"]), 20)
 
@@ -95,6 +126,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         state.pop("consecutiveSendFailures")
         state["failedOutbox"] = [{"id": "historical"}]
         self.store.save("bridge", state)
-        restored = Bridge(self.store, {"user": "owner"}, {"backends": {"deepseek": {"command": ["fake-deepseek", "app-server"]}}})
+        restored = Bridge(self.store, {"user": "owner"}, {"backends": {
+            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         self.assertEqual(restored.prompt_fields()["send_failures"], 0)
         self.assertEqual(restored.state["failedOutbox"], [{"id": "historical"}])

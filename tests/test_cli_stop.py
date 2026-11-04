@@ -14,6 +14,27 @@ from service_adapter import ServiceState
 from storage import Store
 
 
+class TtyBuffer(StringIO):
+    def isatty(self):
+        return True
+
+
+class LogPathHintTests(unittest.TestCase):
+    def test_foreground_hint_names_the_structured_log(self):
+        output = TtyBuffer()
+        with redirect_stdout(output), \
+                patch.object(codex_wechat, "log_path",
+                             return_value=Path("/data/logs/bridge.jsonl")):
+            codex_wechat.show_log_path()
+        self.assertEqual(output.getvalue(), "完整日志: /data/logs/bridge.jsonl\n")
+
+    def test_non_tty_does_not_print_the_hint(self):
+        output = StringIO()
+        with redirect_stdout(output):
+            codex_wechat.show_log_path()
+        self.assertEqual(output.getvalue(), "")
+
+
 class StopCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_reports_missing_service_without_calling_stop(self):
         stop = AsyncMock()
@@ -127,6 +148,26 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
         stop.assert_awaited_once_with(codex_wechat.data_root() / ".state",
                                       codex_wechat.data_root() / "config.json")
         startup_store.assert_not_awaited()
+
+    async def test_status_and_logs_do_not_replace_the_active_release_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / ".state")
+            try:
+                with patch.object(sys, "argv", ["codex_wechat.py", "status"]), \
+                        patch.object(codex_wechat.os, "umask"), \
+                        patch.object(codex_wechat, "startup_store", AsyncMock(return_value=store)), \
+                        patch.object(codex_wechat, "mark_active_release") as marker, \
+                        redirect_stdout(StringIO()):
+                    await codex_wechat.main()
+                marker.assert_not_called()
+                with patch.object(sys, "argv", ["codex_wechat.py", "logs"]), \
+                        patch.object(codex_wechat.os, "umask"), \
+                        patch.object(codex_wechat, "show_logs"), \
+                        patch.object(codex_wechat, "mark_active_release") as marker:
+                    await codex_wechat.main()
+                marker.assert_not_called()
+            finally:
+                store.lock.close()
 
     def test_windows_entry_routes_stop(self):
         script = (Path(__file__).parents[1] / "codex-wechat.ps1").read_text(encoding="utf-8")

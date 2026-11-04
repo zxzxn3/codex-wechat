@@ -56,8 +56,14 @@ class SlicingTests(unittest.TestCase):
             self.assertEqual("".join(parts), text)
             self.bounded(parts)
 
+    def test_smart_boolean_maps_to_mode(self):
+        self.assertEqual(Slicing.from_config({"smart": True}).mode, "smart")
+        self.assertEqual(Slicing.from_config({"smart": False}).mode, "length")
+        with self.assertRaises(ValueError):
+            Slicing.from_config({"smart": "false"})
+
     def test_config_rejects_ambiguous_or_invalid_values(self):
-        for value in ({"mode": "off"}, {"maxParts": 3}, {"targetChars": True},
+        for value in ({"mode": "smart"}, {"maxParts": 3}, {"targetChars": True},
                       {"targetChars": 0}, [], {"targetChars": "600"}):
             with self.assertRaises(ValueError):
                 Slicing.from_config(value)

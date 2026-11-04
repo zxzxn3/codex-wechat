@@ -19,12 +19,6 @@ def can_restart(bridge):
                 or (bridge.session_lock.locked() and not bridge.backend_recovering))
 
 
-def can_handoff_service(bridge):
-    return not (bridge.restarting or bridge.running or bridge.steering or bridge.active_turn()
-                or (bridge.session_lock.locked() and not bridge.backend_recovering)
-                or bridge.backend.pending)
-
-
 def can_prepare_input(bridge):
     # Authentication has its own wake-up path, checked separately by the worker.
     return not (bridge.restarting or bridge.steering or bridge.session_lock.locked()

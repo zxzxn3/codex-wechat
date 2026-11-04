@@ -1,0 +1,23 @@
+{
+  "backends": {
+    "codex": {
+      "label": "Codex",
+      "command": [
+        "codex",
+        "app-server"
+      ],
+      "useSystemProxy": true
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "useSystemProxy": false,
+      "platforms": [
+        "linux"
+      ],
+      "command": [
+        "codex-deepseek",
+        "app-server"
+      ]
+    }
+  }
+}

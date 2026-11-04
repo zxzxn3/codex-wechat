@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from backend import CodexBackend
 from codex_wechat import Bridge
-from command_specs import HELP, help_text
+from command_specs import HELP, HELP_ALL, help_text
 from configuration import TEXT_LIMIT_BYTES
 from prompts import (DEFAULT_PROMPTS, command_approval, prompt_text,
                      validate_prompt_overrides)
@@ -34,9 +34,15 @@ class PromptCatalogueTests(unittest.TestCase):
 
     def test_help_defaults_still_come_from_the_command_catalogue(self):
         self.assertEqual(help_text(), HELP)
+        self.assertEqual(help_text(show_all=True), HELP_ALL)
         custom = help_text(text=lambda name: prompt_text(name, overrides={"HELP_STATUS": "Live status"}))
         self.assertIn('`/status` Live status `/s`', custom)
         self.assertIn('`/sessions [页码|搜索词]`', custom)
+        for command in ("/approve", "/deny", "/answer", "/get", "/getfile",
+                        "/cwd", "/switch", "/ping"):
+            self.assertNotIn(f"`{command} ", HELP)
+            self.assertNotIn(f"`{command}`", HELP)
+            self.assertTrue(f"`{command} " in HELP_ALL or f"`{command}`" in HELP_ALL)
 
     def test_approval_labels_do_not_replace_command_or_response_token(self):
         def text(name):
@@ -89,8 +95,8 @@ class HotPromptTests(unittest.IsolatedAsyncioTestCase):
             'item_list': [{'type': 1, 'text_item': {'text': '/q task'}}]}]})
         self.assertEqual(self.bridge.state['outbox'][-1]['text'], '1 pending model-x')
         self.write({})
-        self.assertEqual(self.bridge.prompt('QUEUE_CONFIRMED', {'count': 2, 'unit': 'tasks'}),
-                         'Queue 2 tasks')
+        self.assertEqual(self.bridge.prompt('QUEUE_CONFIRMED', {'count': 2, 'unit': '条'}),
+                         '已排队: 2 条')
 
     async def test_invalid_file_retains_the_whole_previous_hot_snapshot(self):
         self.bridge.state['processingNotice'] = 'wechat override'

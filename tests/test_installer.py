@@ -25,7 +25,7 @@ class InstallerTests(unittest.TestCase):
         self.enterContext(patch.object(installer, "introduction", return_value=True))
         self.enterContext(patch.object(installer, "prepare_runtime"))
         self.enterContext(patch.object(installer, "report_dependencies"))
-        def bootstrap(target):
+        def bootstrap(target, *, requirements):
             if installer.IS_WINDOWS:
                 executable = target / ".bootstrap-venv/Scripts/python.exe"
                 executable.parent.mkdir(parents=True, exist_ok=True)
@@ -33,8 +33,12 @@ class InstallerTests(unittest.TestCase):
         self.enterContext(patch.object(installer, "prepare_bootstrap_runtime", side_effect=bootstrap))
         self.enterContext(patch.object(installer, "preflight_command_link"))
         self.enterContext(patch.object(installer, "install_command_link"))
-        self.enterContext(patch.object(installer, "configure_windows"))
+        self.enterContext(patch.object(installer, "configure_platform_service"))
         self.enterContext(patch.object(installer, "next_steps"))
+        # The compatibility gate reads the active install's config; keep the
+        # developer's own data root out of these fixtures.
+        self.enterContext(patch.dict(
+            os.environ, {"CODEX_WECHAT_DATA_ROOT": str(self.base / "data")}))
 
     def make_project(self, root, *, version="one"):
         root.mkdir(parents=True, exist_ok=True)
@@ -120,6 +124,7 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(installer.release_matches(self.target, identifier))
         self.assertTrue((self.target / installer._stable_files()[0]).is_file())
         self.assertTrue((self.target / "installer.py").is_file())
+        self.assertTrue((self.target / "release.py").is_file())
         self.assertFalse((self.target / "config.json").exists())
         self.assertFalse((self.target / ".state").exists())
 
@@ -193,19 +198,6 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "符号链接"):
             installer.update(self.source, self.target)
 
-    def test_legacy_in_place_install_is_adopted_without_moving_data(self):
-        self.source.rename(self.target)
-        self.make_project(self.source, version="new")
-        marker = self.target / "workspace/keep.txt"
-        marker.parent.mkdir()
-        marker.write_text("keep", encoding="utf-8")
-        with patch("builtins.input", return_value="y"):
-            self.assertEqual(installer.update(self.source, self.target), 0)
-        self.assertIsNotNone(self.current())
-        self.assertIsNone(self.previous())
-        self.assertEqual(marker.read_text(), "keep")
-        self.assertTrue((self.target / "codex_wechat.py").is_file())
-
     def test_update_switches_as_a_whole_and_preserves_private_data(self):
         (self.source / "removed-in-v2.py").write_text("OLD = True\n", encoding="utf-8")
         with patch("builtins.input", return_value="y"):
@@ -258,6 +250,43 @@ class InstallerTests(unittest.TestCase):
                 installer.install(self.source, self.target)
         self.assertFalse((self.target / installer.CURRENT_FILE).exists())
 
+    def test_prune_keeps_the_newest_and_the_release_that_may_still_run(self):
+        releases = self.target / installer.RELEASES_DIR
+        for name in ("aaa111", "bbb222", "ccc333"):
+            (releases / name).mkdir(parents=True)
+        (releases / ".staging-1234").mkdir()
+        (releases / ".trash-old").mkdir()
+        removed = installer.prune_releases(self.target, keep=("ccc333", "bbb222"))
+        self.assertEqual(removed, ["aaa111"])
+        self.assertEqual(sorted(entry.name for entry in releases.iterdir()),
+                         [".staging-1234", "bbb222", "ccc333"])
+
+    def test_prune_leaves_a_release_it_cannot_move(self):
+        releases = self.target / installer.RELEASES_DIR
+        (releases / "aaa111").mkdir(parents=True)
+        with patch("installer.os.replace", side_effect=OSError("locked")), \
+                patch("installer.PRUNE_RETRY_SECONDS", 0):
+            self.assertEqual(installer.prune_releases(self.target, keep=()), [])
+        self.assertTrue((releases / "aaa111").is_dir())
+
+    def test_prune_retries_a_transiently_held_release(self):
+        releases = self.target / installer.RELEASES_DIR
+        (releases / "aaa111").mkdir(parents=True)
+        real_replace = os.replace
+        attempts = []
+
+        def flaky_replace(source, destination):
+            attempts.append(source.name)
+            if len(attempts) == 1:
+                raise OSError(5, "access denied")
+            return real_replace(source, destination)
+
+        with patch("installer.os.replace", side_effect=flaky_replace), \
+                patch("installer.PRUNE_RETRY_SECONDS", 0):
+            self.assertEqual(installer.prune_releases(self.target, keep=()), ["aaa111"])
+        self.assertEqual(len(attempts), 2)
+        self.assertFalse((releases / "aaa111").exists())
+
     def test_rollback_is_not_an_installer_operation(self):
         with self.assertRaises(SystemExit):
             installer.parser().parse_args(["rollback"])
@@ -269,7 +298,7 @@ class InstallerTests(unittest.TestCase):
         first = self.current()
         self.make_project(self.source, version="two")
         with patch("builtins.input", return_value="y"), \
-             patch.object(installer, "configure_windows", side_effect=OSError("integration failed")):
+             patch.object(installer, "configure_platform_service", side_effect=OSError("integration failed")):
             with self.assertRaisesRegex(OSError, "integration failed"):
                 installer.update(self.source, self.target)
         self.assertNotEqual(self.current(), first)
@@ -351,6 +380,160 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('INSTALL_ROOT/installer.py', text)
         self.assertIn('INSTALL_ROOT/releases/$RELEASE_ID', text)
         self.assertIn('[ -L "$CURRENT_FILE" ]', text)
+
+
+class BootstrapRuntimeTests(unittest.TestCase):
+    def test_existing_environment_still_installs_and_checks_native_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            python = target / ".bootstrap-venv/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"fixture")
+            requirements = target / "requirements-windows.txt"
+            requirements.write_text('pywin32; sys_platform == "win32"\n', encoding="utf-8")
+            with patch.object(installer, "IS_WINDOWS", True), patch.object(installer, "_run") as run:
+                installer.prepare_bootstrap_runtime(target, requirements=requirements)
+            commands = [call.args[0] for call in run.call_args_list]
+            install = next(command for command in commands if "pip" in command)
+            self.assertEqual(install[0], str(python))
+            self.assertEqual(install[-2:], ["-r", str(requirements)])
+            self.assertIn("import win32api, win32event, win32job", commands[-1])
+
+
+class RuntimeDiscoveryTests(unittest.TestCase):
+    """The dry-run report must not claim a missing runtime it never looked for."""
+
+    def test_local_source_discovery_is_used_in_every_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "native_codex.py").write_text(
+                "def discover_codex(env=None, *, windows=None):\n"
+                "    return '/found/by/source'\n", encoding="utf-8")
+            self.assertEqual(installer._discover_runtime(source), "/found/by/source")
+
+    def test_discovery_does_not_cache_bytecode_in_the_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "native_codex.py").write_text(
+                "def discover_codex(env=None, *, windows=None):\n"
+                "    return '/found/by/source'\n", encoding="utf-8")
+            with patch.object(installer.sys, "dont_write_bytecode", False):
+                installer._discover_runtime(source)
+            self.assertFalse((source / "__pycache__").exists())
+
+    def test_missing_or_broken_helper_falls_back_to_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            with patch.object(installer.shutil, "which", return_value="/from/path"):
+                self.assertEqual(installer._discover_runtime(source), "/from/path")
+                (source / "native_codex.py").write_text(
+                    "raise ValueError('broken helper')\n", encoding="utf-8")
+                self.assertEqual(installer._discover_runtime(source), "/from/path")
+
+
+class InstallerCommandTests(unittest.TestCase):
+    def test_hung_install_command_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(installer.subprocess, "run",
+                              side_effect=installer.subprocess.TimeoutExpired("pip", 900)):
+                with self.assertRaisesRegex(ValueError, "分钟未完成"):
+                    installer._run(["pip"], cwd=Path(directory))
+
+    @unittest.skipUnless(os.name == "nt", "Windows ACL semantics")
+    def test_staging_directory_inherits_access(self):
+        # mkdtemp's 0700 becomes an owner-only DACL; os.replace then moves it
+        # onto the installed entries and the service account cannot read them.
+        with tempfile.TemporaryDirectory() as directory:
+            staging = installer._staging_directory(Path(directory), ".staging-")
+            result = installer.subprocess.run(["icacls", str(staging)],
+                                              capture_output=True, text=True)
+            self.assertIn("(I)", result.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "Windows ACL semantics")
+    def test_private_directory_names_the_account(self):
+        try:
+            import win32api
+            import win32security
+        except ImportError:
+            self.skipTest("pywin32 未安装")
+        import platform_support
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "state"
+            platform_support.make_private(target)
+            token = win32security.OpenProcessToken(
+                win32api.GetCurrentProcess(), win32security.TOKEN_QUERY)
+            account = win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+            descriptor = win32security.GetNamedSecurityInfo(
+                str(target), win32security.SE_FILE_OBJECT,
+                win32security.DACL_SECURITY_INFORMATION)
+            dacl = descriptor.GetSecurityDescriptorDacl()
+            owners = {win32security.ConvertSidToStringSid(dacl.GetAce(index)[2])
+                      for index in range(dacl.GetAceCount())}
+            self.assertIn(win32security.ConvertSidToStringSid(account), owners)
+            (target / "probe").write_text("x", encoding="utf-8")
+
+    def test_unreadable_install_entry_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            for name in (*installer._stable_files(), installer.CURRENT_FILE):
+                path = target / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("x", encoding="utf-8")
+            (target / "releases" / "abc").mkdir(parents=True)
+            installer.check_user_access(target, "abc")
+            with patch.object(installer, "_readable",
+                              side_effect=lambda path: path.name != installer.CURRENT_FILE):
+                with self.assertRaisesRegex(ValueError, "chmod|icacls") as caught:
+                    installer.check_user_access(target, "abc")
+            self.assertIn(installer.CURRENT_FILE, str(caught.exception))
+
+
+class LinuxServiceRegistrationTests(unittest.TestCase):
+    def test_registration_links_without_enabling_or_starting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "install"
+            target.mkdir()
+            unit = target / "codex-wechat.service"
+            unit.write_text("[Unit]\n", encoding="utf-8")
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"), \
+                    patch.object(installer, "_linux_service_state", return_value="missing"), \
+                    patch.object(installer, "_run") as run:
+                self.assertTrue(installer.configure_linux_service(target))
+            self.assertEqual(
+                run.call_args_list[0].args[0],
+                ["/usr/bin/systemctl", "--user", "link", str(unit.resolve())])
+            self.assertEqual(
+                run.call_args_list[1].args[0],
+                ["/usr/bin/systemctl", "--user", "daemon-reload"])
+            self.assertFalse(any(
+                "start" in part or "enable" in part
+                for call in run.call_args_list
+                for part in call.args[0]
+            ))
+
+    def test_registration_refuses_a_foreign_unit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            (target / "codex-wechat.service").write_text("[Unit]\n", encoding="utf-8")
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"), \
+                    patch.object(installer, "_linux_service_state", return_value="foreign"), \
+                    patch.object(installer, "_run") as run:
+                with self.assertRaisesRegex(ValueError, "不属于本安装目录"):
+                    installer.configure_linux_service(target)
+            run.assert_not_called()
+
+    def test_unavailable_systemd_is_reported_as_unregistered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            (target / "codex-wechat.service").write_text("[Unit]\n", encoding="utf-8")
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"), \
+                    patch.object(installer, "_linux_service_state", return_value="unavailable"), \
+                    patch.object(installer, "_run") as run:
+                self.assertFalse(installer.configure_linux_service(target))
+            run.assert_not_called()
 
 
 if __name__ == "__main__":

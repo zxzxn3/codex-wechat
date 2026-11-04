@@ -32,6 +32,9 @@ NON_INTERACTIVE = False
 # Dependency declarations are shared; requirements versions live in their files.
 PYTHON_REQUIREMENTS = Path("requirements.txt")
 QR_FALLBACK_REQUIREMENTS = Path("requirements-qr.txt")
+# Generous: pip on a slow mirror may legitimately take minutes, but a hung
+# command must not block the installer forever.
+INSTALL_COMMAND_TIMEOUT_SECONDS = 900
 DEPENDENCIES = (
     ("Codex runtime", "codex.exe" if IS_WINDOWS else "codex", None, "微信模型任务", "warn"),
     ("curl", "curl.exe" if IS_WINDOWS else "curl", (8, 4), "网络测速", "warn"),
@@ -45,9 +48,12 @@ RELEASE_FORMAT = 1
 CURRENT_FILE = "current"
 PREVIOUS_FILE = "previous"
 RELEASES_DIR = "releases"
+ACTIVE_FILE = "active-release"
+# A directory handle held for a moment - by a scanner or a just-exited process -
+# blocks the rename that makes a release deletable; one retry covers it.
+PRUNE_RETRY_SECONDS = 0.2
 LOCK_FILE = ".install-lock"
 MANIFEST_FILE = ".release.json"
-LEGACY_ID = "legacy"
 UPDATE_SOURCE_FILE = ".update-source.json"
 PRIVATE_NAMES = {
     ".git",
@@ -68,6 +74,7 @@ PRIVATE_NAMES = {
     PREVIOUS_FILE,
     LOCK_FILE,
     UPDATE_SOURCE_FILE,
+    ACTIVE_FILE,
 }
 REQUIRED_FILES = {
     Path(".gitignore"),
@@ -75,10 +82,14 @@ REQUIRED_FILES = {
     Path("codex-wechat"),
     Path("codex-wechat.ps1"),
     Path("codex_wechat.py"),
+    Path("config.default.json"),
     Path("install.sh"),
     Path("install.ps1"),
     Path("installer.py"),
     Path("requirements.txt"),
+    Path("requirements-windows.txt"),
+    Path("release.py"),
+    Path("windows/wmi_launch.py"),
 }
 STABLE_LINUX_FILES = (
     Path("codex-desktop"),
@@ -86,6 +97,7 @@ STABLE_LINUX_FILES = (
     Path("codex-wechat"),
     Path("codex-wechat.service"),
     Path("installer.py"),
+    Path("release.py"),
 )
 STABLE_WINDOWS_FILES = (
     Path("native_codex.py"),
@@ -94,6 +106,7 @@ STABLE_WINDOWS_FILES = (
     Path("bootstrap_supervisor.py"),
     Path("codex-wechat.ps1"),
     Path("uninstall.ps1"),
+    Path("release.py"),
 )
 
 
@@ -137,6 +150,13 @@ def introduction() -> bool:
         "codex-wechat 是独立项目，用于把微信私聊连接到本机 Codex。"
         "安装会创建一份不可变程序版本，并保留已有的微信登录、配置、"
         "待办、会话和工作目录；不会复制 Codex 凭据或会话历史。",
+        width=width,
+    ))
+    print()
+    print(textwrap.fill(
+        "本项目为第三方独立开发，与 OpenAI、腾讯公司（微信）及其关联方"
+        "没有隶属、合作或背书关系，也未获其授权；"
+        "相关名称与商标归各自权利人所有。",
         width=width,
     ))
     print()
@@ -236,8 +256,7 @@ def check_runtime_compatibility(files, config):
     backends = config.get("backends", {})
     if not isinstance(backends, dict):
         raise ValueError("backends 必须是对象")
-    definitions = [config.get("backend", {})]
-    definitions.extend(backends.values())
+    definitions = list(backends.values())
     required = any(isinstance(item, dict) and item.get("websocketUrl")
                    for item in definitions)
     if not required:
@@ -317,8 +336,7 @@ def read_pointer(target: Path, name: str) -> str | None:
         raise ValueError(f"无法读取版本指针 {path}: {error}") from error
     if not value:
         return None
-    if value != LEGACY_ID and (
-            not value.isascii() or not all(char.isalnum() or char in "._-" for char in value)):
+    if not value.isascii() or not all(char.isalnum() or char in "._-" for char in value):
         raise ValueError(f"版本指针内容无效: {path}")
     return value
 
@@ -358,6 +376,40 @@ def _write_pointer(target: Path, name: str, value: str) -> None:
         0o600,
         root=target,
     )
+
+
+def _readable(path: Path) -> bool:
+    """A real access check: Windows denies reads without failing stat()."""
+    try:
+        if path.is_dir():
+            with os.scandir(path) as entries:
+                next(entries, None)
+        else:
+            with path.open("rb"):
+                pass
+    except OSError:
+        return False
+    return True
+
+
+def check_user_access(target: Path, identifier: str) -> None:
+    """The service starts as the installing user, so entries must be readable.
+
+    A restricted or elevated sandbox can create files with a private DACL: the
+    install looks successful while `pythonw` fails to load the entry, and the
+    scheduled task logs nothing. Detect that here instead.
+    """
+    entries = [target / relative for relative in _stable_files()]
+    entries += [target / CURRENT_FILE, release_path(target, identifier)]
+    denied = [path for path in entries if not _readable(path)]
+    if denied:
+        remedy = (f'icacls "{target}" /reset /t /c /q' if IS_WINDOWS
+                  else f'chmod -R u+rX "{target}"')
+        raise ValueError(
+            "当前用户无法读取安装入口，服务会以该用户身份启动并静默失败:\n"
+            + "\n".join("  " + str(path) for path in denied)
+            + "\n请在普通（非管理员、非沙箱）终端重新安装，或以管理员执行: "
+            + remedy)
 
 
 class InstallLock:
@@ -408,16 +460,8 @@ class InstallLock:
             self.stream = None
 
 
-def _legacy_installation(target: Path) -> bool:
-    return (target / "codex_wechat.py").is_file() and (
-        target / "installer.py").is_file()
-
-
 def _installation_state(target: Path) -> str | None:
-    current = read_pointer(target, CURRENT_FILE)
-    if current:
-        return current
-    return LEGACY_ID if _legacy_installation(target) else None
+    return read_pointer(target, CURRENT_FILE)
 
 
 def check_install_target(
@@ -458,8 +502,6 @@ def check_install_target(
 
 
 def release_path(target: Path, identifier: str) -> Path:
-    if identifier == LEGACY_ID:
-        return target
     if not identifier.isascii() or not all(
             char.isalnum() or char in "._-" for char in identifier):
         raise ValueError(f"版本标识无效: {identifier}")
@@ -495,14 +537,12 @@ def _manifest_release_files(root: Path, manifest):
     # Validate content selected by this version's own manifest. New exclusions
     # and source requirements cannot redefine an older release's content hash.
     public = project_files(root, require_complete=False)
-    if set(public) - set(files) or not _legacy_installation(root):
-        raise ValueError("版本含未声明的程序文件或缺少入口")
+    if set(public) - set(files):
+        raise ValueError("版本含未声明的程序文件")
     return files
 
 
 def release_matches(target: Path, identifier: str, files=None) -> bool:
-    if identifier == LEGACY_ID:
-        return _legacy_installation(target)
     if target.is_symlink():
         return False
     releases = target / RELEASES_DIR
@@ -548,7 +588,13 @@ def _copy_release(staging: Path, files: dict[Path, tuple[bytes, int]]) -> None:
 
 def _run(command: list[str], *, cwd: Path) -> None:
     detail("执行: " + " ".join(command))
-    subprocess.run(command, cwd=cwd, check=True)
+    try:
+        subprocess.run(command, cwd=cwd, check=True,
+                       timeout=INSTALL_COMMAND_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise ValueError(
+            f"安装命令超过 {INSTALL_COMMAND_TIMEOUT_SECONDS // 60} 分钟未完成，"
+            "请检查网络后重试。") from None
 
 
 def _venv_python(root: Path) -> Path:
@@ -574,7 +620,6 @@ def prepare_runtime(root: Path) -> None:
         "pip",
         "install",
         "--disable-pip-version-check",
-        "--no-cache-dir",
         "-r",
         str(root / PYTHON_REQUIREMENTS),
     ], cwd=root)
@@ -582,7 +627,7 @@ def prepare_runtime(root: Path) -> None:
     if not shutil.which("qrencode"):
         detail("未找到原生二维码编码器，准备轻量二维码回退。")
         _run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
-              "--no-cache-dir", "-r", str(root / QR_FALLBACK_REQUIREMENTS)], cwd=root)
+              "-r", str(root / QR_FALLBACK_REQUIREMENTS)], cwd=root)
     _run([
         str(python),
         "-c",
@@ -597,7 +642,7 @@ def prepare_runtime(root: Path) -> None:
           "[compile(Path(p).read_bytes(), p, 'exec') for p in sys.argv[1:]]", *python_files], cwd=root)
 
 
-def prepare_bootstrap_runtime(target: Path) -> None:
+def prepare_bootstrap_runtime(target: Path, *, requirements: Path) -> None:
     if not IS_WINDOWS:
         return
     root = target / ".bootstrap-venv"
@@ -606,23 +651,38 @@ def prepare_bootstrap_runtime(target: Path) -> None:
     if root.exists() and not root.is_dir():
         raise ValueError(f"Windows supervisor 环境不是目录: {root}")
     python = target / ".bootstrap-venv/Scripts/python.exe"
-    if python.is_file():
-        _run([
-            str(python),
-            "-c",
-            "import sys; raise SystemExit(sys.version_info < (3, 11))",
-        ], cwd=target)
-        return
     created = not root.exists()
     try:
-        _run([sys.executable, "-m", "venv", str(root)], cwd=target)
+        if not python.is_file():
+            _run([sys.executable, "-m", "venv", str(root)], cwd=target)
         if not python.is_file():
             raise ValueError(f"Windows supervisor 环境创建失败: {python}")
+        _run([str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"], cwd=target)
+        _run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
+              "-r", str(requirements)], cwd=target)
+        _run([str(python), "-c", "import win32api, win32event, win32job"], cwd=target)
     except BaseException:
         if created and root.exists():
             shutil.rmtree(root)
         raise
 
+
+
+def _staging_directory(parent: Path, prefix: str) -> Path:
+    """Create a staging directory that inherits the parent's access rules.
+
+    tempfile.mkdtemp creates its directory with mode 0700, which Windows turns
+    into an owner-only DACL; `os.replace` then moves that DACL onto the
+    installed entries and locks the service account out.
+    """
+    for _ in range(10):
+        candidate = parent / (prefix + os.urandom(8).hex())
+        try:
+            candidate.mkdir()
+        except FileExistsError:
+            continue
+        return candidate
+    raise ValueError(f"无法在 {parent} 创建暂存目录")
 
 
 def install_release(
@@ -633,13 +693,13 @@ def install_release(
     releases = target / RELEASES_DIR
     if releases.is_symlink():
         raise ValueError(f"版本目录不能是符号链接: {releases}")
-    releases.mkdir(parents=True, exist_ok=True, mode=0o700)
+    releases.mkdir(parents=True, exist_ok=True)
     final = release_path(target, identifier)
     if final.exists():
         if not release_matches(target, identifier, files):
             raise ValueError(f"现有版本内容与标识不一致: {final}")
         return final, False
-    staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=releases))
+    staging = _staging_directory(releases, ".staging-")
     try:
         _copy_release(staging, files)
         prepare_runtime(staging)
@@ -677,8 +737,8 @@ def stable_files_match(source: Path, target: Path) -> bool:
 
 def install_bootstrap(source: Path, target: Path) -> None:
     # Allocate/write every entry before replacing the first installed file.
-    with tempfile.TemporaryDirectory(prefix=".entry-", dir=target) as directory:
-        staging = Path(directory)
+    staging = _staging_directory(target, ".entry-")
+    try:
         for relative in _stable_files():
             source_path = source / relative
             destination = target / relative
@@ -688,10 +748,23 @@ def install_bootstrap(source: Path, target: Path) -> None:
                           stat.S_IMODE(source_path.stat().st_mode), root=staging)
         for relative in _stable_files():
             os.replace(staging / relative, target / relative)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def activate_release(target: Path, identifier: str) -> None:
     _write_pointer(target, CURRENT_FILE, identifier)
+
+
+def prune_releases(target: Path, *, keep, report=None) -> list[str]:
+    """Compatibility wrapper around the isolated release lifecycle module."""
+    import release as release_state
+    return release_state.prune_releases(
+        target,
+        keep=keep,
+        report=report or detail,
+        retry_seconds=PRUNE_RETRY_SECONDS,
+    )
 
 
 def _linux_command_link() -> Path:
@@ -739,6 +812,66 @@ def configure_windows(release: Path, target: Path, *, update: bool) -> None:
     ]
     command.extend(["-PreparedRuntime", "-PreserveAutostart", "-NoStart"])
     _run(command, cwd=release)
+
+
+def _linux_service_state(systemctl: str, unit: Path) -> str:
+    try:
+        result = subprocess.run(
+            [systemctl, "--user", "show", unit.name,
+             "--property=LoadState", "--property=FragmentPath"],
+            cwd=unit.parent,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unavailable"
+    if result.returncode:
+        return "unavailable"
+    fields = dict(
+        line.split("=", 1)
+        for line in result.stdout.splitlines()
+        if "=" in line
+    )
+    fragment = fields.get("FragmentPath", "")
+    if not fragment:
+        return "missing" if fields.get("LoadState") == "not-found" else "unavailable"
+    try:
+        registered = Path(fragment).resolve()
+    except OSError:
+        return "unavailable"
+    return "owned" if registered == unit.resolve() else "foreign"
+
+
+def configure_linux_service(target: Path) -> bool:
+    """Register the user unit without enabling or starting it."""
+    if IS_WINDOWS:
+        return False
+    unit = target / "codex-wechat.service"
+    if not unit.is_file() or unit.is_symlink():
+        raise ValueError(f"服务模板不存在: {unit}")
+    systemctl = shutil.which("systemctl")
+    if not systemctl:
+        detail("未找到 systemctl，跳过后台服务注册；仍可使用前台 start。")
+        return False
+    state = _linux_service_state(systemctl, unit)
+    if state == "unavailable":
+        detail("systemd 用户服务不可用，跳过后台服务注册；仍可使用前台 start。")
+        return False
+    if state == "foreign":
+        raise ValueError("当前用户已有不属于本安装目录的 codex-wechat.service，未修改。")
+    if state == "missing":
+        _run([systemctl, "--user", "link", str(unit.resolve())], cwd=target)
+    _run([systemctl, "--user", "daemon-reload"], cwd=target)
+    return True
+
+
+def configure_platform_service(release: Path, target: Path, *, update: bool) -> bool:
+    if IS_WINDOWS:
+        configure_windows(release, target, update=update)
+        return True
+    return configure_linux_service(target)
 
 
 def operation_plan(operations: list[str]) -> None:
@@ -799,13 +932,17 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
         print("演练完成，没有修改文件。")
         declaration(source, "complete")
         return 0
-    assert files is not None
+    if files is None:
+        # Not an assert: -O would drop the check and let a None manifest through.
+        raise ValueError("安装清单尚未准备完成，未修改安装。")
 
     created_target = not target.exists()
     release = None
     created = False
+    service_ready = False
     try:
-        target.mkdir(parents=True, exist_ok=True, mode=0o700)
+        from platform_support import make_private
+        make_private(target)
         with InstallLock(target):
             check_install_target(source, target, update=update)
             fresh_files = project_files(source)
@@ -815,14 +952,22 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
                 raise ValueError("确认期间当前版本发生变化，请重新运行")
             phase("准备程序与依赖...")
             release, created = install_release(target, identifier, files)
-            prepare_bootstrap_runtime(target)
+            prepare_bootstrap_runtime(target, requirements=release / "requirements-windows.txt")
             # Everything requiring downloads/builds/user input finishes above.
             phase("更新入口与当前版本...")
             install_bootstrap(source, target)
             install_command_link(target)
             activate_release(target, identifier)
-            configure_windows(release, target, update=update)
+            service_ready = configure_platform_service(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
+            check_user_access(target, identifier)
+            try:
+                pruned = prune_releases(target, keep=(identifier, current))
+            except OSError as error:
+                detail(f"旧版本清理跳过: {error}")
+            else:
+                for name in pruned:
+                    detail(f"已移除旧版本: {name}")
     except BaseException:
         # Only delete a release we created and never activated; no restoration.
         if created and release is not None and read_pointer(target, CURRENT_FILE) != identifier:
@@ -839,11 +984,11 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
         raise
     print(styled("==> 更新完成。" if update else "==> 安装完成。", "1;32"))
     declaration(source, "complete")
-    next_steps(target, update=update, identifier=identifier)
+    next_steps(target, update=update, identifier=identifier, service_ready=service_ready)
     return 0
 
 
-def next_steps(target: Path, *, update: bool, identifier: str) -> None:
+def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bool = True) -> None:
     print()
     phase("下一步")
     print(f"版本: {identifier}")
@@ -853,18 +998,32 @@ def next_steps(target: Path, *, update: bool, identifier: str) -> None:
         if update:
             print(f"重启服务: {command} service-restart")
         else:
-            print("安装时不扫码，登录自启默认关闭。")
-            print(f"首次运行: {command} start")
+            print(f"首次运行: {command} service-start")
+            print("首次运行会在终端显示二维码；扫码后后台服务启动，终端可以关闭。")
             print("然后在微信发送 /help 或普通消息。")
+            print("自启默认关闭；需要时在微信发送 /settings autostart true。")
     elif update:
-        print("重启已有服务: systemctl --user restart codex-wechat")
-        print("若未使用服务，先退出原前台进程，再运行 codex-wechat start。")
+        if service_ready:
+            print("重启已有服务: systemctl --user restart codex-wechat")
+            print("后台服务已更新；现有自启状态保持不变。")
+            print("若当前使用前台运行，先退出原前台进程；之后可执行 "
+                  f"{target / 'codex-wechat'} service-start 使用后台服务。")
+        else:
+            print("后台服务未注册；当前没有可用的 systemd 用户服务，仍可使用前台 start。")
+            print("若未使用服务，先退出原前台进程，再运行 codex-wechat start。")
     else:
         print("1. 确认 Codex 已安装并登录。")
-        print(f"2. 在终端运行 {target / 'codex-wechat'} start，保持此终端打开。")
+        if service_ready:
+            print(f"2. 在终端运行 {target / 'codex-wechat'} service-start，按提示扫码。")
+            print("后台服务已注册；扫码后后台服务启动，终端可以关闭。")
+        else:
+            print(f"2. 在终端运行 {target / 'codex-wechat'} start，保持此终端打开。")
+            print("后台服务未注册；当前没有可用的 systemd 用户服务，仍可使用前台 start。")
         print("3. 在微信发送 /help、/status，然后发送普通消息开始交流。")
-        print("自启默认关闭；需要时在微信发送 /settings autostart on。")
+        print("自启默认关闭；需要时在微信发送 /settings autostart true。")
         print("若提示找不到 codex-wechat，请使用上面的完整路径，或将 ~/.local/bin 加入 PATH。")
+    print("用 Codex CLI 与微信双向收发: 在微信发送 /settings shared true（持久保存，/settings shared false 关闭）。")
+    print("共享后台默认 Windows 为 false、Linux 为 true；开启后 Codex App 打开桥接当前会话会显示锁定。")
 
 
 def install(source: Path, target: Path, *, dry_run: bool = False) -> int:
@@ -990,18 +1149,30 @@ def declaration(source: Path, stage: str) -> None:
             print(text)
 
 
-def _discover_runtime(source: Path, *, dry_run: bool):
+def _discover_runtime(source: Path):
     # The network entry downloads this single stdlib-only installer first.
-    # Once the full source is fetched, reuse its native discovery implementation.
+    # Once the full source is fetched, reuse its native discovery implementation:
+    # it only reads PATH, LOCALAPPDATA and the registered App, so a dry run can
+    # report the same answer without writing files or using the network.
+    fallback = shutil.which("codex.exe" if IS_WINDOWS else "codex")
     helper = source / "native_codex.py"
-    if not dry_run and helper.is_file() and not helper.is_symlink():
+    if not helper.is_file() or helper.is_symlink():
+        return fallback
+    # A dry run must not leave files behind, including a bytecode cache.
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
         spec = importlib.util.spec_from_file_location("codex_wechat_native_discovery", helper)
         if spec is None or spec.loader is None:
-            return shutil.which("codex.exe" if IS_WINDOWS else "codex")
+            return fallback
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.discover_codex(windows=IS_WINDOWS)
-    return shutil.which("codex.exe" if IS_WINDOWS else "codex")
+    except Exception:
+        # An unusable helper must not hide an interpreter that PATH already has.
+        return fallback
+    finally:
+        sys.dont_write_bytecode = previous
 
 
 def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
@@ -1012,7 +1183,7 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
     for name, command, minimum, purpose, policy in DEPENDENCIES:
         if (IS_WINDOWS and command in ("qrencode", "systemd-run")):
             continue
-        executable = (_discover_runtime(source, dry_run=dry_run) if name == "Codex runtime"
+        executable = (_discover_runtime(source) if name == "Codex runtime"
                       else shutil.which(command))
         ready = bool(executable)
         if ready and executable is not None and minimum and not dry_run:
@@ -1026,7 +1197,7 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
         if not ready:
             if policy == "block" and not dry_run:
                 raise ValueError(f"{name} 缺失或版本不足，请补齐后重跑。")
-            detail(f"{name} 缺失或版本不足，{purpose}暂不可用；{'演练继续' if dry_run else '可稍后补齐'}。")
+            detail(f"{name} 缺失或版本不足，{purpose}未就绪；{'演练继续' if dry_run else '可稍后补齐'}。")
         elif dry_run and minimum:
             detail(f"{name}: 已找到；版本检查因 --dry-run 跳过。")
     requirements = source / "requirements.txt"

@@ -6,10 +6,14 @@ import os
 from pathlib import Path
 import struct
 import tempfile
+from types import SimpleNamespace
 import unittest
+import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
-from app_ipc import AppSession, VERSIONS, app_inputs, apply_patches, ipc_path, turns
+import app_ipc
+from app_ipc import (AppSession, VERSIONS, app_inputs, apply_patches, ipc_path,
+                     turns)
 from backend import CodexBackend
 from codex_transport import CodexRpcError
 
@@ -50,11 +54,70 @@ class StateTests(unittest.TestCase):
         self.assertEqual([t["turnId"] for t in turns(state)], ["one", "two"])
 
     def test_home_is_not_guessed_for_custom_launcher_or_explicit_websocket(self):
-        with patch("app_ipc.os.name", "posix"):
+        with patch.object(app_ipc, "WINDOWS", False):
             self.assertIsNone(ipc_path({"command": ["codex-deepseek", "app-server"]}))
             self.assertEqual(ipc_path({"command": ["custom", "app-server"],
                 "env": {"CODEX_HOME": "/tmp/home"}}), Path("/tmp/home/ipc/ipc.sock"))
             self.assertIsNone(ipc_path({"websocketUrl": "ws://127.0.0.1:1234"}))
+            self.assertEqual(ipc_path({"websocketUrl": "ws://127.0.0.1:1234",
+                "env": {"CODEX_HOME": "/tmp/home"}}), Path("/tmp/home/ipc/ipc.sock"))
+
+
+class MalformedResponseTests(unittest.IsolatedAsyncioTestCase):
+    def session(self, request=None):
+        session = AppSession(Path("/tmp/unused.sock"), "thread",
+            on_event=lambda event: None,
+            on_request=AsyncMock(),
+            on_disconnect=lambda error: None)
+        async def read():
+            await asyncio.sleep(3600)
+        session.read = read
+        if request is not None:
+            session.request = request
+        return session
+
+    async def close(self, session):
+        session.reader.cancel()
+        await asyncio.gather(session.reader, return_exceptions=True)
+        await session.close()
+
+    async def test_initialize_without_client_id_is_a_controlled_failure(self):
+        async def request(method, params, *, discover=False):
+            return {}
+        session = self.session(request)
+        try:
+            with self.assertRaisesRegex(ValueError, "clientId"):
+                await session.attach_protocol()
+        finally:
+            await self.close(session)
+
+    async def test_owner_discovery_without_owner_is_a_controlled_failure(self):
+        async def request(method, params, *, discover=False):
+            return {"clientId": "client"} if method == "initialize" else {}
+        session = self.session(request)
+        try:
+            with self.assertRaisesRegex(ValueError, "owner"):
+                await session.attach_protocol()
+        finally:
+            await self.close(session)
+
+    async def test_success_response_without_handled_client_id_is_controlled(self):
+        session = self.session()
+        async def send(message):
+            session.requests[message["requestId"]].set_result({
+                "resultType": "success", "method": "thread-owner-discovery", "result": {}})
+        session.send = send
+        with self.assertRaisesRegex(CodexRpcError, "handledByClientId"):
+            await session.request("thread-owner-discovery", {}, discover=True)
+        await session.close()
+
+    async def test_turn_start_without_required_result_fields_is_controlled(self):
+        for response in ({}, {"result": {}}):
+            with self.subTest(response=response):
+                session = self.session(AsyncMock(return_value=response))
+                session.reader = SimpleNamespace(done=lambda: False)
+                with self.assertRaisesRegex(CodexRpcError, "turn/start"):
+                    await session.rpc("turn/start", {"threadId": "thread", "input": []})
 
 
 @unittest.skipIf(os.name == "nt", "Linux Unix-socket App IPC")
@@ -185,6 +248,135 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.messages[-1]["params"]["decision"], "accept")
         with self.assertRaises(ValueError):
             await self.session.respond({"id": 8, "result": {"decision": "accept"}})
+
+
+@unittest.skipUnless(os.name == "nt", "Windows named-pipe App IPC")
+class WindowsRouterTests(RouterTests):
+    __unittest_skip__ = os.name != "nt"
+
+    async def asyncSetUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(r"\\.\pipe\codex-wechat-fixture-" + uuid.uuid4().hex)
+        self.state = conversation()
+        self.messages, self.events, self.received_requests = [], [], []
+        self.clients = set()
+        self.failed = Mock()
+        self.nested_response = False
+        self.enterContext(patch("app_ipc_windows.PIPE_PATH", str(self.path)))
+        core = Path(self.temp.name) / "resources" / "codex.exe"
+        core.parent.mkdir(parents=True)
+        core.write_text("", encoding="utf-8")
+        (core.parent.parent / "ChatGPT.exe").write_text("", encoding="utf-8")
+        self.enterContext(patch("app_ipc_windows.discover_app_codex",
+                                return_value=str(core)))
+        self.verify = self.enterContext(patch("app_ipc_windows.verify_server"))
+        loop = asyncio.get_running_loop()
+        def protocol():
+            reader = asyncio.StreamReader(limit=16 * 1024 * 1024 + 4)
+            return asyncio.StreamReaderProtocol(reader, self.handle)
+        self.servers = await loop.start_serving_pipe(protocol, str(self.path))
+        self.session = AppSession(self.path, "thread", on_event=self.events.append,
+            on_request=AsyncMock(side_effect=self.received_requests.append), on_disconnect=self.failed)
+
+    async def asyncTearDown(self):
+        await self.session.close()
+        for server in self.servers:
+            server.close()
+        for writer in self.clients:
+            writer.close()
+            await writer.wait_closed()
+        self.temp.cleanup()
+
+    async def test_private_endpoint_required(self):
+        self.verify.side_effect = ValueError("untrusted server")
+        with self.assertRaisesRegex(ValueError, "untrusted server"):
+            await self.session.attach()
+        self.assertEqual(self.messages, [])
+
+    async def test_nonlocal_pipe_is_rejected(self):
+        self.session.path = Path(r"\\other-host\pipe\codex-ipc")
+        with self.assertRaises(ValueError):
+            await self.session.attach()
+        self.verify.assert_not_called()
+
+
+@unittest.skipUnless(os.name == "nt", "Windows named-pipe identity check")
+class WindowsVerifyServerTests(unittest.IsolatedAsyncioTestCase):
+    """The real identity check, against a pipe this process serves itself."""
+
+    async def asyncSetUp(self):
+        self.path = r"\\.\pipe\codex-wechat-verify-" + uuid.uuid4().hex
+        self.transports = []
+        self.loop = asyncio.get_running_loop()
+
+        def protocol():
+            return asyncio.StreamReaderProtocol(asyncio.StreamReader())
+
+        self.servers = await self.loop.start_serving_pipe(protocol, self.path)
+
+    async def asyncTearDown(self):
+        for server in self.servers:
+            server.close()
+        for transport in self.transports:
+            transport.close()
+
+    async def _connected_handle(self):
+        transport, _ = await self.loop.create_pipe_connection(
+            lambda: asyncio.StreamReaderProtocol(asyncio.StreamReader()), self.path)
+        self.transports.append(transport)
+        return transport.get_extra_info("pipe").fileno()
+
+    @staticmethod
+    def _own_image():
+        # A venv python.exe is a redirector, so sys.executable is not the module
+        # the process actually runs; the identity check compares real images.
+        import win32api
+        import win32con
+        import win32process
+        process = win32api.OpenProcess(
+            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+            False, os.getpid())
+        try:
+            return win32process.GetModuleFileNameEx(process, 0)
+        finally:
+            process.Close()
+
+    async def test_accepts_the_executable_that_serves_the_pipe(self):
+        from app_ipc_windows import verify_server
+        verify_server(await self._connected_handle(), self._own_image())
+
+    async def test_rejects_a_pipe_served_by_another_executable(self):
+        from app_ipc_windows import verify_server
+        other = Path(os.environ["WINDIR"]) / "System32" / "cmd.exe"
+        with self.assertRaisesRegex(ValueError, "不是当前已注册的 Codex App"):
+            verify_server(await self._connected_handle(), other)
+
+    async def test_missing_app_executable_is_reported_before_connecting(self):
+        import app_ipc_windows
+        with tempfile.TemporaryDirectory() as temp:
+            core = Path(temp) / "resources" / "codex.exe"
+            core.parent.mkdir(parents=True)
+            core.write_text("", encoding="utf-8")
+            with patch.object(app_ipc_windows, "PIPE_PATH", self.path), \
+                 patch.object(app_ipc_windows, "discover_app_codex",
+                              return_value=str(core)):
+                with self.assertRaisesRegex(ValueError, "找不到已注册的 Codex App 主程序"):
+                    await app_ipc_windows.open_pipe(self.path, limit=1024)
+
+
+@unittest.skipUnless(os.name == "nt", "Windows App endpoint selection")
+class WindowsEndpointTests(unittest.TestCase):
+    def test_websocket_backend_can_follow_app_only_in_primary_home(self):
+        from app_ipc_windows import PIPE_PATH
+        with tempfile.TemporaryDirectory() as primary, tempfile.TemporaryDirectory() as other:
+            with patch.dict(os.environ, {"CODEX_HOME": primary}):
+                config = {"websocketUrl": "ws://127.0.0.1:1234", "env": {"CODEX_HOME": primary}}
+                self.assertEqual(ipc_path(config), Path(PIPE_PATH))
+                config["env"]["CODEX_HOME"] = other
+                self.assertIsNone(ipc_path(config))
+
+    def test_custom_launcher_home_is_never_guessed(self):
+        self.assertIsNone(ipc_path({"command": ["custom.exe", "app-server"]}))
 
 
 class AdoptionTests(unittest.IsolatedAsyncioTestCase):

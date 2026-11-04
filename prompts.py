@@ -14,15 +14,16 @@ COMPACT_UNCONFIRMED = "上下文压缩结果未确认。"
 
 BACKEND_SUMMARY = "```\n后端: {current}\n可用: {available}\n```\n`/backend {{名称}}`"
 EFFORT_SUMMARY = "```\n强度: {current}\n可选: {choices}\n```\n`/effort {{档位}}`"
-ACK_VIEW = "```\n接收提示: {template}\n```\n`/ack text {{模板}}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
-ACK_USAGE = "`/ack text {模板}`\n`/ack text` 关闭\n`/ack fields` 可用字段"
-ACK_TOO_LONG = "未更新接收提示: 最多 {max_bytes} 字节"
+ACK_VIEW = ("```\nack: {template}\n```\n"
+            "`/settings ack {{模板}}`\n`/settings ack \"\"` 关闭\n"
+            "`/settings ack fields` 可用字段")
+ACK_TOO_LONG = "未更新 ack: 最多 {max_bytes} 字节"
 WORKING_DIRECTORY = "目录: {cwd}"
-MEDIA_USAGE = "`/send {路径}`\n`/sendfile {路径}`\n`/sendimage {路径}`\n`/sendvideo {路径}`"
+MEDIA_USAGE = "`/get {路径}`\n`/getfile {路径}`"
 
 BLOCKED_NOTE = "等待桌面处理"
 
-BUSY_CHANGE = "未切换: 任务未结束。等待完成或 `/stop`。"
+BUSY_CHANGE = "未操作: 任务未结束。等待完成或 `/stop`。"
 BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
 RESTART_STARTED = "正在重启微信桥..."
 RESTART_READY = "微信桥已重启。"
@@ -31,25 +32,29 @@ RESTART_CONFIRM_UNSENT = "确认消息未能及时发送。"
 RESTART_FAILED = "重启未完成: {reason}"
 RESTART_NOT_SERVICE = "当前微信桥不是由用户服务启动。"
 
-STOP_REQUESTED = "已请求停止"
-STOP_DEFERRED = "已请求停止，准备结束后生效"
-STOP_IDLE = "当前无运行任务"
-STOP_UNCONFIRMED = "停止未确认，任务可能仍在运行。请在桌面确认。"
+STOP_REQUESTED = "已发送停止请求，正在等待当前任务结束。"
+STOP_DEFERRED = "已发送停止请求，正在等待当前任务结束。"
+STOP_IDLE = "当前没有运行中的任务。"
+STOP_UNCONFIRMED = "停止结果未确认，任务可能仍在运行；请查看 /status 或 Codex。"
 
 BACKEND_CONNECT_FAILED = "后端连接失败: {reason}\n正在重连，未提交的待办已保留。"
 TASK_FAILED = "消息未提交: 后端处理失败。查看 `/status`。"
+TURN_STALLED = (
+    "本轮已中止: 长时间没有收到任何进展。\n"
+    "会话可能仍在桌面端运行；可用 `/status` 查看，再发消息会重新连接。"
+)
 TURN_FAILED = "任务未完成: Agent 执行失败。"
 TURN_INTERRUPTED = "任务已中断。"
 TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
 TURN_COMPLETED_EMPTY = "任务已完成，但没有文本结果。"
 UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
 QUEUED_STEER = "暂时无法追加，已转入排队。"
-QUEUE_CONFIRMED = "Queue {count} {unit}"
-UNQUEUE_CANCELLED = "已撤回。Queue {count} {unit}"
+QUEUE_CONFIRMED = "已排队: {count} {unit}"
+UNQUEUE_CANCELLED = "已撤回，剩余 {count} {unit}。"
 UNQUEUE_EMPTY = "没有可撤回的排队消息。"
-PING_REPLY = "WeChat ─{ingress_ms}/{egress_ms}ms"
-PING_PARTIAL = "WeChat ─{latency}"
-PING_ROUTE = "{channel}─ Bridge ─{provider_latency}─ Provider"
+PING_REPLY = "微信 ─{ingress_ms}/{egress_ms}ms"
+PING_PARTIAL = "微信 ─{latency}"
+PING_ROUTE = "桥接 ─{provider_latency}─ 提供方"
 PING_USAGE = "用法: `/ping`"
 UNKNOWN_COMMAND = "未知指令，查看 `/help`"
 TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {count} 个。\n请分开发送。"
@@ -59,6 +64,7 @@ UNSUPPORTED_MESSAGE = (
     "消息未接收: 仅支持文字、语音转写、图片、视频和文件。\n"
     "文字每条最多 {count} 字符。"
 )
+UNSUPPORTED_MESSAGE_TYPE = "暂时不支持这个类型，请发送文字、图片、视频或文件。"
 
 ATTACHMENT_INCOMING_FAILED = (
     "附件处理失败: {reason}\n"
@@ -67,11 +73,11 @@ ATTACHMENT_INCOMING_FAILED = (
 ATTACHMENT_QUEUED = "附件已排队"
 ATTACHMENT_SEND_FAILED = (
     "附件未发出: {name}\n"
-    "重试 {attempts} 次仍失败，请稍后用 `/send` 重试。"
+    "重试 {attempts} 次仍失败，请稍后用 `/get` 重试。"
 )
 AUTO_ATTACHMENT_LIMIT = "附件未发送: 自动回传最多 {count} 个，超出的已跳过。"
 AUTO_ATTACHMENT_FAILED = "附件未发送: {reason}{hint}"
-AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 `/send {路径}`。"
+AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 `/get {路径}`。"
 
 APPROVAL_ACCEPTED = "已同意"
 APPROVAL_DECLINED = "已拒绝"
@@ -84,7 +90,7 @@ APPROVAL_TOO_LONG = (
 UNSUPPORTED_INTERACTION = "手机端暂不支持这个操作。\n本次请求未能继续，请到电脑端处理。"
 
 COMMAND_FAILURE_LABELS = {
-    "/settings": "读取设置失败",
+    "/settings": "设置操作失败",
     "/backend": "切换后端失败",
     "/sessions": "读取会话失败",
     "/switch": "未切换会话",
@@ -93,12 +99,24 @@ COMMAND_FAILURE_LABELS = {
     "/model": "未切换模型",
     "/effort": "未切换强度",
     "/cwd": "未切换目录",
-    "/ack": "未更新接收提示",
-    "/finish": "未更新结束提示",
 }
 COMMAND_FAILURE = "{action}: {reason}"
 
-SETTINGS_USAGE = "用法: `/settings [autostart on|off]`"
+SETTINGS_USAGE = ("用法:\n`/settings [autostart|shared|compactionNotice|slicing.smart] true|false`\n"
+                  "`/settings connectionIdleSeconds|media.maxMiB|slicing.targetChars <整数>`\n"
+                  "`/settings sourceHint <文本>`\n"
+                  "`/settings ack|finish <模板>|\"\"|fields`")
+SETTINGS_HINT = "以上设置可通过 `/settings [option] [value]` 更改。"
+SETTINGS_NUMBER = "{name} 必须是 {minimum}–{maximum} 的整数"
+SETTINGS_WRITE_FAILED = "未保存设置: 配置文件不可写或格式无效"
+SETTINGS_NOT_APPLIED = "设置已写入，但未生效；请检查配置文件。"
+SOURCE_HINT_TOO_LONG = "未更新 sourceHint: 最多 {max_bytes} 字节"
+SETTINGS_SHARED = "shared: {value}"
+SETTINGS_AUTOSTART = "autostart: {value}"
+SETTINGS_SHARED_FAILED = "未保存共享后台设置: 配置文件不可写"
+SETTINGS_SHARED_FALLBACK = "共享后台不可用: {reason}；本次已退回独立进程，Codex CLI 的回合不会进入微信"
+SETTINGS_SHARED_BUSY = "会话暂时仍被后台占用，下一条消息会自动接管"
+SETTINGS_SHARED_UNSAVED = "已切换，但设置未能写入配置文件，重启后会恢复原模式"
 BACKEND_INVALID = "未切换后端: 名称无效\n可用: {available}"
 BACKEND_SESSION_BUSY = (
     "未切换后端: 目标后端的上次会话正在工作或等待处理。\n"
@@ -116,11 +134,19 @@ SESSION_TARGET_ACTIVE = (
     "未切换会话: 工作中的会话只能通过桌面共享连接。\n"
     "请切换后端或等待任务结束。"
 )
+SESSION_WRITER_BUSY = (
+    "未提交: 会话正被另一个 Codex 客户端占用。\n"
+    "请在 App 或 CLI 中关闭该会话，或稍后重试。"
+)
+SESSION_WRITER_QUEUED = (
+    "已排队: 会话正被另一个 Codex 客户端占用，暂时无法提交。\n"
+    "在 App 或 CLI 中关闭该会话后会自动发送；最多等待 10 分钟。"
+)
 SESSION_INDEX_INVALID = "未切换会话: 编号无效\n请先发送 `/sessions`。"
-SESSION_USAGE = "用法: `/switch {{编号、ID或搜索词}}`"
+SESSION_USAGE = "用法: `/switch {{编号、ID前缀或搜索词}}`"
 NEW_USAGE = "用法: `/new`"
 MODEL_INVALID = "未切换模型: 名称无效\n请使用 `/model` 查看可用模型。"
-MODEL_NOT_IN_CATALOG = "未切换强度: 当前模型不在模型列表中。"
+MODEL_NOT_IN_CATALOG = "无法读取强度: 当前模型不在模型列表中，请重新选择模型。"
 EFFORT_INVALID = "未切换强度: 可选 {choices}"
 DIRECTORY_INVALID = "未切换目录: 目录不存在或无法访问\n请检查路径后重试。"
 DIRECTORY_NOT_FOLDER = "未切换目录: 路径不是文件夹\n请选择文件夹。"
@@ -131,6 +157,7 @@ RESTART_USAGE = "用法: `/restart`"
 LABEL_STATUS = "状态"
 LABEL_BACKEND = "后端"
 LABEL_SESSION = "会话"
+LABEL_SESSION_ID = "ID"
 LABEL_MODEL = "模型"
 LABEL_EFFORT = "强度"
 LABEL_CWD = "目录"
@@ -144,6 +171,7 @@ LABEL_LIMITS = "限额"
 LABEL_QUEUED = "待办"
 LABEL_APPROVALS = "审批"
 LABEL_SEND_FAILURES = "发送失败"
+LABEL_SHARED = "共享后台"
 LABEL_ACK = "接收提示"
 LABEL_FINISH = "结束提示"
 LABEL_AUTOSTART = "自启"
@@ -171,6 +199,7 @@ PAGE_RANGE = "页码超出范围: 1–{count}"
 SESSION_SEARCH_EMPTY = "没有匹配“{query}”的会话。"
 SESSION_SEARCH_MULTIPLE = "找到 {count} 个匹配会话；请用 `/switch {{编号}}` 选择。"
 SESSION_SEARCH_MORE = "仅显示前 {count} 条；`/sessions {query}` 查看全部。"
+SESSION_ID_PREFIX_MORE = "共匹配 {count} 个会话；仅显示前 {shown} 个，请继续输入更多 ID 字符缩小范围。"
 SESSION_LIST_FAILED = "会话列表读取未完成，请重试。"
 COMPACT_BLOCKED = "暂不能压缩: 当前会话等待处理。"
 COMPACT_REQUESTED = "已请求压缩上下文。"
@@ -180,7 +209,7 @@ STOP_CLEARED = "\n已清空待办: {count}"
 ANSWER_ACCEPTED = "已回答。"
 ANSWER_EXPIRED = "问题已失效或编号无效。"
 ANSWER_FAILED = "回答投递结果未确认，请查看桌面；未自动重发。"
-SEND_FILE_FAILED = "附件未发送: {reason}\n请检查路径后重试。"
+SEND_FILE_FAILED = "附件未发送: {reason}\n请检查文件，或稍后重试。"
 REPLY_SEND_FAILED = "这条回复未能完整发送，已停止其余部分。请在桌面查看。"
 INPUT_RECOVERED = "上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。"
 INPUT_RESULT_INTERRUPTED = "任务已提交，但结果接收中断，未重新执行。"
@@ -189,8 +218,7 @@ CONTROL_TIMEOUT = "控制请求未确认，请查看 `/status`；不会自动重
 CONTROL_FAILED = "指令未完成，请查看 `/status` 后重试。"
 GENERIC_FAILURE = "操作失败"
 COMMAND_USAGE = "用法: `{usage}`"
-AUTOSTART_CUSTOM_PATH = "自定义状态或配置路径不能交给默认服务，请自行管理服务。"
-AUTOSTART_BUSY = "首次启用自启需要移交后台服务，请等任务结束或用 /stop 停止后再试。"
+HELP_USAGE = "用法: `/help` 或 `/help all`"
 INPUT_SUBMISSION_UNCERTAIN = "消息提交结果未确认，未自动重发。"
 BACKEND_UNREADY = "后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。"
 RESULT_PREPARE_FAILED = "结果准备失败，请在桌面查看该轮回答。"
@@ -201,7 +229,8 @@ WECHAT_AUTH_TITLE = "微信绑定已失效"
 WECHAT_REBIND_HINT = "重新绑定\n{command}"
 VALUE_ON = "开启"
 VALUE_OFF = "关闭"
-VALUE_UNAVAILABLE = "不可用"
+VALUE_UNAVAILABLE = "N/A"
+VALUE_EMPTY = ""
 APPROVAL_COMMAND_TITLE = "审批: 执行命令"
 APPROVAL_FILE_TITLE = "审批: 修改文件"
 LABEL_COMMAND = "命令"
@@ -212,12 +241,11 @@ ACTION_APPROVE = "同意"
 ACTION_DENY = "拒绝"
 ANSWER_ARGUMENT = "选项或文字"
 ANSWER_OPTION_RANGE = "选项编号应为 1–{count}；也可直接填写文字。"
-FINISH_VIEW = ACK_VIEW.replace("/ack", "/finish").replace("接收提示", "结束提示")
-FINISH_USAGE = ACK_USAGE.replace("/ack", "/finish")
-FINISH_TOO_LONG = ACK_TOO_LONG.replace("接收提示", "结束提示")
+FINISH_VIEW = ACK_VIEW.replace("/settings ack", "/settings finish").replace("ack:", "finish:", 1)
+FINISH_TOO_LONG = ACK_TOO_LONG.replace("ack", "finish")
 
 HELP_STATUS = '当前状态'
-HELP_SETTINGS = '查看设置或修改登录自启'
+HELP_SETTINGS = '查看设置'
 HELP_SESSIONS = '列出、搜索或翻页会话'
 HELP_NEW = '新建'
 HELP_COMPACT = '压缩当前会话上下文'
@@ -225,22 +253,18 @@ HELP_QUEUE = '排队到当前任务结束后执行'
 HELP_UNQUEUE = '撤回最后一条尚未开始的排队消息'
 HELP_STOP = '停止并清空待办'
 HELP_PING = '微信与供应商网络延迟'
-HELP_SWITCH = '按编号、ID或搜索词切换会话'
+HELP_SWITCH = '按编号、ID前缀或搜索词切换会话'
 HELP_BACKEND = '查看或切换后端'
 HELP_MODEL = '查看或切换模型'
 HELP_EFFORT = '查看或切换强度'
 HELP_CWD = '查看或切换目录'
-HELP_ACK = '接收提示；空模板关闭'
-HELP_FINISH = '结束提示；空模板关闭'
 HELP_APPROVE = '同意审批'
 HELP_DENY = '拒绝审批'
 HELP_ANSWER = '回答原生提问'
-HELP_SEND = '回传文件、图片或视频'
-HELP_SENDFILE = '作为文件回传'
-HELP_SENDIMAGE = '作为图片回传'
-HELP_SENDVIDEO = '作为视频回传'
+HELP_GET = '从电脑取回文件、图片或视频'
+HELP_GETFILE = '作为文件回传'
 HELP_RESTART = '重启微信桥'
-HELP_HELP = '命令说明'
+HELP_HELP = '查看常用命令；`/help all` 查看全部'
 
 DEFAULT_PROMPTS = MappingProxyType({name: value for name, value in tuple(globals().items())
                                   if name.isupper() and isinstance(value, str)} |
@@ -251,11 +275,13 @@ _FORMATTER = Formatter()
 
 _FIELD_LABELS = {
     "status": "LABEL_STATUS", "backend": "LABEL_BACKEND", "session": "LABEL_SESSION",
+    "session_id": "LABEL_SESSION_ID",
     "model": "LABEL_MODEL", "effort": "LABEL_EFFORT", "cwd": "LABEL_CWD",
     "provider": "LABEL_PROVIDER", "permissions": "LABEL_PERMISSIONS", "collaboration": "LABEL_COLLABORATION",
     "connection": "LABEL_SERVICE", "token_usage": "LABEL_TOKENS", "context_usage": "LABEL_CONTEXT",
     "rate_limits": "LABEL_LIMITS", "queue_depth": "LABEL_QUEUED", "pending_requests": "LABEL_APPROVALS",
     "send_failures": "LABEL_SEND_FAILURES",
+    "shared_fallback": "LABEL_SHARED",
 }
 
 
@@ -291,12 +317,22 @@ def render_ack(template, values):
     # triggering a second expansion. Unknown fields remain literal text.
     def replace(match):
         value = values.get(match[1], match[0])
-        return "-" if value in (None, "暂不可用") else str(value)
+        return VALUE_UNAVAILABLE if value is None else str(value)
     return re.sub(r"\{([^{}]+)\}", replace, template)
 
 
 def effort_label(value):
     return str(value).replace("_", " ").capitalize() if value else "默认"
+
+
+def duration_label(seconds):
+    """Format a turn duration for prompt templates; None means no sample yet."""
+    if not isinstance(seconds, (int, float)) or seconds < 0:
+        return "-"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, rest = divmod(int(round(seconds)), 60)
+    return f"{minutes}m{rest:02d}s"
 
 
 def model_label(model, effort):
@@ -314,7 +350,7 @@ def display_path(value):
     return path
 
 
-def compact_label(value, fallback="暂不可用", limit=100):
+def compact_label(value, fallback=VALUE_UNAVAILABLE, limit=100):
     text = " ".join(str(value or "").split())
     return text[:limit] or fallback
 
@@ -338,7 +374,7 @@ def permission_label(*, sandbox, approval, reviewer, profile=None):
     }.get(sandbox_name)
     if not permission and isinstance(profile, dict):
         permission = compact_label(profile.get("id"), fallback="")
-    permission = permission or "暂不可用"
+    permission = permission or VALUE_UNAVAILABLE
 
     if isinstance(approval, dict):
         approval_name = "精细审批"
@@ -368,7 +404,7 @@ def token_count(value):
     try:
         number = max(0, int(value))
     except (TypeError, ValueError):
-        return "暂不可用"
+        return VALUE_UNAVAILABLE
     if number >= 1_000_000:
         text = f"{number / 1_000_000:.1f}M"
     elif number >= 1_000:
@@ -383,10 +419,10 @@ def context_usage(value):
     used = last.get("totalTokens")
     window = value.get("modelContextWindow") if isinstance(value, dict) else None
     used_text = token_count(used)
-    if used_text == "暂不可用":
+    if used_text == VALUE_UNAVAILABLE:
         return used_text
     window_text = token_count(window)
-    if window_text == "暂不可用":
+    if window_text == VALUE_UNAVAILABLE:
         return f"{used_text} Token"
     try:
         percent = round(int(used) * 100 / int(window))
@@ -398,7 +434,7 @@ def context_usage(value):
 def token_usage(value):
     total = value.get("total", {}) if isinstance(value, dict) else {}
     if not isinstance(total, dict) or total.get("totalTokens") is None:
-        return "暂不可用"
+        return VALUE_UNAVAILABLE
     total_count = token_count(total.get("totalTokens"))
     input_count = token_count(total.get("inputTokens"))
     output_count = token_count(total.get("outputTokens"))
@@ -441,10 +477,10 @@ def limit_window(value, fallback):
 
 def rate_limit_label(value):
     if not isinstance(value, dict):
-        return "暂不可用"
+        return VALUE_UNAVAILABLE
     snapshot = value.get("rateLimits", value)
     if not isinstance(snapshot, dict):
-        return "暂不可用"
+        return VALUE_UNAVAILABLE
 
     parts = []
     if value.get("ordinaryUsageAllowed") is False:
@@ -476,11 +512,15 @@ def rate_limit_label(value):
         if count > 0:
             parts.append(f"可重置 {count} 次")
 
-    return "  ".join(parts) or "暂不可用"
+    return "  ".join(parts) or VALUE_UNAVAILABLE
 
 
 def session_name(value):
     return str(value or "未命名").replace("\n", " ").strip()[:100] or "未命名"
+
+
+def short_session_id(value):
+    return str(value or "")[:8] or "-"
 
 
 def panel(*lines):
@@ -490,9 +530,10 @@ def panel(*lines):
 
 
 def session_summary(action, *, name, model, effort, cwd, backend=None, status=None,
-                    text=prompt_text):
+                    session_id=None, text=prompt_text):
     return action + "\n" + panel(f"{text('LABEL_BACKEND')}: {backend}" if backend else None,
                  f"{text('LABEL_SESSION')}: {session_name(name)}",
+                 f"{text('LABEL_SESSION_ID')}: {short_session_id(session_id)}",
                  f"{text('LABEL_STATUS')}: {status}" if status else None,
                  f"{text('LABEL_MODEL')}: {model_label(model, effort)}",
                  f"{text('LABEL_CWD')}: {display_path(cwd)}")
@@ -513,21 +554,28 @@ def setting_summary(action=None, *, model, effort, cwd, field=None, text=prompt_
 def status_fields(*, status, queued, pending, failed, name, model, effort,
                    cwd, connection, provider=None, approval=None,
                    sandbox=None, reviewer=None, collaboration=None,
-                   profile=None, usage=None, rate_limits=None, backend=None):
+                   profile=None, usage=None, rate_limits=None, backend=None,
+                   shared_fallback=None, session_id=None):
     total = (usage or {}).get("total") or {}
+    last = (usage or {}).get("last") or {}
     context = context_usage(usage)
     remaining = re.match(r"剩余 (\d+%)", context)
     return {
         "status": status, "backend": backend, "session": session_name(name),
+        "session_id": short_session_id(session_id),
         "model": model or "默认模型", "effort": effort_label(effort),
         "cwd": display_path(cwd), "provider": provider_label(provider),
         "permissions": permission_label(sandbox=sandbox, approval=approval, reviewer=reviewer, profile=profile),
         "collaboration": collaboration_label(collaboration), "connection": connection,
+        "shared_fallback": shared_fallback,
         "queue_depth": queued, "pending_requests": pending, "send_failures": failed,
-        "context_usage": context, "context_remaining": remaining[1] if remaining else "暂不可用",
+        "context_usage": context, "context_remaining": remaining[1] if remaining else VALUE_UNAVAILABLE,
         "total_tokens": token_count(total.get("totalTokens")),
         "input_tokens": token_count(total.get("inputTokens")),
         "output_tokens": token_count(total.get("outputTokens")),
+        "turn_total_tokens": token_count(last.get("totalTokens")),
+        "turn_input_tokens": token_count(last.get("inputTokens")),
+        "turn_output_tokens": token_count(last.get("outputTokens")),
         "token_usage": token_usage(usage), "rate_limits": rate_limit_label(rate_limits),
     }
 
@@ -543,7 +591,10 @@ def status_from_fields(values, *, text=prompt_text):
         lines.append(f"{label('backend')}: {values['backend']}")
     lines.extend([f"{label('model')}: {values['model']} ({values['effort']})"])
     lines.extend(f"{label(key)}: {values[key]}" for key in
-                 ("provider", "cwd", "permissions", "collaboration", "session", "connection"))
+                 ("provider", "cwd", "permissions", "collaboration", "session",
+                  "session_id", "connection"))
+    if values.get("shared_fallback"):
+        lines.append(f"{label('shared_fallback')}: {values['shared_fallback']}")
     lines.append("")
     lines.extend(f"{label(key)}: {values[key]}" for key in ("token_usage", "context_usage", "rate_limits"))
     return panel(*lines)
@@ -554,33 +605,39 @@ def status_summary(**kwargs):
 
 
 def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None,
-                     completion_notice="", source_hint=None, autostart=None,
+                     completion_notice="", source_hint=None, autostart=None, shared=None,
                      connection_idle_seconds=None, text=prompt_text):
-    off = text('VALUE_OFF')
-    lines = [f"{text('LABEL_ACK')}: {notice or off}",
-             f"{text('LABEL_FINISH')}: {completion_notice or off}",
-             f"{text('LABEL_ATTACHMENTS')}: {attachment_mib} MiB"]
+    def display_template(value):
+        value = str(value or VALUE_EMPTY)
+        if len(value) >= 2 and value[0] == value[-1] == "`":
+            return value[1:-1]
+        return value
+
+    editable = [f"ack: {display_template(notice)}",
+                f"finish: {display_template(completion_notice)}"]
     if autostart is not None:
-        lines.append(f"{text('LABEL_AUTOSTART')}: {autostart}")
-    if connection_idle_seconds is not None:
-        value = (f"{connection_idle_seconds}s" if connection_idle_seconds else
-                 text('VALUE_CONNECTION_IDLE_UNLIMITED'))
-        lines.append(f"{text('LABEL_CONNECTION_IDLE')}: {value}")
-    if slicing is not None:
-        lines.extend([f"{text('LABEL_SLICING')}: {slicing.mode}",
-                      f"{text('LABEL_TARGET_LENGTH')}: {slicing.target_chars} 字符"])
-    if source_hint is not None:
-        lines.append(f"{text('LABEL_SOURCE')}: {source_hint or off}")
+        editable.append(f"autostart: {autostart}")
+    if shared is not None:
+        editable.append(f"shared: {shared}")
     if notifications is not None:
-        summaries = []
-        for window, label in (("primary", "LABEL_QUOTA_PRIMARY"),
-                              ("secondary", "LABEL_QUOTA_SECONDARY")):
+        editable.append(f"compactionNotice: {'true' if notifications.compaction else 'false'}")
+    if connection_idle_seconds is not None:
+        editable.append(f"connectionIdleSeconds: {connection_idle_seconds}")
+    editable.append(f"media.maxMiB: {attachment_mib}")
+    if slicing is not None:
+        editable.append(f"slicing.smart: {'true' if slicing.mode == 'smart' else 'false'}")
+        editable.append(f"slicing.targetChars: {slicing.target_chars}")
+    if source_hint is not None:
+        editable.append(f"sourceHint: {source_hint or VALUE_EMPTY}")
+    readonly = []
+    if notifications is not None:
+        for window in ("primary", "secondary"):
             values = notifications.quota_thresholds.get(window, ())
-            summary = "/".join(f"{value}%" for value in values) or off
-            summaries.append(f"{text(label)}={summary}")
-        lines.extend([f"{text('LABEL_COMPACTION')}: {text('VALUE_ON') if notifications.compaction else off}",
-                      f"{text('LABEL_QUOTA_WARNING')}: " + "；".join(summaries)])
-    return panel(*lines)
+            summary = "[" + ",".join(str(value) for value in values) + "]"
+            readonly.append(f"quotaWarningThresholds.{window}: {summary}")
+    if readonly:
+        editable.extend(["[无法直接修改]", *readonly])
+    return panel(*editable) + "\n\n" + text("SETTINGS_HINT")
 
 
 def session_age(timestamp, *, now=None):

@@ -26,6 +26,7 @@ class HotConfigContractTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[1] / "config.example.json"
         config = json.loads(path.read_text(encoding="utf-8"))
         settings = HotSettings.from_config(config)
+        self.assertTrue(settings.notifications.compaction)
         self.assertEqual(settings.notifications.quota_thresholds, {
             "primary": (50, 25, 10, 5, 1),
             "secondary": (50, 25, 10, 5, 1),

@@ -4,7 +4,8 @@ import os
 import re
 from urllib.parse import urlsplit
 
-from platform_support import IS_WINDOWS
+from diagnostics import log_event
+from platform_support import IS_WINDOWS, PROXY_ENV_KEYS, apply_system_proxy, proxy_label
 
 SUPPORTED_TRANSPORTS = ("stdio", "native-daemon", "loopback-websocket")
 
@@ -16,6 +17,7 @@ class ConnectionSpec:
     endpoint: str | None = None
     startup: tuple[str, ...] = ()
     runtime: str = "auto"
+    system_proxy: bool = True
 
     @classmethod
     def from_config(cls, config):
@@ -55,14 +57,29 @@ class ConnectionSpec:
             raise ValueError("websocketStartupCommand 必须是字符串数组")
         if shared and not endpoint and list(command[-1:]) != ["app-server"] and list(command[-2:]) != ["app-server", "proxy"]:
             raise ValueError("sharedDaemon 模式的 command 须以 app-server 结尾")
-        return cls(tuple(command), shared, endpoint, tuple(startup), runtime)
+        system_proxy = config.get("useSystemProxy", True)
+        if type(system_proxy) is not bool:
+            raise ValueError("useSystemProxy 必须是布尔值")
+        return cls(tuple(command), shared, endpoint, tuple(startup), runtime, system_proxy)
 
     def environment(self, config):
         env = dict(os.environ)
         # A caller's current chat/home must never silently choose another backend.
         for key in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_HOME"):
             env.pop(key, None)
+        # Disabling system-proxy discovery means this backend should not inherit
+        # an unrelated proxy from the long-lived bridge process. Explicit backend
+        # env below still wins, so a deliberate proxy configuration is preserved.
+        if not self.system_proxy:
+            for key in PROXY_ENV_KEYS:
+                env.pop(key, None)
         env.update(config.get("env", {}))
+        # Codex only reads a proxy for sampling from the environment; without it
+        # the first turn of a proxied machine burns every WebSocket retry.
+        applied = apply_system_proxy(env, enabled=self.system_proxy)
+        if applied:
+            log_event("backend.proxy_inherited", component="backend", source="system",
+                      proxy=proxy_label(applied["HTTPS_PROXY"]))
         return env
 
     def proxy_command(self):
