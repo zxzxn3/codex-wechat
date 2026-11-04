@@ -48,9 +48,6 @@ RELEASE_FORMAT = 1
 CURRENT_FILE = "current"
 PREVIOUS_FILE = "previous"
 RELEASES_DIR = "releases"
-# An update keeps the newest release plus the one a running bridge was started
-# from; that older one is removed by the next update, once nothing can use it.
-RELEASE_KEEP = 1
 LOCK_FILE = ".install-lock"
 MANIFEST_FILE = ".release.json"
 LEGACY_ID = "legacy"
@@ -776,11 +773,11 @@ def prune_releases(target: Path, *, keep) -> list[str]:
     kept = {name for name in keep if name}
     for stale in releases.glob(".trash-*"):
         shutil.rmtree(stale, ignore_errors=True)
+    candidates = [entry for entry in releases.iterdir()
+                  if not entry.name.startswith(".") and entry.is_dir() and not entry.is_symlink()]
     removed = []
-    for entry in sorted(releases.iterdir()):
-        if entry.name in kept or entry.name.startswith(".") or entry.is_symlink():
-            continue
-        if not entry.is_dir():
+    for entry in sorted(candidates, key=lambda item: item.name):
+        if entry.name in kept:
             continue
         trash = releases / (".trash-" + entry.name)
         try:
