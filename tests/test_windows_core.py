@@ -179,13 +179,16 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.attach_app.assert_not_awaited()
         self.assertEqual(backend.released_thread, "thread-1")
 
-        candidate = SimpleNamespace(thread_id="thread-1", close=AsyncMock())
+        candidate = SimpleNamespace(thread_id="thread-1", enabled=False,
+                                    activate=Mock(), close=AsyncMock())
         backend.app_available = lambda: True
         backend.attach_app = AsyncMock(return_value=candidate)
         self.assertTrue(await backend.follow_app("thread-1"))
         self.assertIs(backend.app, candidate)
         self.assertIsNone(backend.released_thread)
         self.assertEqual(backend.selected_thread, "thread-1")
+        # Without activate() the follower never publishes state changes.
+        candidate.activate.assert_called_once_with()
 
     async def test_attach_failure_never_escapes_following(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

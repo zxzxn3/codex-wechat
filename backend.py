@@ -727,6 +727,10 @@ class CodexBackend:
         self.selected_thread = thread_id
         self.released_thread = None
         self.attach_error = None
+        if not app.enabled:
+            # Without this the follower stays silent: broadcast() only publishes
+            # state changes while enabled, so desktop turns would never reach us.
+            app.activate()
         self.writer_event("backend.app_followed", thread=thread_id, status="followed")
         return True
 
