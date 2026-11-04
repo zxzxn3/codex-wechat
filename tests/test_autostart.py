@@ -28,6 +28,13 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await autostart.status())
         script.assert_awaited_once_with("status")
 
+    async def test_windows_without_the_task_reports_unavailable(self):
+        with patch.object(autostart, "IS_WINDOWS", True), \
+                patch.object(autostart, "windows_task_flags", return_value=(False, False)):
+            with self.assertRaises(ValueError):
+                await autostart.status()
+            self.assertFalse(await autostart.installed())
+
     async def test_linux_reads_native_state_and_checks_installation_identity(self):
         for value, expected in (("enabled", True), ("disabled", False), ("linked", False)):
             output = f"FragmentPath={autostart.INSTALL_ROOT / autostart.UNIT}\nUnitFileState={value}"

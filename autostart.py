@@ -103,11 +103,15 @@ async def status():
     if not IS_WINDOWS:
         return bool(await _linux_status())
     try:
-        return (await asyncio.to_thread(windows_task_flags))[1]
+        installed_flag, enabled = await asyncio.to_thread(windows_task_flags)
     except Exception:
         # No scheduler API here: the launcher script is slower but authoritative.
         log_event("autostart.task_read_failed", level="warning", component="autostart")
         return await _windows_request("status")
+    if not installed_flag:
+        # Missing, or a CodexWeChat task that belongs to another installation.
+        raise ValueError("尚未安装本项目的计划任务，或该任务属于另一个目录。")
+    return enabled
 
 
 async def set_enabled(enabled, *, start_if_missing=True):
