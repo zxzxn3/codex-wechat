@@ -487,15 +487,17 @@ class InstallerCommandTests(unittest.TestCase):
     def test_unreadable_install_entry_is_reported(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            for name in ("bootstrap_supervisor.py", "codex-wechat.ps1", "current"):
-                (target / name).write_text("x", encoding="utf-8")
+            for name in (*installer._stable_files(), installer.CURRENT_FILE):
+                path = target / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("x", encoding="utf-8")
             (target / "releases" / "abc").mkdir(parents=True)
             installer.check_user_access(target, "abc")
             with patch.object(installer, "_readable",
-                              side_effect=lambda path: path.name != "current"):
-                with self.assertRaisesRegex(ValueError, "icacls") as caught:
+                              side_effect=lambda path: path.name != installer.CURRENT_FILE):
+                with self.assertRaisesRegex(ValueError, "chmod|icacls") as caught:
                     installer.check_user_access(target, "abc")
-            self.assertIn("current", str(caught.exception))
+            self.assertIn(installer.CURRENT_FILE, str(caught.exception))
 
 
 if __name__ == "__main__":

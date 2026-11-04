@@ -396,15 +396,17 @@ def check_user_access(target: Path, identifier: str) -> None:
     install looks successful while `pythonw` fails to load the entry, and the
     scheduled task logs nothing. Detect that here instead.
     """
-    entries = [target / "bootstrap_supervisor.py", target / "codex-wechat.ps1",
-               target / CURRENT_FILE, release_path(target, identifier)]
+    entries = [target / relative for relative in _stable_files()]
+    entries += [target / CURRENT_FILE, release_path(target, identifier)]
     denied = [path for path in entries if not _readable(path)]
     if denied:
+        remedy = (f'icacls "{target}" /reset /t /c /q' if IS_WINDOWS
+                  else f'chmod -R u+rX "{target}"')
         raise ValueError(
             "当前用户无法读取安装入口，服务会以该用户身份启动并静默失败:\n"
             + "\n".join("  " + str(path) for path in denied)
             + "\n请在普通（非管理员、非沙箱）终端重新安装，或以管理员执行: "
-            + f'icacls "{target}" /reset /t /c /q')
+            + remedy)
 
 
 class InstallLock:
