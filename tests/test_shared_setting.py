@@ -43,12 +43,29 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
         with patch("commands.switch", self.reconnect(True)) as switch:
             await dispatch(bridge, "/settings shared on")
         saved = json.loads(self.path.read_text(encoding="utf-8"))
-        self.assertTrue(saved["backend"]["sharedDaemon"])
+        self.assertTrue(saved["backends"]["codex"]["sharedDaemon"])
         # Unrelated keys survive the rewrite.
         self.assertEqual(saved["cwd"], self.temp.name)
+        self.assertEqual(saved["backend"], {"command": ["codex", "app-server"]})
         switch.assert_awaited_once_with(bridge, "codex", force=True, adopt_busy=True)
         self.assertTrue(bridge.backend_configs["codex"]["sharedDaemon"])
         self.assertIn("共享后台: 开启", bridge.state["outbox"][-1]["text"])
+
+    async def test_shared_choice_overrides_a_definition_written_by_desktop_setup(self):
+        # `codex-desktop setup` stores sharedDaemon under backends[name], which
+        # definitions() applies after the legacy backend section.
+        self.path.write_text(json.dumps({"backend": {"sharedDaemon": True},
+                                         "backends": {"codex": {"sharedDaemon": True}}}),
+                             encoding="utf-8")
+        bridge = self.bridge({"backend": {"sharedDaemon": True},
+                              "backends": {"codex": {"sharedDaemon": True}}})
+        self.assertTrue(bridge.backend.shared)
+        with patch("commands.switch", self.reconnect(False)):
+            await dispatch(bridge, "/settings shared off")
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertFalse(saved["backends"]["codex"]["sharedDaemon"])
+        self.assertNotIn("sharedDaemon", saved["backend"])
+        self.assertFalse(bridge.backend_configs["codex"]["sharedDaemon"])
 
     async def test_shared_off_releases_the_thread_before_reconnecting(self):
         bridge = self.bridge()
@@ -57,8 +74,19 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
         with patch("commands.switch", self.reconnect(False)) as switch:
             await dispatch(bridge, "/settings shared off")
         bridge.backend.release_thread.assert_awaited_once_with("thread-1")
-        self.assertFalse(json.loads(self.path.read_text(encoding="utf-8"))["backend"]["sharedDaemon"])
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertFalse(saved["backends"]["codex"]["sharedDaemon"])
         switch.assert_awaited_once_with(bridge, "codex", force=True, adopt_busy=True)
+
+    async def test_a_mode_change_is_refused_while_a_turn_runs(self):
+        bridge = self.bridge()
+        bridge.running = True
+        with patch("commands.switch", AsyncMock()) as switch:
+            await dispatch(bridge, "/settings shared on")
+        # Switching mode restarts the backend, which would abort the live turn.
+        self.assertIn("任务未结束", bridge.state["outbox"][-1]["text"])
+        switch.assert_not_called()
+        self.assertFalse(self.path.exists())
 
     async def test_shared_off_reports_a_thread_that_is_still_busy(self):
         bridge = self.bridge()
@@ -95,12 +123,14 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
         switch.assert_not_called()
 
     async def test_a_failed_switch_leaves_the_file_and_the_mode_untouched(self):
-        self.path.write_text(json.dumps({"backend": {"sharedDaemon": True}}), encoding="utf-8")
-        bridge = self.bridge({"backend": {"sharedDaemon": True}})
+        self.path.write_text(json.dumps({"backends": {"codex": {"sharedDaemon": True}}}),
+                             encoding="utf-8")
+        bridge = self.bridge({"backends": {"codex": {"sharedDaemon": True}}})
         with patch("commands.switch", AsyncMock(side_effect=RuntimeError("boom"))):
             await dispatch(bridge, "/settings shared off")
         self.assertIn("失败", bridge.state["outbox"][-1]["text"])
-        self.assertTrue(json.loads(self.path.read_text(encoding="utf-8"))["backend"]["sharedDaemon"])
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertTrue(saved["backends"]["codex"]["sharedDaemon"])
         self.assertTrue(bridge.backend_configs["codex"]["sharedDaemon"])
 
 

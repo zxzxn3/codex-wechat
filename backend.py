@@ -755,7 +755,10 @@ class CodexBackend:
                                           "busy" if self.active is not None else "offline"))
             return False
         if self.shared and follow:
-            self.set_writer(WRITER_NATIVE, thread_id)
+            # Another client may still own the thread we just adopted; keep that
+            # state so the next turn takes the writer back instead of assuming it.
+            if not (self.writer_thread == thread_id and self.writer_mode == WRITER_BUSY):
+                self.set_writer(WRITER_NATIVE, thread_id)
             self.writer_event("backend.writer_kept", thread=thread_id, status="shared")
             return False
         try:

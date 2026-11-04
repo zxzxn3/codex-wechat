@@ -123,46 +123,64 @@ def write_config(path, config):
     os.replace(temp, path)
 
 
+def backend_section(config, name):
+    """The per-backend definition `definitions()` applies last for this name."""
+    backends = config.setdefault("backends", {})
+    if not isinstance(backends, dict):
+        raise ValueError("backends 必须是对象")
+    section = backends.setdefault(name, {})
+    if not isinstance(section, dict):
+        raise ValueError("backends 的每一项必须是对象")
+    return section
+
+
 async def set_shared_daemon(bridge, enabled):
     """Apply the shared-daemon choice, then persist it only once it works.
 
     Nothing is written until the reconnect succeeds, so a failed switch leaves
-    the file and the running mode agreeing with each other.
+    the file and the running mode agreeing with each other. The value goes to
+    `backends[name]`, which `definitions()` applies after the legacy `backend`
+    section: `codex-desktop setup` writes there, so a change stored anywhere else
+    would be silently overridden on the next start.
     """
     path = bridge.settings.path
+    name = bridge.backend_name
+    if not can_change_session(bridge):
+        # Switching mode restarts the backend, which would abort a live turn.
+        raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
     try:
         if path is None:
             raise OSError("没有可写入的配置文件")
         config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
         if not isinstance(config, dict):
             raise ValueError("配置必须是 JSON 对象")
-        backend = config.setdefault("backend", {})
-        if not isinstance(backend, dict):
-            raise ValueError("backend 必须是对象")
+        section = backend_section(config, name)
+        running = backend_section(bridge.config, name)
     except (OSError, ValueError):
         raise UserFacingError(bridge.prompt("SETTINGS_SHARED_FAILED")) from None
-    config["backend"]["sharedDaemon"] = enabled
-    running = bridge.config.setdefault("backend", {})
-    if not isinstance(running, dict):
-        raise UserFacingError(bridge.prompt("SETTINGS_SHARED_FAILED"))
+    section["sharedDaemon"] = enabled
+    legacy = config.get("backend")
+    if name == "codex" and isinstance(legacy, dict):
+        legacy.pop("sharedDaemon", None)
     previous_value = running.get("sharedDaemon")
     running["sharedDaemon"] = enabled
     bridge.backend_configs = definitions(bridge.config)
     previous = bridge.backend
-    if not enabled:
-        # A daemon keeps every thread it loaded locked, so hand this one back first.
-        await previous.release_thread(bridge.state.get("thread"))
-    await previous.close()
-    bridge.backend_started = False
-    try:
-        await switch(bridge, bridge.backend_name, force=True, adopt_busy=True)
-    except BaseException:
-        if previous_value is None:
-            running.pop("sharedDaemon", None)
-        else:
-            running["sharedDaemon"] = previous_value
-        bridge.backend_configs = definitions(bridge.config)
-        raise
+    async with bridge.session_lock:
+        if not enabled:
+            # A daemon keeps every thread it loaded locked, so hand this one back.
+            await previous.release_thread(bridge.state.get("thread"))
+        await previous.close()
+        bridge.backend_started = False
+        try:
+            await switch(bridge, name, force=True, adopt_busy=True)
+        except BaseException:
+            if previous_value is None:
+                running.pop("sharedDaemon", None)
+            else:
+                running["sharedDaemon"] = previous_value
+            bridge.backend_configs = definitions(bridge.config)
+            raise
     values = {"value": bridge.prompt("VALUE_ON" if bridge.backend.shared else "VALUE_OFF")}
     text = bridge.prompt("SETTINGS_SHARED", values)
     try:

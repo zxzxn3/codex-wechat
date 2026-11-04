@@ -196,6 +196,19 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.rpc.assert_awaited_once_with("thread/unsubscribe", {"threadId": "thread-1"})
         self.assertEqual(backend.writer_mode, WRITER_RELEASED)
 
+    async def test_an_adopted_shared_thread_still_reports_a_foreign_writer(self):
+        backend = CodexBackend({"sharedDaemon": True}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.transport.shared = True
+        backend.rpc = AsyncMock(return_value={})
+        backend.set_writer(WRITER_BUSY, "thread-1")
+        # Keeping the subscription must not claim a writer another client holds,
+        # or the next turn would submit into a conflict it cannot recover from.
+        self.assertFalse(await backend.release_thread("thread-1", follow=True))
+        self.assertEqual(backend.writer_mode, WRITER_BUSY)
+        self.assertTrue(backend.writer_elsewhere("thread-1"))
+
     async def test_unavailable_shared_daemon_falls_back_to_a_private_server(self):
         backend = CodexBackend({"sharedDaemon": True}, "/tmp", lambda _: None)
         backend.transport.start = AsyncMock(
@@ -218,7 +231,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
                 CodexRpcError(-32600, "thread t already has an active writer"), "t"]),
             adopt_thread=AsyncMock())
         with patch("profiles.asyncio.sleep", AsyncMock()):
-            self.assertEqual(await resume_or_adopt(None, candidate, "t", True), "t")
+            self.assertEqual(await resume_or_adopt(candidate, "t", True), "t")
         candidate.adopt_thread.assert_not_called()
 
     async def test_a_mode_change_adopts_a_thread_the_daemon_still_holds(self):
@@ -227,7 +240,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
             thread=AsyncMock(
                 side_effect=CodexRpcError(-32600, "thread t already has an active writer")),
             adopt_thread=AsyncMock(return_value="t"))
-        self.assertEqual(await resume_or_adopt(None, candidate, "t", True, wait=0), "t")
+        self.assertEqual(await resume_or_adopt(candidate, "t", True, wait=0), "t")
         candidate.adopt_thread.assert_awaited_once_with("t")
 
     async def test_a_plain_switch_still_reports_the_writer_conflict(self):
@@ -237,7 +250,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=CodexRpcError(-32600, "thread t already has an active writer")),
             adopt_thread=AsyncMock())
         with self.assertRaises(CodexRpcError):
-            await resume_or_adopt(None, candidate, "t", False)
+            await resume_or_adopt(candidate, "t", False)
         candidate.adopt_thread.assert_not_called()
 
     async def test_writer_states_track_who_holds_the_thread(self):

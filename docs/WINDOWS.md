@@ -128,8 +128,9 @@ app-server，两边的回合才会互相可见。
 | 微信 ↔ Codex App | 双向（App 先持笔，桥接用 IPC follower 借笔） | App 先打开会话时仍可跟随；桥接先发过消息后该会话在 App 里显示锁定 |
 | 微信 ↔ Codex CLI | 不可用（只能轮流用，CLI 释放写者要 65–100 秒） | 双向 |
 
-- 切换：`/settings shared on|off`，写入 `config.json` 的 `backend.sharedDaemon` 并立即重连，
-  重启后保持。`/settings` 与 `/status` 都会显示当前模式。
+- 切换：`/settings shared on|off`，写入 `config.json` 的 `backends.<后端>.sharedDaemon`
+  （`definitions()` 最后应用这一段，因此不会被 `codex-desktop setup` 写下的同名段覆盖），
+  并立即重连，重启后保持。`/settings` 与 `/status` 都会显示当前模式。
 - daemon 放手有延迟：刚退订后的私有 app-server 仍可能被 `-32600 active writer` 拒绝。因此模式
   切换会先重试约 5 秒，仍占用就以"不持笔"的方式采纳该会话（`/settings` 回复里会说明），
   下一条微信消息排队等写者，锁一放开就发出（最多等 10 分钟，重试间隔 30 秒起退避到 2 分钟；
@@ -144,8 +145,10 @@ app-server，两边的回合才会互相可见。
   `os error 5`）自动退回独立进程，并在 `/status` 与日志 `backend.shared_unavailable` 里写明
   原因。配置里的 `sharedDaemon: true` 不会被改写。
 - 模型请求在共享模式下由 daemon 进程发出，因此 daemon 必须继承代理环境变量：要么在带代理的
-  shell 里启动它，要么把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 写进 `backend.env`，
-  由桥接启动 daemon 时传下去。
+  shell 里启动它，要么把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 写进 `backends.<后端>.env`
+  （或旧的 `backend.env`），由桥接启动 daemon 时传下去。
+- 切换模式会重建后端连接，因此任务进行中（或有排队、正在切换会话）会被拒绝，等待结束或
+  `/stop` 后再试。
 
 ## 本机环境观察（不代表其它机器）
 

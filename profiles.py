@@ -49,7 +49,7 @@ def writer_conflict(error):
             and "already has an active writer" in str(error.reason))
 
 
-async def resume_or_adopt(bridge, candidate, thread_id, adopt_busy, *, wait=5.0):
+async def resume_or_adopt(candidate, thread_id, adopt_busy, *, wait=5.0):
     """Take the writer for the saved thread, or adopt it without one.
 
     A daemon that was just unsubscribed can keep the writer for a moment, so a
@@ -90,7 +90,7 @@ async def switch(bridge, name, *, force=False, adopt_busy=False):
             if status == "systemError" or (not adopt_busy and status == "active"
                                            and not candidate.shared):
                 raise UserFacingError(bridge.prompt("BACKEND_SESSION_BUSY"))
-        selected = await resume_or_adopt(bridge, candidate, thread_id, adopt_busy)
+        selected = await resume_or_adopt(candidate, thread_id, adopt_busy)
     except BaseException:
         await candidate.close()
         raise
