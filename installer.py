@@ -935,6 +935,8 @@ def next_steps(target: Path, *, update: bool, identifier: str) -> None:
         print("3. 在微信发送 /help、/status，然后发送普通消息开始交流。")
         print("自启默认关闭；需要时在微信发送 /settings autostart on。")
         print("若提示找不到 codex-wechat，请使用上面的完整路径，或将 ~/.local/bin 加入 PATH。")
+    print("用 Codex CLI 与微信双向收发: 在微信发送 /settings shared on（持久保存，/settings shared off 关闭）。")
+    print("共享后台默认 Windows 为 false、Linux 为 true；开启后 Codex App 打开桥接当前会话会显示锁定。")
 
 
 def install(source: Path, target: Path, *, dry_run: bool = False) -> int:
