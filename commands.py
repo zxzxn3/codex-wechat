@@ -21,8 +21,8 @@ from diagnostics import error_fields, log_event, request_context
 
 from prompts import (
     MAX_NOTICE_BYTES, COMMAND_FAILURE_LABELS, panel, display_path, effort_label,
-    session_age, session_name, session_summary, setting_summary, settings_summary,
-    ping_channel, status_from_fields, prompt_text,
+    pending_setting_label, session_age, session_name, session_summary,
+    setting_summary, settings_summary, ping_channel, status_from_fields, prompt_text,
 )
 from command_specs import REGISTRY, COMMANDS, help_text
 from configuration import processing_template, completion_template
@@ -385,6 +385,20 @@ def session_control(handler):
     return guarded
 
 
+def session_setting(handler):
+    """Model and effort may be asked for while a turn runs.
+
+    The running turn keeps the values it started with - the server cannot swap
+    them mid-turn - so the handler records the change and it lands on the next
+    turn. Everything else still uses the full session barrier.
+    """
+    @wraps(handler)
+    async def guarded(bridge, command, argument, received=None):
+        async with bridge.session_lock:
+            return await handler(bridge, command, argument, received)
+    return guarded
+
+
 @session_control
 async def _change_backend(bridge, command, argument, received=None):
     await switch(bridge, argument)
@@ -395,6 +409,8 @@ async def _change_backend(bridge, command, argument, received=None):
 @session_control
 async def command_new(bridge, command, argument, received=None):
     await activate(bridge)
+    bridge.state.pop("pendingSettings", None)  # A new session starts from the request itself.
+    bridge.save()
     bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED")))
     return
 
@@ -432,6 +448,8 @@ async def command_switch(bridge, command, argument, received=None):
             bridge.reply(text)
             return
     desktop = await activate(bridge, target)
+    bridge.state.pop("pendingSettings", None)  # Pending choices belong to the session just left.
+    bridge.save()
     bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop else bridge.prompt("SESSION_SWITCHED")))
     return
 
@@ -446,7 +464,7 @@ async def command_compact(bridge, command, argument, received=None):
     return
 
 
-@session_control
+@session_setting
 async def _change_model(bridge, command, argument, received=None):
     await ensure_session(bridge)
     models = (bridge.model_choices if argument.isdecimal() and bridge.model_choices
@@ -485,7 +503,7 @@ async def command_effort_view(bridge, command, argument, received=None):
     }))
 
 
-@session_control
+@session_setting
 async def _change_effort(bridge, command, argument, received=None):
     choices = await _current_effort_choices(bridge)
     selected_effort = next(
@@ -516,11 +534,38 @@ async def _change_cwd(bridge, command, argument, received=None):
 
 
 async def _apply_settings(bridge, command, overrides):
+    if not can_change_session(bridge, own_lock=True):
+        # Only a running turn defers: a model or effort choice cannot be swapped
+        # mid-turn, so it is recorded for the next one instead of refused.
+        if set(overrides) - {"model", "effort"}:
+            raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
+        bridge.state["pendingSettings"] = overrides
+        bridge.save()
+        bridge.reply(bridge.prompt(
+            "SETTINGS_DEFERRED", {"value": pending_setting_label(overrides)}))
+        return
     await activate(bridge, bridge.state["thread"], overrides)
     details = bridge.backend.info
     bridge.reply(setting_summary(model=details.get("model"), effort=details.get("effort"),
                                  cwd=details.get("cwd") or bridge.backend.cwd,
                                  field=command.removeprefix("/"), text=bridge.prompt))
+
+
+async def apply_pending_settings(bridge):
+    """Start the next turn with a setting recorded while one was running."""
+    overrides = bridge.state.pop("pendingSettings", None)
+    if not overrides:
+        return
+    try:
+        await activate(bridge, bridge.state["thread"], overrides)
+    except Exception as error:
+        # The message matters more than the setting: keep it for the next turn.
+        bridge.state["pendingSettings"] = overrides
+        bridge.save()
+        bridge.reply(bridge.prompt(
+            "SETTINGS_DEFERRED_FAILED", {"value": pending_setting_label(overrides)}))
+        log_event("settings.deferred_failed", level="warning", component="commands",
+                  error_type=type(error).__name__)
 
 
 def _is_thread_id(value):

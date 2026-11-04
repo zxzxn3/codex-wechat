@@ -48,7 +48,7 @@ from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, WeCh
 from platform_support import IS_WINDOWS, data_root
 from diagnostics import error_fields, log_event, new_request_id
 from log_viewer import show_logs
-from prompts import (render_ack, status_fields, duration_label)
+from prompts import (render_ack, status_fields, duration_label, pending_setting_label)
 
 ROOT = Path(__file__).resolve().parent
 
@@ -287,6 +287,7 @@ class Bridge:
             rate_limits=rate_limits,
             connection="本地后台" if self.backend.shared else "独立进程",
             shared_fallback=self.backend.shared_fallback,
+            pending_settings=pending_setting_label(self.state.get("pendingSettings")),
         )
         values.update(self.latency.values(ingress_ms))
         values["elapsed"] = duration_label(self.last_turn_seconds)

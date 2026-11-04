@@ -6,9 +6,11 @@ rules. Keep those differences explicit rather than inventing one global busy bit
 from records import InputPhase
 
 
-def can_change_session(bridge):
+def can_change_session(bridge, own_lock=False):
+    """own_lock admits a caller that already holds the barrier, such as a command handler."""
+    locked = bridge.session_lock.locked() and not own_lock
     return not (bridge.restarting or bridge.running or bridge.steering or bridge.active_turn()
-                or bridge.state["inbox"] or bridge.session_lock.locked())
+                or bridge.state["inbox"] or locked)
 
 
 def can_restart(bridge):

@@ -3,6 +3,7 @@ import inspect
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import commands
 from codex_wechat import Bridge
@@ -41,7 +42,7 @@ class CommandSplitTests(unittest.IsolatedAsyncioTestCase):
         original = dict(self.bridge.state)
         for command, argument in (
                 ("/switch", "target"), ("/new", ""), ("/compact", ""),
-                ("/effort", "high"), ("/model", "2"), ("/cwd", "/tmp")):
+                ("/cwd", "/tmp")):
             with self.subTest(command=command):
                 with self.assertRaises(UserFacingError) as raised:
                     await handle(self.bridge, command, argument)
@@ -55,6 +56,24 @@ class CommandSplitTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(UserFacingError) as raised:
             await handle(self.bridge, "/switch", "target")
         self.assertEqual(str(raised.exception), self.bridge.prompt("BUSY_CHANGE"))
+
+    async def test_model_and_effort_stay_available_during_work(self):
+        self.bridge.running = True
+        self.bridge.model_choices = [{"model": "one", "defaultReasoningEffort": "low"},
+                                     {"model": "two", "defaultReasoningEffort": "high"}]
+        self.bridge.backend.info = {"model": "one", "effort": "low"}
+        self.bridge.backend.models = AsyncMock(return_value=[
+            {"model": "one", "supportedReasoningEfforts": [{"reasoningEffort": "low"},
+                                                          {"reasoningEffort": "high"}]}])
+        original = dict(self.bridge.state)
+        with patch.object(commands, "ensure_session", AsyncMock()), \
+                patch.object(commands, "_apply_settings", AsyncMock()) as apply:
+            await handle(self.bridge, "/effort", "high")
+            await handle(self.bridge, "/model", "2")
+        self.assertEqual([call.args[2] for call in apply.await_args_list],
+                         [{"effort": "high"}, {"model": "two", "effort": "high"}])
+        self.assertEqual(self.bridge.state["thread"], original["thread"])
+        self.assertEqual(self.bridge.state["inbox"], original["inbox"])
 
     async def test_usage_checks_stay_before_the_busy_gate(self):
         self.bridge.running = True

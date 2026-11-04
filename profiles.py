@@ -32,6 +32,7 @@ def restore(state, saved):
         state.pop(key, None)
     state.update({key: deepcopy(saved[key]) for key in SESSION_KEYS if key in saved})
     state.pop("sessionOptions", None)
+    state.pop("pendingSettings", None)
     state.setdefault("thread", None)
 
 

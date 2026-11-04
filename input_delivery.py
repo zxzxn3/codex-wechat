@@ -11,7 +11,7 @@ import sys
 import time
 import uuid
 from backend import CodexRpcError, DeferTurn, TurnStalled, WRITER_RELEASED
-from commands import ensure_session
+from commands import apply_pending_settings, ensure_session
 from records import InputPhase
 from media import MediaError
 from errors import attachment_reason
@@ -231,6 +231,8 @@ class InputDelivery:
                 if bridge.restarting or bridge.wechat_paused:
                     self.defer_restart(job)
                     continue
+                if bridge.state.get("pendingSettings"):
+                    await apply_pending_settings(bridge)
                 bridge.acknowledge(job)
                 if await self._prepare_attachments(job):
                     log_event("input.prepared", component="input", count=len(job["preparedAttachments"]),

@@ -108,6 +108,8 @@ SETTINGS_SHARED_FAILED = "未保存共享后台设置: 配置文件不可写"
 SETTINGS_SHARED_FALLBACK = "共享后台不可用: {reason}；本次已退回独立进程，Codex CLI 的回合不会进入微信"
 SETTINGS_SHARED_BUSY = "会话暂时仍被后台占用，下一条消息会自动接管"
 SETTINGS_SHARED_UNSAVED = "已切换，但设置未能写入配置文件，重启后会恢复原模式"
+SETTINGS_DEFERRED = "已记录: 下一条消息使用 {value}（当前回合继续使用原设置）。"
+SETTINGS_DEFERRED_FAILED = "已记录 {value}，但这次没能切换，稍后消息会再试。"
 BACKEND_INVALID = "未切换后端: 名称无效\n可用: {available}"
 BACKEND_SESSION_BUSY = (
     "未切换后端: 目标后端的上次会话正在工作或等待处理。\n"
@@ -162,6 +164,7 @@ LABEL_QUEUED = "待办"
 LABEL_APPROVALS = "审批"
 LABEL_SEND_FAILURES = "发送失败"
 LABEL_SHARED = "共享后台"
+LABEL_PENDING_SETTINGS = "待应用"
 LABEL_ACK = "接收提示"
 LABEL_FINISH = "结束提示"
 LABEL_AUTOSTART = "自启"
@@ -275,6 +278,7 @@ _FIELD_LABELS = {
     "rate_limits": "LABEL_LIMITS", "queue_depth": "LABEL_QUEUED", "pending_requests": "LABEL_APPROVALS",
     "send_failures": "LABEL_SEND_FAILURES",
     "shared_fallback": "LABEL_SHARED",
+    "pending_settings": "LABEL_PENDING_SETTINGS",
 }
 
 
@@ -331,6 +335,15 @@ def duration_label(seconds):
 def model_label(model, effort):
     model = model or "默认模型"
     return f"{model} ({effort_label(effort)})"
+
+
+def pending_setting_label(overrides):
+    """Describe a choice recorded while a turn was running; None means nothing waits."""
+    if not overrides:
+        return None
+    if "model" in overrides:
+        return model_label(overrides["model"], overrides.get("effort"))
+    return effort_label(overrides.get("effort"))
 
 
 def display_path(value):
@@ -543,7 +556,7 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
                    cwd, connection, provider=None, approval=None,
                    sandbox=None, reviewer=None, collaboration=None,
                    profile=None, usage=None, rate_limits=None, backend=None,
-                   shared_fallback=None):
+                   shared_fallback=None, pending_settings=None):
     total = (usage or {}).get("total") or {}
     context = context_usage(usage)
     remaining = re.match(r"剩余 (\d+%)", context)
@@ -554,6 +567,7 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
         "permissions": permission_label(sandbox=sandbox, approval=approval, reviewer=reviewer, profile=profile),
         "collaboration": collaboration_label(collaboration), "connection": connection,
         "shared_fallback": shared_fallback,
+        "pending_settings": pending_settings,
         "queue_depth": queued, "pending_requests": pending, "send_failures": failed,
         "context_usage": context, "context_remaining": remaining[1] if remaining else "暂不可用",
         "total_tokens": token_count(total.get("totalTokens")),
@@ -577,6 +591,8 @@ def status_from_fields(values, *, text=prompt_text):
                  ("provider", "cwd", "permissions", "collaboration", "session", "connection"))
     if values.get("shared_fallback"):
         lines.append(f"{label('shared_fallback')}: {values['shared_fallback']}")
+    if values.get("pending_settings"):
+        lines.append(f"{label('pending_settings')}: {values['pending_settings']}")
     lines.append("")
     lines.extend(f"{label(key)}: {values[key]}" for key in ("token_usage", "context_usage", "rate_limits"))
     return panel(*lines)
