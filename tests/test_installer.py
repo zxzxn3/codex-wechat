@@ -276,9 +276,28 @@ class InstallerTests(unittest.TestCase):
     def test_prune_leaves_a_release_it_cannot_move(self):
         releases = self.target / installer.RELEASES_DIR
         (releases / "aaa111").mkdir(parents=True)
-        with patch("installer.os.replace", side_effect=OSError("locked")):
+        with patch("installer.os.replace", side_effect=OSError("locked")), \
+                patch("installer.PRUNE_RETRY_SECONDS", 0):
             self.assertEqual(installer.prune_releases(self.target, keep=()), [])
         self.assertTrue((releases / "aaa111").is_dir())
+
+    def test_prune_retries_a_transiently_held_release(self):
+        releases = self.target / installer.RELEASES_DIR
+        (releases / "aaa111").mkdir(parents=True)
+        real_replace = os.replace
+        attempts = []
+
+        def flaky_replace(source, destination):
+            attempts.append(source.name)
+            if len(attempts) == 1:
+                raise OSError(5, "access denied")
+            return real_replace(source, destination)
+
+        with patch("installer.os.replace", side_effect=flaky_replace), \
+                patch("installer.PRUNE_RETRY_SECONDS", 0):
+            self.assertEqual(installer.prune_releases(self.target, keep=()), ["aaa111"])
+        self.assertEqual(len(attempts), 2)
+        self.assertFalse((releases / "aaa111").exists())
 
     def test_rollback_is_not_an_installer_operation(self):
         with self.assertRaises(SystemExit):

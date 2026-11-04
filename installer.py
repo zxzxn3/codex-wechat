@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from urllib.parse import urlsplit
 
 
@@ -48,6 +49,9 @@ RELEASE_FORMAT = 1
 CURRENT_FILE = "current"
 PREVIOUS_FILE = "previous"
 RELEASES_DIR = "releases"
+# A directory handle held for a moment - by a scanner or a just-exited process -
+# blocks the rename that makes a release deletable; one retry covers it.
+PRUNE_RETRY_SECONDS = 0.2
 LOCK_FILE = ".install-lock"
 MANIFEST_FILE = ".release.json"
 LEGACY_ID = "legacy"
@@ -780,13 +784,20 @@ def prune_releases(target: Path, *, keep) -> list[str]:
         if entry.name in kept:
             continue
         trash = releases / (".trash-" + entry.name)
-        try:
-            os.replace(entry, trash)
-        except OSError:
-            # Still in use or read-only: leave it intact for the next update.
-            continue
-        shutil.rmtree(trash, ignore_errors=True)
-        removed.append(entry.name)
+        # A scanner or a just-exited process can hold a directory handle for a
+        # moment; renaming needs it, so one short retry covers the common case.
+        for attempt in range(2):
+            try:
+                os.replace(entry, trash)
+            except OSError:
+                if attempt:
+                    detail(f"跳过旧版本 {entry.name}（仍被占用，下次更新再删）")
+                    continue
+                time.sleep(PRUNE_RETRY_SECONDS)
+            else:
+                shutil.rmtree(trash, ignore_errors=True)
+                removed.append(entry.name)
+                break
     return removed
 
 
