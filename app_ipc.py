@@ -116,11 +116,9 @@ def app_inputs(inputs):
 
 
 class AppSession:
-    def __init__(self, path, thread_id, *, on_event, on_request, on_disconnect,
-                 trust_router=False):
+    def __init__(self, path, thread_id, *, on_event, on_request, on_disconnect):
         self.path, self.thread_id = Path(path), thread_id
         self.on_event, self.on_request, self.on_disconnect = on_event, on_request, on_disconnect
-        self.trust_router = trust_router
         self.stream = self.writer = self.reader = None
         self.client = "initializing-client"
         self.owner = None
@@ -148,8 +146,7 @@ class AppSession:
         if WINDOWS:
             from app_ipc_windows import open_pipe
             self.stream, self.writer = await asyncio.wait_for(
-                open_pipe(self.path, limit=MAX_FRAME + 4,
-                          trust_router=self.trust_router), 8)
+                open_pipe(self.path, limit=MAX_FRAME + 4), 8)
         else:
             self.stream, self.writer = await self.open_unix()
         await self.attach_protocol()

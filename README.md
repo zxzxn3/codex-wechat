@@ -69,12 +69,9 @@ Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对
 app-server 的释放是延迟的（数十秒到一分钟），且旧版本不认识该方法时只能等桥接重启释放。
 反向接入（桥接充当 IPC 持有者）尚未实现，实现与维护成本较高，因此暂未支持。
 Windows 的 `\\.\pipe\codex-ipc` 由最先启动的 Codex 客户端托管，VS Code 的 Codex 扩展也会
-托管它；默认只跟随由已注册 App 托管的通道，其它托管者会被身份校验拒绝。若日志出现
-`backend.app_attach_failed` 且原因指向“不是当前已注册的 Codex App”，说明 pipe 被别的
-Codex 客户端（如 VS Code 扩展宿主）托管，此时可在后端配置里显式写
-`"appIpcTrustRouter": true`（默认 `false`，启用后日志记一条
-`backend.app_ipc_router_trusted`）来跟随它；该开关仍保留“服务进程必须属于当前用户”的校验，
-放宽的是“必须是已注册 App 本体”。
+托管它；桥接只跟随由已注册 App 托管的通道，其它托管者会被身份校验拒绝（日志
+`backend.app_attach_failed`）。遇到这种情况优先卸载/退出那个客户端，见
+[WINDOWS.md](docs/WINDOWS.md) 的「自带 Codex 后端的第三方客户端会抢走会话写者」。
 
 **自带 Codex 后端的第三方客户端会抢走会话写者**：任何自带 Codex 后端并会打开会话的客户端
 （例如 VS Code 的 `openai.chatgpt` 扩展、其它包装器或启动器）都可能替用户持有
