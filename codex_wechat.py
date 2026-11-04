@@ -283,6 +283,7 @@ class Bridge:
             usage=details.get("usage"),
             rate_limits=rate_limits,
             connection="本地后台" if self.backend.shared else "独立进程",
+            shared_fallback=self.backend.shared_fallback,
         )
         values.update(self.latency.values(ingress_ms))
         values["elapsed"] = duration_label(self.last_turn_seconds)

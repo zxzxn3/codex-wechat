@@ -39,6 +39,9 @@ class CodexRpcError(RuntimeError):
         detail = f"：{self.reason}" if self.reason else ""
         super().__init__(f"Codex RPC 错误 {code}{stage}{detail}")
 
+class SharedDaemonUnavailable(RuntimeError):
+    """The shared daemon cannot be reached or started; callers may use a private server."""
+
 class CodexTransport:
     def __init__(self, config, cwd, *, on_request, on_event, on_connect, on_disconnect):
         self.config, self.cwd = config, cwd
@@ -76,7 +79,11 @@ class CodexTransport:
                 raise  # A protocol rejection is not evidence that the daemon is absent.
             except (TimeoutError, RuntimeError, OSError):
                 await self.close()
-            unit = await self.start_shared_daemon(command[:-1], env)
+            try:
+                unit = await self.start_shared_daemon(command[:-1], env)
+            except (TimeoutError, RuntimeError, OSError) as error:
+                await self.close()
+                raise SharedDaemonUnavailable(str(error)) from error
             deadline = asyncio.get_running_loop().time() + 30
             last_error = "连接超时"
             while asyncio.get_running_loop().time() < deadline:
@@ -90,11 +97,12 @@ class CodexTransport:
                     state = await daemon_control.status(unit) if unit else {}
                     failure = daemon_control.failure(state, command) if unit else None
                     if failure:
-                        raise failure from error
+                        await self.close()
+                        raise SharedDaemonUnavailable(str(failure)) from error
                     last_error = str(error) if isinstance(error, RuntimeError) else type(error).__name__
                     await self.close()
                     await asyncio.sleep(0.5)
-            raise RuntimeError(f"共享后台自动启动后仍未连接成功：{last_error}（{unit}）；请检查启动器/登录状态后重试 /backend")
+            raise SharedDaemonUnavailable(f"共享后台自动启动后仍未连接成功：{last_error}")
         await self.connect(command, env)
 
     async def start_shared_daemon(self, command, env):

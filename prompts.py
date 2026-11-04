@@ -156,6 +156,7 @@ LABEL_LIMITS = "限额"
 LABEL_QUEUED = "待办"
 LABEL_APPROVALS = "审批"
 LABEL_SEND_FAILURES = "发送失败"
+LABEL_SHARED = "共享后台"
 LABEL_ACK = "接收提示"
 LABEL_FINISH = "结束提示"
 LABEL_AUTOSTART = "自启"
@@ -268,6 +269,7 @@ _FIELD_LABELS = {
     "connection": "LABEL_SERVICE", "token_usage": "LABEL_TOKENS", "context_usage": "LABEL_CONTEXT",
     "rate_limits": "LABEL_LIMITS", "queue_depth": "LABEL_QUEUED", "pending_requests": "LABEL_APPROVALS",
     "send_failures": "LABEL_SEND_FAILURES",
+    "shared_fallback": "LABEL_SHARED",
 }
 
 
@@ -535,7 +537,8 @@ def setting_summary(action=None, *, model, effort, cwd, field=None, text=prompt_
 def status_fields(*, status, queued, pending, failed, name, model, effort,
                    cwd, connection, provider=None, approval=None,
                    sandbox=None, reviewer=None, collaboration=None,
-                   profile=None, usage=None, rate_limits=None, backend=None):
+                   profile=None, usage=None, rate_limits=None, backend=None,
+                   shared_fallback=None):
     total = (usage or {}).get("total") or {}
     context = context_usage(usage)
     remaining = re.match(r"剩余 (\d+%)", context)
@@ -545,6 +548,7 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
         "cwd": display_path(cwd), "provider": provider_label(provider),
         "permissions": permission_label(sandbox=sandbox, approval=approval, reviewer=reviewer, profile=profile),
         "collaboration": collaboration_label(collaboration), "connection": connection,
+        "shared_fallback": shared_fallback,
         "queue_depth": queued, "pending_requests": pending, "send_failures": failed,
         "context_usage": context, "context_remaining": remaining[1] if remaining else "暂不可用",
         "total_tokens": token_count(total.get("totalTokens")),
@@ -566,6 +570,8 @@ def status_from_fields(values, *, text=prompt_text):
     lines.extend([f"{label('model')}: {values['model']} ({values['effort']})"])
     lines.extend(f"{label(key)}: {values[key]}" for key in
                  ("provider", "cwd", "permissions", "collaboration", "session", "connection"))
+    if values.get("shared_fallback"):
+        lines.append(f"{label('shared_fallback')}: {values['shared_fallback']}")
     lines.append("")
     lines.extend(f"{label(key)}: {values[key]}" for key in ("token_usage", "context_usage", "rate_limits"))
     return panel(*lines)

@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from backend import (CodexBackend, TurnStalled, WRITER_BUSY, WRITER_FOLLOWED,
                      WRITER_NATIVE, WRITER_RELEASED)
-from codex_transport import CodexTransport, CodexRpcError
+from codex_transport import CodexTransport, CodexRpcError, SharedDaemonUnavailable
 from pipe_websocket import PipeWebSocket
-from profiles import definitions
+from profiles import definitions, resume_or_adopt
 from storage import Store
 import platform_support
 from websockets.server import ServerProtocol
@@ -171,7 +171,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         # The shared path must configure publishing, or desktop turns go silent.
         candidate.activate.assert_called_once_with()
 
-    async def test_shared_daemon_keeps_the_thread_loaded(self):
+    async def test_shared_daemon_keeps_the_thread_loaded_while_following(self):
         backend = CodexBackend({"sharedDaemon": True}, "/tmp", lambda _: None)
         backend.transport.proc = SimpleNamespace(returncode=None)
         backend.transport.reader = SimpleNamespace(done=lambda: False)
@@ -179,8 +179,66 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.rpc = AsyncMock(return_value={})
         # The daemon serialises writers, so unsubscribing would only lose the
         # event stream that carries another client's turns.
-        self.assertFalse(await backend.release_thread("thread-1"))
+        self.assertFalse(await backend.release_thread("thread-1", follow=True))
         backend.rpc.assert_not_awaited()
+        self.assertEqual(backend.writer_mode, WRITER_NATIVE)
+        self.assertEqual(backend.writer_thread, "thread-1")
+
+    async def test_shared_daemon_releases_a_thread_the_bridge_leaves(self):
+        backend = CodexBackend({"sharedDaemon": True}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.transport.shared = True
+        backend.rpc = AsyncMock(return_value={})
+        # /switch must unsubscribe, or every thread the bridge ever selected
+        # stays locked for the App until the daemon restarts.
+        self.assertTrue(await backend.release_thread("thread-1"))
+        backend.rpc.assert_awaited_once_with("thread/unsubscribe", {"threadId": "thread-1"})
+        self.assertEqual(backend.writer_mode, WRITER_RELEASED)
+
+    async def test_unavailable_shared_daemon_falls_back_to_a_private_server(self):
+        backend = CodexBackend({"sharedDaemon": True}, "/tmp", lambda _: None)
+        backend.transport.start = AsyncMock(
+            side_effect=SharedDaemonUnavailable("this CLI has no complete local package"))
+        with patch("backend.CodexTransport") as transport:
+            transport.return_value.start = AsyncMock()
+            transport.return_value.shared = False
+            await backend.start()
+        self.assertFalse(backend.shared)
+        self.assertEqual(backend.config, {"sharedDaemon": True})
+        self.assertIn("no complete local package", backend.shared_fallback)
+        transport.assert_called_once()
+        self.assertEqual(transport.call_args.args[0], {"sharedDaemon": False})
+        transport.return_value.start.assert_awaited_once_with()
+
+    async def test_a_busy_thread_is_retried_before_adopting(self):
+        candidate = SimpleNamespace(
+            shared=False,
+            thread=AsyncMock(side_effect=[
+                CodexRpcError(-32600, "thread t already has an active writer"), "t"]),
+            adopt_thread=AsyncMock())
+        with patch("profiles.asyncio.sleep", AsyncMock()):
+            self.assertEqual(await resume_or_adopt(None, candidate, "t", True), "t")
+        candidate.adopt_thread.assert_not_called()
+
+    async def test_a_mode_change_adopts_a_thread_the_daemon_still_holds(self):
+        candidate = SimpleNamespace(
+            shared=False,
+            thread=AsyncMock(
+                side_effect=CodexRpcError(-32600, "thread t already has an active writer")),
+            adopt_thread=AsyncMock(return_value="t"))
+        self.assertEqual(await resume_or_adopt(None, candidate, "t", True, wait=0), "t")
+        candidate.adopt_thread.assert_awaited_once_with("t")
+
+    async def test_a_plain_switch_still_reports_the_writer_conflict(self):
+        candidate = SimpleNamespace(
+            shared=False,
+            thread=AsyncMock(
+                side_effect=CodexRpcError(-32600, "thread t already has an active writer")),
+            adopt_thread=AsyncMock())
+        with self.assertRaises(CodexRpcError):
+            await resume_or_adopt(None, candidate, "t", False)
+        candidate.adopt_thread.assert_not_called()
 
     async def test_writer_states_track_who_holds_the_thread(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

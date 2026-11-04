@@ -30,7 +30,7 @@ from prompts import (prompt_text)
 from platform_support import IS_WINDOWS
 from prompts import (command_approval, file_approval)
 
-from codex_transport import CodexTransport, CodexRpcError
+from codex_transport import CodexTransport, CodexRpcError, SharedDaemonUnavailable
 
 PENDING_TOKEN_ALPHABET = "023456789abcdefghjkmnpqrstuvwxyz"
 PENDING_TOKEN_LENGTH = 3
@@ -95,6 +95,7 @@ class CodexBackend:
         self.model_catalog = None
         self.models_checked_at = 0
         self.app = None
+        self.shared_fallback = None
         self.transport = CodexTransport(config, cwd,
             on_request=self.server_request, on_event=self.transport_event,
             on_connect=self.reset_connection, on_disconnect=self.connection_lost)
@@ -126,7 +127,19 @@ class CodexBackend:
         return self.transport.connected and (not self.app or self.app.connected)
 
     async def start(self):
-        await self.transport.start()
+        try:
+            await self.transport.start()
+        except SharedDaemonUnavailable as error:
+            # An explicit shared choice stays in the configuration; this run only
+            # needs to keep working, so reuse the private server instead.
+            await self.close()
+            self.shared_fallback = str(error)[:200] or type(error).__name__
+            log_event("backend.shared_unavailable", level="warning", component="backend",
+                      reason=self.shared_fallback)
+            self.transport = CodexTransport({**self.config, "sharedDaemon": False}, self.cwd,
+                on_request=self.server_request, on_event=self.transport_event,
+                on_connect=self.reset_connection, on_disconnect=self.connection_lost)
+            await self.transport.start()
 
     async def rpc(self, method, params):
         if self.app and method != "thread/resume" and params.get("threadId") == self.app.thread_id:
@@ -728,6 +741,12 @@ class CodexBackend:
         looking at a locked thread. Best effort: an older server that does not
         know the method must not fail the caller, and a followed App thread is
         left alone because its events still arrive through IPC.
+
+        A shared daemon serialises writers itself and broadcasts turns to every
+        client that has the thread loaded, so ``follow`` keeps the subscription:
+        unsubscribing there would drop the stream that carries another client's
+        turns. Leaving a thread must still release it, or the daemon would keep
+        every session this bridge ever selected locked for the App.
         """
         if not thread_id or not self.connected or self.active is not None or self.app is not None:
             if thread_id:
@@ -735,10 +754,8 @@ class CodexBackend:
                                   status=("followed" if self.app is not None else
                                           "busy" if self.active is not None else "offline"))
             return False
-        if self.shared:
-            # A shared daemon serialises writers itself and broadcasts turns to
-            # every client that has the thread loaded. Unsubscribing would drop
-            # that stream, so another client's turn would never reach WeChat.
+        if self.shared and follow:
+            self.set_writer(WRITER_NATIVE, thread_id)
             self.writer_event("backend.writer_kept", thread=thread_id, status="shared")
             return False
         try:
