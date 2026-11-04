@@ -248,6 +248,9 @@ class Bridge:
         return active if active and not active["done"].done() else None
 
     def acknowledge(self, job):
+        # Every delivery attempt re-sends the receipt: while a desktop holds the
+        # writer the retries back off, so the repeats stay few and tell the user
+        # the message is still being tried.
         template = notice(self)
         if template:
             self.reply(render_ack(template, self.prompt_fields(job.get("ingress_ms"))),

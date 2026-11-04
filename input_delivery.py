@@ -25,6 +25,9 @@ class InputDelivery:
     # the message queued until it lets go, but never forever.
     WRITER_WAIT_SECONDS = 600
     WRITER_RETRY_SECONDS = 30
+    # Retries double from the first interval up to this cap, so a two-minute lock
+    # costs a few attempts instead of four, and each attempt repeats the receipt.
+    WRITER_RETRY_MAX_SECONDS = 120
 
     def __init__(self, bridge):
         self.bridge = bridge
@@ -50,7 +53,12 @@ class InputDelivery:
             queued_at = job["writerQueuedAt"] = now
         if now - queued_at > self.WRITER_WAIT_SECONDS:
             return False
-        job["writerRetryAt"] = now + self.WRITER_RETRY_SECONDS
+        attempts = job.get("writerAttempts")
+        attempts = 1 if not isinstance(attempts, int) else attempts + 1
+        job["writerAttempts"] = attempts
+        job["writerRetryAt"] = now + min(
+            self.WRITER_RETRY_MAX_SECONDS,
+            self.WRITER_RETRY_SECONDS * 2 ** min(attempts - 1, 8))
         job["phase"] = InputPhase.PREPARING
         job["mode"] = "queue"
         if bridge.state.get("currentInput") is job:
