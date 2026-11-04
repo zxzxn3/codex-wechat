@@ -77,6 +77,35 @@ Administrators"并断开继承；其下所有目录改为普通创建、继承�
 主线只保留与所有权无关的部分：`{elapsed}` 与默认结束提示、`install.ps1` 任务比对、以及
 "桌面占用会话时降级采纳而不是进入恢复死循环""不可用的 App relay 按不可用处理"两项健壮性修复。
 
+## 自带 Codex 后端的第三方客户端会抢走会话写者
+
+**这是本机遇到的最容易误判成"桥接 bug"的一类问题。** 任何自带 Codex 后端、并且会打开
+会话的客户端，都可能：抢走 `\\.\pipe\codex-ipc` 的 router 身份，以及替用户持有会话写者
+（`~/.codex/thread-writer-locks/<threadId>.lock`）。
+
+2026-11-04 本机实测（同一份代码、同一台机器，只改一件事）：
+
+| 项 | 装着 `openai.chatgpt` 扩展 | 卸载该扩展并重载窗口 |
+|---|---|---|
+| `codex-ipc` 宿主 | `Code.exe`（扩展宿主进程） | `ChatGPT.exe`（Codex App） |
+| 额外 `codex.exe` 后端 | 有（父进程为扩展宿主） | 无 |
+| 写者锁数量 | 4 把 | 2 把（只剩 App 与桥接各自的） |
+
+该扩展自带完整的 `IpcRouterManager`（`extension.js` 内的 `codex-ipc` router 与
+`EADDRINUSE` 退让逻辑），并会在激活时拉起自己的 `codex.exe`。搜遍其代码未发现任何
+可关闭 router 的配置项（`codex.ipc`、`ipcEnabled`、`startRouter`、`ipc.router`、`enableIpc`
+均不存在），因此只能通过禁用/卸载扩展来消除。
+
+已知会抢占的客户端（不限于此列表）：VS Code 的 `openai.chatgpt` 扩展、Codex App 本体、
+以及任何会把同一 `CODEX_HOME` 的会话 resume 到自己连接上的包装器/启动器。
+
+核对方法：连一次 `\\.\pipe\codex-ipc` 并读服务进程映像，再枚举 `codex.exe` 进程按可执行
+文件路径分类（扩展目录 / WindowsApps / 独立 CLI），最后对照
+`~/.codex/thread-writer-locks` 的锁数量变化。
+
+处置：出现"App 打不开会话""微信提示会话被占用"时，先按上表核对；确认是第三方客户端
+抢占后，禁用该客户端（或让它在桥接之后启动），再重启桥接。
+
 ## App IPC 由其它客户端托管时
 
 `\\.\pipe\codex-ipc` 是单实例名，由**最先启动**的 Codex 客户端托管；2026-11-04 本机观察到
@@ -86,6 +115,9 @@ VS Code 的 Codex 扩展（`Code.exe` 扩展宿主进程）先占用它，此时
 需要在这类机器上跟随 App 时，把后端配置写成 `"appIpcTrustRouter": true`：跳过"必须是已注册
 App 本体"的映像校验，保留"服务进程属于当前用户"的校验，并在 `bridge.jsonl` 记一条
 `backend.app_ipc_router_trusted`。放宽后接受的是该托管者转发本会话内容的风险。
+
+注意：这个开关只解决"跟随"，不解决"别人已经持有写者"。第三方客户端替用户持有的写者
+仍然会让桥接和 App 都写不进去，只能先让它放手。
 
 ## 本机环境观察（不代表其它机器）
 

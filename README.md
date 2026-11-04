@@ -69,6 +69,12 @@ Windows 的 `\\.\pipe\codex-ipc` 由最先启动的 Codex 客户端托管，VS C
 托管它；默认只跟随由已注册 App 托管的通道，其它托管者会被身份校验拒绝。若接受该托管者
 转发本会话的风险，可在后端配置里显式写 `"appIpcTrustRouter": true`（默认 `false`，启用后
 日志记一条 `backend.app_ipc_router_trusted`），此时仍保留“服务进程必须属于当前用户”的校验。
+
+**自带 Codex 后端的第三方客户端会抢走会话写者**：任何自带 Codex 后端并会打开会话的客户端
+（例如 VS Code 的 `openai.chatgpt` 扩展、其它包装器或启动器）都可能替用户持有
+`~/.codex/thread-writer-locks` 里的写者，并抢占 `codex-ipc` 的 router 身份。此时 App 打开
+同一会话会显示锁定、微信也会提示会话被占用，而桥接本身没有错。排查与处置见
+[WINDOWS.md](docs/WINDOWS.md) 的「自带 Codex 后端的第三方客户端会抢走会话写者」。
 App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
 若旧版本曾通过 `--shortcut` 创建 Linux 用户桌面覆盖，请先核对
 `~/.local/share/applications/chatgpt.desktop` 中的 `X-Codex-WeChat=true`，仅移除项目创建且未自行修改的覆盖，恢复系统原入口。
