@@ -1,5 +1,4 @@
 """Offline contracts for the Windows per-user service; no Windows calls."""
-import asyncio
 import json
 import os
 from pathlib import Path

@@ -181,7 +181,7 @@ class InputDelivery:
                 if self.awaiting_desktop():
                     try:
                         await asyncio.wait_for(bridge.wake.wait(), self.FOLLOW_POLL_SECONDS)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         await self.follow_desktop()
                 else:
                     await bridge.wake.wait()
@@ -191,7 +191,7 @@ class InputDelivery:
                 bridge.wake.clear()
                 try:
                     await asyncio.wait_for(bridge.wake.wait(), min(wait, self.FOLLOW_POLL_SECONDS))
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
                 continue
             bridge.running = True

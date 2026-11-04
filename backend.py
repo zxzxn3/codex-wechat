@@ -789,7 +789,7 @@ class CodexBackend:
             return False
         try:
             app = await self.attach_follower(thread_id, {})
-        except (CodexRpcError, OSError, RuntimeError, asyncio.TimeoutError) as error:
+        except (TimeoutError, CodexRpcError, OSError, RuntimeError) as error:
             # Following is best effort: it must never fail the caller's turn or
             # the bridge startup.
             self.writer_event("backend.app_attach_failed", level="warning",
@@ -926,7 +926,7 @@ class CodexBackend:
             idle = max(1.0, limit - (time.monotonic() - self.last_event_at))
             try:
                 return await asyncio.wait_for(asyncio.shield(current["done"]), idle)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if current["done"].done():
                     return current["done"].result()
                 if time.monotonic() - self.last_event_at < limit:
