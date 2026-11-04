@@ -12,6 +12,22 @@ from storage import Store
 
 
 class AutostartTests(unittest.IsolatedAsyncioTestCase):
+    async def test_windows_reads_the_task_without_starting_powershell(self):
+        with patch.object(autostart, "IS_WINDOWS", True), \
+                patch.object(autostart, "windows_task_flags", return_value=(True, True)), \
+                patch.object(autostart, "_windows_request", AsyncMock()) as script:
+            self.assertTrue(await autostart.status())
+            self.assertTrue(await autostart.installed())
+        script.assert_not_called()
+
+    async def test_windows_falls_back_to_the_launcher_script(self):
+        with patch.object(autostart, "IS_WINDOWS", True), \
+                patch.object(autostart, "windows_task_flags", side_effect=OSError("no scheduler")), \
+                patch.object(autostart, "_windows_request", AsyncMock(return_value=False)) as script, \
+                patch.object(autostart, "log_event"):
+            self.assertFalse(await autostart.status())
+        script.assert_awaited_once_with("status")
+
     async def test_linux_reads_native_state_and_checks_installation_identity(self):
         for value, expected in (("enabled", True), ("disabled", False), ("linked", False)):
             output = f"FragmentPath={autostart.INSTALL_ROOT / autostart.UNIT}\nUnitFileState={value}"

@@ -4,8 +4,13 @@ import json
 from pathlib import Path
 import sys
 
+from diagnostics import log_event
 from platform_support import INSTALL_ROOT, IS_WINDOWS, subprocess_options
 from service_control import UNIT, systemctl
+
+WINDOWS_TASK = "CodexWeChat"
+SUPERVISOR_SCRIPT = "bootstrap_supervisor.py"
+TASK_TRIGGER_LOGON = 9
 
 
 async def _windows_request(mode):
@@ -37,9 +42,48 @@ async def _windows_request(mode):
 
 async def installed():
     if IS_WINDOWS:
-        await _windows_request("status")
-        return True
+        try:
+            return (await asyncio.to_thread(windows_task_flags))[0]
+        except Exception:  # no scheduler API or a foreign task: ask the script
+            await _windows_request("status")
+            return True
     return await _linux_status() is not None
+
+
+def windows_task_flags():
+    """(installed, enabled) straight from the task definition.
+
+    Asking the launcher script costs about three seconds because it starts
+    PowerShell; the scheduler's own COM API answers in about forty milliseconds.
+    The ownership check stays conservative: anything that does not look like the
+    task this project installs reports "not installed", and the caller falls back.
+    """
+    import pythoncom
+
+    pythoncom.CoInitialize()
+    try:
+        return _read_task_flags()
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def _read_task_flags():
+    import win32com.client
+
+    service = win32com.client.Dispatch("Schedule.Service")
+    service.Connect()
+    try:
+        task = service.GetFolder("\\").GetTask(WINDOWS_TASK)
+    except Exception:
+        return False, False
+    definition = task.Definition
+    actions = definition.Actions
+    if actions.Count != 1 or SUPERVISOR_SCRIPT not in str(actions.Item(1).Arguments).casefold():
+        return False, False
+    triggers = [definition.Triggers.Item(index) for index in range(1, definition.Triggers.Count + 1)]
+    logon = [trigger for trigger in triggers if trigger.Type == TASK_TRIGGER_LOGON]
+    enabled = bool(task.Enabled) and any(bool(trigger.Enabled) for trigger in logon)
+    return True, enabled
 
 
 async def _linux_status():
@@ -56,7 +100,14 @@ async def _linux_status():
 
 
 async def status():
-    return await _windows_request("status") if IS_WINDOWS else bool(await _linux_status())
+    if not IS_WINDOWS:
+        return bool(await _linux_status())
+    try:
+        return (await asyncio.to_thread(windows_task_flags))[1]
+    except Exception:
+        # No scheduler API here: the launcher script is slower but authoritative.
+        log_event("autostart.task_read_failed", level="warning", component="autostart")
+        return await _windows_request("status")
 
 
 async def set_enabled(enabled, *, start_if_missing=True):
