@@ -148,9 +148,9 @@ class CodexBackend:
             # a guessed attachment or a new independent writer.
             await candidate.close()
             return None
-        except ValueError as error:
-            # A relay that is not the registered App (for example the VS Code
-            # extension host) cannot be used: keep the caller's own reason.
+        except (CodexRpcError, ValueError) as error:
+            # No capable owner, a foreign relay or an unusable endpoint: keep the
+            # caller's own writer-conflict reason instead of an attach detail.
             await candidate.close()
             log_event("backend.app_attach_failed", level="warning", component="backend",
                       error_type=type(error).__name__)

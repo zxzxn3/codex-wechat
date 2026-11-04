@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from backend import CodexBackend
-from codex_transport import CodexTransport
+from codex_transport import CodexTransport, CodexRpcError
 from pipe_websocket import PipeWebSocket
 from profiles import definitions
 from storage import Store
@@ -157,6 +157,27 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.transport.proc = SimpleNamespace(returncode=1)
         backend.rpc = AsyncMock(return_value={})
         self.assertFalse(await backend.release_thread("thread-3"))
+
+    async def test_unusable_app_endpoint_keeps_the_writer_conflict(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.rpc = AsyncMock(side_effect=CodexRpcError(
+            -32600, "thread t already has an active writer"))
+        backend.refresh_runtime = AsyncMock()
+        backend.refresh_usage = AsyncMock()
+        candidate = SimpleNamespace(
+            attach=AsyncMock(side_effect=CodexRpcError(-32600, "App IPC: no-client-found")),
+            settings=AsyncMock(), close=AsyncMock())
+        import app_ipc
+        with patch.object(app_ipc, "AppSession", return_value=candidate):
+            # The desktop owns the thread but nothing can serve it: the caller's
+            # conflict must survive so the session is still adopted.
+            with self.assertRaises(CodexRpcError) as raised:
+                await backend.thread("t")
+            self.assertIsNone(backend.app)
+        self.assertIn("active writer", str(raised.exception))
+        candidate.close.assert_awaited()
 
     async def test_windows_probe_falls_back_to_the_system_proxy(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
