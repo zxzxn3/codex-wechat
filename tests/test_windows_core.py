@@ -171,6 +171,17 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         # The shared path must configure publishing, or desktop turns go silent.
         candidate.activate.assert_called_once_with()
 
+    async def test_shared_daemon_keeps_the_thread_loaded(self):
+        backend = CodexBackend({"sharedDaemon": True}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.transport.shared = True
+        backend.rpc = AsyncMock(return_value={})
+        # The daemon serialises writers, so unsubscribing would only lose the
+        # event stream that carries another client's turns.
+        self.assertFalse(await backend.release_thread("thread-1"))
+        backend.rpc.assert_not_awaited()
+
     async def test_writer_states_track_who_holds_the_thread(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.transport.proc = SimpleNamespace(returncode=None)

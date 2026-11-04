@@ -735,6 +735,12 @@ class CodexBackend:
                                   status=("followed" if self.app is not None else
                                           "busy" if self.active is not None else "offline"))
             return False
+        if self.shared:
+            # A shared daemon serialises writers itself and broadcasts turns to
+            # every client that has the thread loaded. Unsubscribing would drop
+            # that stream, so another client's turn would never reach WeChat.
+            self.writer_event("backend.writer_kept", thread=thread_id, status="shared")
+            return False
         try:
             await self.rpc("thread/unsubscribe", {"threadId": thread_id})
         except (CodexRpcError, OSError, RuntimeError) as error:
