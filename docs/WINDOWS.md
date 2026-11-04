@@ -150,8 +150,10 @@ app-server，两边的回合才会互相可见。
   `app-server-daemon/src/backend/windows.rs::ensure_detached_launch`，官方文档也写明
   "Windows startup requires a non-elevated terminal whose host permits detached child processes"）。
   计划任务的 job 禁止 breakaway，所以直接启动必定失败。桥接因此保留直连尝试，失败后改用 WMI
-  （`Win32_Process.Create`）启动——该进程不在我们的 job 里。实测：停掉 daemon 后经
-  `Start-ScheduledTask` 重启桥接，**2.07 秒**后 `backend.connected` + `backend.writer_kept`，
+  启动——该进程不在我们的 job 里。WMI 调用优先走管道：`pywin32` 的 COM 接口约 0.07 秒，而
+  `powershell -Command Invoke-CimMethod` 要约 1.9 秒（PowerShell 启动开销），后者仅作为
+  pywin32 不可用时的回退。实测（2026-11-04）：停掉 daemon 后经 `Start-ScheduledTask` 重启桥接，
+  `bridge.start` → `backend.connected` **约 0.9 秒**（改造前 2.07 秒），随后 `backend.writer_kept`，
   子进程为 `app-server proxy`，即共享模式正常恢复。
 - WMI 创建的子进程继承的是 WmiPrvSE 的环境，不是我们的，因此 `CODEX_HOME` 与
   `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY/OPENAI_BASE_URL` 会重新写进它的命令行；
