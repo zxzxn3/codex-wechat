@@ -144,6 +144,14 @@ app-server，两边的回合才会互相可见。
   `this CLI has no complete local package`；或当前进程不允许拉起脱离父进程的后台进程：
   `os error 5`）自动退回独立进程，并在 `/status` 与日志 `backend.shared_unavailable` 里写明
   原因。配置里的 `sharedDaemon: true` 不会被改写。
+- **实测（2026-11-04）：计划任务上下文拉不起 daemon**。停掉 daemon 后经
+  `Start-ScheduledTask` 重启桥接（与登录自启同一上下文），桥接启动 166 毫秒后就记下
+  `backend.shared_unavailable`（`后台准备失败（退出码 1）`）并退回独立进程；在同一上下文里
+  直接执行 `codex app-server daemon start` 得到 `this Windows launcher prevents background
+  processes from outliving it … 拒绝访问（os error 5）`。因此**重启后桥接不会自行恢复共享模式**：
+  需要用户在普通终端（可脱离父进程的环境，且带代理）执行一次
+  `codex app-server daemon start`，再在微信发 `/settings shared on` 让它重连。日志里也是
+  零样本——此前每次桥接启动时 daemon 都已在运行，自动拉起从未真正成功过。
 - 模型请求在共享模式下由 daemon 进程发出，因此 daemon 必须继承代理环境变量：要么在带代理的
   shell 里启动它，要么把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 写进 `backends.<后端>.env`
   （或旧的 `backend.env`），由桥接启动 daemon 时传下去。
