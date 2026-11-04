@@ -68,11 +68,11 @@ Linux 已显式配置 WebSocket 时，需要后端 `env.CODEX_HOME` 才启用对
 可能仍显示锁定，稍等或重新进入即可。
 桥接空闲时会每 5 秒检查一次 App 的 IPC 是否出现：App 后启动并接管该会话后，桥接会自动
 重新跟随，桌面端的回信也会继续进入微信。`\\.\pipe\codex-ipc` 由最先启动的 Codex 客户端
-托管——VS Code 的 Codex 扩展也会托管它。默认只跟随由已注册 App 托管的通道，其它托管者会被
-身份校验拒绝（日志 `backend.app_attach_failed`）：此时桌面端的回信不会进入微信，微信发来的
-消息会先排队，等 App 关闭该会话后自动发送，最多等待 10 分钟。若接受该托管者转发本会话的
-风险，可在后端配置中显式打开 `"appIpcTrustRouter": true`（默认 `false`，打开后日志记一条
-`backend.app_ipc_router_trusted`），此时仍保留“服务进程必须属于当前用户”的校验。
+托管——VS Code 的 Codex 扩展也会托管它。桥接只跟随由已注册 App 托管的通道，其它托管者
+会被身份校验拒绝（日志 `backend.app_attach_failed`）：此时桌面端的回信不会进入微信，
+微信发来的消息会先排队，等 App 关闭该会话后自动发送，最多等待 10 分钟。遇到这种情况应
+卸载/退出那个客户端，见 [WINDOWS.md](docs/WINDOWS.md) 的「自带 Codex 后端的第三方客户端
+会抢走会话写者」。
 IPC 只支持“App 作为写者”的方向；桥接不会反向充当 IPC 持有者。
 反向接入（桥接作为 owner 向 App 广播会话状态并承接它的 follower 请求）尚未实现：需要复刻
 App 的 conversationState/增量与 revision 语义，属于版本相关的内部协议，实现与维护成本较高。

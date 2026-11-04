@@ -35,9 +35,6 @@ class ConnectionSpec:
             list(command[-2:]) == ["app-server", "proxy"]))
         if type(shared) is not bool:
             raise ValueError("sharedDaemon 必须是布尔值")
-        trust_router = config.get("appIpcTrustRouter", False)
-        if type(trust_router) is not bool:
-            raise ValueError("appIpcTrustRouter 必须是布尔值")
         endpoint = config.get("websocketUrl")
         if endpoint is not None:
             # No credentials, paths, remote hosts or ambiguous authority parsing.

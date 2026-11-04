@@ -48,7 +48,6 @@ class CodexBackend:
         self.active = None
         self.released_thread = None
         self.attach_error = None
-        self.router_trust_reported = False
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
@@ -137,18 +136,11 @@ class CodexBackend:
         path = ipc_path(self.config)
         if path is None or (not IS_WINDOWS and not path.exists()):
             return None
-        trust_router = bool(self.config.get("appIpcTrustRouter"))
-        if trust_router and not self.router_trust_reported:
-            # An opt-in that widens who may relay App IPC: say it once.
-            self.router_trust_reported = True
-            self.writer_event("backend.app_ipc_router_trusted", level="warning",
-                              status="trusted")
         candidate = None
         candidate = AppSession(path, thread_id,
             on_event=lambda event: self.event(event) if self.app is candidate else None,
             on_request=lambda request: self.app_request(candidate, request),
-            on_disconnect=lambda error: self.connection_lost(error) if self.app is candidate else None,
-            trust_router=trust_router)
+            on_disconnect=lambda error: self.connection_lost(error) if self.app is candidate else None)
         try:
             await candidate.attach()
             await candidate.settings(options)

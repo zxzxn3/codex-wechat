@@ -24,6 +24,14 @@ class WeChatPollTimeout(RuntimeError):
     """Long poll reached its wait deadline after HTTPS preparation, without a response."""
 
 
+class WeChatApiError(RuntimeError):
+    """The API rejected the request itself: retrying cannot change the outcome."""
+    def __init__(self, code, kind):
+        self.code = code
+        self.kind = kind
+        super().__init__(f"微信 API 错误 {code}")
+
+
 BACKEND_REASONS = (
     (("超时", "timeout"), "连接超时"),
     (("启动器", "no such file", "filenotfound"), "启动器未就绪"),
