@@ -50,6 +50,7 @@ class QuestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(set(token), set(PENDING_TOKEN_ALPHABET))
         self.assertIn("运行在哪里？", self.notices[0])
         self.assertIn(f"`/answer {token} {{选项或文字}}`", self.notices[0])
+        self.assertIn(f"`/a {token}`", self.notices[0])
         self.assertFalse(self.backend.write.called)
         self.assertTrue(await self.backend.answer_question(token, "1"))
         self.backend.write.assert_awaited_once_with({"id": 1, "result": {
@@ -138,6 +139,7 @@ class QuestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("选择数据库", self.notices[0])
         self.assertIn("1  Postgres", self.notices[0])
         self.assertIn(f"`/answer {token} {{选项或文字}}`", self.notices[0])
+        self.assertIn(f"`/a {token}`", self.notices[0])
 
         self.assertTrue(await self.backend.answer_question(token, "2"))
         self.assertFalse(self.backend.pending)

@@ -23,12 +23,13 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_aliases_and_protected_commands_share_one_registry(self):
         for short, full in (("/s", "/status"), ("/q", "/queue"), ("/m", "/model"),
-                            ("/e", "/effort"), ("/p", "/ping"), ("/h", "/help")):
+                            ("/e", "/effort"), ("/p", "/ping"), ("/h", "/help"),
+                            ("/a", "/answer")):
             self.assertIs(REGISTRY[short], REGISTRY[full])
             self.assertEqual(command_lane(short, ""), command_lane(full, ""))
             self.assertIn(f"`{short}`", HELP)
         for name in ("/settings", "/sessions", "/switch", "/new", "/stop", "/restart",
-                     "/backend", "/cwd", "/approve", "/deny", "/send", "/answer", "/compact"):
+                     "/backend", "/cwd", "/approve", "/deny", "/send", "/compact"):
             self.assertFalse(REGISTRY[name].aliases)
 
     async def test_status_alias_is_local_and_rejects_extra_args(self):

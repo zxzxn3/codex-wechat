@@ -84,7 +84,7 @@ def question_prompt(question, token, index, total, *, text=prompt_text):
             (f"\n   {option['description']}" if option.get("description") else "")
             for number, option in enumerate(options, 1)]
     return (title + ("\n" + panel(*rows) if rows else "") +
-            f"\n`/answer {token} {{{text('ANSWER_ARGUMENT')}}}`")
+            f"\n`/answer {token} {{{text('ANSWER_ARGUMENT')}}}`（也可用 `/a {token}`）")
 
 
 def question_answer(question, text, *, render=prompt_text):
