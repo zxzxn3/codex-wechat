@@ -13,12 +13,14 @@ from records import TurnResult
 from slicing import split_text
 from media import MediaError, MAX_ATTACHMENTS, split_answer
 from wechat_content import entry_summary, remember_quote
-from errors import WeChatAuthExpired, attachment_reason
+from errors import WeChatApiError, WeChatAuthExpired, attachment_reason
 from diagnostics import current_request_id, error_fields, log_event
 from prompts import render_ack
 
 SEND_ATTEMPTS = 3
 SEND_RETRY_SECONDS = 1
+# Rejections of the message itself; retrying cannot change the outcome.
+NON_RETRYABLE_SEND_KINDS = frozenset({"prepare_failed"})
 
 class OutputDelivery:
     def __init__(self, bridge):
@@ -244,6 +246,33 @@ class OutputDelivery:
                     remember_quote(bridge.state, response["message_id"], entry_summary(entry))
             except WeChatAuthExpired:
                 await bridge.require_wechat_rebind()
+                continue
+            except WeChatApiError as error:
+                entry["attempts"] = entry.get("attempts", 0) + 1
+                if error.kind in NON_RETRYABLE_SEND_KINDS:
+                    # The server rejected the message itself, so a retry only adds
+                    # traffic. A stale conversation token is the usual cause: hold
+                    # the rest of the outbox until a fresh inbound message arrives.
+                    log_event("output.send_rejected", level="warning", component="output",
+                              role=entry.get("role", "body"), attempt=entry["attempts"],
+                              error_code=error.code, api_error_kind=error.kind,
+                              queued=len(bridge.state["outbox"]),
+                              job_id=entry.get("group"), request_id=entry.get("requestId"))
+                    log_event("output.waiting_context", level="warning", component="output",
+                              status="pending", queued=len(bridge.state["outbox"]))
+                    bridge.state["wechatContextPending"] = True
+                    bridge.fail_output(entry)
+                    continue
+                if entry["attempts"] >= SEND_ATTEMPTS:
+                    bridge.fail_output(entry)
+                    continue
+                bridge.save()
+                log_event("output.send_failed", level="warning", component="output",
+                          role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
+                          retry_in_ms=SEND_RETRY_SECONDS * 1000, job_id=entry.get("group"),
+                          request_id=entry.get("requestId"), **error_fields(error))
+                print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
+                await asyncio.sleep(SEND_RETRY_SECONDS)
                 continue
             except Exception as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1

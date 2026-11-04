@@ -8,7 +8,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from errors import WeChatAuthExpired, WeChatPollTimeout
+from errors import WeChatApiError, WeChatAuthExpired, WeChatPollTimeout
 from diagnostics import error_fields, log_event
 from latency import timeout_stage
 from wechat_http import PooledHTTP
@@ -119,12 +119,12 @@ class WeChat:
                 raise RuntimeError("微信响应无法解析") from None
             if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
                 code = result.get("errcode") or result.get("ret")
+                kind = api_error_kind(code, result.get("errmsg") or result.get("msg"))
                 metadata["error_code"] = code
-                metadata["api_error_kind"] = api_error_kind(
-                    code, result.get("errmsg") or result.get("msg"))
+                metadata["api_error_kind"] = kind
                 if auth and str(code) == "-14":
                     raise WeChatAuthExpired()
-                raise RuntimeError(f"微信 API 错误 {code}")
+                raise WeChatApiError(code, kind)
             # Poll and typing successes are routine traffic; failures remain visible.
             ok, level = True, "debug" if route in (
                 "ilink/bot/getupdates", "ilink/bot/getconfig", "ilink/bot/sendtyping") else "info"

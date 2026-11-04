@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from codex_wechat import Bridge
+from errors import WeChatApiError
 from profiles import restore
 from storage import Store
 
@@ -70,6 +71,34 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 failed = next(call for call in log_event.call_args_list
                               if call.args and call.args[0] == "output.send_failed")
                 self.assertEqual(failed.kwargs["retry_in_ms"], 0)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_api_rejection_is_not_retried_and_waits_for_a_new_context(self):
+        bridge = self.bridge
+        bridge.reply("answer")
+        calls = 0
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            raise WeChatApiError(-2, "prepare_failed")
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event") as log_event:
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("wechatContextPending"):
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertEqual(calls, 1)  # no retry amplification
+                self.assertTrue(bridge.state["wechatContextPending"])
+                self.assertEqual(len(bridge.state["failedOutbox"]), 1)
+                rejected = next(call for call in log_event.call_args_list
+                                if call.args and call.args[0] == "output.send_rejected")
+                self.assertEqual(rejected.kwargs["api_error_kind"], "prepare_failed")
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
