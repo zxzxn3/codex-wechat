@@ -134,8 +134,10 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   [COMMANDS](COMMANDS.md) 的待修问题 1。**修复后同一条件**：6.8 秒内失败、退出码 1、
   报 `后台服务启动后立即退出（state=Ready last_result=78）；日志: …\bridge.jsonl`；
   恢复正常配置后 `service-start` 8.6 秒成功、`task=Running`。
-- [ ] 后台服务原本在运行时执行一次 `rebind`，确认重新绑定完成后服务能重新启动，
+- [x] 后台服务原本在运行时执行一次 `rebind`，确认重新绑定完成后服务能重新启动，
   不出现状态目录锁冲突。
+  2026-11-05 由操作者实机确认：后台服务运行时执行 `rebind` 成功，重绑后服务正常重启并
+  继续收发。该时段的日志已被修复前的 `recover_failed` 与 `/sessions` 失败占满，无法逐条核对。
 - [x] 从 release A 启动服务后，执行稳定入口的 `status` 和 `logs`；确认
   `active-release` 仍指向 A，没有被只读命令改写。
   2026-11-05 静态确认：`mark_active_release()` 只在 `args.action == "start"` 时调用，
@@ -183,16 +185,15 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 
 ### 2026-11-05 复核：状态说明与剩余依据
 
-同一台机器上的复核（行为基线以 `main` @ `45d979c` 起为准）。上面 12 项里 **6 项已确认并勾选**
+同一台机器上的复核（行为基线以 `main` @ `45d979c` 起为准）。上面 12 项里 **7 项已确认并勾选**
 （`active-release` 只读不改、同名任务不误报、真实 App 的空闲 follower、服务命令的失败可见性、
-运行时 release 不被清理、断开/重开 App 的受控失败），其余 6 项仍未验证，其中 1 项被私有仓库
-阻塞、1 项在本机无法复现。已确认项的判据写在对应条目下；未勾选的复选框一律代表"尚未验证"，
-不代表已通过。
+运行时 release 不被清理、断开/重开 App 的受控失败、后台运行时 `rebind`），其余 5 项仍未验证，
+其中 1 项被私有仓库阻塞、1 项在本机无法复现。已确认项的判据写在对应条目下；未勾选的复选框
+一律代表"尚未验证"，不代表已通过。
 
-另外两项由操作者在 2026-11-05 的实机操作中确认可用，但没有留下可核对的日志（那段时间的
-`bridge.jsonl` 已被修复前的 `recover_failed` 与 `/sessions` 失败占满）：**④ 后台运行时执行
-`rebind` 后服务能重新启动**、以及**未绑定时 `service-start` 会弹二维码并完成绑定**。第 ② 项
-仍留待验证，因为它还要求核对"`start` 与 `service-start` 的扫码准入一致"以及具体提示文案。
+第 ② 项仍留待验证：未绑定时 `service-start` 确实会弹二维码并完成绑定（操作者已走过一遍），
+但该项还要求核对"`start` 与 `service-start` 的扫码准入一致"以及具体提示文案，需要再测一次。
+
 
 `release.py` 的下载前提已满足：`bootstrap.ps1:49-53` 与 `bootstrap.sh:43-44` 都下载
 `installer.py` 和 `release.py`，`ModuleNotFoundError: release` 不会再出现。但这不足以勾选第 1 项——
