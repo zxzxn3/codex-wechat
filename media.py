@@ -19,8 +19,10 @@ CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_MAX_MIB = 20
 MEDIA_MAX_MIB_MIN = 1
 MEDIA_MAX_MIB_MAX = 100
-# This path serves both downloads and uploads. A single GET retry is safe;
-# upload POST retry remains under verification because idempotency is unproven.
+# A download can simply be repeated; an upload POST is never repeated in place,
+# because the CDN hands out a different reference for every POST and a second
+# attempt on the same filekey is not known to be idempotent. A failed upload goes
+# back through output delivery, which asks for a new filekey.
 # Six seconds already exceeds a normal CDN connect by an order of magnitude here.
 CDN_ATTEMPTS = 2
 CDN_CONNECT_TIMEOUT = 6
@@ -215,10 +217,18 @@ class Media:
             self._log_transfer(False, started, kind=failure.kind, error=failure.error,
                                curl_code=failure.curl_code,
                                http_status=failure.http_status)
-            if not (failure.retryable and attempt < CDN_ATTEMPTS):
+            # That connection just failed; reusing it would make the next attempt
+            # wait out the same timeout instead of failing or succeeding fast.
+            await self._discard_connection()
+            if not (failure.retryable and data is None and attempt < CDN_ATTEMPTS):
                 raise MediaError(failure.message) from None
             log_event("media.transfer_retry", level="warning", component="media",
                       attempt=attempt, kind=failure.kind)
+
+    async def _discard_connection(self):
+        discard = getattr(getattr(self.channel, "http", None), "discard_outgoing", None)
+        if discard is not None:
+            await discard()
 
     @staticmethod
     def _log_transfer(ok, started, *, kind, error=None, curl_code=None,

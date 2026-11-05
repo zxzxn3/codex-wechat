@@ -146,6 +146,27 @@ class PooledTransferTests(unittest.IsolatedAsyncioTestCase):
         await transport.close()
         self.assertEqual(session.closed, 1)
 
+    async def test_discarding_the_outgoing_pool_forces_new_connections(self):
+        created = []
+
+        def factory(*_args, **_kwargs):
+            session = FakeSession(lambda method, url, kwargs: FakeResponse())
+            created.append(session)
+            return session
+
+        with patch("wechat_http._session", side_effect=factory):
+            transport = PooledHTTP()
+            try:
+                await transport.transfer(URL, None, limit=1024)
+                self.assertEqual(len(created), 1)
+                await transport.discard_outgoing()
+                self.assertEqual(created[0].closed, 1)
+                await transport.transfer(URL, None, limit=1024)
+                self.assertEqual(len(created), 2)
+            finally:
+                await transport.close()
+        self.assertEqual(len(created[1].calls), 1)
+
 
 class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -190,6 +211,32 @@ class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
             received, parameter = await media.transfer(URL)
         self.assertEqual((received, parameter), (b"body", "parameter"))
         self.assertEqual(channel.http.transfer.await_count, 2)
+
+    async def test_an_upload_stall_is_not_retried_on_the_same_filekey(self):
+        media, channel = self.media(SimpleNamespace(transfer=AsyncMock(side_effect=[
+            (b"", 0, 28, None), (b"", 200, 0, "parameter")])))
+        with patch("media.log_event"):
+            with self.assertRaisesRegex(MediaError, "curl 28"):
+                await media.transfer(URL, b"ciphertext")
+        self.assertEqual(channel.http.transfer.await_count, 1)
+
+    async def test_a_failed_transfer_drops_the_connection_before_retrying(self):
+        order = []
+        responses = [(b"", 0, 28, None), (b"body", 200, 0, "p")]
+
+        def transfer(*_args, **_kwargs):
+            order.append("transfer")
+            return responses.pop(0)
+
+        async def discard():
+            order.append("discard")
+
+        http = SimpleNamespace(transfer=AsyncMock(side_effect=transfer),
+                               discard_outgoing=discard)
+        media, _channel = self.media(http)
+        with patch("media.log_event"):
+            await media.transfer(URL)
+        self.assertEqual(order, ["transfer", "discard", "transfer"])
 
     async def test_size_limit_and_server_errors_are_not_retried(self):
         media, channel = self.media(SimpleNamespace(

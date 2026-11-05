@@ -113,6 +113,16 @@ class _Pool:
         if session is not None:
             await session.close()
 
+    async def discard(self):
+        """Drop the session so the next request cannot reuse a dead connection."""
+        idle, self.idle = self.idle, None
+        if idle is not None:
+            idle.cancel()
+            await asyncio.gather(idle, return_exceptions=True)
+        session, self.session = self.session, None
+        if session is not None:
+            await session.close()
+
     async def close(self):
         self.closed = True
         idle, self.idle = self.idle, None
@@ -194,3 +204,7 @@ class PooledHTTP:
 
     async def close(self):
         await asyncio.gather(self.poll.close(), self.outgoing.close())
+
+    async def discard_outgoing(self):
+        # Only the data pool: a dead CDN connection must not be reused.
+        await self.outgoing.discard()
