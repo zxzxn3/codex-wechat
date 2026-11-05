@@ -4,6 +4,7 @@ from lifecycle import can_change_session
 from pathlib import Path
 import asyncio
 import json
+import re
 import sys
 import time
 import uuid
@@ -203,15 +204,19 @@ def text_setting_value(bridge, argument, max_bytes, too_long_key):
 
 
 def current_numeric_setting(bridge, name):
-    """Read back what the reload actually applied, so a silent no-op is caught."""
-    return {
-        "connectionIdleSeconds": lambda: bridge.settings.hot.connection_idle_seconds,
-        "media.maxMiB": lambda: bridge.media.limit // (1024 * 1024),
-        "slicing.targetChars": lambda: bridge.slicing.target_chars,
-        "logs.keep": lambda: bridge.settings.hot.logs.keep,
-        "budgets": lambda: bridge.reply_budget(),
-        "sending.replyBudget": lambda: bridge.reply_budget(),
-    }[name]()
+    """Read back what the reload applied, derived from SETTING_PATHS itself.
+
+    Adding a hot numeric setting therefore needs no entry here: the camelCase
+    config path is walked over the hot settings object. media.maxMiB is the one
+    runtime value that is not a hot setting, because Media keeps its own limit.
+    """
+    if name == "media.maxMiB":
+        return bridge.media.limit // (1024 * 1024)
+    node = bridge.settings.hot
+    for part in SETTING_PATHS[name]:
+        attribute = re.sub(r"(?<!^)(?=[A-Z])", "_", part).lower()
+        node = getattr(node, attribute)
+    return node
 
 
 async def set_numeric_setting(bridge, name, value):
