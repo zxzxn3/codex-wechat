@@ -89,18 +89,33 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   已有绑定时应启动后台服务并输出 `后台服务已启动；终端可以关闭。` 以及
   `完整日志: ...\bridge.jsonl`。确认 `start` 与 `service-start` 的扫码准入一致，
   且 `service-start` 不会显示前台 `Ctrl+C` 停止提示。
-- [ ] 在已有后台服务时运行 `.\codex-wechat.ps1 service-restart`，确认输出
+- [x] 在已有后台服务时运行 `.\codex-wechat.ps1 service-restart`，确认输出
   `后台服务已重启。` 和日志路径；再运行一次 `service-start`，确认它会直接提示已在运行，
   而不是争抢状态锁。人为制造一次任务启动后立即退出（例如暂时让配置无效），确认
   `service-start` 在 15 秒内失败，而不是打印成功后留下未运行的服务。
+  2026-11-05 实测：`service-restart` → `后台服务已重启。` + `完整日志: …`、退出码 0、
+  运行中的 release 从 `4d6cecf…` 切到 `8ed3f06…`；紧接着 `service-start` → `后台服务已在运行。`
+  + 日志路径、退出码 0，没有争抢状态锁。
+  第三段**最初不满足**：故意把 `config.json` 改成 `{"backends":{"broken":{…}}}` 后，
+  `service-start` 用 4.8 秒打印 `后台服务已启动；终端可以关闭。` 并 `exit 0`，而 6 秒后
+  `task=Ready`、`last_result=78`、`service.log` 写着
+  `supervisor: bridge configuration failed; not restarting`。原因见
+  [COMMANDS](COMMANDS.md) 的待修问题 1。**修复后同一条件**：6.8 秒内失败、退出码 1、
+  报 `后台服务启动后立即退出（state=Ready last_result=78）；日志: …\bridge.jsonl`；
+  恢复正常配置后 `service-start` 8.6 秒成功、`task=Running`。
 - [ ] 后台服务原本在运行时执行一次 `rebind`，确认重新绑定完成后服务能重新启动，
   不出现状态目录锁冲突。
 - [x] 从 release A 启动服务后，执行稳定入口的 `status` 和 `logs`；确认
   `active-release` 仍指向 A，没有被只读命令改写。
   2026-11-05 静态确认：`mark_active_release()` 只在 `args.action == "start"` 时调用，
   `status` / `logs` 不经过它。
-- [ ] 保持 A 运行，连续更新到 B、C 且不重启桥接；确认 A 的 release 目录不会被
+- [x] 保持 A 运行，连续更新到 B、C 且不重启桥接；确认 A 的 release 目录不会被
   清理。停止 A 并由新桥接启动后，确认下一次更新可以清理 A。
+  2026-11-05 实测（服务跑 `4d6cecf…` 时连续更新）：更新后新版本成为 `current`，
+  `active-release` 仍指向运行中的 `4d6cecf…`，该目录保留；既非 current 又非 active 的
+  `3c558f6…` 被清理；服务仍是 `Running` 且仍跑旧 release（更新不重启桥接）。
+  随后 `service-restart` 把 `active-release` 换成新版本，再更新一次时
+  `4d6cecf…`（此时两者都不是）被清理。
 - [x] 构造一个同名 `CodexWeChat` 任务，但把 action 指向另一个安装目录或另一个可执行文件；
   确认快速 `autostart.status` 不会误报；需要 PowerShell 检查时 `installed` 回退也不会把它当作当前安装，
   启用/禁用也不会修改该任务。
@@ -113,11 +128,18 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   双向收发可用；第 1 种状态（先关 App 再启动）未测。
 - [ ] 断开/重启 App，检查 `initialize`、owner discovery、turn start/steer 响应缺少
   字段时是否以受控失败结束，而不是让 `KeyError` 穿透到输入投递层。
-  （2026-11-05：缺字段路径已在 `app_ipc.py` 逐项校验并抛 `CodexRpcError(-32603)`，
-  仍需实机断连确认。）
+  （2026-11-05：缺字段路径已在 `app_ipc.py` 逐项校验并抛 `CodexRpcError(-32603)`。
+  实机日志里见过受控失败：交还写者后立刻 attach 得到 `backend.app_attach_failed`
+  `CodexRpcError`，按 best-effort 记警告且不影响该轮，**不是** `KeyError`。断开/重启
+  App 本身仍需实机确认。）
 - [ ] 人为让共享 daemon 启动失败，确认 `/status` 显示 `shared_fallback`，日志出现
   `backend.shared_unavailable` 和可理解的失败原因；配置中的 `sharedDaemon: true`
   不被改写。
+  （2026-11-05：**本机无法真实复现**。这台机器的 Codex CLI 自带完整包，且 Windows 的
+  app-server daemon 是按用户而不是按 `CODEX_HOME` 的，把 `env.CODEX_HOME` 指到空目录仍能
+  起 daemon（实测 `backend.shared=True`、`shared_fallback=None`）。要复现只能破坏 Codex
+  自身安装，未做。回退与提示逻辑由 `tests/test_windows_core.py` 的
+  `SharedDaemonUnavailable` 用例覆盖。）
 - [ ] 使用带用户名和密码的系统代理，触发一次 WMI 启动的共享 daemon；用
   `Win32_Process.CommandLine` 或等价方式确认代理凭据没有进入命令行，并确认一次性
   环境文件在启动后已删除。
@@ -129,10 +151,11 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 
 ### 2026-11-05 复核：状态说明与剩余依据
 
-同一台机器、同一提交（`main` @ `45d979c`）上的复核。上面 12 项里 **3 项已确认并勾选**
-（`active-release` 只读不改、同名任务不误报、真实 App 的空闲 follower），其余 9 项仍需实机，
-其中 1 项被私有仓库阻塞。已确认项的判据写在对应条目下；未勾选的复选框一律代表"尚未验证"，
-不代表已通过。
+同一台机器、同一提交（`docs/WINDOWS.md` 记录的行为以 `main` @ `45d979c` 起为基线）上的复核。
+上面 12 项里 **5 项已确认并勾选**（`active-release` 只读不改、同名任务不误报、真实 App 的
+空闲 follower、服务命令的失败可见性、运行时 release 不被清理），其余 7 项仍需实机，
+其中 1 项被私有仓库阻塞、1 项在本机无法复现。已确认项的判据写在对应条目下；未勾选的复选框
+一律代表"尚未验证"，不代表已通过。
 
 另外两项由操作者在 2026-11-05 的实机操作中确认可用，但没有留下可核对的日志（那段时间的
 `bridge.jsonl` 已被修复前的 `recover_failed` 与 `/sessions` 失败占满）：**④ 后台运行时执行

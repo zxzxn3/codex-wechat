@@ -84,6 +84,10 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 - 改协议字段：同步 SOURCES、ARCHITECTURE、诊断事件和失败边界。
 - 改提示或配置：保持 `prompts.py` 默认目录和英文 snake_case 字段；无效配置整组保留旧值。
 - 改 Windows/服务/安装：至少做静态入口检查；有实机时再跑真实回归。
+- 改 `*.ps1`：`codex-wechat.ps1` 含中文，必须保持 **UTF-8 with BOM**。Windows PowerShell 5.1
+  对无 BOM 的脚本按 ANSI 解码，去掉 BOM 会让整份文件解析失败（表现为一串无关的
+  "字符串缺少终止符"）。其余 `.ps1` 是纯 ASCII，不需要 BOM；用 .NET 的
+  `WriteAllText(..., UTF8Encoding($false))` 之类写回时特别容易漏掉这一点。
 - 提交按主题拆分；cfg 提交使用中文并附 `Committed-by` footer。
 
 ## 重构边界

@@ -114,26 +114,35 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 
 ## 待修问题
 
-### 1. Windows `service-start` 可能假成功（严重）
+### 1. ~~Windows `service-start` 可能假成功~~ 已修复（2026-11-05）
 
-链路：
+链路（修复前）：
 
-1. `codex-wechat.ps1:260` → `Start-ScheduledTask` → `Wait-TaskRunning` → 打印「后台服务已启动；终端可以关闭。」
-2. 若前台 `start` 仍持有状态锁，supervisor 拉起的 `codex_wechat.py start` 在
-   `startup_store()` 处拿到 `RuntimeError`（`storage.py:49`），进程非零退出。
+1. `codex-wechat.ps1` 的 `service-start` → `Start-ScheduledTask` → `Wait-TaskRunning`
+   → 打印「后台服务已启动；终端可以关闭。」
+2. 若桥接起来后立即退出（前台仍持有状态锁、配置无效等都算），supervisor 记
+   `bridge configuration failed; not restarting` 并退出。
 3. ps1 已经打印成功并 `exit 0`，任务状态早已回到 Ready。
 
 Linux 不受影响：`start_background_service()` 在 `service_adapter.start()` 之后会轮询 `status()`，
 失败时抛「后台服务启动请求已提交，但未能确认运行状态」（`service_adapter.py:106`）。
 
-`docs/WINDOWS.md` 的待验证清单里已有一条对应的验收项（"`service-start` 在 15 秒内失败，而不是
-打印成功后留下未运行的服务"），当前代码不满足。
+**实机复现（修复前）**：把 `config.json` 改成 `{"backends":{"broken":{"label":"broken"}}}` 后
+`codex-wechat service-start` → 4.8 秒打印「后台服务已启动；终端可以关闭。」、`exit 0`；
+6 秒后 `task=Ready`、`last_result=78`、`service.log` 有
+`supervisor: bridge configuration failed; not restarting`。
 
-修复方向二选一：
+**修复**：`Wait-TaskRunning`（看到一次 Running 就返回）换成 `Wait-ServiceStable`——
+要求任务持续 Running 满 2 秒才算成功；观察到 Running 之后又退出则直接失败，并带出
+`state`、`last_result` 与日志路径。`service-start` 与 `service-restart` 都改用它。
 
-- 让 `codex-wechat.ps1 service-start` 转发到 `codex_wechat.py service-start`，把校验收拢到一处；
-- 保留 ps1 实现，但在 `Wait-TaskRunning` 之后追加一次 `service-status -Json` 复查，`running` 为 false
-  时报错并返回非零。
+**修复后同一条件**：6.8 秒内失败、退出码 1、
+「后台服务启动后立即退出（state=Ready last_result=78）；日志: …\bridge.jsonl」；
+恢复正常配置后 `service-start` 8.6 秒成功、`task=Running`，`service-restart` 同样正常。
+
+原先考虑的另一种修法（让 ps1 转发到 Python 的 `service-start`）没有采用：那会让 ps1 的
+`service-start` 多一次 PowerShell→Python→PowerShell 往返，而校验收敛到
+`Wait-ServiceStable` 一处即可。
 
 ### 2. ~~`login` 缺少 Python 层守卫~~ 已修复（2026-11-05）
 
