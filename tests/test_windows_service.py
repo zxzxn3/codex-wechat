@@ -297,6 +297,9 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('task=$($task.State) last_result', entry)
         # The entry point forwards the task it already read; no second PowerShell.
         self.assertIn("$env:CODEX_WECHAT_HOST_STATE = $hostState", entry)
+        # -TaskOnly keeps the nested call from repeating the binding gate.
+        self.assertIn("[switch]$TaskOnly", entry)
+        self.assertIn("-not $TaskOnly -and -not (Test-Path", entry)
         self.assertIn("[char]::IsWhiteSpace", install)
         self.assertIn("$trigger.Enabled = $enabled", entry)
         self.assertIn("Set-ScheduledTask -TaskName $TaskName -Trigger $triggers", entry)

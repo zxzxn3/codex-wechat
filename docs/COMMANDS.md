@@ -97,6 +97,8 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 | 冲突时的实际结果 | `startup_store()`（`codex_wechat.py:689`）等待状态锁最多 30 秒后报错 | 服务进程立即失败退出 |
 
 `startup_store()` 的等待分支只在 `action == "start"` 且非 Windows 时生效，因此两个平台的兜底行为不同。
+要不要给 Linux 也加一道"后台 unit 在跑就拒绝"的前置检查（对称于 ps1 的预检），由 Linux 侧决定；
+Windows 那道预检在 ps1 里，Python 层没有对应实现，所以"统一"意味着把它下沉到 Python。
 
 ### `service-start` 的启动校验（2026-11-05 起两个平台都能发现"起来就退出"）
 
@@ -235,9 +237,13 @@ Windows 侧的取值链：`codex-wechat.ps1 status` 在自己进程里读一次�
   先 `prepare_asset()`（快照 + 本地校验），再回执，最后 `queue_asset()` 入队。这样本地错误
   （文件不存在、超限、凭据目录）仍然先报原因、不产生假回执，而回执本身赶在附件之前发出，
   不再被整份上传（15 MiB 约 12 秒）压在后面。
-  剩下的只是**文案**：现在这句在文件之前到达，"已排队"字面上没错（它确实刚进队列），但用户随后
+  剩下的只是**文案**（待定）：现在这句在文件之前到达，"已排队"字面上没错（它确实刚进队列），但用户随后
   要等十几秒，改成「正在发送附件…」更贴合实际观感；若出站队列正好被别的消息占着，它其实还没
   开始传，所以"上传中"有一点过于具体。改一行 `prompts.ATTACHMENT_QUEUED` 即可。
+- Linux 不拒绝 root/sudo。Windows 已经硬拒绝提权（见 [WINDOWS](WINDOWS.md)「不要在管理员终端里运行」），
+  但 `platform_support.is_elevated()` 在 POSIX 上恒为 `False`，所以 `sudo codex-wechat` 仍会把 release 装到
+  `/root` 下、unit 注册给 root。要不要加 `os.geteuid() == 0` 的对应闸门由 Linux 侧决定
+  （注意：某些场景下 sudo 装系统级 unit 可能是刻意的，所以不是照搬 Windows 就能用）。
 - `make_private()` 去掉了"目录已存在就返回"的早退，Windows 上每次构造 `Store` 都会跑一次 `icacls`
   （每次 CLI 调用多一个子进程）。好处是能自愈被提权破坏的 ACL，属于有意的取舍。
 - ~~Windows 的 `status` 比 Linux 多打印一行 `task=…`~~ 已统一（2026-11-05）：那行散装文本删掉了，

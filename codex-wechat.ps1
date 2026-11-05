@@ -17,6 +17,7 @@ param(
     [switch]$DryRun,
     [switch]$NonInteractive,
     [switch]$StopActive,
+    [switch]$TaskOnly,
     [string]$Component,
     [string]$SkillsDir
 )
@@ -286,21 +287,28 @@ switch ($Command) {
         exit $LASTEXITCODE
     }
     'service-start' {
+        # -TaskOnly is the internal entry point: the Python CLI has already run
+        # the binding gate and only needs the task started, so this must never
+        # open a nested login prompt or print user-facing lines.
         $task = Get-InstalledTask
         if ($task.State -in @('Running', 'Queued')) {
-            Write-Host '后台服务已在运行。'
-            Write-Host "完整日志: $BridgeLog"
+            if (-not $TaskOnly) {
+                Write-Host '后台服务已在运行。'
+                Write-Host "完整日志: $BridgeLog"
+            }
             exit 0
         }
-        if (-not (Test-Path (Join-Path $StateDir 'account.json'))) {
+        if (-not $TaskOnly -and -not (Test-Path (Join-Path $StateDir 'account.json'))) {
             Write-Host '尚未绑定微信，请在当前终端扫码；绑定后会继续启动。'
             & $VenvPython -u $Agent login --state-dir $StateDir --config $ConfigPath --starting
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         }
         Start-ScheduledTask -TaskName $TaskName
         Wait-ServiceStable
-        Write-Host '后台服务已启动；终端可以关闭。'
-        Write-Host "完整日志: $BridgeLog"
+        if (-not $TaskOnly) {
+            Write-Host '后台服务已启动；终端可以关闭。'
+            Write-Host "完整日志: $BridgeLog"
+        }
     }
     'service-stop' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

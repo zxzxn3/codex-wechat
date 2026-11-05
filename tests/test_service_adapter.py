@@ -96,6 +96,17 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
         command.assert_awaited_once_with(
             "--no-block", "restart", service_adapter.UNIT)
 
+    async def test_windows_start_asks_only_for_the_task(self):
+        status = AsyncMock(side_effect=[service_adapter.ServiceState(True, False),
+                                        service_adapter.ServiceState(True, True)])
+        request = AsyncMock()
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter, "IS_WINDOWS", True), \
+                patch.object(service_adapter, "_windows_request", request):
+            await service_adapter.start()
+        # The binding gate already ran in Python; the entry point must not repeat it.
+        request.assert_awaited_once_with(["service-start", "-TaskOnly"], timeout=20)
+
     async def test_windows_restart_uses_the_service_entry(self):
         status = AsyncMock(return_value=service_adapter.ServiceState(True, True))
         request = AsyncMock()

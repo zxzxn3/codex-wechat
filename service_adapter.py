@@ -126,7 +126,7 @@ async def start():
     if current.running:
         return current
     if IS_WINDOWS:
-        await _windows_request(["service-start"], timeout=20)
+        await _windows_request(["service-start", "-TaskOnly"], timeout=20)
     else:
         await systemctl("start", UNIT)
     loop = asyncio.get_running_loop()
