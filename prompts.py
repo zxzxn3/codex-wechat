@@ -120,7 +120,7 @@ connectionIdleSeconds: 0–3600，微信 HTTP 连接池空闲秒数；0 表示�
 media.maxMiB: 1–100，单个微信附件的大小上限。
 slicing.smart: true|false，true 使用智能语义切片，false 按长度切片。
 slicing.targetChars: 80–20000，切片目标字符数。
-sourceHint: 附加到微信用户消息的来源说明。
+sourceHint: 附加到每条微信用户消息的来源说明；空字符串关闭。
 
 [无法直接修改]
 quotaWarningThresholds.primary: 5 小时限额提醒阈值；修改 config.json 后热加载。

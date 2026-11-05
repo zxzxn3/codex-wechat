@@ -28,10 +28,14 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
 
 - [ ] 用一行 PowerShell 分别执行首次安装和已安装更新，确认临时目录下载了
   `installer.py` 与 `release.py`，安装结束后没有 `ModuleNotFoundError: release`。
-- [ ] 先确认没有前台桥接，再分别在没有微信绑定和已有绑定时运行 `codex-wechat.ps1 service-start`：未绑定时
-  应显示二维码并等待扫码，已有绑定时应启动后台服务并输出 `后台服务已启动。`。确认
+- [ ] 先确认没有前台桥接，再分别在没有微信绑定和已有绑定时运行 `.\codex-wechat.ps1 service-start`：未绑定时
+  应显示二维码并等待扫码，已有绑定时应启动后台服务并输出
+  `后台服务已启动；终端可以关闭。`。确认
   `start` 与 `service-start` 的扫码准入一致，且 `service-start` 不会显示前台 `Ctrl+C`
   停止提示。
+- [ ] 在已有后台服务时运行 `.\codex-wechat.ps1 service-restart`，确认输出
+  `后台服务已重启。` 和日志路径；再运行一次 `service-start`，确认它会直接提示已在运行，
+  而不是争抢状态锁。
 - [ ] 从 release A 启动服务后，执行稳定入口的 `status` 和 `logs`；确认
   `active-release` 仍指向 A，没有被只读命令改写。
 - [ ] 保持 A 运行，连续更新到 B、C 且不重启桥接；确认 A 的 release 目录不会被
@@ -70,7 +74,7 @@ PID、创建时间、exe和回环监听归属；不抢占未知端口，不因Ap
 仅支持主 CODEX_HOME；先在 App 打开目标会话，微信后连接。源码与新增管道用例尚不等于实机验收。
 
 CLI 接入与后台准备保留 codex-desktop.ps1，参数放在 cli 后并用 -- 分隔；不再提供 App 启动命令。
-重新绑定统一用 codex-wechat.ps1 rebind，不复制独立业务。
+重新绑定统一用 `.\codex-wechat.ps1 rebind`，不复制独立业务。
 
 Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致不可见。2026-11-04 已在
 本机实机确认气泡可见，但该结论只覆盖当时的登录会话。App/CLI/微信三端共享仍未实机验证，
@@ -90,7 +94,7 @@ Administrators"并断开继承；其下所有目录改为普通创建、继承�
 ## 诊断与实机验证
 
 结构化诊断位于 `%LOCALAPPDATA%\codex-wechat\logs\bridge.jsonl`，使用
-`codex-wechat.ps1 logs [-Follow]`；默认不显示原始控制台输出。加 `-Service` 才显示
+`.\codex-wechat.ps1 logs [-Follow]`；默认不显示原始控制台输出。加 `-Service` 才显示
 `service.log`，该文件未承诺脱敏。日志字段与网络计时定义见 [ARCHITECTURE](ARCHITECTURE.md)。
 
 曾观察到curl56/28和发送积压。2026-11-04 在本机定位到不可达的 IPv6 DNS 会让 curl_cffi 每次
