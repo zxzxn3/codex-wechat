@@ -60,6 +60,7 @@ class CodexTransport:
         self.on_request, self.on_event = on_request, on_event
         self.on_connect, self.on_disconnect = on_connect, on_disconnect
         self.proc = self.reader = self.websocket = None
+        self.server_version = ""
         self.requests = {}
         self.serial = 0
         self.launch_env = {}
@@ -176,9 +177,17 @@ class CodexTransport:
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
                 limit=16 * 1024 * 1024, **subprocess_options())
         self.reader = asyncio.create_task(self.read())
-        await self.rpc("initialize", {"clientInfo": {
+        # The response carries the server's own identification; keep it for the
+        # one startup log line instead of guessing versions from the install.
+        greeting = await self.rpc("initialize", {"clientInfo": {
             "name": "codex_wechat", "title": "Codex WeChat", "version": APP_VERSION},
             "capabilities": {"experimentalApi": True}})
+        if isinstance(greeting, dict):
+            for key in ("userAgent", "user_agent"):
+                value = greeting.get(key)
+                if isinstance(value, str) and value:
+                    self.server_version = value[:64]
+                    break
         await self.write({"method": "initialized", "params": {}})
         # Keep project-owned skills local to this app-server connection instead
         # of installing links into each backend's CODEX_HOME.

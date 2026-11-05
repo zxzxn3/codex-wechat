@@ -102,7 +102,8 @@ COMMAND_FAILURE_LABELS = {
 COMMAND_FAILURE = "{action}: {reason}"
 
 SETTINGS_USAGE = ("用法:\n`/settings [autostart|shared|compactionNotice|slicing.smart] true|false`\n"
-                  "`/settings connectionIdleSeconds|media.maxMiB|slicing.targetChars <整数>`\n"
+                  "`/settings connectionIdleSeconds|media.maxMiB|slicing.targetChars|"
+                  "logs.keep <整数>`\n"
                   "`/settings sourceHint <文本>`\n"
                   "`/settings ack|finish <模板>|\"\"|fields`")
 SETTINGS_HINT = ("以上设置可通过 `/settings [option] [value]` 更改。\n"
@@ -119,12 +120,12 @@ connectionIdleSeconds: 0–3600，微信 HTTP 连接池空闲秒数；0 表示�
 media.maxMiB: 1–100，单个微信附件的大小上限。
 slicing.smart: true|false，true 使用智能语义切片，false 按长度切片。
 slicing.targetChars: 80–20000，切片目标字符数。
+logs.keep: 1–100，保留几份轮转日志（活动文件之外，磁盘占用约为 5 MiB ×(keep+1)）。
 sourceHint: 附加到每条微信用户消息的来源说明；空字符串关闭。
 
 [无法直接修改]
 quotaWarningThresholds.primary: 5 小时限额提醒阈值；修改 config.json 后热加载。
-quotaWarningThresholds.secondary: 7 天限额提醒阈值；修改 config.json 后热加载。
-logs.keep: 保留几份轮转日志；修改 config.json 后下次启动生效，下限 1、无上限。"""
+quotaWarningThresholds.secondary: 7 天限额提醒阈值；修改 config.json 后热加载。"""
 SETTINGS_NUMBER = "{name} 必须是 {minimum}–{maximum} 的整数"
 SETTINGS_WRITE_FAILED = "未保存设置: 配置文件不可写或格式无效"
 SETTINGS_NOT_APPLIED = "设置已写入，但未生效；请检查配置文件。"
@@ -626,7 +627,7 @@ def status_summary(**kwargs):
 
 def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None,
                      completion_notice="", source_hint=None, autostart=None, shared=None,
-                     connection_idle_seconds=None, text=prompt_text):
+                     connection_idle_seconds=None, log_keep=None, text=prompt_text):
     def display_template(value):
         value = str(value or VALUE_EMPTY)
         if len(value) >= 2 and value[0] == value[-1] == "`":
@@ -649,6 +650,8 @@ def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None
         editable.append(f"slicing.targetChars: {slicing.target_chars}")
     if source_hint is not None:
         editable.append(f"sourceHint: {source_hint or VALUE_EMPTY}")
+    if log_keep is not None:
+        editable.append(f"logs.keep: {log_keep}")
     readonly = []
     if notifications is not None:
         for window in ("primary", "secondary"):

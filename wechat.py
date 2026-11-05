@@ -25,6 +25,9 @@ POLL_TIMEOUT_GRACE = 5
 MAX_POLL_TIMEOUT = 120
 SEND_TIMEOUT = 5
 TYPING_TIMEOUT = 2
+# Successful routine requests below this stay at debug; slow ones and failures
+# remain visible at info so a shared log still shows the interesting requests.
+SLOW_REQUEST_SECONDS = 2
 
 
 def api_error_kind(code, message):
@@ -145,6 +148,8 @@ class WeChat:
             raise
         finally:
             elapsed = time.perf_counter() - started
+            if ok and level == "info" and elapsed < SLOW_REQUEST_SECONDS:
+                level = "debug"
             # One outcome per request; never include bodies, URLs or exception text.
             log_event("wechat.request", level=level, component="wechat", ok=ok,
                       duration_ms=elapsed * 1000, **metadata)
@@ -174,7 +179,7 @@ class WeChat:
         keys = result if isinstance(result, dict) else {}
         acknowledged = any(key in keys for key in (
             "msgid", "msg_id", "message_id", "messageId", "msgId"))
-        log_event("wechat.send_ack", component="wechat",
+        log_event("wechat.send_ack", level="debug", component="wechat",
                   status="acked" if acknowledged else "no_id", count=len(keys),
                   request_id=entry.get("requestId"))
         if not acknowledged:

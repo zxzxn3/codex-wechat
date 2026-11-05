@@ -10,7 +10,7 @@ from diagnostics import error_fields, log_event
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
                    "compactionNotice", "quotaWarningThresholds", "prompts", "connectionIdleSeconds",
-                   "sending")
+                   "sending", "logs")
 DEFAULT_CONNECTION_IDLE_SECONDS = 60
 CONNECTION_IDLE_MIN = 0
 CONNECTION_IDLE_MAX = 3600
@@ -28,6 +28,7 @@ SLICING_TARGET_MAX = 20000
 TEXT_LIMIT_BYTES = 3000
 SOURCE_HINT_LIMIT_BYTES = 4000
 LOG_KEEP_MIN = 1
+LOG_KEEP_MAX = 100
 DEFAULT_LOG_KEEP = 3
 QUOTA_WINDOWS = ("primary", "secondary")
 DEFAULT_QUOTA_THRESHOLDS = {
@@ -114,6 +115,22 @@ class Sending:
 
 
 @dataclass(frozen=True)
+class Logs:
+    keep: int = DEFAULT_LOG_KEEP
+
+    @classmethod
+    def from_config(cls, value=None):
+        value = {} if value is None else value
+        if not isinstance(value, dict) or set(value) - {"keep"}:
+            raise ValueError("logs 仅支持 keep")
+        keep = value.get("keep", cls.keep)
+        if type(keep) is not int or not LOG_KEEP_MIN <= keep <= LOG_KEEP_MAX:
+            raise ValueError(
+                f"logs.keep 必须是 {LOG_KEEP_MIN}–{LOG_KEEP_MAX} 的整数")
+        return cls(keep)
+
+
+@dataclass(frozen=True)
 class HotSettings:
     slicing: Slicing
     notifications: Notifications
@@ -121,6 +138,7 @@ class HotSettings:
     prompts: dict[str, str]
     connection_idle_seconds: int
     sending: Sending
+    logs: Logs
 
     @classmethod
     def from_config(cls, config):
@@ -137,7 +155,8 @@ class HotSettings:
             raise ValueError(
                 f"connectionIdleSeconds 必须是 {CONNECTION_IDLE_MIN}–{CONNECTION_IDLE_MAX} 的整数")
         return cls(Slicing.from_config(config.get("slicing")), Notifications.from_config(config), hint,
-                   templates, idle, Sending.from_config(config.get("sending")))
+                   templates, idle, Sending.from_config(config.get("sending")),
+                   Logs.from_config(config.get("logs")))
 
 
 def processing_template(config, state):
@@ -160,14 +179,8 @@ def completion_template(config, state):
 
 
 def log_keep(value=None):
-    """Rotated log files to keep. Only a lower bound applies; disk is the limit."""
-    value = {} if value is None else value
-    if not isinstance(value, dict) or set(value) - {"keep"}:
-        raise ValueError("logs 仅支持 keep")
-    keep = value.get("keep", DEFAULT_LOG_KEEP)
-    if type(keep) is not int or keep < LOG_KEEP_MIN:
-        raise ValueError(f"logs.keep 必须是不小于 {LOG_KEEP_MIN} 的整数")
-    return keep
+    """Rotated log files to keep, bounded so a stray value cannot fill the disk."""
+    return Logs.from_config(value).keep
 
 
 class ConfigLoader:

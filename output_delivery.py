@@ -275,7 +275,7 @@ class OutputDelivery:
                 queued_at = self._queued_at.get(entry.get("id"))
                 waiting = ({"queue_wait_ms": max(0, (time.perf_counter() - queued_at) * 1000)}
                            if queued_at is not None and not entry.get("attempts", 0) else {})
-                log_event("output.send_start", component="output",
+                log_event("output.send_start", level="debug", component="output",
                           queued=len(bridge.state["outbox"]), role=entry.get("role", "body"),
                           attempt=entry.get("attempts", 0), part=entry.get("part"),
                           parts=entry.get("parts"), job_id=entry.get("group"),
@@ -348,7 +348,7 @@ class OutputDelivery:
             log_event("output.sent", component="output", role=entry.get("role", "body"),
                       attempt=entry.get("attempts", 0), duration_ms=send_ms,
                       queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
-                      request_id=entry.get("requestId"))
+                      request_id=entry.get("requestId"), **waiting)
             bridge.latency.sends.append(send_ms)
             bridge.state["lastSendMs"] = round(send_ms, 1)
             bridge.mark_wechat_valid()

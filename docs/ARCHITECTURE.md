@@ -130,8 +130,8 @@ Token优先原生事件，缺失时只读当前Thread.path的有界尾部，按�
 
 ## 诊断与隐私
 
-结构化诊断写入数据目录的`logs/bridge.jsonl`，按5 MiB轮转并保留3份备份（旋转份数由
-config.json 的 `logs.keep` 控制，下限 1、无上限，磁盘占用约为 5 MiB ×(keep+1)）。每行是一个
+结构化诊断写入数据目录的`logs/bridge.jsonl`，按5 MiB轮转，旋转份数由 `logs.keep` 控制
+（1–100，默认 3，可 `/settings logs.keep` 热改；磁盘占用约为 5 MiB ×(keep+1)）。每行是一个
 JSON对象，用随机`request_id`关联由微信输入触发的接收、准备、提交、输出入队、发送和
 发送API。中途回复携带轮次关联的请求号；同一轮有多条输入时，通过`output.related`和
 输出组`job_id`关联，不表示每段输出由某条输入独立产生。连接/恢复等生命周期事件不强行
@@ -142,8 +142,11 @@ endpoint、HTTP/curl状态和耗时。事件字段由固定白名单校验，正
 锁被占用或写盘失败时丢弃本条诊断，不等待、不阻断消息收发。`codex-wechat logs`
 默认展示结构化日志及轮转文件；`--service`才加入服务控制台输出，后者未脱敏，
 不是结构化日志。跟随模式按文件身份和读取位置追踪轮转，在备份保留范围内补读旧文件。
-默认保留命令处理、输出入队/开始/结果及网络计时，便于判断延迟所在阶段；poll、getconfig、
-sendtyping 成功和 typing 启停仅记 debug，故障仍可见。发送开始/完成不再重复写 stderr。
+默认保留命令处理、输出入队与结果及网络计时，便于判断延迟所在阶段；`output.send_start`、
+`wechat.send_ack`、poll、getconfig、sendtyping 成功以及 2 秒内完成的微信请求只记 debug，
+故障与慢请求仍在 info/warning。`output.sent` 带 `queue_wait_ms`，不再靠 send_start 才能拿到
+排队等待。每条记录都带桥的 `version` 与 `platform`；`bridge.start` 额外记一次
+`backend_version`（取自 app-server initialize 响应的 `userAgent`），用于区分 Codex 侧的版本。
 typing 的 getconfig/sendtyping 与输入处理并行，不等待网络完成再准备或提交消息。
 并发输入共用引用计数，最后一项结束时取消启动/保活任务，再尽力发送停止状态。
 typing ticket 缓存最多 600s，以单调时钟计时；到期或身份变化时，在下一次启动、保活或停止

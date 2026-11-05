@@ -18,6 +18,7 @@ class HotConfigContractTests(unittest.TestCase):
             "prompts": "prompts",
             "connectionIdleSeconds": "connection_idle_seconds",
             "sending": "sending",
+            "logs": "logs",
         }
         self.assertEqual(set(HOT_CONFIG_KEYS), set(key_fields))
         self.assertEqual({field for field in key_fields.values() if field},

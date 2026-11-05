@@ -146,6 +146,7 @@ class Bridge:
         self.ingress = Ingress(self)
         self.backend_session = BackendSession(self)
         self.note_reply_budget()
+        self.apply_log_keep()
 
     @property
     def slicing(self):
@@ -158,6 +159,9 @@ class Bridge:
     @property
     def source_hint(self):
         return self.settings.hot.source_hint
+
+    def apply_log_keep(self):
+        configure_diagnostics(backups=self.settings.hot.logs.keep)
 
     def reply_budget(self):
         """Replies one inbound message may spend before the bridge asks for more."""
@@ -201,6 +205,7 @@ class Bridge:
     def reload_config(self):
         changed = self.settings.reload(self.state)
         self.note_reply_budget()
+        self.apply_log_keep()
         set_idle = getattr(self.channel, "set_idle_seconds", None)
         if set_idle is not None:
             set_idle(self.settings.hot.connection_idle_seconds)
@@ -563,7 +568,9 @@ class Bridge:
                       self.external_result_worker, self.sender, self.maintain_backend)]
             tasks.extend(asyncio.create_task(self.control_worker(lane)) for lane in self.controls)
             log_event("bridge.start", component="bridge", backend=self.backend_name,
-                      connected=self.backend.connected)
+                      connected=self.backend.connected,
+                      backend_version=getattr(getattr(self.backend, "transport", None),
+                                              "server_version", ""))
             print("微信桥已启动；Ctrl+C 停止。", flush=True)
             show_log_path()
             await asyncio.gather(*tasks)

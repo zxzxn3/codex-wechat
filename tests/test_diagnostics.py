@@ -348,6 +348,10 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await client.request("ilink/bot/sendtyping")
             self.assertEqual(self.records(), [])
             await client.request("ilink/bot/sendmessage")
+        # A fast successful send is routine: output.sent already records the result.
+        self.assertEqual(self.records(), [])
+        with exchange(), patch("wechat.SLOW_REQUEST_SECONDS", 0):
+            await client.request("ilink/bot/sendmessage")
         self.assertEqual(self.records()[-1]["endpoint"], "ilink/bot/sendmessage")
         self.assertEqual(self.records()[-1]["level"], "info")
         with exchange(b'{"ret":-2,"errmsg":"prepare failed"}\n200'):

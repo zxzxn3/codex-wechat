@@ -28,13 +28,13 @@ class SendingConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Sending.from_config({"replyBudget": 3, "nope": 1})
 
-    def test_log_retention_is_configured_with_a_floor_and_no_ceiling(self):
+    def test_log_retention_is_configured_with_a_floor_and_a_ceiling(self):
         from configuration import log_keep
         self.assertEqual(log_keep(None), 3)
         self.assertEqual(log_keep({}), 3)
         self.assertEqual(log_keep({"keep": 1}), 1)
-        self.assertEqual(log_keep({"keep": 500}), 500)
-        for value in (0, -1, True, "3", 2.5):
+        self.assertEqual(log_keep({"keep": 100}), 100)
+        for value in (0, -1, 101, True, "3", 2.5):
             with self.assertRaises(ValueError):
                 log_keep({"keep": value})
         with self.assertRaises(ValueError):
