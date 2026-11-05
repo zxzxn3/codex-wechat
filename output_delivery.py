@@ -111,10 +111,6 @@ class OutputDelivery:
         origin = origin or bridge.media_origin()
         return await asyncio.to_thread(bridge.media.snapshot, path, origin["cwd"], kind)
 
-    async def queue_file(self, path, kind="auto", *, origin=None):
-        asset = await self.prepare_asset(path, kind, origin=origin)
-        self.queue_asset(asset, origin=origin)
-
     async def deliver_answer(self, answer, *, finish_running=True, cwd=None,
                              notify_completion=False, source=None, require_current=False,
                              request_id=None):

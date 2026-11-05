@@ -281,10 +281,17 @@ switch ($Command) {
             $hostState = '{"installed":false,"owned":false,"running":false,"state":"not-installed"}'
         }
         # Pass through the environment: PowerShell strips the quotes out of a
-        # JSON string handed to a native command.
-        $env:CODEX_WECHAT_HOST_STATE = $hostState
-        & $VenvPython -u $Agent status --state-dir $StateDir --config $ConfigPath
-        exit $LASTEXITCODE
+        # JSON string handed to a native command. Restore it afterwards because
+        # this script runs in the caller's process.
+        $previousHostState = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_HOST_STATE', 'Process')
+        try {
+            $env:CODEX_WECHAT_HOST_STATE = $hostState
+            & $VenvPython -u $Agent status --state-dir $StateDir --config $ConfigPath
+            $statusExit = $LASTEXITCODE
+        } finally {
+            [Environment]::SetEnvironmentVariable('CODEX_WECHAT_HOST_STATE', $previousHostState, 'Process')
+        }
+        exit $statusExit
     }
     'service-start' {
         # -TaskOnly is the internal entry point: the Python CLI has already run

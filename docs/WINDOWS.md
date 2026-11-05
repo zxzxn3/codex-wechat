@@ -123,8 +123,8 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   2026-11-05 实测未绑定分支（把 `account.json` 移走，两边都出码后直接 Ctrl+C，不扫码）：
   `codex-wechat start` → 「尚未绑定微信，请在当前终端扫码；绑定后会继续启动。」+ 二维码四行
   + 二维码 + URL；`codex-wechat service-start` → **同样出码**，但**没有**那第一行。
-  仅此一行差异：`start` 经 `startup_account()`（`codex_wechat.py:726`），而 ps1 的
-  `service-start` 直接调 `login --starting`（`codex-wechat.ps1:282`）。两者都进入扫码闸门，且都**没有**出现前台的
+  仅此一行差异：`start` 经 `startup_account()`（`codex_wechat.py:729`），而 ps1 的
+  `service-start` 直接调 `login --starting`（`codex-wechat.ps1:310`）。两者都进入扫码闸门，且都**没有**出现前台的
   「微信桥已启动；Ctrl+C 停止。」——修复前 `service-start` 在这里会直接失败退出、不出码。
   已绑定分支（启动服务并输出「后台服务已启动；终端可以关闭。」+ 日志路径）当天多次
   `service-start` 已确认；扫码成功后的文案来自共用代码
@@ -275,7 +275,7 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 helper 的 `finally` 会先删掉该目录，`Popen` 随后报 `WinError 267`。生产路径中 `cwd` 是后端
 工作目录、环境文件在 `%TEMP%\codex-wechat-wmi-*`，两者不会重合。
 
-**预测：清单第 3 项的"15 秒内失败"当前不满足。** `codex-wechat.ps1:260` 用
+**预测：清单第 3 项的"15 秒内失败"当前不满足。** `codex-wechat.ps1:296` 用
 `Wait-TaskRunning` 判断成败，而任务状态在进程刚拉起时就已是 `Running`；若前台仍持有状态锁，
 supervisor 内部的 `start` 在 `startup_store()` 处拿到 `RuntimeError`（`storage.py:49`）后退出，
 ps1 却已经打印「后台服务已启动」并 `exit 0`。Linux 有 `service_adapter.start()` 的 10 秒事后
@@ -286,7 +286,7 @@ ps1 却已经打印「后台服务已启动」并 `exit 0`。Linux 有 `service_
 helper 的 `finally` 会先删掉该目录，`Popen` 随后报 `WinError 267`。生产路径中 `cwd` 是后端
 工作目录、环境文件在 `%TEMP%\codex-wechat-wmi-*`，两者不会重合。
 
-**预测：清单第 3 项的"15 秒内失败"当前不满足。** `codex-wechat.ps1:260` 用
+**预测：清单第 3 项的"15 秒内失败"当前不满足。** `codex-wechat.ps1:296` 用
 `Wait-TaskRunning` 判断成败，而任务状态在进程刚拉起时就已是 `Running`；若前台仍持有状态锁，
 supervisor 内部的 `start` 在 `startup_store()` 处拿到 `RuntimeError`（`storage.py:49`）后退出，
 ps1 却已经打印「后台服务已启动」并 `exit 0`。Linux 有 `service_adapter.start()` 的 10 秒事后
@@ -333,6 +333,11 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
   读不到入口，表现为"装好了但服务什么都不写"——`installer.check_user_access()` 就是为这个写的。
 
 唯一的例外是 `uninstall.ps1`：它不在闸门内，因为清理一个历史上由管理员注册的任务确实需要提权。
+
+注意这条闸门也盖住了服务自己的子进程：supervisor 拉起来的是 `codex_wechat.py start`
+（`windows_service.py:270`），所以万一某个任务被注册成 `RunLevel Highest`，桥会拒绝启动并把
+「请以普通用户身份运行…」写进 `service.log`。正常注册用的是 `RunLevel Limited`，令牌是过滤过的，
+`IsUserAnAdmin()` 返回 False，不会误伤。
 
 ## 命令入口：`~/.local/bin/codex-wechat.cmd`
 

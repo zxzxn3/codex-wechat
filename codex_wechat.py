@@ -376,9 +376,6 @@ class Bridge:
         return self.output.asset_entry(asset, group=group, context=context, source=source,
                                        request_id=request_id)
 
-    async def queue_file(self, path, kind="auto", *, origin=None):
-        return await self.output.queue_file(path, kind, origin=origin)
-
     async def prepare_asset(self, path, kind="auto", *, origin=None):
         return await self.output.prepare_asset(path, kind, origin=origin)
 

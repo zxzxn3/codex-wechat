@@ -53,9 +53,9 @@ Windows 上提权运行会被硬拒绝：`codex_wechat.py` 与 `installer.py` �
 | `update` / `install` / `menu` / `components` | ✅ | ✅ | 对称，均转发同一个 `installer.py` |
 | `cli` | ✅ `codex-wechat cli` | ❌ 只能 `codex-desktop.ps1` | **待定，见下节**（默认配置下与直接跑 `codex` 等价） |
 | `desktop` | ✅ `codex-wechat desktop` | ❌ 只能 `codex-desktop.ps1` | **建议删除**：无独立语义，见下节 |
-| `status -Json` | ❌ | ✅ | 可合并 |
+| `status -Json` | ❌ | ❌ | 两个平台都拒绝：`status` 本来就输出 JSON，`-Json` 只对 `autostart` / `service-status` 有效 |
 
-Python 层接受的动作只有六个加两个服务词（`codex_wechat.py:840`）：
+Python 层接受的动作只有六个加两个服务词（`codex_wechat.py:892`）：
 
 ```
 login  start  stop  status  rebind  logs  service-start  service-restart
@@ -68,8 +68,8 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 
 | 缺的词 | 底层已有的实现 |
 |---|---|
-| `service-stop` | `service_adapter.stop_and_wait()`（`service_adapter.py:87`），Linux 分支已用 `systemctl --no-block stop` |
-| `service-status` | `service_adapter.status()`（`service_adapter.py:52`），Linux 分支已用 `systemctl show --property=LoadState/ActiveState/FragmentPath` 并校验 `FragmentPath` 属于本安装目录 |
+| `service-stop` | `service_adapter.stop_and_wait()`（`service_adapter.py:103`），Linux 分支已用 `systemctl --no-block stop` |
+| `service-status` | `service_adapter.status()`（`service_adapter.py:75`），Linux 分支已用 `systemctl show --property=LoadState/ActiveState/FragmentPath` 并校验 `FragmentPath` 属于本安装目录 |
 | `autostart on\|off` | `autostart.set_enabled()`，Linux 分支已用 `systemctl enable/disable <UNIT>` 并回读确认 |
 
 `uninstall` 没有对应实现：`uninstall.ps1` 是纯 PowerShell，Linux 侧需要新写
@@ -84,7 +84,7 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 | 必须交互终端 | ✅ `codex_wechat.require_login_allowed()` | ✅ 同一处（ps1 另有一道前置检查） |
 | 后台服务必须已停 | ✅ 同上 | ✅ 同上 |
 
-这两道检查原先只写在 `codex-wechat.ps1:216` 的 `login` 分支里，Linux 的 `codex-wechat login` 会直接
+这两道检查原先只写在 `codex-wechat.ps1` 的 `login` 分支里，Linux 的 `codex-wechat login` 会直接
 进入 `wechat._login()`（`wechat.py:214`），没有任何守卫。现在统一下沉到 Python 层，写法对齐
 `rebind.py:51`；`start` / `service-start` 内部的自动登录不经过这道闸门，因此未绑定时仍能弹二维码。
 
@@ -92,9 +92,9 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 
 | | Linux | Windows |
 |---|---|---|
-| 后台在运行时执行 `start` | 无前置检查 | `codex-wechat.ps1:236` 预检计划任务，立即拒绝 |
+| 后台在运行时执行 `start` | 无前置检查 | `codex-wechat.ps1:256` 预检计划任务，立即拒绝 |
 | 前台在运行时执行 `service-start` | 无前置检查 | **无前置检查** |
-| 冲突时的实际结果 | `startup_store()`（`codex_wechat.py:689`）等待状态锁最多 30 秒后报错 | 服务进程立即失败退出 |
+| 冲突时的实际结果 | `startup_store()`（`codex_wechat.py:692`）等待状态锁最多 30 秒后报错 | 服务进程立即失败退出 |
 
 `startup_store()` 的等待分支只在 `action == "start"` 且非 Windows 时生效，因此两个平台的兜底行为不同。
 要不要给 Linux 也加一道"后台 unit 在跑就拒绝"的前置检查（对称于 ps1 的预检），由 Linux 侧决定；
@@ -104,19 +104,19 @@ Windows 那道预检在 ps1 里，Python 层没有对应实现，所以"统一"�
 
 | | Linux | Windows |
 |---|---|---|
-| 起点 | `codex_wechat.py:835` 的 `start_background_service()` | `codex-wechat.ps1:279` 的 `service-start` 分支 |
-| 启动 | `systemctl start`（`service_adapter.start()`，`service_adapter.py:106`） | `Start-ScheduledTask` |
-| 事后校验 | 轮询 `status()` 最多 10 秒，超时抛「未能确认运行状态」 | `Wait-ServiceStable`（`codex-wechat.ps1:201`）要求 Running **持续 2 秒**；失败报「后台服务启动后立即退出（state=… last_result=…）」并 `exit 1` |
+| 起点 | `codex_wechat.py:867` 的 `start_background_service()` | `codex-wechat.ps1:296` 的 `service-start` 分支 |
+| 启动 | `systemctl start`（`service_adapter.start()`，`service_adapter.py:122`） | `Start-ScheduledTask` |
+| 事后校验 | 轮询 `status()` 最多 10 秒，超时抛「未能确认运行状态」 | `Wait-ServiceStable`（`codex-wechat.ps1:202`）要求 Running **持续 2 秒**；失败报「后台服务启动后立即退出（state=… last_result=…）」并 `exit 1` |
 | 额外兜底 | — | Python 的 `service_adapter.start()` 在 Windows 上回调 ps1 的 `service-start`，因此前面那道校验之后还会再轮询 `status()` 10 秒 |
 
-修复前 Windows 只看 `Wait-TaskRunning`（`codex-wechat.ps1:196`，已删除），而任务状态在进程刚拉起时
+修复前 Windows 只看 `Wait-TaskRunning`（已删除），而任务状态在进程刚拉起时
 就是 Running，所以"起来后立刻退出"会被当成成功；见待修问题 1。
 
 ### 版本号校验（2026-11-05 起三处一致）
 
 | 文件 | 校验 |
 |---|---|
-| `codex-wechat.ps1:81` | `^[a-f0-9]{16}$` |
+| `codex-wechat.ps1:82` | `^[a-f0-9]{16}$` |
 | `codex-desktop.ps1:15` | `^[a-f0-9]{16}$` |
 | `bootstrap_supervisor.py` 的 `active_release()` | `RELEASE_ID.fullmatch()`，同一个 16 位十六进制 |
 
@@ -163,7 +163,7 @@ return subprocess.call(command, env=env)               # 终端交给 TUI
 desktop) shift; exec "$INSTALL_ROOT/codex-desktop" "$@" ;;
 ```
 
-而 `desktop.py` 的动作只有 `cli` / `ensure` / `setup`（`desktop.py:105`）。所以
+而 `desktop.py` 的动作只有 `cli` / `ensure` / `setup`（`desktop.py:106`）。所以
 `codex-wechat desktop setup` ≡ `codex-desktop setup`，`codex-wechat desktop` 单独跑则直接
 argparse 报"缺少 action"。名字还误导：它听起来像"启动桌面 App"，但 App 启动入口是**刻意**
 移除的（README 第 140 行"项目不再提供 App 启动命令或桌面入口覆盖"，WINDOWS.md 同款说明）。
@@ -194,7 +194,7 @@ argparse 报"缺少 action"。名字还误导：它听起来像"启动桌面 App
 3. ps1 已经打印成功并 `exit 0`，任务状态早已回到 Ready。
 
 Linux 不受影响：`start_background_service()` 在 `service_adapter.start()` 之后会轮询 `status()`，
-失败时抛「后台服务启动请求已提交，但未能确认运行状态」（`service_adapter.py:106`）。
+失败时抛「后台服务启动请求已提交，但未能确认运行状态」（`service_adapter.py:122`）。
 
 **实机复现（修复前）**：把 `config.json` 改成 `{"backends":{"broken":{"label":"broken"}}}` 后
 `codex-wechat service-start` → 4.8 秒打印「后台服务已启动；终端可以关闭。」、`exit 0`；
@@ -217,21 +217,21 @@ Linux 不受影响：`start_background_service()` 在 `service_adapter.start()` 
 
 两个入口都能进入扫码闸门（2026-11-05 实测），但 `start` 会多打印一行
 「尚未绑定微信，请在当前终端扫码；绑定后会继续启动。」：它走 `startup_account()`
-（`codex_wechat.py:726`），而 Windows 的 `service-start` 直接调 `login --starting`
-（`codex-wechat.ps1:287`）。
+（`codex_wechat.py:729`），而 Windows 的 `service-start` 直接调 `login --starting`
+（`codex-wechat.ps1:309`）。
 
 现在 ps1 的 `service-start` 在调用 `login --starting` 之前打印同一句
-（`codex-wechat.ps1:287`），文案由 `tests/test_windows_service.py` 钉住。
+（`codex-wechat.ps1:309`），文案由 `tests/test_windows_service.py` 钉住。
 
 没有选"让 ps1 走 Python 的 `start_background_service()`"：`service_adapter.start()`
-在 Windows 上本来就是回调 ps1 的 `service-start`（`service_adapter.py:114`），
+在 Windows 上本来就是回调 ps1 的 `service-start`（`service_adapter.py:129`），
 直接委托会形成 ps1 → Python → ps1 的循环，必须先给 ps1 加一个"只启动不校验绑定"的内部开关。
 那件事与"命令面统一"是同一件工作，留到那时一起做。代价是这句话现在有两处副本，
 改文案要同时改 `prompts.py` 与 ps1。
 
 ### 2. ~~`login` 缺少 Python 层守卫~~ 已修复（2026-11-05）
 
-原先只有 `codex-wechat.ps1:216` 检查"交互终端 + 后台服务已停"，Linux 上可以：
+原先只有 `codex-wechat.ps1` 的 `login` 分支检查"交互终端 + 后台服务已停"，Linux 上可以：
 
 - 在后台服务运行时执行 `codex-wechat login`，覆盖 `account.json`，而正在运行的桥仍持有旧 token；
 - 在非 TTY 环境下执行，二维码被打印进管道。
@@ -254,11 +254,11 @@ service-start    exit=78  尚未注册后台服务，请重新运行安装器。
 service-restart  exit=78  尚未注册后台服务，请重新运行安装器。
 ```
 
-### `status -Json` 与 `service` 段（2026-11-05 起两个平台同一份 JSON）
+### `status` 的输出与 `service` 段（2026-11-05 起两个平台同一份 JSON）
 
-`codex-wechat status` 输出**一份** JSON：`bound / auth / available / rebind_required / thread /
-backend / unfinished_at_last_save / queued / unsent`，加上 2026-11-05 新增的 `service` 段——
-也就是"跑桥的那个宿主"现在的状态。
+`codex-wechat status` 在两个平台都**直接输出一份 JSON**（所以 `-Json` 是多余的，两边都会拒绝）。
+内容：`bound / auth / available / rebind_required / thread / backend / unfinished_at_last_save /
+queued / unsent`，加上 2026-11-05 新增的 `service` 段——也就是"跑桥的那个宿主"现在的状态。
 
 | 字段 | Windows（计划任务） | Linux（systemd --user unit） |
 |---|---|---|
