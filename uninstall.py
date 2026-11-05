@@ -1,4 +1,4 @@
-"""Remove the installed launcher and service, preserving user data by default."""
+"""Linux stable uninstall helper; Windows uses uninstall.ps1."""
 import asyncio
 import os
 from pathlib import Path
@@ -6,12 +6,11 @@ import shutil
 import sys
 
 import service_adapter
-from platform_support import INSTALL_ROOT, IS_WINDOWS, data_root, subprocess_options
+from platform_support import INSTALL_ROOT, IS_WINDOWS, data_root
 from service_control import UNIT, systemctl
 from storage import Store
 
 LINUX_DATA_PATHS = ("config.json", ".state", "workspace", "logs", "shared")
-UNINSTALL_TIMEOUT_SECONDS = 60
 
 
 def _command_link() -> Path:
@@ -30,50 +29,6 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path)
     elif path.exists():
         path.unlink()
-
-
-async def _windows_uninstall(purge: bool) -> None:
-    try:
-        current = await service_adapter.status()
-    except FileNotFoundError:
-        # No native service manager is available; the stable uninstaller can
-        # still remove a task/shim after the foreground-lock check below.
-        current = None
-    except (OSError, RuntimeError) as error:
-        raise RuntimeError(f"无法确认后台服务状态，拒绝卸载: {error}") from error
-    if current is not None and current.installed and current.running:
-        await service_adapter.stop_and_wait()
-    _require_no_bridge()
-    script = INSTALL_ROOT / "uninstall.ps1"
-    if not script.is_file():
-        raise RuntimeError("找不到 Windows 卸载组件，请重新运行安装器。")
-    command = [
-        "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
-        "-ExecutionPolicy", "Bypass", "-File", str(script),
-        "-DataRoot", str(data_root()),
-    ]
-    if purge:
-        command.append("-PurgeData")
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        **subprocess_options(),
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=UNINSTALL_TIMEOUT_SECONDS)
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        raise RuntimeError("Windows 卸载组件超时。") from None
-    if stdout:
-        print(stdout.decode("utf-8", "replace").rstrip())
-    if stderr:
-        print(stderr.decode("utf-8", "replace").rstrip(), file=sys.stderr)
-    if process.returncode:
-        raise RuntimeError("Windows 卸载未完成。")
 
 
 async def _linux_service_removal() -> None:
@@ -164,8 +119,7 @@ def _require_no_bridge() -> None:
 
 async def uninstall(*, purge: bool = False) -> None:
     if IS_WINDOWS:
-        await _windows_uninstall(purge)
-        return
+        raise RuntimeError("Windows 卸载请使用 stable uninstall.ps1；uninstall.py 仅用于 Linux。")
     await _linux_service_removal()
     _require_no_bridge()
     _linux_command_removal()

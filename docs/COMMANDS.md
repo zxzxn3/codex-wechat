@@ -73,6 +73,8 @@ Windows 自定义数据目录由 `CODEX_WECHAT_DATA_ROOT`（或原生 helper 的
 Linux 的 stable `codex-wechat` 和 Windows 的 `codex-wechat.ps1` 在读取 `current` 之前
 直接分派 `uninstall` 到稳定卸载组件。这样 `current` 缺失、损坏或活动 release 不完整时，
 仍能移除服务和命令入口，而不是先因为版本指针错误而无法卸载。
+其中 Linux stable `uninstall.py` 仅处理 Linux；Windows stable `uninstall.ps1` 仅处理 Windows。
+`codex_wechat.py` 不再提供 `uninstall` action，因此不存在给普通用户使用的 Python 次级卸载路径。
 
 服务未安装时，`autostart` 查询统一返回 `false` 并退出 0；只有同名服务/任务属于另一个
 安装目录时才报错。

@@ -12,7 +12,7 @@
 - 卸载必须能从稳定入口执行，不依赖 `current` 的完整性；`current` 损坏时仍应能移除服务、命令入口和可选用户数据。
 - purge 只删除已知用户数据项，不递归删除用户提供的自定义数据根目录；前台桥接持锁时 fail-closed。
 - Windows 自定义数据目录通过 `-DataRoot`/`CODEX_WECHAT_DATA_ROOT` 传递，卸载不得静默回落到默认目录。
-- 用户只通过公开入口卸载；`uninstall.py`/`uninstall.ps1` 是内部稳定组件。次级 Python 卸载路径是否保留仍待讨论，见 [PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md)。
+- 用户只通过公开入口卸载；Linux 使用 stable `uninstall.py`，Windows 使用 stable `uninstall.ps1`。已删除 `codex_wechat.py uninstall` 次级路径，避免两套锁、超时和数据目录语义漂移。
 - 保留 `cli`；Windows 暂不增加薄转发，继续使用 `codex-desktop.ps1 cli`。`cli` 的真实价值主要在 `websocketUrl` 模式。
 - 删除 `codex-wechat desktop` 别名；保留 `codex-desktop` 本身。
 - `start` / `service-start` 的前置互斥检查下沉到共享 Python 层。

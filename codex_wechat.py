@@ -51,7 +51,6 @@ from platform_support import IS_WINDOWS, data_root, is_elevated, root_override_e
 from diagnostics import error_fields, log_event, log_path, new_request_id
 from log_viewer import show_logs
 from prompts import (render_ack, status_fields, duration_label)
-from uninstall import uninstall as uninstall_command
 
 ROOT = Path(__file__).resolve().parent
 SERVICE_CHILD_ENV = "CODEX_WECHAT_SERVICE_CHILD"
@@ -919,7 +918,7 @@ async def manage_autostart(value):
 
 def require_regular_user(action):
     if (is_elevated() and not root_override_enabled()
-            and action not in {"status", "logs", "uninstall"}):
+            and action not in {"status", "logs"}):
         raise ConfigurationError("请以普通用户身份运行，不要使用管理员终端。")
 
 
@@ -927,7 +926,7 @@ async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", nargs="?", default="status", choices=(
         "login", "start", "stop", "status", "rebind", "logs", "service-start",
-        "service-restart", "autostart", "uninstall"))
+        "service-restart", "autostart"))
     parser.add_argument("value", nargs="?", choices=("true", "false"))
     parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
@@ -935,7 +934,6 @@ async def main():
     parser.add_argument("--follow", action="store_true")
     parser.add_argument("--service", action="store_true",
                         help="同时查看未脱敏的 supervisor/service.log")
-    parser.add_argument("--purge-data", action="store_true")
     parser.add_argument("--starting", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     require_regular_user(args.action)
@@ -949,8 +947,6 @@ async def main():
         parser.error("--starting 只能与 login 一起使用")
     if args.value is not None and args.action != "autostart":
         parser.error("true|false 只能与 autostart 一起使用")
-    if args.purge_data and args.action != "uninstall":
-        parser.error("--purge-data 只能与 uninstall 一起使用")
     os.umask(0o077)
     if args.action == "logs":
         show_logs(args.follow, args.service)
@@ -966,9 +962,6 @@ async def main():
         return
     if args.action == "autostart":
         await manage_autostart(args.value)
-        return
-    if args.action == "uninstall":
-        await uninstall_command(purge=args.purge_data)
         return
     if args.action == "rebind":
         await run_rebind(

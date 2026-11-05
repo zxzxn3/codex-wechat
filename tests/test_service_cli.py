@@ -196,17 +196,11 @@ class CommandRoutingTests(unittest.IsolatedAsyncioTestCase):
             await codex_wechat.main()
         manage.assert_awaited_once_with("true")
 
-    async def test_uninstall_purge_is_routed_before_the_bridge_lock(self):
-        action = AsyncMock()
-        startup_store = AsyncMock()
-        with patch.object(sys, "argv", ["codex_wechat.py", "uninstall", "--purge-data"]), \
-                patch.object(codex_wechat.os, "umask"), \
-                patch.object(codex_wechat, "uninstall_command", action), \
-                patch.object(codex_wechat, "startup_store", startup_store):
-            await codex_wechat.main()
-        action.assert_awaited_once_with(purge=True)
-        startup_store.assert_not_awaited()
-
+    async def test_uninstall_is_not_a_python_router_action(self):
+        with patch.object(sys, "argv", ["codex_wechat.py", "uninstall"]), \
+                patch.object(codex_wechat.os, "umask"):
+            with self.assertRaises(SystemExit):
+                await codex_wechat.main()
 
 class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
     """`status` reports the host that runs the bridge, not just saved state."""

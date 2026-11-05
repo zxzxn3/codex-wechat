@@ -1,7 +1,6 @@
 """Uninstall keeps data by default and only purges explicit user state."""
 from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -94,37 +93,7 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "无法确认后台服务状态"):
                 await uninstall._linux_service_removal()
 
-
-class WindowsUninstallTests(unittest.IsolatedAsyncioTestCase):
-    async def test_purge_is_forwarded_to_the_powershell_helper(self):
-        class Process:
-            returncode = 0
-
-            async def communicate(self):
-                return b"", b""
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "uninstall.ps1").write_text("", encoding="utf-8")
-            spawn = AsyncMock(return_value=Process())
-            with patch.object(uninstall, "IS_WINDOWS", True), \
-                    patch.object(uninstall, "INSTALL_ROOT", root), \
-                    patch.object(uninstall, "_require_no_bridge"), \
-                    patch.object(uninstall.service_adapter, "status",
-                                 AsyncMock(return_value=SimpleNamespace(
-                                     installed=False, running=False))), \
-                    patch.object(uninstall, "data_root", return_value=root), \
-                    patch.object(uninstall.asyncio, "create_subprocess_exec", spawn):
-                await uninstall.uninstall(purge=True)
-        command = spawn.call_args.args
-        self.assertIn("-PurgeData", command)
-        self.assertIn("-DataRoot", command)
-        self.assertIn(str(root), command)
-        self.assertIn(str(root / "uninstall.ps1"), command)
-
-    async def test_windows_uninstall_refuses_unknown_service_state(self):
-        with patch.object(uninstall, "IS_WINDOWS", True), \
-                patch.object(uninstall.service_adapter, "status",
-                             AsyncMock(side_effect=OSError("unreadable"))):
-            with self.assertRaisesRegex(RuntimeError, "无法确认后台服务状态"):
-                await uninstall._windows_uninstall(purge=True)
+    async def test_windows_path_is_not_handled_by_the_linux_helper(self):
+        with patch.object(uninstall, "IS_WINDOWS", True):
+            with self.assertRaisesRegex(RuntimeError, "uninstall.ps1"):
+                await uninstall.uninstall()

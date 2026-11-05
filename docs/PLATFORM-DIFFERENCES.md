@@ -45,19 +45,19 @@ Windows `.cmd` 未生成时，使用完整 stable 入口：
 & "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" uninstall
 ```
 
-`uninstall.py` 和 `uninstall.ps1` 是稳定卸载组件，属于内部入口；正常用户不应直接调用。
-它们绕过公开入口对平台参数、数据目录和稳定分发约定的一部分处理。只有在维护者排查损坏入口时，
-才应直接调用。
+`uninstall.py` 是 Linux 稳定卸载组件，`uninstall.ps1` 是 Windows 稳定卸载组件，二者都属于
+内部入口；正常用户不应直接调用。它们绕过公开入口对平台参数、数据目录和稳定分发约定的一部分
+处理。只有在维护者排查损坏入口时，才应直接调用。
 
 Windows 公开入口在读取 `current` 之前直接调用 `uninstall.ps1`；Linux 公开入口在读取
 `current` 之前直接调用 stable `uninstall.py`。这是为了保证 `current` 损坏时仍能卸载。
 
-## 待讨论
+## 已移除
 
-`codex_wechat.py uninstall` 在代码层面两边都能运行：Linux 走 `uninstall.py` 的 Linux 分支，
-Windows 走 `uninstall.py` 的 Windows 分支并调用 `uninstall.ps1`。但当前两个公开入口都绕过它，
-因此它不是正常的用户路径。是否删除这条次级路径、或将其提升为正式接口，尚未决定；在决定前
-不要把它写进用户契约，也不要在公开入口之外新增依赖。
+`codex_wechat.py` 不再提供 `uninstall` action。Linux 只保留 stable `uninstall.py`，
+Windows 只保留 stable `uninstall.ps1`；不再维护“Python 公共 router 调 PowerShell”的次级
+卸载路径。这样卸载行为只有一个公开入口和一个平台 stable helper，避免两套锁、超时和数据目录
+语义再次漂移。
 
 ## 已对齐
 

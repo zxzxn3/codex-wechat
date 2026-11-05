@@ -114,7 +114,8 @@ Token优先原生事件，缺失时只读当前Thread.path的有界尾部，按�
 `service-start` 在前台锁存在时拒绝。
 `uninstall` 默认只移除服务和入口，显式 purge 才删除用户数据。稳定入口在读取 `current`
 之前分派卸载，因此损坏的 `current` 或缺失的活动 release 不会阻止卸载；Linux 使用稳定目录中
-的 `uninstall.py` 及其运行时依赖，Windows 使用稳定的 `uninstall.ps1`。purge 只删除
+的 `uninstall.py` 及其运行时依赖（仅 Linux），Windows 使用稳定的 `uninstall.ps1`；两者之外
+没有 `codex_wechat.py uninstall` 次级路径。purge 只删除
 `config.json`、`.state`、`workspace`、`logs`、`shared`，不递归删除自定义数据根目录；
 前台桥接仍持有状态锁时拒绝继续。旧版本按自己的文件清单核对，不能用新打包规则重新定义旧版本。
 候选连接能力和本地导入在激活前检查；dry-run不执行环境副作用。
