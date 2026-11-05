@@ -106,10 +106,15 @@ Token优先原生事件，缺失时只读当前Thread.path的有界尾部，按�
 
 安装遵守用户INSTALLERS约定：准备阶段独立，激活集中；保留数据、自启状态，安装不初始化
 账户、不重启业务、不提供回滚。Windows 安装/更新注册计划任务，Linux 在 systemd 用户会话
-可用时注册 unit（link），但不 enable 或 start；不可用时明确跳过。`autostart` 只控制登录
-触发器，不停止当前进程也不启动服务；`service-start` 只启动已注册的服务，服务已在运行时
-直接返回；`service-restart` 请求重启已注册的服务。旧版本按自己的文件清单核对，不能用新打包规则
-重新定义旧版本。候选连接能力和本地导入在激活前检查；dry-run不执行环境副作用。
+可用时注册 unit（link），但不 enable 或 start；不可用时明确跳过。公开入口只有
+`codex-wechat` / Windows `.cmd`，二者最终进入 `codex_wechat.py`；Windows 原生任务操作
+集中在内部 `windows/task-service.ps1`。`autostart` 只控制登录触发器，不停止当前进程也不
+启动服务；`service-start` 只启动已注册的服务，服务已在运行时直接返回；`service-restart`
+请求重启已注册的服务。`start` 在后台服务运行时拒绝，`service-start` 在前台锁存在时拒绝。
+`uninstall` 默认只移除服务和入口，显式 purge 才删除用户数据。旧版本按自己的文件清单核对，
+不能用新打包规则重新定义旧版本。候选连接能力和本地导入在激活前检查；dry-run不执行环境副作用。
+服务启动的桥接子进程由 systemd unit 或 Windows supervisor 设置
+`CODEX_WECHAT_SERVICE_CHILD=1`，因此不会被用户前台 `start` 的互斥检查误伤。
 
 ## 诊断与隐私
 

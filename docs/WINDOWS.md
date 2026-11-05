@@ -4,6 +4,22 @@
 codex.exe 均可发现；显式 command 始终优先，不把 .cmd/.bat 当原生 exe 自动执行。
 App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径。也可显式配置完整命令数组。
 
+## 本轮命令入口重构：待实机验收
+
+以下项目只能在 Windows 上确认，不能由 Linux mock 或静态检查代替：
+
+- [ ] `codex-wechat.cmd` → 薄 `codex-wechat.ps1` → `codex_wechat.py` 的完整链路；
+  `start`、`stop`、`status`、`service-start`、`service-restart`、`autostart`、
+  `autostart true|false`、`uninstall`、`uninstall -PurgeData` 各跑一次。
+- [ ] 后台服务运行时 `start` 被拒绝；前台桥接持锁时 `service-start` 被拒绝。
+- [ ] 内部 `windows/task-service.ps1` 的 `start` 只在任务持续 Running 2 秒后成功，
+  Queued 不再被当成稳定运行；失败输出仍带日志路径。
+- [ ] 管理员终端下写操作被拒绝；`status`、`logs`、`uninstall` 仍可执行；
+  `codex-desktop.ps1 cli` 也拒绝管理员终端。
+- [ ] `uninstall` 默认保留 `%LOCALAPPDATA%\codex-wechat`；`-PurgeData` 才停止共享后台并删除
+  配置、登录、待办、工作目录和日志；`.cmd` 只删除本项目的 shim。
+- [ ] 新 `.cmd`/入口在含空格和非 ASCII 的用户路径下仍能正确转发参数。
+
 ## 命名管道存在性判断（2026-11-05 三种状态已实测）
 
 这一项曾标为最优先的未验证假设：`CodexBackend.app_available()` 用
@@ -66,7 +82,8 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 由此：
 
 - 上面第 1 种状态（无 App 时不得误报）**已满足**：没有 App 时返回 `False`。
-- 存在性判断不再因"忙"而误判，但第 2、3 种状态（真实 App 的 `/switch` 与空闲后接管）仍需实机。
+- 存在性判断不再因"忙"而误判；第 2、3 种状态（真实 App 的 `/switch` 与空闲后接管）已在
+  2026-11-05 实机闭环，见下文时间线。
 - 不要改用 `os.path.exists()`：它对忙管道恒 `False`，比 `Path.exists()` 更差。
 - 若将来要更彻底，可换成有界连接；代价是空闲时每 5 秒一次建连。
 
@@ -104,7 +121,7 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 再叠加 5 秒轮询。当前行为与"释放是延迟的"这条描述一致，未修改；若希望 `/switch` 之后跟得更快，
 可以让前几次失败按 5–10 秒重试。
 
-**第 1 种状态仍未测**：需要先关闭 App 再启动桥接，确认不会出现 `app_ipc.connected`。
+第 1 种状态也已实机通过：先关闭 App 再启动桥接，不出现 `app_ipc.connected`。
 
 ## 本轮修复后的 Windows 验证
 
@@ -258,40 +275,13 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 实测：恢复后启动服务，排队中的「已恢复会话」与随后 `/status` 的回复都在同一条微信消息到达后
 两次请求内成功发出（`wechat.request ok=true` ×2），`outbox` 归零，全程没有重启桥接或重扫。
 
-### 2026-11-05 复核：状态说明与剩余依据
+历史轮次中记录的 `Wait-TaskRunning` 假成功问题已经由 `Wait-ServiceStable` 取代；当前实现
+位于内部 `windows/task-service.ps1`，详见 [COMMANDS](COMMANDS.md)。旧款逐步排查记录不再
+作为当前状态依据。
 
-同一台机器上的复核（行为基线以 `main` @ `45d979c` 起为准）。上面 12 项里 **8 项已确认并勾选**
-（`active-release` 只读不改、同名任务不误报、真实 App 的空闲 follower、服务命令的失败可见性、
-运行时 release 不被清理、断开/重开 App 的受控失败、后台运行时 `rebind`、扫码准入一致），
-其余 4 项仍未验证，其中 1 项被私有仓库阻塞、1 项在本机无法复现。已确认项的判据写在对应条目下；
-未勾选的复选框一律代表"尚未验证"，不代表已通过。
-
-
-`release.py` 的下载前提已满足：`bootstrap.ps1:49-53` 与 `bootstrap.sh:43-44` 都下载
-`installer.py` 和 `release.py`，`ModuleNotFoundError: release` 不会再出现。但这不足以勾选第 1 项——
-入口本身在私有仓库下取不到文件（见该条备注）。
-
-另外记录 `wmi_launch.py` 的一个边界（不是缺陷）：若 `--cwd` 恰好等于环境文件所在目录，
-helper 的 `finally` 会先删掉该目录，`Popen` 随后报 `WinError 267`。生产路径中 `cwd` 是后端
-工作目录、环境文件在 `%TEMP%\codex-wechat-wmi-*`，两者不会重合。
-
-**预测：清单第 3 项的"15 秒内失败"当前不满足。** `codex-wechat.ps1:296` 用
-`Wait-TaskRunning` 判断成败，而任务状态在进程刚拉起时就已是 `Running`；若前台仍持有状态锁，
-supervisor 内部的 `start` 在 `startup_store()` 处拿到 `RuntimeError`（`storage.py:49`）后退出，
-ps1 却已经打印「后台服务已启动」并 `exit 0`。Linux 有 `service_adapter.start()` 的 10 秒事后
-轮询兜底，Windows 这条路径没有。按清单实机确认后再修，修复方向见
-[COMMANDS](COMMANDS.md) 的待修问题 1。
-
-另外记录 `wmi_launch.py` 的一个边界（不是缺陷）：若 `--cwd` 恰好等于环境文件所在目录，
-helper 的 `finally` 会先删掉该目录，`Popen` 随后报 `WinError 267`。生产路径中 `cwd` 是后端
-工作目录、环境文件在 `%TEMP%\codex-wechat-wmi-*`，两者不会重合。
-
-**预测：清单第 3 项的"15 秒内失败"当前不满足。** `codex-wechat.ps1:296` 用
-`Wait-TaskRunning` 判断成败，而任务状态在进程刚拉起时就已是 `Running`；若前台仍持有状态锁，
-supervisor 内部的 `start` 在 `startup_store()` 处拿到 `RuntimeError`（`storage.py:49`）后退出，
-ps1 却已经打印「后台服务已启动」并 `exit 0`。Linux 有 `service_adapter.start()` 的 10 秒事后
-轮询兜底，Windows 这条路径没有。按清单实机确认后再修，修复方向见
-[COMMANDS](COMMANDS.md) 的待修问题 1。
+`wmi_launch.py` 的已知边界：若 `--cwd` 恰好等于环境文件所在目录，helper 的 `finally` 会先
+删掉该目录，`Popen` 随后报 `WinError 267`。生产路径中 `cwd` 是后端工作目录、环境文件在
+`%TEMP%\codex-wechat-wmi-*`，两者不会重合。
 
 安装和首次扫码见 README。计划任务属于当前用户、交互登录、非管理员权限，首次自启关闭；
 更改自启只改登录触发器，不启动或停止实例。bootstrap_supervisor选择current版本，运行时长不设上限，
@@ -319,10 +309,11 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 
 ## 不要在管理员终端里运行
 
-`codex_wechat.py` 与 `installer.py` 启动时都会检查 `shell32.IsUserAnAdmin()`
-（[platform_support.is_elevated()](../platform_support.py)、`installer._elevated()`），
-命中就直接报「请以普通用户身份运行，不要使用管理员终端。」并以 `78` / `1` 退出，
-不做任何安装或启动动作。`codex-wechat.ps1` 的所有命令都会经过这两处。
+`codex_wechat.py`、`installer.py` 与入口脚本都会检查提权状态
+（[platform_support.is_elevated()](../platform_support.py)、`installer._elevated()`）。
+写操作命中就直接报「请以普通用户身份运行，不要使用管理员终端。」并以 `78` / `1` 退出；
+只读 `status` / `logs` 和显式 `uninstall` 放行。容器/一次性 CI 可设置
+`CODEX_WECHAT_ALLOW_ROOT=1`；这是逃生口，不是推荐运行方式。
 
 不需要管理员的原因：计划任务以当前用户、`-LogonType Interactive -RunLevel Limited` 注册，
 状态目录在 `%LOCALAPPDATA%`，命名管道用 `Local\` 命名空间。提权只有两种结果：
@@ -332,7 +323,9 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 - 提权创建的文件 owner 是 `Administrators`，一旦 DACL 被收窄，普通用户的 `pythonw`
   读不到入口，表现为"装好了但服务什么都不写"——`installer.check_user_access()` 就是为这个写的。
 
-唯一的例外是 `uninstall.ps1`：它不在闸门内，因为清理一个历史上由管理员注册的任务确实需要提权。
+`uninstall` 是显式例外：清理历史上由管理员注册的计划任务时，仍可能需要管理员权限。
+Windows 的公开 `.ps1` 只负责定位 release 并调用 Python；真正的计划任务停止/启动/查询在
+内部 `windows/task-service.ps1`，不需要用户直接调用，也不暴露 `service-stop` / `service-status`。
 
 注意这条闸门也盖住了服务自己的子进程：supervisor 拉起来的是 `codex_wechat.py start`
 （`windows_service.py:270`），所以万一某个任务被注册成 `RunLevel Highest`，桥会拒绝启动并把

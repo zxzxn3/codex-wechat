@@ -94,20 +94,34 @@ Windows 的命令入口是 `%USERPROFILE%\.local\bin\codex-wechat.cmd`，安装�
 codex-wechat stop
 ```
 
-重启已安装的后台服务：
+重启、查询或更改登录自启：
 
 ```bash
 codex-wechat service-restart
+codex-wechat status
+codex-wechat autostart
+codex-wechat autostart true
 ```
 
-Windows 使用同一入口执行这些命令：命令入口已生成时直接写 `codex-wechat service-restart`、
-`codex-wechat stop`；否则用
-`& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-restart` 这样的完整路径。
-该命令只操作后台服务；若正在前台 `start`，请先按 `Ctrl+C` 退出。
+Windows 使用同一入口执行这些命令；命令入口未生成时，用
+`& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" ...` 的完整路径。
+后台服务运行时不能在前台再执行 `start`；前台桥接运行时也不能执行 `service-start`，
+两种冲突都会直接拒绝。`stop` 只停止后台服务，并尽力向最近一次微信会话发送停止通知；
+前台桥接用 `Ctrl+C` 退出。
 
-Windows 使用同一 `.ps1` 入口的 `stop`（例如
-`& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" stop`，或已生成命令入口时的
-`codex-wechat stop`）。命令会先尽力向最近一次微信会话发送“微信桥正在停止。”，通知失败不阻止停服；直接使用 `systemctl stop` 不经过这条通知逻辑。前台 `start` 仍在终端按 Ctrl+C 退出。
+除只读 `status` / `logs` 和显式 `uninstall` 外，root/管理员终端会被拒绝；容器或一次性 CI
+可显式设置 `CODEX_WECHAT_ALLOW_ROOT=1`。
+
+卸载：
+
+```bash
+codex-wechat uninstall              # 保留配置、登录、待办和工作目录
+codex-wechat uninstall --purge-data # 同时删除本机用户数据
+```
+
+Windows 使用 `codex-wechat uninstall`；删除数据时写作
+`codex-wechat uninstall -PurgeData`。Linux 的默认安装目录同时存放程序与数据，
+因此 purge 只删除用户数据，不删除程序 release 本身。
 
 ## CLI 与 App 共用会话
 
@@ -139,7 +153,7 @@ IPC 只支持“App 作为写者”的方向；桥接不会反向充当 IPC 持�
 App 的 conversationState/增量与 revision 语义，属于版本相关的内部协议，实现与维护成本较高。
 App 使用系统原入口或仅提供代理的启动器；项目不再提供 App 启动命令或桌面入口覆盖。
 
-CLI 仍可连接微信使用的原生后台：
+CLI 仍可连接微信使用的原生后台（仅 Linux；Windows 用 `codex-desktop.ps1 cli`）：
 
 ```bash
 codex-wechat cli -- resume
@@ -147,6 +161,8 @@ codex-wechat cli -- resume
 
 Windows 使用 `codex-desktop.ps1 cli -- resume`。`desktop setup` / `ensure` 仅配置和准备 CLI/微信的后台，
 不启动 App、不改代理或系统桌面入口。IPC 为版本相关内部协议，依据及未验收组合见 [SOURCES](docs/SOURCES.md)。
+`codex-wechat desktop` 别名已删除；需要底层入口时直接使用 `codex-desktop` /
+`codex-desktop.ps1`。
 
 ## 日常行为
 
