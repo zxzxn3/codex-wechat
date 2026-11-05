@@ -22,11 +22,11 @@ class TtyBuffer(StringIO):
 class LogPathHintTests(unittest.TestCase):
     def test_foreground_hint_names_the_structured_log(self):
         output = TtyBuffer()
+        expected = Path("/data/logs/bridge.jsonl")
         with redirect_stdout(output), \
-                patch.object(codex_wechat, "log_path",
-                             return_value=Path("/data/logs/bridge.jsonl")):
+                patch.object(codex_wechat, "log_path", return_value=expected):
             codex_wechat.show_log_path()
-        self.assertEqual(output.getvalue(), "完整日志: /data/logs/bridge.jsonl\n")
+        self.assertEqual(output.getvalue(), f"完整日志: {expected}\n")
 
     def test_non_tty_does_not_print_the_hint(self):
         output = StringIO()

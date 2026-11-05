@@ -27,7 +27,7 @@ from prompts import (
 )
 from storage import Store
 from wechat import trusted_url
-from profiles import backend_label, definitions, ensure_backend_config
+from profiles import backend_label, default_backends, definitions, ensure_backend_config
 
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -530,15 +530,18 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     def test_backend_seed_adds_defaults_when_config_has_none(self):
         config = {}
         self.assertTrue(ensure_backend_config(config))
-        self.assertIn("codex", config["backends"])
-        self.assertIn("deepseek", config["backends"])
+        # config.default.json filters entries by platform, so compare with the
+        # template actually applicable here instead of naming a backend.
+        self.assertEqual(config["backends"], default_backends())
 
     def test_backend_migration_fills_known_backend_defaults(self):
-        config = {"backends": {"deepseek": {"useSystemProxy": False}}}
+        config = {"backends": {"codex": {"useSystemProxy": False}}}
         self.assertTrue(ensure_backend_config(config))
-        self.assertEqual(config["backends"]["deepseek"]["command"],
-                         ["codex-deepseek", "app-server"])
-        self.assertEqual(config["backends"]["deepseek"]["label"], "DeepSeek")
+        self.assertEqual(config["backends"]["codex"]["command"],
+                         ["codex", "app-server"])
+        self.assertEqual(config["backends"]["codex"]["label"], "Codex")
+        # An explicit setting must survive the merge.
+        self.assertFalse(config["backends"]["codex"]["useSystemProxy"])
 
     async def test_stop_during_input_preflight_never_starts_turn(self):
         backend = CodexBackend({"sharedDaemon": False}, self.temp.name, lambda _: None)
