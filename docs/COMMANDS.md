@@ -182,6 +182,13 @@ service-restart  exit=78  尚未注册后台服务，请重新运行安装器。
 
 ## 只记录、不建议现在处理
 
+- `/get` 的路径规则是"认本平台原生写法"，没有跨平台转换：Windows 上 `C:\x\a.txt` 与 `C:/x/a.txt`
+  都行，但 Linux 风格的 `/home/x/a.txt` 在 Windows 上**不是绝对路径**（有 root 无 drive），会被拼到
+  工作目录所在盘（`C:\work\proj` + `/home/x/a.txt` → `C:\home\x\a.txt`），通常就报「附件不存在或
+  无法读取」。反过来 Linux 上 `C:\x\a.txt` 只是个带反斜杠的文件名。UNC、驱动器相对路径
+  （`C:a.txt`）和 NTFS 数据流（`a.txt:stream`）在 Windows 上是明确拒绝的。
+  不额外加"Linux 风格路径不被支持"的专门报错：路径是用户自己给的，落到不存在就报不存在，
+  已经能定位问题，再加分支只是换一句话。
 - `/get` 的「附件已排队」提示总在**文件之后**到达（2026-11-05 实测）。`command_get()` 先把附件
   入队（`queue_file`），紧接着 `reply(ATTACHMENT_QUEUED)`；出站队列是 FIFO，而附件要等整份上传完
   （15 MiB 约 12 秒）才发出，所以那句确认在用户视角是"文件已经到了，却说还在排队"。
