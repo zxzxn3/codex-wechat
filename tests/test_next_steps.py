@@ -25,11 +25,11 @@ class NextStepsHintTests(unittest.TestCase):
                 self.assertIn("/settings shared true", text)
                 self.assertIn("Windows 为 false、Linux 为 true", text)
 
-    def test_linux_install_reports_service_registration_and_preserves_autostart(self):
+    def test_linux_install_recommends_service_start_and_preserves_autostart(self):
         install = self.output(False)
         update = self.output(False, update=True)
-        self.assertIn("后台服务已注册", install)
         self.assertIn("service-start", install)
+        self.assertNotIn("后台服务已注册", install)
         self.assertNotIn("保持此终端打开", install)
         self.assertIn("现有自启状态保持不变", update)
 

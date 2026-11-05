@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import unicodedata
 from urllib.parse import urlsplit
 
 
@@ -126,6 +127,15 @@ def detail(text: str) -> None:
     print("  " + styled("->", "2") + " " + text)
 
 
+def display_width(text: str) -> int:
+    """Count terminal cells; Chinese characters occupy two columns."""
+    return sum(
+        0 if unicodedata.combining(char) else
+        2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+        for char in text
+    )
+
+
 def confirm(prompt: str) -> bool:
     if NON_INTERACTIVE:
         return True
@@ -148,12 +158,12 @@ def confirm(prompt: str) -> bool:
 def introduction() -> bool:
     phase("开始之前")
     width = min(76, shutil.get_terminal_size(fallback=(80, 24)).columns)
-    print(textwrap.fill(
+    print(styled(textwrap.fill(
         "codex-wechat 是独立项目，用于把微信私聊连接到本机 Codex。"
         "安装会创建一份不可变程序版本，并保留已有的微信登录、配置、"
         "待办、会话和工作目录；不会复制 Codex 凭据或会话历史。",
         width=width,
-    ))
+    ), "33"))
     print()
     print(styled(textwrap.fill(
         "本项目为第三方独立开发，与 OpenAI、腾讯公司（微信）及其关联方"
@@ -162,10 +172,10 @@ def introduction() -> bool:
         width=width,
     ), "33"))
     print()
-    print(textwrap.fill(
+    print(styled(textwrap.fill(
         "接下来展示操作计划，确认后执行；不启用新自启、不启动服务、不安装附加组件。",
         width=width,
-    ))
+    ), "2"))
     print()
     return True
 
@@ -877,11 +887,12 @@ def configure_platform_service(release: Path, target: Path, *, update: bool) -> 
 
 
 def operation_plan(operations: list[str]) -> None:
-    width = max(map(len, operations), default=1) + 4
+    width = max(map(display_width, operations), default=1) + 4
     for number, operation in enumerate(operations, 1):
+        padding = " " * max(0, width - display_width(operation))
         print(
             styled(f"({number}/{len(operations)})", "2")
-            + f" {operation:<{width}}"
+            + f" {operation}{padding}"
             + styled("待执行", "2")
         )
 
@@ -925,7 +936,7 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
     if not introduction():
         return 0
     report_dependencies(source, dry_run=dry_run)
-    operation_plan(["准备程序与 Python 依赖", "集中更新入口及当前版本", "保留配置、登录与工作内容", "清理本次无用产物"])
+    operation_plan(["准备程序与 Python 依赖", "集中更新入口及当前版本", "保留配置、登录与工作内容", "清理临时文件与旧版本"])
     print(f"安装目录: {target}")
     print(f"版本: {identifier}")
     if not confirm("执行更新？" if update else "执行安装？"):
@@ -994,38 +1005,42 @@ def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bo
     print()
     phase("下一步")
     print(f"版本: {identifier}")
+    print()
     if IS_WINDOWS:
         entry = str(target / "codex-wechat.ps1").replace("'", "''")
         command = f"& '{entry}'"
         if update:
-            print(f"重启服务: {command} service-restart")
+            print(f"1. 重启后台服务: {command} service-restart")
+            print("2. 在微信发送 /status 确认连接。")
         else:
-            print(f"首次运行: {command} service-start")
-            print("首次运行会在终端显示二维码；扫码后后台服务启动，终端可以关闭。")
-            print("然后在微信发送 /help 或普通消息。")
-            print("自启默认关闭；需要时在微信发送 /settings autostart true。")
+            print("1. 确认 Codex 已安装并登录。")
+            print(f"2. 首次运行并扫码: {command} service-start")
+            print("3. 在微信发送 /help 或 /status，然后发送普通消息。")
     elif update:
         if service_ready:
-            print("重启已有服务: systemctl --user restart codex-wechat")
-            print("后台服务已更新；现有自启状态保持不变。")
-            print("若当前使用前台运行，先退出原前台进程；之后可执行 "
-                  f"{target / 'codex-wechat'} service-start 使用后台服务。")
+            print("1. 若此前使用前台 start，请先退出。")
+            print("2. 重启后台服务: systemctl --user restart codex-wechat")
+            print("3. 在微信发送 /status 确认连接。")
+            print()
+            print("现有自启状态保持不变。")
         else:
-            print("后台服务未注册；当前没有可用的 systemd 用户服务，仍可使用前台 start。")
-            print("若未使用服务，先退出原前台进程，再运行 codex-wechat start。")
+            print("后台服务未注册；请先退出原前台进程，再运行 "
+                  f"{target / 'codex-wechat'} start。")
     else:
         print("1. 确认 Codex 已安装并登录。")
         if service_ready:
-            print(f"2. 在终端运行 {target / 'codex-wechat'} service-start，按提示扫码。")
-            print("后台服务已注册；扫码后后台服务启动，终端可以关闭。")
+            print(f"2. 运行并扫码: {target / 'codex-wechat'} service-start")
         else:
-            print(f"2. 在终端运行 {target / 'codex-wechat'} start，保持此终端打开。")
-            print("后台服务未注册；当前没有可用的 systemd 用户服务，仍可使用前台 start。")
-        print("3. 在微信发送 /help、/status，然后发送普通消息开始交流。")
-        print("自启默认关闭；需要时在微信发送 /settings autostart true。")
-        print("若提示找不到 codex-wechat，请使用上面的完整路径，或将 ~/.local/bin 加入 PATH。")
-    print("用 Codex CLI 与微信双向收发: 在微信发送 /settings shared true（持久保存，/settings shared false 关闭）。")
-    print("共享后台默认 Windows 为 false、Linux 为 true；开启后 Codex App 打开桥接当前会话会显示锁定。")
+            print(f"2. 在当前终端运行并扫码: {target / 'codex-wechat'} start")
+            print("   后台服务未注册；请保持终端运行。")
+        print("3. 在微信发送 /help 或 /status，然后发送普通消息。")
+    print()
+    if not update:
+        print("可选设置:")
+        print("   登录自启: /settings autostart true")
+        print("   双向收发: /settings shared true（默认 Windows 为 false、Linux 为 true）")
+    else:
+        print("双向收发: /settings shared true（默认 Windows 为 false、Linux 为 true）")
 
 
 def install(source: Path, target: Path, *, dry_run: bool = False) -> int:

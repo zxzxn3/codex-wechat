@@ -797,7 +797,7 @@ async def start_background_service(args):
         # a QR code. Use the same binding gate as foreground start.
         await startup_account(store)
         await service_adapter.start()
-        print("后台服务已启动。")
+        print("后台服务已启动；终端可以关闭。")
         show_log_path()
     finally:
         store.close()
