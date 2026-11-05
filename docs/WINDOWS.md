@@ -53,8 +53,11 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 
 以下项目需要安装后的真实 Windows 进程、App、微信或 CDN 条件，不能只靠源码阅读或 Linux mock 判定。
 
-- [ ] 用一行 PowerShell 分别执行首次安装和已安装更新，确认临时目录下载了
+- [ ] **（当前被私有仓库阻塞）** 用一行 PowerShell 分别执行首次安装和已安装更新，确认临时目录下载了
   `installer.py` 与 `release.py`，安装结束后没有 `ModuleNotFoundError: release`。
+  `raw.githubusercontent.com` 对私有仓库返回 404（2026-11-05 实测
+  `.../zxzxn3/codex-wechat/main/installer.py` → `404`），所以这一行入口现在跑不起来；
+  仓库公开后可直接执行。本地入口（`install.ps1`）不经过这一步下载，不能替代本项。
 - [ ] 先确认没有前台桥接，再分别在没有微信绑定和已有绑定时运行 `.\codex-wechat.ps1 service-start`：未绑定时
   应显示二维码并等待扫码，扫码后应出现 `正在继续启动桥接`，而不是再次提示运行 `start`；
   已有绑定时应启动后台服务并输出 `后台服务已启动；终端可以关闭。` 以及
@@ -66,38 +69,56 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   `service-start` 在 15 秒内失败，而不是打印成功后留下未运行的服务。
 - [ ] 后台服务原本在运行时执行一次 `rebind`，确认重新绑定完成后服务能重新启动，
   不出现状态目录锁冲突。
-- [ ] 从 release A 启动服务后，执行稳定入口的 `status` 和 `logs`；确认
+- [x] 从 release A 启动服务后，执行稳定入口的 `status` 和 `logs`；确认
   `active-release` 仍指向 A，没有被只读命令改写。
+  2026-11-05 静态确认：`mark_active_release()` 只在 `args.action == "start"` 时调用，
+  `status` / `logs` 不经过它。
 - [ ] 保持 A 运行，连续更新到 B、C 且不重启桥接；确认 A 的 release 目录不会被
   清理。停止 A 并由新桥接启动后，确认下一次更新可以清理 A。
-- [ ] 构造一个同名 `CodexWeChat` 任务，但把 action 指向另一个安装目录或另一个可执行文件；
+- [x] 构造一个同名 `CodexWeChat` 任务，但把 action 指向另一个安装目录或另一个可执行文件；
   确认快速 `autostart.status` 不会误报；需要 PowerShell 检查时 `installed` 回退也不会把它当作当前安装，
   启用/禁用也不会修改该任务。
+  2026-11-05 代码 + 单测确认：`autostart._owned_supervisor_action()` 校验参数前缀、分隔符边界，
+  且 `Execute` 必须是本安装 `.bootstrap-venv` 的 pythonw/python；`service_adapter.status()`
+  对"已安装但非本安装"直接抛错。见 `tests/test_autostart_windows.py`。
 - [ ] 在真实 Windows App 上观察 `\\.\pipe\codex-ipc` 的 `Path.exists()`、App 空闲
   后接管会话和空闲 follower；结果写入验收记录，不能用 Linux mock 代替。
 - [ ] 断开/重启 App，检查 `initialize`、owner discovery、turn start/steer 响应缺少
   字段时是否以受控失败结束，而不是让 `KeyError` 穿透到输入投递层。
+  （2026-11-05：缺字段路径已在 `app_ipc.py` 逐项校验并抛 `CodexRpcError(-32603)`，
+  仍需实机断连确认。）
 - [ ] 人为让共享 daemon 启动失败，确认 `/status` 显示 `shared_fallback`，日志出现
   `backend.shared_unavailable` 和可理解的失败原因；配置中的 `sharedDaemon: true`
   不被改写。
 - [ ] 使用带用户名和密码的系统代理，触发一次 WMI 启动的共享 daemon；用
   `Win32_Process.CommandLine` 或等价方式确认代理凭据没有进入命令行，并确认一次性
   环境文件在启动后已删除。
+  （2026-11-05：已直接运行 `windows/wmi_launch.py` 验证机制——环境文件在子进程启动前删除、
+  临时目录一并清理、子进程继承 `HTTPS_PROXY`/`NO_PROXY`、`argv` 中无凭据；仍需真实 WMI
+  与计划任务上下文。）
 - [ ] 在真实 CDN 上传大文件并模拟一次超时，确认同一个上传 `filekey` 的重试不会
   产生重复对象；未确认幂等前，不把 POST 自动重试写成已验收行为。
 
-### 2026-11-05 复核：哪些项已可判定
+### 2026-11-05 复核：状态说明与剩余依据
 
-同一台机器、同一提交（`main` @ `45d979c`）上的复核。**只有写明结论的才是已确认项**，
-其余仍需按上面清单实机验证；未勾选的复选框保持原样，不代表已通过。
+同一台机器、同一提交（`main` @ `45d979c`）上的复核。上面 12 项里 **2 项已确认并勾选**
+（`active-release` 只读不改、同名任务不误报），其余 10 项仍需实机，其中 1 项被私有仓库阻塞。
+已确认项的判据写在对应条目下；未勾选的复选框一律代表"尚未验证"，不代表已通过。
 
-| 清单项 | 结论 | 依据 |
-|---|---|---|
-| 一行入口下载 `installer.py` 与 `release.py` | 代码已满足，e2e 未验 | `bootstrap.ps1:49-53` 与 `bootstrap.sh:43-44` 都下载这两个文件，`ModuleNotFoundError: release` 的前提已消除 |
-| 只读命令不得改写 `active-release` | 已确认（静态） | `mark_active_release()` 只在 `args.action == "start"` 时调用，`status` / `logs` 不经过它 |
-| 同名 `CodexWeChat` 任务不得误报 | 已确认（代码 + 单测） | `autostart._owned_supervisor_action()` 校验参数前缀、分隔符边界，且 `Execute` 必须是本安装 `.bootstrap-venv` 的 pythonw/python；`service_adapter.status()` 对"已安装但非本安装"直接抛错。见 `tests/test_autostart_windows.py` |
-| WMI 启动时凭据不进命令行 | 机制已实测，WMI/任务上下文未验 | 直接运行 `windows/wmi_launch.py`：环境文件在子进程启动前已删除、临时目录一并清理、子进程继承 `HTTPS_PROXY`/`NO_PROXY`，`argv` 中无凭据 |
-| App IPC 缺字段时受控失败 | 代码已加固，实机未验 | `app_ipc.py` 对 `clientId`、`owner`、`handledByClientId`、`result`、`turn.id` 逐项校验并抛 `CodexRpcError(-32603)` |
+`release.py` 的下载前提已满足：`bootstrap.ps1:49-53` 与 `bootstrap.sh:43-44` 都下载
+`installer.py` 和 `release.py`，`ModuleNotFoundError: release` 不会再出现。但这不足以勾选第 1 项——
+入口本身在私有仓库下取不到文件（见该条备注）。
+
+另外记录 `wmi_launch.py` 的一个边界（不是缺陷）：若 `--cwd` 恰好等于环境文件所在目录，
+helper 的 `finally` 会先删掉该目录，`Popen` 随后报 `WinError 267`。生产路径中 `cwd` 是后端
+工作目录、环境文件在 `%TEMP%\codex-wechat-wmi-*`，两者不会重合。
+
+**预测：清单第 3 项的"15 秒内失败"当前不满足。** `codex-wechat.ps1:260` 用
+`Wait-TaskRunning` 判断成败，而任务状态在进程刚拉起时就已是 `Running`；若前台仍持有状态锁，
+supervisor 内部的 `start` 在 `startup_store()` 处拿到 `RuntimeError`（`storage.py:49`）后退出，
+ps1 却已经打印「后台服务已启动」并 `exit 0`。Linux 有 `service_adapter.start()` 的 10 秒事后
+轮询兜底，Windows 这条路径没有。按清单实机确认后再修，修复方向见
+[COMMANDS](COMMANDS.md) 的待修问题 1。
 
 另外记录 `wmi_launch.py` 的一个边界（不是缺陷）：若 `--cwd` 恰好等于环境文件所在目录，
 helper 的 `finally` 会先删掉该目录，`Popen` 随后报 `WinError 267`。生产路径中 `cwd` 是后端
