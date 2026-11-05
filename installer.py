@@ -1024,14 +1024,13 @@ def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bo
             print()
             print("现有自启状态保持不变。")
         else:
-            print("后台服务未注册；请先退出原前台进程，再运行 "
-                  f"{target / 'codex-wechat'} start。")
+            print("后台服务未注册；请先退出原前台进程，再运行 codex-wechat start。")
     else:
         print("1. 确认 Codex 已安装并登录。")
         if service_ready:
-            print(f"2. 运行并扫码: {target / 'codex-wechat'} service-start")
+            print("2. 运行并扫码: codex-wechat service-start")
         else:
-            print(f"2. 在当前终端运行并扫码: {target / 'codex-wechat'} start")
+            print("2. 在当前终端运行并扫码: codex-wechat start")
             print("   后台服务未注册；请保持终端运行。")
         print("3. 在微信发送 /help 或 /status，然后发送普通消息。")
     if not update:
