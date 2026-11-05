@@ -2,6 +2,7 @@
 import asyncio
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -134,12 +135,94 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 events = [call.args[0] for call in log_event.call_args_list if call.args]
                 self.assertNotIn("output.sent", events)
                 self.assertIn("output.failed", events)
+                self.assertIn("output.send_paused", events)
                 failed = next(call for call in log_event.call_args_list
                               if call.args and call.args[0] == "output.send_failed")
                 self.assertEqual(failed.kwargs["error_type"], "WeChatNotAcknowledged")
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+
+    async def test_a_dropped_reply_does_not_spend_requests_on_a_failure_notice(self):
+        # The channel drops instead of rejecting, so the notice would be dropped too.
+        bridge = self.bridge
+        bridge.reply("answer")
+        calls = 0
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            raise WeChatNotAcknowledged(0)
+
+        bridge.channel.send = send
+        with (patch("output_delivery.log_event"),
+              patch("output_delivery.SEND_RETRY_SECONDS", 0)):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("failedOutbox"):
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertEqual(calls, SEND_ATTEMPTS)
+                self.assertEqual(len(bridge.state["outbox"]), 0)  # no notice queued
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_retry_waits_grow_instead_of_hammering_the_channel(self):
+        bridge = self.bridge
+        bridge.reply("answer")
+        delays = []
+        real_sleep = asyncio.sleep
+
+        async def send(_):
+            raise OSError("simulated channel failure")
+
+        async def sleep(seconds, *args, **kwargs):
+            if seconds:
+                delays.append(seconds)
+            await real_sleep(0)
+
+        bridge.channel.send = send
+        with (patch("output_delivery.log_event"),
+              patch("output_delivery.asyncio.sleep", sleep)):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("failedOutbox"):
+                        break
+                    await real_sleep(0.02)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertEqual(delays[:2], [1, 3])  # 1 s then 3 s, not 1 s twice
+
+    async def test_consecutive_sends_are_spaced(self):
+        bridge = self.bridge
+        bridge.reply("one")
+        bridge.reply("two")
+        stamps = []
+
+        async def send(_):
+            stamps.append(time.perf_counter())
+
+        bridge.channel.send = send
+        with (patch("output_delivery.log_event"),
+              patch("output_delivery.SEND_SPACING_SECONDS", 0.05)):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                await asyncio.wait_for(bridge.outbox_drained.wait(), 2)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertEqual(len(stamps), 2)
+        self.assertGreaterEqual(stamps[1] - stamps[0], 0.05)
+
+    def test_status_flags_unconfirmed_delivery_after_repeated_failures(self):
+        from codex_wechat import status_payload
+        for failures, expected in ((0, "ok"), (2, "ok"), (3, "unconfirmed")):
+            self.store.save("bridge", {"consecutiveSendFailures": failures})
+            self.assertEqual(status_payload(self.store)["delivery"], expected)
 
     async def test_failure_count_is_not_capped_or_reset_by_session_or_restart(self):
         bridge = self.bridge

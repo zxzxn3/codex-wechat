@@ -13,12 +13,19 @@ from records import TurnResult
 from slicing import split_text
 from media import MediaError, MAX_ATTACHMENTS, split_answer
 from wechat_content import entry_summary, remember_quote
-from errors import WeChatApiError, WeChatAuthExpired, attachment_reason
+from errors import (WeChatApiError, WeChatAuthExpired, WeChatNotAcknowledged,
+                    attachment_reason)
 from diagnostics import current_request_id, error_fields, log_event
 from prompts import render_ack
 
 SEND_ATTEMPTS = 3
 SEND_RETRY_SECONDS = 1
+# Same-user spacing: two production bridges report 2.5 s as the smallest interval
+# the platform tolerates without complaints, and bursts are what gets filtered.
+SEND_SPACING_SECONDS = 2.5
+# After a silently dropped send the channel itself looks blocked, so stop firing.
+DELIVERY_PAUSE_SECONDS = 60
+DELIVERY_DEGRADED_THRESHOLD = 3
 # Rejections of the message itself; retrying cannot change the outcome.
 NON_RETRYABLE_SEND_KINDS = frozenset({"prepare_failed"})
 
@@ -26,6 +33,7 @@ class OutputDelivery:
     def __init__(self, bridge):
         self.bridge = bridge
         self._queued_at = {}  # Monotonic timestamps belong only to this service lifetime.
+        self._paused_until = 0.0
 
     def text_entries(self, text, *, group, context, semantic=False, source=None, role="body",
                      request_id=None):
@@ -178,7 +186,7 @@ class OutputDelivery:
             finally:
                 bridge.external_results.task_done()
 
-    def fail_output(self, entry):
+    def fail_output(self, entry, *, notify=True):
         """Freeze a partial group; never present a suffix as a complete answer."""
         bridge = self.bridge
         bridge.state["outbox"].pop(0)
@@ -204,8 +212,9 @@ class OutputDelivery:
                   parts=entry.get("parts"), part=entry.get("part"),
                   count=len(skipped), job_id=entry.get("group"),
                   request_id=entry.get("requestId"))
-        # Never recursively report a failed failure notice.
-        if not entry.get("failureNotice"):
+        # Never recursively report a failed failure notice, and never spend a
+        # request on one when the channel itself is dropping messages.
+        if notify and not entry.get("failureNotice"):
             text = (bridge.prompt("ATTACHMENT_SEND_FAILED", {"name": entry["asset"]["name"], "attempts": SEND_ATTEMPTS})
                     if "asset" in entry else bridge.prompt("REPLY_SEND_FAILED"))
             notes = bridge.text_entries(text, group=str(uuid.uuid4()), context=entry["context"],
@@ -228,6 +237,10 @@ class OutputDelivery:
             if not bridge.state["outbox"]:
                 bridge.send_wake.clear()
                 await bridge.send_wake.wait()
+                continue
+            paused = self._paused_until - time.monotonic()
+            if paused > 0:
+                await asyncio.sleep(min(paused, 5))
                 continue
             entry = bridge.state["outbox"][0]
             try:
@@ -269,15 +282,25 @@ class OutputDelivery:
                     bridge.fail_output(entry)
                     continue
                 if entry["attempts"] >= SEND_ATTEMPTS:
-                    bridge.fail_output(entry)
+                    unconfirmed = isinstance(error, WeChatNotAcknowledged)
+                    if unconfirmed:
+                        # The channel is dropping instead of rejecting, so the next
+                        # entry would be dropped too and each attempt only adds load.
+                        self._paused_until = time.monotonic() + DELIVERY_PAUSE_SECONDS
+                        log_event("output.send_paused", level="warning", component="output",
+                                  retry_in_ms=DELIVERY_PAUSE_SECONDS * 1000,
+                                  send_failures=bridge.state["consecutiveSendFailures"] + 1,
+                                  queued=len(bridge.state["outbox"]))
+                    bridge.fail_output(entry, notify=not unconfirmed)
                     continue
                 bridge.save()
+                delay = SEND_RETRY_SECONDS * 3 ** (entry["attempts"] - 1)
                 log_event("output.send_failed", level="warning", component="output",
                           role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
-                          retry_in_ms=SEND_RETRY_SECONDS * 1000, job_id=entry.get("group"),
+                          retry_in_ms=int(delay * 1000), job_id=entry.get("group"),
                           request_id=entry.get("requestId"), **error_fields(error))
                 print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
-                await asyncio.sleep(SEND_RETRY_SECONDS)
+                await asyncio.sleep(delay)
                 continue
             except Exception as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1
@@ -285,13 +308,14 @@ class OutputDelivery:
                     bridge.fail_output(entry)
                     continue
                 bridge.save()
+                delay = SEND_RETRY_SECONDS * 3 ** (entry["attempts"] - 1)
                 log_event("output.send_failed", level="warning", component="output",
                           role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
-                          retry_in_ms=SEND_RETRY_SECONDS * 1000, job_id=entry.get("group"),
+                          retry_in_ms=int(delay * 1000), job_id=entry.get("group"),
                           request_id=entry.get("requestId"),
                           **error_fields(error))
                 print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
-                await asyncio.sleep(SEND_RETRY_SECONDS)
+                await asyncio.sleep(delay)
                 continue
             bridge.state["outbox"].pop(0)
             self._queued_at.pop(entry.get("id"), None)
@@ -306,3 +330,7 @@ class OutputDelivery:
             bridge.save()
             if not bridge.state["outbox"]:
                 bridge.outbox_drained.set()
+            elif SEND_SPACING_SECONDS > 0:
+                # Space consecutive sends to the same user instead of bursting the
+                # whole sliced answer at once.
+                await asyncio.sleep(SEND_SPACING_SECONDS)

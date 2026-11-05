@@ -17,7 +17,7 @@ import service_adapter
 import service_control
 import wechat_auth
 from backend import CodexBackend
-from output_delivery import OutputDelivery
+from output_delivery import DELIVERY_DEGRADED_THRESHOLD, OutputDelivery
 from input_delivery import InputDelivery
 from ingress import Ingress
 from backend_session import BackendSession
@@ -462,8 +462,8 @@ class Bridge:
     async def external_result_worker(self):
         return await self.output.external_result_worker()
 
-    def fail_output(self, entry):
-        return self.output.fail_output(entry)
+    def fail_output(self, entry, *, notify=True):
+        return self.output.fail_output(entry, notify=notify)
 
     async def sender(self):
         return await self.output.sender()
@@ -608,6 +608,9 @@ def status_payload(store):
         ),
         "queued": len(state.get("inbox", [])),
         "unsent": len(state.get("outbox", [])),
+        "delivery": ("unconfirmed"
+                     if state.get("consecutiveSendFailures", 0) >= DELIVERY_DEGRADED_THRESHOLD
+                     else "ok"),
     }
     auth_details = state.get("wechatAuth")
     if isinstance(auth_details, dict):
