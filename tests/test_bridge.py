@@ -209,7 +209,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                          "```\nack: IN < ~{turn_total_tokens} ({ingress_ms}ms)\n"
                          "finish: OUT > {turn_output_tokens} in {elapsed}\n"
                          "media.maxMiB: 20\n```\n\n"
-                         "以上设置可通过 `/settings [option] [value]` 更改。\n"
+                         "以上设置可通过 `/settings [option] [value]` 更改；"
                          "使用 `/help settings` 查看设置说明。")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
@@ -277,6 +277,17 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.state["context"] = "context"
         await self.bridge.control("/s")
         self.assertIn("ID: 01a13162", self.bridge.state["outbox"][-1]["text"])
+
+    async def test_a_missing_launcher_is_named_in_the_disconnect_log(self):
+        # Without the reason a shared log only shows FileNotFoundError.
+        with patch("codex_wechat.log_event") as log_event:
+            self.bridge.backend_connection(
+                self.bridge.backend, False,
+                FileNotFoundError(2, "系统找不到指定的文件。", "codex.exe"))
+        record = next(call for call in log_event.call_args_list
+                      if call.args and call.args[0] == "backend.disconnected")
+        self.assertEqual(record.kwargs["reason"], "启动器未就绪")
+        self.assertEqual(record.kwargs["error_type"], "FileNotFoundError")
 
     async def test_restart_refuses_non_service_owner(self):
         owner = AsyncMock(side_effect=ValueError("not service owner"))

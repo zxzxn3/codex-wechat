@@ -34,7 +34,7 @@ from rebind import run_rebind
 from media import Media
 from latency import Latency
 from typing_indicator import TypingIndicator
-from errors import UserFacingError, WeChatAuthExpired, WeChatPollTimeout
+from errors import UserFacingError, WeChatAuthExpired, WeChatPollTimeout, backend_reason
 from platform_support import IS_WINDOWS, data_root, is_elevated, root_override_enabled
 from diagnostics import configure as configure_diagnostics
 from diagnostics import error_fields, log_event, log_path
@@ -329,6 +329,9 @@ class Bridge:
                   "connected": connected}
         if error is not None:
             fields.update(error_fields(error))
+            # A missing launcher only reached the chat reply before, so a shared log
+            # showed RuntimeError with nothing pointing at the missing codex.
+            fields["reason"] = backend_reason(error)
         log_event("backend.connected" if connected else "backend.disconnected",
                   **fields)
 

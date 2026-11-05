@@ -156,7 +156,12 @@ def _classify(text, rules, default):
 def backend_reason(error):
     if isinstance(error, BackendStartupError):
         return error.reason
-    return _classify(str(error).casefold(), BACKEND_REASONS, BACKEND_REASON_DEFAULT)
+    # A localized "file not found" message never contains the English tokens, so
+    # match the type first or a missing launcher reports "服务异常".
+    if isinstance(error, FileNotFoundError):
+        return "启动器未就绪"
+    return _classify(str(error).casefold(), BACKEND_REASONS,
+                     BACKEND_REASON_DEFAULT)
 
 
 def attachment_reason(error):

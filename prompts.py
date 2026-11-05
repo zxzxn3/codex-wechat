@@ -106,7 +106,7 @@ SETTINGS_USAGE = ("用法:\n`/settings [autostart|shared|compactionNotice|slicin
                   "logs.keep <整数>`\n"
                   "`/settings sourceHint <文本>`\n"
                   "`/settings ack|finish <模板>|\"\"|fields`")
-SETTINGS_HINT = ("以上设置可通过 `/settings [option] [value]` 更改。\n"
+SETTINGS_HINT = ("以上设置可通过 `/settings [option] [value]` 更改；"
                  "使用 `/help settings` 查看设置说明。")
 SETTINGS_HELP = """设置说明
 `/settings` 查看当前值；`/settings 名称 值` 修改。

@@ -129,7 +129,7 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("autostart: true", bridge.state["outbox"][-1]["text"])
                     settings_text = bridge.state["outbox"][-1]["text"]
                     self.assertIn(
-                        "\n\n以上设置可通过 `/settings [option] [value]` 更改。",
+                        "\n\n以上设置可通过 `/settings [option] [value]` 更改；使用 `/help settings` 查看设置说明。",
                         settings_text)
                     self.assertLess(settings_text.index("slicing.smart:"),
                                     settings_text.index("sourceHint:"))
