@@ -44,15 +44,18 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
         log_hint.assert_called_once_with()
 
     async def test_service_start_waits_for_a_transitional_service(self):
-        store = Mock()
+        startup_store = AsyncMock()
+        startup_account = AsyncMock()
         with patch("codex_wechat.service_adapter.status",
                    AsyncMock(return_value=ServiceState(True, True, state="Queued"))), \
-             patch("codex_wechat.startup_store", AsyncMock(return_value=store)), \
-             patch("codex_wechat.startup_account", AsyncMock()), \
+             patch("codex_wechat.startup_store", startup_store), \
+             patch("codex_wechat.startup_account", startup_account), \
              patch("codex_wechat.service_adapter.start", AsyncMock()) as start, \
              patch("codex_wechat.show_log_path"):
             await start_background_service(SimpleNamespace(action="service-start"))
         start.assert_awaited_once()
+        startup_store.assert_not_awaited()
+        startup_account.assert_not_awaited()
 
     async def test_restart_prints_the_log_location(self):
         with patch("codex_wechat.service_adapter.restart", AsyncMock()) as restart, \
