@@ -135,11 +135,12 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 - [ ] 人为让共享 daemon 启动失败，确认 `/status` 显示 `shared_fallback`，日志出现
   `backend.shared_unavailable` 和可理解的失败原因；配置中的 `sharedDaemon: true`
   不被改写。
-  （2026-11-05：**本机无法真实复现**。这台机器的 Codex CLI 自带完整包，且 Windows 的
-  app-server daemon 是按用户而不是按 `CODEX_HOME` 的，把 `env.CODEX_HOME` 指到空目录仍能
-  起 daemon（实测 `backend.shared=True`、`shared_fallback=None`）。要复现只能破坏 Codex
-  自身安装，未做。回退与提示逻辑由 `tests/test_windows_core.py` 的
-  `SharedDaemonUnavailable` 用例覆盖。）
+  （2026-11-05：**本机无法真实复现**。把 `env.CODEX_HOME` 指到一个空目录后，`codex` CLI
+  会**自行准备并下载** app-server daemon 包到那个 home 里，因此 daemon 照样起来
+  （实测 `backend.shared=True`、`shared_fallback=None`；探针的临时 home 里出现了
+  `packages/app-server-daemon/releases/0.166.0-…` 与 `app-server-daemon/` 目录，共约 357 MB）。
+  要造出 `this CLI has no complete local package` 只能破坏 Codex 自身安装，未做。回退与提示逻辑由
+  `tests/test_windows_core.py` 的 `SharedDaemonUnavailable` 用例覆盖。）
 - [ ] 使用带用户名和密码的系统代理，触发一次 WMI 启动的共享 daemon；用
   `Win32_Process.CommandLine` 或等价方式确认代理凭据没有进入命令行，并确认一次性
   环境文件在启动后已删除。
