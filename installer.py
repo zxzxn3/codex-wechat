@@ -1060,6 +1060,11 @@ def _common_install(
             # directory was not on PATH yet. Re-running the same version must
             # still repair the entry point.
             install_command_link(target)
+            # `uninstall` removes the platform service but keeps the release, so
+            # the same short-circuit would otherwise leave a command that cannot
+            # start anything. Both platform steps are idempotent.
+            configure_platform_service(target / "releases" / identifier, target,
+                                       update=update)
             print(f"版本 {identifier} 已经安装，没有修改。")
             return 0
     if not introduction():

@@ -408,6 +408,21 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.update(self.source, self.target), 0)
         link.assert_called_once_with(self.target)
 
+    def test_same_version_update_restores_a_service_that_uninstall_removed(self):
+        # `uninstall` unregisters the platform service but leaves the release,
+        # so the no-op path is the only chance to put it back.
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        current = self.current()
+        with patch("builtins.input", return_value="y"), \
+                patch.object(installer, "configure_platform_service") as configure:
+            self.assertEqual(installer.update(self.source, self.target), 0)
+        configure.assert_called_once()
+        release, target = configure.call_args.args
+        self.assertEqual(target, self.target)
+        self.assertEqual(release, self.target / "releases" / current)
+        self.assertEqual(configure.call_args.kwargs, {"update": True})
+
     def test_update_rejects_same_versioned_root_as_source(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
