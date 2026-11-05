@@ -68,8 +68,20 @@ Linux：
 Windows：
 
 ```powershell
+codex-wechat service-start
+```
+
+若安装器提示 `~/.local/bin` 不存在或不在 PATH，它会跳过命令入口而不修改 PATH；
+这时用完整入口，行为完全相同：
+
+```powershell
 & "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start
 ```
+
+Windows 的命令入口是 `%USERPROFILE%\.local\bin\codex-wechat.cmd`，安装时生成、卸载时删除，
+只在 `%USERPROFILE%\.local\bin` 已经存在且已在 PATH 中时才创建。它必须用 `.cmd` 而不是
+`.ps1`：`.ps1` 不在 `PATHEXT` 里（cmd.exe 找不到），且受执行策略限制。详见
+[WINDOWS](docs/WINDOWS.md)。
 
 未绑定时，`service-start` 会在当前终端显示二维码；扫码后后台服务启动，终端可以关闭。
 如果安装器提示后台服务未注册，可改用 `start` 在前台运行。
@@ -88,12 +100,14 @@ codex-wechat stop
 codex-wechat service-restart
 ```
 
-Windows 使用上方首次使用中的 `.ps1` 入口执行同一命令，例如
-`& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-restart`。
+Windows 使用同一入口执行这些命令：命令入口已生成时直接写 `codex-wechat service-restart`、
+`codex-wechat stop`；否则用
+`& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-restart` 这样的完整路径。
 该命令只操作后台服务；若正在前台 `start`，请先按 `Ctrl+C` 退出。
 
 Windows 使用同一 `.ps1` 入口的 `stop`（例如
-`& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" stop`）。命令会先尽力向最近一次微信会话发送“微信桥正在停止。”，通知失败不阻止停服；直接使用 `systemctl stop` 不经过这条通知逻辑。前台 `start` 仍在终端按 Ctrl+C 退出。
+`& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" stop`，或已生成命令入口时的
+`codex-wechat stop`）。命令会先尽力向最近一次微信会话发送“微信桥正在停止。”，通知失败不阻止停服；直接使用 `systemctl stop` 不经过这条通知逻辑。前台 `start` 仍在终端按 Ctrl+C 退出。
 
 ## CLI 与 App 共用会话
 

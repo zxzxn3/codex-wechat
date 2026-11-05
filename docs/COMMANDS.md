@@ -10,13 +10,20 @@
 
 | | Linux | Windows |
 |---|---|---|
-| 主入口 | `codex-wechat`（安装时软链到 `~/.local/bin`，**在 PATH**） | `%LOCALAPPDATA%\codex-wechat\app\codex-wechat.ps1`（**不在 PATH**） |
+| 主入口 | `codex-wechat`（安装时软链到 `~/.local/bin`，**在 PATH**） | `~/.local/bin/codex-wechat.cmd`（安装时生成，**前提是该目录已在 PATH 中**） |
 | CLI/App 入口 | `codex-desktop`（安装根，不在 PATH） | `codex-desktop.ps1`（安装根，不在 PATH） |
 | 安装入口 | `install.sh` | `install.ps1` |
 | 卸载入口 | 无 | `uninstall.ps1 [-PurgeData]` |
 
-Windows 的主入口不在 PATH 是安装器的有意选择（`installer.install_command_link()` 在 Windows 直接
-返回），代价是所有文档都必须写全路径。
+Windows 的命令入口是 `%USERPROFILE%\.local\bin\codex-wechat.cmd`，和 Linux 的
+`~/.local/bin/codex-wechat` 是同一个约定。差别在实现：Windows 无管理员权限不能建符号链接，
+`.ps1` 又不在 `PATHEXT` 里且受执行策略限制，所以落地成一个内容固定的 `.cmd`
+（`installer.windows_shim_text()`），内部用 `-ExecutionPolicy Bypass` 调稳定入口
+`<安装根>\codex-wechat.ps1`。同名目录里**不能**再放 `.ps1`：同名时 PowerShell 优先选 `.ps1`，
+会把执行策略问题带回来。
+
+该目录不在 PATH 时安装器**降级而不修改 PATH**，只在输出的"命令入口"一行说明原因；
+`uninstall.ps1` 只删除带 `rem codex-wechat command shim` 标记的那个文件，不会碰别人的文件。
 
 ## 命令词表
 

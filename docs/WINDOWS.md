@@ -158,6 +158,30 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 本机实机确认气泡可见，但该结论只覆盖当时的登录会话。App/CLI/微信三端共享仍未实机验证，
 具体覆盖以验收报告为准。
 
+## 命令入口：`~/.local/bin/codex-wechat.cmd`
+
+安装时若 `%USERPROFILE%\.local\bin` **已经存在且在用户 PATH 中**，安装器写入一个 `.cmd`
+shim，让 `codex-wechat service-start` 这类短命令在两个 shell 里都能用；否则跳过并说明原因，
+**不修改 PATH**。卸载时只删除带 `rem codex-wechat command shim` 标记的那个文件。
+
+选择 `.cmd` 而不是符号链接或 `.ps1`，依据是 2026-11-05 在本机的实测：
+
+| 事实 | 实测结果 |
+|---|---|
+| `.ps1` 不在 `PATHEXT` 中 | cmd.exe 里只有 `probe.ps1` 时：`'probe' is not recognized` |
+| PowerShell 能把裸名解析到 `.ps1`，但受执行策略约束 | `-ExecutionPolicy Restricted` 下报 "running scripts is disabled" |
+| 同名 `.ps1` 与 `.cmd` 并存时，PowerShell 优先选 `.ps1` | 两文件同目录：PowerShell 跑 `.ps1`，cmd.exe 跑 `.cmd` |
+| 无管理员权限不能建符号链接 | `New-Item -ItemType SymbolicLink` → "此操作需要管理员权限" |
+| `.cmd` 不受执行策略约束 | 只有 `.cmd` 时，`Restricted` 下照常运行 |
+| `~/.local/bin` 在 Windows 上已有人用 | 本机该目录由 `uv` 创建，内含 `uv.exe`/`uvx.exe` |
+
+shim 内容固定，包含 `-ExecutionPolicy Bypass`、稳定入口的绝对路径、`%*` 转发与
+`exit /b %ERRORLEVEL%`（服务命令依赖 78 表达配置错误）。实测：参数转发、含空格路径、
+受限策略下执行、退出码 78 均正确。
+
+若该目录不在 PATH，安装器不会自己去加；手动把它加入用户 PATH 后重新运行安装器即可。
+命令入口存在时安装结尾的"下一步"用短命令，否则仍打印完整路径。
+
 ## 目录权限不能依赖 POSIX 0700
 
 Windows 把 POSIX 的 0700 翻译成"仅对象**所有者**"的 DACL。提权进程创建的对象所有者是
