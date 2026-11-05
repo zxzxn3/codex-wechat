@@ -3,7 +3,7 @@
 本文记录 `codex-wechat` 的**用户可见命令面**在两个平台上的实际差异，以及由此暴露的三个待修问题。
 运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，能力边界见 [CAPABILITIES](CAPABILITIES.md)。
 
-核对基线：`main` @ `0b44360`，Windows 11 + Python 3.12.10 实机核对，Linux 侧依据同一份代码的
+核对基线：`main` @ `0b44360`（行号已按 2026-11-05 的修复提交校正），Windows 11 + Python 3.12.10 实机核对，Linux 侧依据同一份代码的
 `systemctl` 分支。文档中的行号以该提交为准，后续改动可能失效。
 
 ## 入口
@@ -42,7 +42,7 @@ Windows 的主入口不在 PATH 是安装器的有意选择（`installer.install
 | `desktop` | ✅ `codex-wechat desktop` | ❌ 只能 `codex-desktop.ps1` | **可合并** |
 | `status -Json` | ❌ | ✅ | 可合并 |
 
-Python 层接受的动作只有六个加两个服务词（`codex_wechat.py:820`）：
+Python 层接受的动作只有六个加两个服务词（`codex_wechat.py:840`）：
 
 ```
 login  start  stop  status  rebind  logs  service-start  service-restart
@@ -55,8 +55,8 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 
 | 缺的词 | 底层已有的实现 |
 |---|---|
-| `service-stop` | `service_adapter.stop_and_wait()`（`service_adapter.py:84`），Linux 分支已用 `systemctl --no-block stop` |
-| `service-status` | `service_adapter.status()`（`service_adapter.py:49`），Linux 分支已用 `systemctl show --property=LoadState/ActiveState/FragmentPath` 并校验 `FragmentPath` 属于本安装目录 |
+| `service-stop` | `service_adapter.stop_and_wait()`（`service_adapter.py:87`），Linux 分支已用 `systemctl --no-block stop` |
+| `service-status` | `service_adapter.status()`（`service_adapter.py:52`），Linux 分支已用 `systemctl show --property=LoadState/ActiveState/FragmentPath` 并校验 `FragmentPath` 属于本安装目录 |
 | `autostart on\|off` | `autostart.set_enabled()`，Linux 分支已用 `systemctl enable/disable <UNIT>` 并回读确认 |
 
 `uninstall` 没有对应实现：`uninstall.ps1` 是纯 PowerShell，Linux 侧需要新写
@@ -64,16 +64,16 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 
 ## 同一命令的行为差异
 
-### `login` 的守卫只在 Windows 存在
+### `login` 的守卫（2026-11-05 起两个平台一致）
 
 | 检查 | Linux | Windows |
 |---|---|---|
-| 必须交互终端 | ❌ | ✅ `codex-wechat.ps1:216` |
-| 后台服务必须已停 | ❌ | ✅ 同上 |
+| 必须交互终端 | ✅ `codex_wechat.require_login_allowed()` | ✅ 同一处（ps1 另有一道前置检查） |
+| 后台服务必须已停 | ✅ 同上 | ✅ 同上 |
 
-原因是这两道检查写在 `codex-wechat.ps1` 的 `login` 分支里，而 Linux 的 `codex-wechat login` 直接进入
-`wechat._login()`（`wechat.py:214`），没有对应逻辑。对比 `rebind` 就做对了：`rebind.py:51` 在
-Python 层检查 `isatty`，并先调用 `adapter.status()` 拒绝外部服务。
+这两道检查原先只写在 `codex-wechat.ps1:216` 的 `login` 分支里，Linux 的 `codex-wechat login` 会直接
+进入 `wechat._login()`（`wechat.py:214`），没有任何守卫。现在统一下沉到 Python 层，写法对齐
+`rebind.py:51`；`start` / `service-start` 内部的自动登录不经过这道闸门，因此未绑定时仍能弹二维码。
 
 ### 前台与后台的互斥检测方向不一致
 
@@ -89,7 +89,7 @@ Python 层检查 `isatty`，并先调用 `adapter.status()` 拒绝外部服务�
 
 | | Linux | Windows |
 |---|---|---|
-| 起点 | `codex_wechat.py:795` | `codex-wechat.ps1:260` |
+| 起点 | `codex_wechat.py:815` | `codex-wechat.ps1:260` |
 | 启动 | `systemctl start` | `Start-ScheduledTask` |
 | 事后校验 | 轮询 `service_adapter.status()` 最多 10 秒，失败抛错 | `Wait-TaskRunning`（`codex-wechat.ps1:196`），只看任务状态是否为 Running/Queued |
 
@@ -117,7 +117,7 @@ Python 层检查 `isatty`，并先调用 `adapter.status()` 拒绝外部服务�
 3. ps1 已经打印成功并 `exit 0`，任务状态早已回到 Ready。
 
 Linux 不受影响：`start_background_service()` 在 `service_adapter.start()` 之后会轮询 `status()`，
-失败时抛「后台服务启动请求已提交，但未能确认运行状态」（`service_adapter.py:103`）。
+失败时抛「后台服务启动请求已提交，但未能确认运行状态」（`service_adapter.py:106`）。
 
 `docs/WINDOWS.md` 的待验证清单里已有一条对应的验收项（"`service-start` 在 15 秒内失败，而不是
 打印成功后留下未运行的服务"），当前代码不满足。
@@ -128,27 +128,30 @@ Linux 不受影响：`start_background_service()` 在 `service_adapter.start()` 
 - 保留 ps1 实现，但在 `Wait-TaskRunning` 之后追加一次 `service-status -Json` 复查，`running` 为 false
   时报错并返回非零。
 
-### 2. `login` 缺少 Python 层守卫（中等）
+### 2. ~~`login` 缺少 Python 层守卫~~ 已修复（2026-11-05）
 
-Linux 上可以：
+原先只有 `codex-wechat.ps1:216` 检查"交互终端 + 后台服务已停"，Linux 上可以：
 
 - 在后台服务运行时执行 `codex-wechat login`，覆盖 `account.json`，而正在运行的桥仍持有旧 token；
 - 在非 TTY 环境下执行，二维码被打印进管道。
 
-修复方向：把 `codex-wechat.ps1:216` 的两道检查下沉进 `wechat._login()` 或 `codex_wechat.py` 的
-`login` 分支，按 `rebind.py:51` 的写法检查 `isatty`，并在登录前确认后台服务未运行。
+现在 `codex_wechat.require_login_allowed()` 在取状态锁之前完成同样的检查，两个平台共用；
+"服务属于别的安装"也会被翻译成 `ConfigurationError`（退出码 78）而不是裸 `ValueError`。
+对应 `tests/test_service_cli.py` 的 `LoginGateTests`。
 
-### 3. `service-start` 与 `service-restart` 的失败语义不一致（低）
+### 3. ~~`service-start` 与 `service-restart` 的失败语义不一致~~ 已修复（2026-11-05）
 
-未注册服务时的实测结果：
+修复前，未注册服务时：`service-start` → `ConfigurationError` / 退出码 78 /
+"尚未注册后台服务，请重新运行安装器。"；`service-restart` → `ValueError` / 退出码 1 /
+"本项目尚未注册后台服务，请重新运行安装器"。
 
-| 命令 | 异常类型 | 退出码 | 文案 |
-|---|---|---|---|
-| `service-start` | `ConfigurationError` | 78 | 尚未注册后台服务，请重新运行安装器。 |
-| `service-restart` | `ValueError` | 1 | 本项目尚未注册后台服务，请重新运行安装器 |
+现在文案统一为 `service_adapter.NOT_INSTALLED`，`restart_background_service()` 把它翻译成
+`ConfigurationError`。Windows 实机复核：
 
-同一类前置条件应对应同一类失败：`service_adapter.restart()`（`service_adapter.py:123`）应和
-`start()` 一致地抛出同类异常。
+```
+service-start    exit=78  尚未注册后台服务，请重新运行安装器。
+service-restart  exit=78  尚未注册后台服务，请重新运行安装器。
+```
 
 ## 只记录、不建议现在处理
 

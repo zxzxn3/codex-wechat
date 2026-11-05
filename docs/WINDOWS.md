@@ -37,17 +37,20 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
 CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含 231
 （`ERROR_PIPE_BUSY`）**，所以管道实例全忙时 `Path.exists()` 把异常抛给调用者。
 
-`CodexBackend.app_available()`（`backend.py:830`）的 `except OSError: return False` 因此会把
-"App 在、但管道忙"判成"App 不在"，`input_delivery.follow_desktop()`（`input_delivery.py:79`）
-那一次 5 秒检查被跳过。这是**假阴性窗口**，不是永久失效——`next_follow_at` 会重试。
+`CodexBackend.app_available()` 原先的 `except OSError: return False` 因此会把"App 在、但管道忙"
+判成"App 不在"，`input_delivery.follow_desktop()`（`input_delivery.py:79`）那一次 5 秒检查被跳过。
+这是**假阴性窗口**，不是永久失效——`next_follow_at` 会重试。
+
+**2026-11-05 已修**：`app_available()`（`backend.py:834`）现在把 `winerror == 231`
+（`backend.ERROR_PIPE_BUSY`）当作"存在"，其它 `OSError` 仍视为不可用。确定性由
+`tests/test_windows_core.py::AppAvailabilityTests` 覆盖；活体管道在有空闲实例时返回 `True`。
 
 由此：
 
-- 上面第 1 种状态（无 App 时不得误报）**已满足**：没有 App 时确实返回 `False`。
-- 但"存在性判断是否可靠"的答案是**不可靠**，不必等第 3 项失败才行动。
-- 不要改用 `os.path.exists()`：它对忙管道恒 `False`，比现状更差。
-- 最小修法是把 `winerror == 231` 视为"存在"；换成有界连接更彻底，代价是空闲时每 5 秒
-  一次建连（文档前面建议的方向）。
+- 上面第 1 种状态（无 App 时不得误报）**已满足**：没有 App 时返回 `False`。
+- 存在性判断不再因"忙"而误判，但第 2、3 种状态（真实 App 的 `/switch` 与空闲后接管）仍需实机。
+- 不要改用 `os.path.exists()`：它对忙管道恒 `False`，比 `Path.exists()` 更差。
+- 若将来要更彻底，可换成有界连接；代价是空闲时每 5 秒一次建连。
 
 ## 本轮修复后的 Windows 验证
 
