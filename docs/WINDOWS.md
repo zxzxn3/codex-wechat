@@ -22,6 +22,33 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
 若第 3 项失败，应把存在性判断改为直接尝试有界连接，或提供等价的 Windows 专用探测；
 仅改 mock 或把测试标绿不算实机验收。
 
+### 2026-11-05 实测：`Path.exists()` 会抛异常，而不是返回 False
+
+本机（Windows 11 / Python 3.12.10 / `main` @ `45d979c`，Codex app-server daemon 0.166.0
+正在运行）对 `\\.\pipe\codex-ipc` 的采样：
+
+| 采样方式 | 结果 |
+|---|---|
+| `Path(r"\\.\pipe\codex-ipc").exists()`，100 次、间隔 20ms（App 空闲窗口） | `True` 100/100 |
+| 同上，20 次配对采样（App 忙窗口） | 抛 `OSError`（`winerror=231`）19 次，`True` 1 次 |
+| `os.stat()` 同一路径，60 次 | 抛 `winerror=231` 60/60 |
+| `os.path.exists()` 同一路径 | 恒 `False` |
+
+CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含 231
+（`ERROR_PIPE_BUSY`）**，所以管道实例全忙时 `Path.exists()` 把异常抛给调用者。
+
+`CodexBackend.app_available()`（`backend.py:830`）的 `except OSError: return False` 因此会把
+"App 在、但管道忙"判成"App 不在"，`input_delivery.follow_desktop()`（`input_delivery.py:79`）
+那一次 5 秒检查被跳过。这是**假阴性窗口**，不是永久失效——`next_follow_at` 会重试。
+
+由此：
+
+- 上面第 1 种状态（无 App 时不得误报）**已满足**：没有 App 时确实返回 `False`。
+- 但"存在性判断是否可靠"的答案是**不可靠**，不必等第 3 项失败才行动。
+- 不要改用 `os.path.exists()`：它对忙管道恒 `False`，比现状更差。
+- 最小修法是把 `winerror == 231` 视为"存在"；换成有界连接更彻底，代价是空闲时每 5 秒
+  一次建连（文档前面建议的方向）。
+
 ## 本轮修复后的 Windows 验证
 
 以下项目需要安装后的真实 Windows 进程、App、微信或 CDN 条件，不能只靠源码阅读或 Linux mock 判定。
@@ -58,6 +85,30 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
   环境文件在启动后已删除。
 - [ ] 在真实 CDN 上传大文件并模拟一次超时，确认同一个上传 `filekey` 的重试不会
   产生重复对象；未确认幂等前，不把 POST 自动重试写成已验收行为。
+
+### 2026-11-05 复核：哪些项已可判定
+
+同一台机器、同一提交（`main` @ `45d979c`）上的复核。**只有写明结论的才是已确认项**，
+其余仍需按上面清单实机验证；未勾选的复选框保持原样，不代表已通过。
+
+| 清单项 | 结论 | 依据 |
+|---|---|---|
+| 一行入口下载 `installer.py` 与 `release.py` | 代码已满足，e2e 未验 | `bootstrap.ps1:49-53` 与 `bootstrap.sh:43-44` 都下载这两个文件，`ModuleNotFoundError: release` 的前提已消除 |
+| 只读命令不得改写 `active-release` | 已确认（静态） | `mark_active_release()` 只在 `args.action == "start"` 时调用，`status` / `logs` 不经过它 |
+| 同名 `CodexWeChat` 任务不得误报 | 已确认（代码 + 单测） | `autostart._owned_supervisor_action()` 校验参数前缀、分隔符边界，且 `Execute` 必须是本安装 `.bootstrap-venv` 的 pythonw/python；`service_adapter.status()` 对"已安装但非本安装"直接抛错。见 `tests/test_autostart_windows.py` |
+| WMI 启动时凭据不进命令行 | 机制已实测，WMI/任务上下文未验 | 直接运行 `windows/wmi_launch.py`：环境文件在子进程启动前已删除、临时目录一并清理、子进程继承 `HTTPS_PROXY`/`NO_PROXY`，`argv` 中无凭据 |
+| App IPC 缺字段时受控失败 | 代码已加固，实机未验 | `app_ipc.py` 对 `clientId`、`owner`、`handledByClientId`、`result`、`turn.id` 逐项校验并抛 `CodexRpcError(-32603)` |
+
+另外记录 `wmi_launch.py` 的一个边界（不是缺陷）：若 `--cwd` 恰好等于环境文件所在目录，
+helper 的 `finally` 会先删掉该目录，`Popen` 随后报 `WinError 267`。生产路径中 `cwd` 是后端
+工作目录、环境文件在 `%TEMP%\codex-wechat-wmi-*`，两者不会重合。
+
+**预测：清单第 3 项的"15 秒内失败"当前不满足。** `codex-wechat.ps1:260` 用
+`Wait-TaskRunning` 判断成败，而任务状态在进程刚拉起时就已是 `Running`；若前台仍持有状态锁，
+supervisor 内部的 `start` 在 `startup_store()` 处拿到 `RuntimeError`（`storage.py:49`）后退出，
+ps1 却已经打印「后台服务已启动」并 `exit 0`。Linux 有 `service_adapter.start()` 的 10 秒事后
+轮询兜底，Windows 这条路径没有。按清单实机确认后再修，修复方向见
+[COMMANDS](COMMANDS.md) 的待修问题 1。
 
 安装和首次扫码见 README。计划任务属于当前用户、交互登录、非管理员权限，首次自启关闭；
 更改自启只改登录触发器，不启动或停止实例。bootstrap_supervisor选择current版本，运行时长不设上限，
