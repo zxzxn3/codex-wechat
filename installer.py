@@ -111,7 +111,9 @@ STABLE_WINDOWS_FILES = (
 
 
 def styled(text: str, code: str) -> str:
-    if sys.stdout.isatty() and os.environ.get("NO_COLOR") is None:
+    if (sys.stdout.isatty()
+            and "NO_COLOR" not in os.environ
+            and os.environ.get("TERM") != "dumb"):
         return f"\033[{code}m{text}\033[0m"
     return text
 
@@ -153,12 +155,12 @@ def introduction() -> bool:
         width=width,
     ))
     print()
-    print(textwrap.fill(
+    print(styled(textwrap.fill(
         "本项目为第三方独立开发，与 OpenAI、腾讯公司（微信）及其关联方"
         "没有隶属、合作或背书关系，也未获其授权；"
         "相关名称与商标归各自权利人所有。",
         width=width,
-    ))
+    ), "33"))
     print()
     print(textwrap.fill(
         "接下来展示操作计划，确认后执行；不启用新自启、不启动服务、不安装附加组件。",
