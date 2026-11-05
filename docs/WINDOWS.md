@@ -70,6 +70,19 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 - 不要改用 `os.path.exists()`：它对忙管道恒 `False`，比 `Path.exists()` 更差。
 - 若将来要更彻底，可换成有界连接；代价是空闲时每 5 秒一次建连。
 
+### 2026-11-05 断开 App → 重开 → 再打开会话（状态 3 的完整闭环）
+
+同一台机器上的连续观测，四步都不需要重启桥接：
+
+| 时间 | 事件 | 说明 |
+|---|---|---|
+| 02:43:20 | `bridge.start`，`backend.connected` | App 已完全退出，`\\.\pipe\*codex*` 一个都没有；本次会话 `app_ipc.*` 与 `backend.app_*` 事件为 **0**，没有误报 |
+| 02:45:21 | `backend.app_attach_failed` `CodexRpcError` | 重开 App 但**没有打开任何会话**；`thread-owner-discovery` 对桥接选中的会话和另外 6 个历史会话全部返回 `no-client-found`。同原因只记一次 |
+| 02:49:34 | `app_ipc.connected` → `backend.app_followed` `followed` | 在 App 里打开该会话后约 15 秒，空闲重试自己挂上了 |
+
+过程中没有出现 `KeyError`、`recover_failed` 或重启：断开的 App 只是让管道消失，重连失败走
+`backend.app_attach_failed` 这条受控路径。
+
 ### 状态 2、3 的实测时间线（2026-11-05，真实 App + 真实微信）
 
 操作者按下面的顺序用了一轮，日志时间线与之对应（`bridge.jsonl`）：
@@ -144,12 +157,12 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   后接管会话和空闲 follower；结果写入验收记录，不能用 Linux mock 代替。
   2026-11-05 三种状态全部实测通过：先关 App 再启动桥接不会误报（`app_ipc.*` 事件为 0）、
   App 持有会话时 `/switch` 可用、空闲后接管出现 `backend.app_followed` 并双向收发。
-- [ ] 断开/重启 App，检查 `initialize`、owner discovery、turn start/steer 响应缺少
+- [x] 断开/重启 App，检查 `initialize`、owner discovery、turn start/steer 响应缺少
   字段时是否以受控失败结束，而不是让 `KeyError` 穿透到输入投递层。
-  （2026-11-05：缺字段路径已在 `app_ipc.py` 逐项校验并抛 `CodexRpcError(-32603)`。
-  实机日志里见过受控失败：交还写者后立刻 attach 得到 `backend.app_attach_failed`
-  `CodexRpcError`，按 best-effort 记警告且不影响该轮，**不是** `KeyError`。断开/重启
-  App 本身仍需实机确认。）
+  2026-11-05 实测闭环：App 完全退出时管道消失、桥接不误报也不报错；重开但未打开会话时
+  得到一次受控的 `backend.app_attach_failed CodexRpcError`（`no-client-found`），不是
+  `KeyError`；在 App 打开该会话后约 15 秒 `app_ipc.connected` → `backend.app_followed`，
+  全程无重启。缺字段路径另有 `app_ipc.py` 的逐项校验与单测覆盖。
 - [ ] 人为让共享 daemon 启动失败，确认 `/status` 显示 `shared_fallback`，日志出现
   `backend.shared_unavailable` 和可理解的失败原因；配置中的 `sharedDaemon: true`
   不被改写。
@@ -170,11 +183,11 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 
 ### 2026-11-05 复核：状态说明与剩余依据
 
-同一台机器、同一提交（`docs/WINDOWS.md` 记录的行为以 `main` @ `45d979c` 起为基线）上的复核。
-上面 12 项里 **5 项已确认并勾选**（`active-release` 只读不改、同名任务不误报、真实 App 的
-空闲 follower、服务命令的失败可见性、运行时 release 不被清理），其余 7 项仍需实机，
-其中 1 项被私有仓库阻塞、1 项在本机无法复现。已确认项的判据写在对应条目下；未勾选的复选框
-一律代表"尚未验证"，不代表已通过。
+同一台机器上的复核（行为基线以 `main` @ `45d979c` 起为准）。上面 12 项里 **6 项已确认并勾选**
+（`active-release` 只读不改、同名任务不误报、真实 App 的空闲 follower、服务命令的失败可见性、
+运行时 release 不被清理、断开/重开 App 的受控失败），其余 6 项仍未验证，其中 1 项被私有仓库
+阻塞、1 项在本机无法复现。已确认项的判据写在对应条目下；未勾选的复选框一律代表"尚未验证"，
+不代表已通过。
 
 另外两项由操作者在 2026-11-05 的实机操作中确认可用，但没有留下可核对的日志（那段时间的
 `bridge.jsonl` 已被修复前的 `recover_failed` 与 `/sessions` 失败占满）：**④ 后台运行时执行
