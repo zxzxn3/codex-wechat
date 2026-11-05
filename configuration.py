@@ -15,9 +15,11 @@ DEFAULT_CONNECTION_IDLE_SECONDS = 60
 CONNECTION_IDLE_MIN = 0
 CONNECTION_IDLE_MAX = 3600
 REPLY_BUDGET_MIN = 1
-# The platform tolerates roughly ten replies per inbound message; the "/" notice
-# that asks for more is sent on top of this, so the ceiling stays at nine.
-REPLY_BUDGET_MAX = 9
+# Ten replies per inbound message is the community-observed ceiling; the ceiling
+# here is deliberately higher so an operator who knows this key can take the risk.
+REPLY_BUDGET_MAX = 100
+# Past this observed value the bridge warns once, so a shared log shows the cause.
+REPLY_BUDGET_CEILING = 9
 DEFAULT_REPLY_BUDGET = 9
 DEFAULT_COMPLETION_TEMPLATE = "`OUT > {turn_output_tokens} in {elapsed}`"
 DEFAULT_ACK_TEMPLATE = "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`"

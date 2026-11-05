@@ -138,6 +138,9 @@ NUMERIC_SETTINGS = {
     "connectionIdleSeconds": (CONNECTION_IDLE_MIN, CONNECTION_IDLE_MAX),
     "media.maxMiB": (MEDIA_MAX_MIB_MIN, MEDIA_MAX_MIB_MAX),
     "slicing.targetChars": (SLICING_TARGET_MIN, SLICING_TARGET_MAX),
+    # Not advertised in the panel or in /help settings: an operator who knows the
+    # name may raise it past the observed platform ceiling on purpose.
+    "budgets": (REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
     "sending.replyBudget": (REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
 }
 SETTING_PATHS = {
@@ -147,6 +150,7 @@ SETTING_PATHS = {
     "sourceHint": ("sourceHint",),
     "slicing.smart": ("slicing", "smart"),
     "slicing.targetChars": ("slicing", "targetChars"),
+    "budgets": ("sending", "replyBudget"),
     "sending.replyBudget": ("sending", "replyBudget"),
 }
 
@@ -346,7 +350,6 @@ async def command_settings(bridge, command, argument, received=None):
         notice=notice(bridge),
         completion_notice=completion_template(bridge.reload_config(), bridge.state),
         source_hint=bridge.source_hint,
-        reply_budget=bridge.reply_budget(),
         attachment_mib=bridge.media.limit // (1024 * 1024),
         slicing=bridge.slicing,
         notifications=bridge.notifications,

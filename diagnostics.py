@@ -68,6 +68,7 @@ _NUMBER_FIELDS = {
     "bytes", "chars", "parts", "part", "http_status", "curl_code",
     "exit_code", "retry_in_ms", "threshold", "sample_ms", "pid",
     "message_type", "message_state", "queue_wait_ms", "send_failures",
+"budget", "ceiling",
 } | NETWORK_TIMING_FIELDS
 _BOOL_FIELDS = {"ok", "connected", "proxy_used", "connection_reused"}
 

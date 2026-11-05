@@ -17,19 +17,24 @@ class SendingConfigTests(unittest.TestCase):
         self.assertEqual(Sending.from_config({}).reply_budget, 9)
         self.assertEqual(Sending.from_config(None).reply_budget, 9)
 
-    def test_rejects_values_outside_one_to_nine(self):
-        for value in (0, 10, True, "3", 3.0, -1):
+    def test_rejects_values_outside_one_to_one_hundred(self):
+        for value in (0, 101, True, "3", 3.0, -1):
             with self.assertRaises(ValueError):
                 Sending.from_config({"replyBudget": value})
         self.assertEqual(Sending.from_config({"replyBudget": 1}).reply_budget, 1)
+        self.assertEqual(Sending.from_config({"replyBudget": 100}).reply_budget, 100)
 
     def test_rejects_unknown_keys(self):
         with self.assertRaises(ValueError):
             Sending.from_config({"replyBudget": 3, "nope": 1})
 
-    def test_the_setting_is_exposed_with_the_same_bounds(self):
-        self.assertEqual(NUMERIC_SETTINGS["sending.replyBudget"], (1, 9))
-        self.assertEqual(SETTING_PATHS["sending.replyBudget"], ("sending", "replyBudget"))
+    def test_the_knob_is_settable_but_absent_from_the_panel(self):
+        from prompts import SETTINGS_HELP, settings_summary
+        for name in ("budgets", "sending.replyBudget"):
+            self.assertEqual(NUMERIC_SETTINGS[name], (1, 100))
+            self.assertEqual(SETTING_PATHS[name], ("sending", "replyBudget"))
+        self.assertNotIn("budgets", SETTINGS_HELP)
+        self.assertNotIn("replyBudget", settings_summary(notice="", attachment_mib=20))
 
 
 class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
@@ -117,6 +122,25 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
         queued = len(self.bridge.state["outbox"])
         await HANDLERS["/continue"](self.bridge, "/continue", "")
         self.assertEqual(len(self.bridge.state["outbox"]), queued)
+
+    def test_a_budget_past_the_ceiling_is_logged_once_with_its_value(self):
+        config = {"backends": {"codex": {}}, "sending": {"replyBudget": 20}}
+        with patch("codex_wechat.log_event") as log_event:
+            bridge = Bridge(self.store, {"user": "owner"}, config)
+            bridge.reload_config()
+            bridge.reload_config()
+        events = [call for call in log_event.call_args_list
+                  if call.args and call.args[0] == "config.reply_budget_above_ceiling"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].kwargs["level"], "warning")
+        self.assertEqual(events[0].kwargs["budget"], 20)
+        self.assertEqual(events[0].kwargs["ceiling"], 9)
+
+    def test_the_default_budget_logs_nothing(self):
+        with patch("codex_wechat.log_event") as log_event:
+            Bridge(self.store, {"user": "owner"}, {"backends": {"codex": {}}})
+        self.assertNotIn("config.reply_budget_above_ceiling",
+                         [call.args[0] for call in log_event.call_args_list if call.args])
 
     async def test_an_inbound_message_clears_the_pause(self):
         self.bridge.spend_reply_budget()

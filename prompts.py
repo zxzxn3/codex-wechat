@@ -102,8 +102,7 @@ COMMAND_FAILURE_LABELS = {
 COMMAND_FAILURE = "{action}: {reason}"
 
 SETTINGS_USAGE = ("用法:\n`/settings [autostart|shared|compactionNotice|slicing.smart] true|false`\n"
-                  "`/settings connectionIdleSeconds|media.maxMiB|slicing.targetChars|"
-                  "sending.replyBudget <整数>`\n"
+                  "`/settings connectionIdleSeconds|media.maxMiB|slicing.targetChars <整数>`\n"
                   "`/settings sourceHint <文本>`\n"
                   "`/settings ack|finish <模板>|\"\"|fields`")
 SETTINGS_HINT = ("以上设置可通过 `/settings [option] [value]` 更改。\n"
@@ -120,7 +119,6 @@ connectionIdleSeconds: 0–3600，微信 HTTP 连接池空闲秒数；0 表示�
 media.maxMiB: 1–100，单个微信附件的大小上限。
 slicing.smart: true|false，true 使用智能语义切片，false 按长度切片。
 slicing.targetChars: 80–20000，切片目标字符数。
-sending.replyBudget: 1–9，每条入站消息最多回多少条（含处理回执、结束提示和附件）；`/` 续传提示不计入。
 sourceHint: 附加到每条微信用户消息的来源说明；空字符串关闭。
 
 [无法直接修改]
@@ -627,7 +625,7 @@ def status_summary(**kwargs):
 
 def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None,
                      completion_notice="", source_hint=None, autostart=None, shared=None,
-                     connection_idle_seconds=None, reply_budget=None, text=prompt_text):
+                     connection_idle_seconds=None, text=prompt_text):
     def display_template(value):
         value = str(value or VALUE_EMPTY)
         if len(value) >= 2 and value[0] == value[-1] == "`":
@@ -650,8 +648,6 @@ def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None
         editable.append(f"slicing.targetChars: {slicing.target_chars}")
     if source_hint is not None:
         editable.append(f"sourceHint: {source_hint or VALUE_EMPTY}")
-    if reply_budget is not None:
-        editable.append(f"sending.replyBudget: {reply_budget}")
     readonly = []
     if notifications is not None:
         for window in ("primary", "secondary"):

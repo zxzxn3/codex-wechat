@@ -25,7 +25,8 @@ from storage import Store
 from wechat import WeChat, login
 from commands import dispatch, notice, parse_control
 from command_specs import CONTROL_LANES
-from configuration import ConfigLoader, ConfigurationError, HotSettings, write_config
+from configuration import (ConfigLoader, ConfigurationError, HotSettings,
+                           REPLY_BUDGET_CEILING, write_config)
 from prompts import (prompt_text)
 from quota import quota_warnings
 from profiles import backend_label, definitions, ensure_backend_config, snapshot
@@ -143,6 +144,7 @@ class Bridge:
         self.inputs = InputDelivery(self)
         self.ingress = Ingress(self)
         self.backend_session = BackendSession(self)
+        self.note_reply_budget()
 
     @property
     def slicing(self):
@@ -159,6 +161,15 @@ class Bridge:
     def reply_budget(self):
         """Replies one inbound message may spend before the bridge asks for more."""
         return self.settings.hot.sending.reply_budget
+
+    def note_reply_budget(self):
+        """A budget past the observed ceiling is deliberate; leave a trace for support."""
+        budget = self.reply_budget()
+        if budget <= REPLY_BUDGET_CEILING or budget == getattr(self, "noted_reply_budget", None):
+            return
+        self.noted_reply_budget = budget
+        log_event("config.reply_budget_above_ceiling", level="warning", component="config",
+                  budget=budget, ceiling=REPLY_BUDGET_CEILING)
 
     def budget_state(self):
         budget = self.state.get("replyBudget")
@@ -188,6 +199,7 @@ class Bridge:
 
     def reload_config(self):
         changed = self.settings.reload(self.state)
+        self.note_reply_budget()
         set_idle = getattr(self.channel, "set_idle_seconds", None)
         if set_idle is not None:
             set_idle(self.settings.hot.connection_idle_seconds)
