@@ -26,6 +26,9 @@ _WMI_CREATE = (
     "-Arguments @{{ CommandLine = '{command}'; CurrentDirectory = '{cwd}' }}; "
     "exit $r.ReturnValue")
 WMI_HELPER = PROJECT_ROOT / "windows" / "wmi_launch.py"
+# A successful WMI create returns before the helper reads the file, so the sweep
+# has to come later than the helper's own cleanup (which takes about 100ms).
+ENV_FILE_SWEEP_SECONDS = 5.0
 
 
 async def run(command, *, env, cwd, timeout):
@@ -165,10 +168,15 @@ class BackendRuntime:
 
         try:
             await asyncio.to_thread(create_process_outside_job, line, str(self.cwd))
-            return
         except Exception:  # pywin32 absent or the COM call refused; keep a slower way in
             log_event("backend.detached_com_unavailable", level="warning",
                       component="backend")
+        else:
+            # The helper deletes the file before it starts the target. This sweep
+            # covers a helper that never reached its own cleanup, so a file
+            # holding proxy credentials cannot outlive the launch.
+            asyncio.get_running_loop().call_later(ENV_FILE_SWEEP_SECONDS, cleanup_later)
+            return
         powershell = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
         if not powershell:
             cleanup_later()

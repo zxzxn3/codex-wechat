@@ -187,7 +187,11 @@ class DaemonLaunchTests(unittest.IsolatedAsyncioTestCase):
             return b""
 
         detached = Mock(return_value=4242)
-        with patch.object(backend_runtime, "run", runner), \
+        real_mkdtemp = tempfile.mkdtemp
+        with tempfile.TemporaryDirectory() as scratch, \
+                patch.object(backend_runtime.tempfile, "mkdtemp",
+                             lambda **kwargs: real_mkdtemp(dir=scratch, **kwargs)), \
+                patch.object(backend_runtime, "run", runner), \
                 patch.object(backend_runtime, "create_process_outside_job", detached):
             await self.runtime().ensure_native(["codex.exe", "app-server"],
                                                {"HTTP_PROXY": "p"}, is_windows=True)
@@ -195,6 +199,23 @@ class DaemonLaunchTests(unittest.IsolatedAsyncioTestCase):
         detached.assert_called_once()
         self.assertIn("wmi_launch.py", detached.call_args.args[0])
         self.assertNotIn("HTTP_PROXY", detached.call_args.args[0])
+
+    async def test_a_successful_launch_sweeps_the_env_file(self):
+        async def runner(command, *, env, cwd, timeout):
+            raise BackendStartupError("后台准备失败（退出码 1）")
+
+        real_mkdtemp = tempfile.mkdtemp
+        with tempfile.TemporaryDirectory() as scratch, \
+                patch.object(backend_runtime.tempfile, "mkdtemp",
+                             lambda **kwargs: real_mkdtemp(dir=scratch, **kwargs)), \
+                patch.object(backend_runtime, "ENV_FILE_SWEEP_SECONDS", 0.02), \
+                patch.object(backend_runtime, "run", runner), \
+                patch.object(backend_runtime, "create_process_outside_job", Mock(return_value=4242)):
+            await self.runtime().ensure_native(["codex.exe", "app-server"],
+                                               {"HTTP_PROXY": "p"}, is_windows=True)
+            await asyncio.sleep(0.1)
+            leftovers = list(Path(scratch).rglob("env.json"))
+        self.assertEqual(leftovers, [])
 
     async def test_the_shell_fallback_is_used_when_com_is_unavailable(self):
         calls = []
