@@ -16,6 +16,7 @@ import uuid
 from records import AgentMessage, Source, TurnResult
 from media import OUTPUT_HINT
 from diagnostics import error_reason, log_event
+from errors import ErrorAction, disposition
 from usage import UsageCache
 from questions import (
     ASYNC_QUESTION_METHOD,
@@ -54,10 +55,12 @@ WRITER_BUSY = "busy"            # the desktop holds it and we could not follow
 
 class DeferTurn(RuntimeError):
     """The desktop owns an active turn that did not accept this input."""
+    error_actions = ErrorAction.RETRYABLE
 
 
 class TurnStalled(RuntimeError):
     """The turn stopped reporting events; it was abandoned locally."""
+    error_actions = ErrorAction.TERMINAL
 
 class CodexBackend:
     def __init__(self, config, cwd, notify):
@@ -131,6 +134,8 @@ class CodexBackend:
         try:
             await self.transport.start()
         except SharedDaemonUnavailable as error:
+            if ErrorAction.FALLBACK not in disposition(error).actions:
+                raise
             # An explicit shared choice stays in the configuration; this run only
             # needs to keep working, so reuse the private server instead.
             await self.close()

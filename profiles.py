@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import time
 from platform_support import IS_WINDOWS
-from errors import UserFacingError
+from errors import UserFacingError, writer_conflict
 from codex_transport import CodexRpcError
 
 SESSION_KEYS = ("thread", "sessionChoices", "sessionCursor", "sessionSearch")
@@ -99,12 +99,6 @@ def backend_label(name, backends=None):
 
 def backend_argument(name):
     return str(name).lower()
-
-
-def writer_conflict(error):
-    """A resume rejected because another client still holds the thread's writer."""
-    return (isinstance(error, CodexRpcError) and error.code == -32600
-            and "already has an active writer" in str(error.reason))
 
 
 async def resume_or_adopt(candidate, thread_id, adopt_busy, *, wait=5.0):

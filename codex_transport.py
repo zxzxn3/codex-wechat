@@ -9,6 +9,7 @@ import daemon_control
 from backend_runtime import BackendRuntime
 from codex_connection import ConnectionSpec
 from diagnostics import error_fields, log_event
+from errors import ErrorAction
 from subprocess_io import communicate
 from platform_support import IS_WINDOWS, subprocess_options
 from version import APP_VERSION
@@ -16,6 +17,8 @@ from version import APP_VERSION
 SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
 
 class CodexRpcError(RuntimeError):
+    error_actions = ErrorAction.TERMINAL
+
     def __init__(self, code, reason="", method=None, *, definite=None):
         self.code = code
         # Only validation/precondition rejections establish non-delivery. Internal
@@ -41,6 +44,8 @@ class CodexRpcError(RuntimeError):
 
 class SharedDaemonUnavailable(RuntimeError):
     """The shared daemon cannot be reached or started; callers may use a private server."""
+    error_actions = ErrorAction.FALLBACK | ErrorAction.RETRYABLE
+
     def __init__(self, reason, *, cause=None):
         super().__init__(str(reason))
         self.cause = cause

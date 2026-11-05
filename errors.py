@@ -1,10 +1,48 @@
 """User-safe error classification; no protocol or UI state."""
+from dataclasses import dataclass
+from enum import Flag, auto
+
+
+class ErrorAction(Flag):
+    """Independent handling axes; an error may need more than one."""
+    RETRYABLE = auto()
+    USER_ACTION = auto()
+    FALLBACK = auto()
+    TERMINAL = auto()
+
+
+# The first applicable action is the caller's immediate strategy.
+ACTION_PRIORITY = (
+    ErrorAction.FALLBACK,
+    ErrorAction.RETRYABLE,
+    ErrorAction.USER_ACTION,
+    ErrorAction.TERMINAL,
+)
+WRITER_CONFLICT_MARKER = "already has an active writer"
+
+
+@dataclass(frozen=True)
+class ErrorDisposition:
+    actions: ErrorAction
+    retry_after: float | None = None
+
+    @property
+    def primary(self):
+        for action in ACTION_PRIORITY:
+            if action in self.actions:
+                return action
+        return ErrorAction.TERMINAL
+
+
 class UserFacingError(ValueError):
     """An already complete WeChat-facing error message."""
+    error_actions = ErrorAction.USER_ACTION
 
 
 class BackendStartupError(RuntimeError):
     """A bounded, safe startup reason derived from native service metadata."""
+    error_actions = ErrorAction.RETRYABLE
+
     def __init__(self, reason, *, retry_after=10):
         self.reason = reason
         self.retry_after = retry_after
@@ -13,6 +51,7 @@ class BackendStartupError(RuntimeError):
 
 class WeChatAuthExpired(RuntimeError):
     """The saved bot token was rejected and requires an interactive rebind."""
+    error_actions = ErrorAction.USER_ACTION
     code = -14
 
     def __init__(self):
@@ -22,14 +61,38 @@ class WeChatAuthExpired(RuntimeError):
 
 class WeChatPollTimeout(RuntimeError):
     """Long poll reached its wait deadline after HTTPS preparation, without a response."""
+    error_actions = ErrorAction.RETRYABLE
 
 
 class WeChatApiError(RuntimeError):
     """The API rejected the request itself: retrying cannot change the outcome."""
+    error_actions = ErrorAction.TERMINAL
+
     def __init__(self, code, kind):
         self.code = code
         self.kind = kind
         super().__init__(f"微信 API 错误 {code}")
+
+
+def writer_conflict(error):
+    """A resume rejected because another client still holds the thread's writer."""
+    return (getattr(error, "code", None) == -32600
+            and WRITER_CONFLICT_MARKER in str(getattr(error, "reason", error)))
+
+
+def disposition(error):
+    """Return independent handling axes and the bounded retry delay, if any."""
+    actions = getattr(type(error), "error_actions", ErrorAction.TERMINAL)
+    if writer_conflict(error):
+        actions = (actions & ~ErrorAction.TERMINAL) | ErrorAction.RETRYABLE | ErrorAction.USER_ACTION
+    if isinstance(error, (TimeoutError, ConnectionError, OSError)):
+        actions = (actions & ~ErrorAction.TERMINAL) | ErrorAction.RETRYABLE
+    if ErrorAction.RETRYABLE in actions or ErrorAction.FALLBACK in actions:
+        actions &= ~ErrorAction.TERMINAL
+    retry_after = getattr(error, "retry_after", None)
+    if not isinstance(retry_after, (int, float)) or retry_after < 0:
+        retry_after = None
+    return ErrorDisposition(actions, retry_after)
 
 
 BACKEND_REASONS = (

@@ -14,7 +14,7 @@ from backend import CodexRpcError, DeferTurn, TurnStalled, WRITER_RELEASED
 from commands import ensure_session
 from records import InputPhase
 from media import MediaError
-from errors import attachment_reason
+from errors import attachment_reason, writer_conflict
 from diagnostics import error_fields, log_event
 
 class InputDelivery:
@@ -275,8 +275,7 @@ class InputDelivery:
                 bridge.state.pop("currentInput", None)
                 bridge.save()
             except Exception as error:
-                conflict = (isinstance(error, CodexRpcError) and error.code == -32600
-                            and "already has an active writer" in str(error.reason))
+                conflict = writer_conflict(error)
                 if conflict and not bridge.stopping and self.queue_writer_conflict(bridge, job):
                     continue
                 if bridge.state.get("currentInput") is job:

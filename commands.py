@@ -9,9 +9,8 @@ import time
 import uuid
 import autostart
 
-from profiles import (backend_argument, backend_label, definitions, ensure_backend_config,
-                      switch, writer_conflict)
-from errors import UserFacingError, attachment_reason, backend_reason
+from profiles import backend_argument, backend_label, definitions, ensure_backend_config, switch
+from errors import UserFacingError, attachment_reason, backend_reason, writer_conflict
 from codex_transport import CodexRpcError
 from codex_connection import ConnectionSpec
 from backend import WRITER_BUSY, WRITER_NATIVE
