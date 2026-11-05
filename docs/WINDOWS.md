@@ -13,8 +13,8 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
   `autostart true|false`、`uninstall`、`uninstall -PurgeData` 各跑一次。
 - [ ] 无参数运行等价于 `status`；服务未安装时 `autostart` 输出 `false` 并退出 0。
 - [ ] 后台服务运行时 `start` 被拒绝；前台桥接持锁时 `service-start` 被拒绝。
-- [ ] 内部 `windows/task-service.ps1` 的 `start` 只在任务持续 Running 2 秒后成功，
-  Queued 不再被当成稳定运行；失败输出仍带日志路径。
+- [ ] `service_adapter.py` 的 `start` 只在任务持续 Running 2 秒后成功；
+  Queued 不再被当成稳定运行。内部 `windows/task-service.ps1` 只发原生 start/stop。
 - [ ] `service-restart` 在任务停止并重新 Running 稳定后才返回；启动即退出会失败。
 - [ ] 管理员终端下写操作被拒绝；`status`、`logs`、`uninstall` 仍可执行；
   `codex-desktop.ps1 cli` 也拒绝管理员终端。
@@ -285,8 +285,8 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 实测：恢复后启动服务，排队中的「已恢复会话」与随后 `/status` 的回复都在同一条微信消息到达后
 两次请求内成功发出（`wechat.request ok=true` ×2），`outbox` 归零，全程没有重启桥接或重扫。
 
-历史轮次中记录的 `Wait-TaskRunning` 假成功问题已经由 `Wait-ServiceStable` 取代；当前实现
-位于内部 `windows/task-service.ps1`，详见 [COMMANDS](COMMANDS.md)。旧款逐步排查记录不再
+历史轮次中记录的 PowerShell 稳定等待与假成功问题已经收敛；当前稳定判断位于
+`service_adapter.py`，PowerShell helper 只做原生操作，详见 [COMMANDS](COMMANDS.md)。旧款逐步排查记录不再
 作为当前状态依据。
 
 `wmi_launch.py` 的已知边界：若 `--cwd` 恰好等于环境文件所在目录，helper 的 `finally` 会先

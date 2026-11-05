@@ -97,23 +97,46 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
             "restart", service_adapter.UNIT, timeout=30)
 
     async def test_windows_start_asks_only_for_the_task(self):
-        status = AsyncMock(side_effect=[service_adapter.ServiceState(True, False),
-                                        service_adapter.ServiceState(True, True)])
+        status = AsyncMock(return_value=service_adapter.ServiceState(True, False))
         request = AsyncMock()
+        wait = AsyncMock(return_value=service_adapter.ServiceState(True, True, state="Running"))
         with patch.object(service_adapter, "status", status), \
                 patch.object(service_adapter, "IS_WINDOWS", True), \
-                patch.object(service_adapter, "_windows_request", request):
+                patch.object(service_adapter, "_windows_request", request), \
+                patch.object(service_adapter, "_wait_running_stable", wait):
             await service_adapter.start()
         request.assert_awaited_once_with(["start"], timeout=20)
+        wait.assert_awaited_once_with(timeout=20, settle=service_adapter.STABLE_SECONDS)
 
-    async def test_windows_restart_uses_the_service_entry(self):
+    async def test_windows_restart_uses_only_primitive_host_operations(self):
         status = AsyncMock(return_value=service_adapter.ServiceState(True, True))
         request = AsyncMock()
+        stopped = AsyncMock()
+        wait = AsyncMock(return_value=service_adapter.ServiceState(True, True, state="Running"))
         with patch.object(service_adapter, "status", status), \
                 patch.object(service_adapter, "IS_WINDOWS", True), \
-                patch.object(service_adapter, "_windows_request", request):
+                patch.object(service_adapter, "_windows_request", request), \
+                patch.object(service_adapter, "_wait_stopped", stopped), \
+                patch.object(service_adapter, "_wait_running_stable", wait):
             await service_adapter.restart()
-        request.assert_awaited_once_with(["restart"], timeout=40)
+        self.assertEqual(
+            [call.args[0] for call in request.await_args_list],
+            [["stop"], ["start"]],
+        )
+        stopped.assert_awaited_once_with(timeout=20)
+        wait.assert_awaited_once_with(timeout=20, settle=service_adapter.STABLE_SECONDS)
+
+    async def test_stop_uses_the_same_wait_on_both_platforms(self):
+        status = AsyncMock(return_value=service_adapter.ServiceState(True, True))
+        request = AsyncMock()
+        stopped = AsyncMock(return_value=service_adapter.ServiceState(True, False))
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter, "IS_WINDOWS", True), \
+                patch.object(service_adapter, "_windows_request", request), \
+                patch.object(service_adapter, "_wait_stopped", stopped):
+            await service_adapter.stop_and_wait()
+        request.assert_awaited_once_with(["stop"], timeout=25)
+        stopped.assert_awaited_once_with(timeout=20)
 
     async def test_restart_rejects_an_unregistered_service(self):
         command = AsyncMock()

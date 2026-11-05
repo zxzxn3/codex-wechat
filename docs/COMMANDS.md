@@ -89,7 +89,8 @@ Linux stable 入口、Windows `codex-wechat.ps1`、Windows `codex-desktop.ps1` �
 
 - 新薄入口与 `.cmd`：`start`、`stop`、`status`、`service-start`、`service-restart`、
   `autostart true|false`、`uninstall`、`uninstall -PurgeData` 的完整闭环。
-- 内部 `windows/task-service.ps1` 的 `Running` 稳定性校验，以及前台锁/后台服务的双向互斥。
+- Python 服务适配器的 `Running` 稳定性校验，以及前台锁/后台服务的双向互斥；
+  内部 `windows/task-service.ps1` 只负责原生 start/stop/status。
 - 管理员终端拒绝，以及 `status`、`logs`、`uninstall` 例外；`codex-desktop.ps1` 同样拒绝管理员。
 - `autostart true|false` 对已有计划任务、缺失任务、foreign task 的结果。
 - 卸载默认保留数据、`-PurgeData` 清理数据，以及 `.cmd` 安全删除。

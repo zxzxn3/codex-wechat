@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('status', 'start', 'stop', 'restart', 'autostart')]
+    [ValidateSet('status', 'start', 'stop', 'autostart')]
     [string]$Action = 'status',
     [Parameter(Position = 1)]
     [ValidateSet('true', 'false')]
@@ -13,7 +13,6 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $TaskName = 'CodexWeChat'
-$BridgeLog = Join-Path $env:LOCALAPPDATA 'codex-wechat\logs\bridge.jsonl'
 $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     [IO.Path]::GetFullPath($env:CODEX_WECHAT_INSTALL_ROOT)
 } elseif ((Split-Path -Leaf (Split-Path -Parent $PSScriptRoot)) -eq 'releases') {
@@ -69,42 +68,6 @@ function Get-LogonTriggers([object]$Task) {
     })
 }
 
-function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if (-not $task -or $task.State -notin @('Running', 'Queued')) {
-            return
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    Fail "scheduled task did not stop in time; log: $BridgeLog"
-}
-
-function Wait-ServiceStable([int]$TimeoutSeconds = 15, [int]$SettleMilliseconds = 2000) {
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $runningSince = $null
-    while ((Get-Date) -lt $deadline) {
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        $state = if ($task) { [string]$task.State } else { 'not-installed' }
-        if ($state -eq 'Running') {
-            if (-not $runningSince) {
-                $runningSince = Get-Date
-            } elseif (((Get-Date) - $runningSince).TotalMilliseconds -ge $SettleMilliseconds) {
-                return
-            }
-        } else {
-            if ($runningSince) {
-                $result = (Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult
-                Fail "background service exited during startup (state=$state last_result=$result); log: $BridgeLog"
-            }
-            $runningSince = $null
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    Fail "background service did not become stable in time; log: $BridgeLog"
-}
-
 function Write-TaskStatus {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     $installed = $null -ne $task
@@ -137,7 +100,6 @@ switch ($Action) {
         if ($task.State -notin @('Running', 'Queued')) {
             Start-ScheduledTask -TaskName $TaskName
         }
-        Wait-ServiceStable
     }
     'stop' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -149,17 +111,7 @@ switch ($Action) {
         }
         if ($task.State -in @('Running', 'Queued')) {
             Stop-ScheduledTask -TaskName $TaskName
-            Wait-TaskStopped
         }
-    }
-    'restart' {
-        $task = Get-InstalledTask
-        if ($task.State -in @('Running', 'Queued')) {
-            Stop-ScheduledTask -TaskName $TaskName
-            Wait-TaskStopped
-        }
-        Start-ScheduledTask -TaskName $TaskName
-        Wait-ServiceStable
     }
     'autostart' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

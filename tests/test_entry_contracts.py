@@ -54,10 +54,12 @@ class EntryContractTests(unittest.TestCase):
 
     def test_task_helper_is_internal_and_owns_native_operations(self):
         text = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
-        self.assertIn("ValidateSet('status', 'start', 'stop', 'restart', 'autostart')", text)
+        self.assertIn("ValidateSet('status', 'start', 'stop', 'autostart')", text)
         self.assertIn("Start-ScheduledTask", text)
         self.assertIn("Stop-ScheduledTask", text)
-        self.assertIn("Wait-ServiceStable", text)
+        self.assertNotIn("'restart'", text)
+        self.assertNotIn("Wait-ServiceStable", text)
+        self.assertNotIn("Wait-TaskStopped", text)
         self.assertNotIn("codex_wechat.py", text)
 
     def test_task_helper_is_shipped_as_a_stable_windows_file(self):

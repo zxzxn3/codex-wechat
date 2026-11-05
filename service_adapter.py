@@ -105,11 +105,25 @@ async def stop_and_wait(timeout=20):
     current = await status()
     if not current.installed or not current.running:
         return current
+    await _request_stop(timeout=timeout)
+    return await _wait_stopped(timeout=timeout)
+
+
+async def _request_stop(*, timeout=20):
     if IS_WINDOWS:
         await _windows_request(["stop"], timeout=timeout + 5)
-        return await status()
+    else:
+        await systemctl("--no-block", "stop", UNIT)
 
-    await systemctl("--no-block", "stop", UNIT)
+
+async def _request_start(*, timeout=20):
+    if IS_WINDOWS:
+        await _windows_request(["start"], timeout=timeout)
+    else:
+        await systemctl("start", UNIT)
+
+
+async def _wait_stopped(timeout):
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
@@ -126,13 +140,8 @@ async def start():
         raise ValueError(NOT_INSTALLED)
     if current.running:
         return current
-    if IS_WINDOWS:
-        await _windows_request(["start"], timeout=20)
-        settle = 0
-    else:
-        await systemctl("start", UNIT)
-        settle = STABLE_SECONDS
-    return await _wait_running_stable(timeout=10, settle=settle)
+    await _request_start(timeout=20)
+    return await _wait_running_stable(timeout=20, settle=STABLE_SECONDS)
 
 
 async def restart():
@@ -140,14 +149,13 @@ async def restart():
     if not current.installed:
         raise ValueError(NOT_INSTALLED)
     if IS_WINDOWS:
-        # The helper may spend 15 seconds stopping and 15 seconds waiting for
-        # a stable start; the outer request must cover both phases.
-        await _windows_request(["restart"], timeout=40)
-        settle = 0
+        if current.running:
+            await _request_stop(timeout=20)
+            await _wait_stopped(timeout=20)
+        await _request_start(timeout=20)
     else:
         await systemctl("restart", UNIT, timeout=30)
-        settle = STABLE_SECONDS
-    return await _wait_running_stable(timeout=20, settle=settle)
+    return await _wait_running_stable(timeout=20, settle=STABLE_SECONDS)
 
 
 async def _wait_running_stable(*, timeout, settle):
