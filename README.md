@@ -82,6 +82,12 @@ Windows：
 codex-wechat stop
 ```
 
+重启已安装的后台服务：
+
+```bash
+codex-wechat service-restart
+```
+
 Windows 使用 `.ps1 stop`。命令会先尽力向最近一次微信会话发送“微信桥正在停止。”，通知失败不阻止停服；直接使用 `systemctl stop` 不经过这条通知逻辑。前台 `start` 仍在终端按 Ctrl+C 退出。
 
 ## CLI 与 App 共用会话

@@ -786,6 +786,11 @@ async def stop_background_service(state_dir, config_path):
     print("后台服务已停止。")
 
 
+async def restart_background_service():
+    await service_adapter.restart()
+    print("后台服务重启已请求。")
+
+
 async def start_background_service(args):
     """Start the installed service; bind interactively if this terminal can show QR."""
     current = await service_adapter.status()
@@ -806,7 +811,8 @@ async def start_background_service(args):
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=(
-        "login", "start", "stop", "status", "rebind", "logs", "service-start"))
+        "login", "start", "stop", "status", "rebind", "logs", "service-start",
+        "service-restart"))
     parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
     parser.add_argument("--stop-active", action="store_true")
@@ -829,6 +835,9 @@ async def main():
         return
     if args.action == "service-start":
         await start_background_service(args)
+        return
+    if args.action == "service-restart":
+        await restart_background_service()
         return
     if args.action == "rebind":
         await run_rebind(

@@ -908,7 +908,7 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
     if source != SOURCE_ROOT:
         logo_banner(source)
         declaration(source, "start")
-    phase("演练模式，不会修改文件" if dry_run else "安装 / 更新")
+    phase("演练模式，不会修改文件" if dry_run else ("更新" if update else "安装"))
     try:
         files = project_files(source)
     except (OSError, ValueError) as error:
@@ -1019,7 +1019,7 @@ def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bo
     elif update:
         if service_ready:
             print("1. 若此前使用前台 start，请先退出。")
-            print("2. 重启后台服务: systemctl --user restart codex-wechat")
+            print("2. 重启后台服务: codex-wechat service-restart")
             print("3. 在微信发送 /status 确认连接。")
             print()
             print("现有自启状态保持不变。")

@@ -120,6 +120,16 @@ async def start():
     raise RuntimeError("后台服务启动请求已提交，但未能确认运行状态")
 
 
+async def restart():
+    current = await status()
+    if not current.installed:
+        raise ValueError("本项目尚未注册后台服务，请重新运行安装器")
+    if IS_WINDOWS:
+        await _windows_request(["service-restart"], timeout=20)
+    else:
+        await systemctl("--no-block", "restart", UNIT)
+
+
 async def notify(title, message):
     """Persisted auth state remains authoritative when desktop delivery fails."""
     print(f"{title}: {message}", file=sys.stderr, flush=True)
