@@ -1,10 +1,10 @@
 # 命令词表与平台不对称
 
-本文记录 `codex-wechat` 的**用户可见命令面**在两个平台上的实际差异，以及由此暴露的三个待修问题。
+本文记录 `codex-wechat` 的**用户可见命令面**在两个平台上的实际差异，以及由此暴露的四个待修问题。
 运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，能力边界见 [CAPABILITIES](CAPABILITIES.md)。
 
-核对基线：`main` @ `0b44360`（行号已按 2026-11-05 的修复提交校正），Windows 11 + Python 3.12.10 实机核对，Linux 侧依据同一份代码的
-`systemctl` 分支。文档中的行号以该提交为准，后续改动可能失效。
+核对基线：2026-11-05 Windows 侧修复之后的 `main`（行号按该快照校正，之后的改动可能让它失效），
+Windows 11 + Python 3.12.10 实机核对，Linux 侧依据同一份代码的 `systemctl` 分支。
 
 ## 入口
 
@@ -94,19 +94,21 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 |---|---|---|
 | 后台在运行时执行 `start` | 无前置检查 | `codex-wechat.ps1:236` 预检计划任务，立即拒绝 |
 | 前台在运行时执行 `service-start` | 无前置检查 | **无前置检查** |
-| 冲突时的实际结果 | `startup_store()`（`codex_wechat.py:669`）等待状态锁最多 30 秒后报错 | 服务进程立即失败退出 |
+| 冲突时的实际结果 | `startup_store()`（`codex_wechat.py:689`）等待状态锁最多 30 秒后报错 | 服务进程立即失败退出 |
 
 `startup_store()` 的等待分支只在 `action == "start"` 且非 Windows 时生效，因此两个平台的兜底行为不同。
 
-### `service-start` 的事后校验只在 Linux 生效
+### `service-start` 的启动校验（2026-11-05 起两个平台都能发现"起来就退出"）
 
 | | Linux | Windows |
 |---|---|---|
-| 起点 | `codex_wechat.py:815` | `codex-wechat.ps1:260` |
-| 启动 | `systemctl start` | `Start-ScheduledTask` |
-| 事后校验 | 轮询 `service_adapter.status()` 最多 10 秒，失败抛错 | `Wait-TaskRunning`（`codex-wechat.ps1:196`），只看任务状态是否为 Running/Queued |
+| 起点 | `codex_wechat.py:835` 的 `start_background_service()` | `codex-wechat.ps1:279` 的 `service-start` 分支 |
+| 启动 | `systemctl start`（`service_adapter.start()`，`service_adapter.py:106`） | `Start-ScheduledTask` |
+| 事后校验 | 轮询 `status()` 最多 10 秒，超时抛「未能确认运行状态」 | `Wait-ServiceStable`（`codex-wechat.ps1:201`）要求 Running **持续 2 秒**；失败报「后台服务启动后立即退出（state=… last_result=…）」并 `exit 1` |
+| 额外兜底 | — | Python 的 `service_adapter.start()` 在 Windows 上回调 ps1 的 `service-start`，因此前面那道校验之后还会再轮询 `status()` 10 秒 |
 
-任务状态在进程刚拉起时就已是 Running，所以 Windows 这条路径无法发现"起来后立刻退出"的情况。
+修复前 Windows 只看 `Wait-TaskRunning`（`codex-wechat.ps1:196`，已删除），而任务状态在进程刚拉起时
+就是 Running，所以"起来后立刻退出"会被当成成功；见待修问题 1。
 
 ### 版本号校验两处不一致
 
