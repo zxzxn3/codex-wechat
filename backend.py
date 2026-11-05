@@ -40,6 +40,10 @@ PENDING_TOKEN_RECENT = 128
 # which would otherwise freeze the delivery worker until the service restarts.
 TURN_IDLE_SECONDS = 900
 
+# A busy Windows named pipe reports ERROR_PIPE_BUSY rather than "not found", and
+# pathlib does not treat it as a missing path; the pipe is there either way.
+ERROR_PIPE_BUSY = 231
+
 # Writer ownership for the selected thread. NONE means this connection does not
 # hold it; only the two WAITING modes are retried at the start of the next turn.
 WRITER_NATIVE = "native"        # this connection holds the writer
@@ -828,14 +832,15 @@ class CodexBackend:
         return True
 
     def app_available(self):
+        """A busy pipe still proves the App is there; only a missing one does not."""
         from app_ipc import ipc_path
         path = ipc_path(self.config)
         if path is None:
             return False
         try:
             return Path(path).exists()
-        except OSError:
-            return False
+        except OSError as error:
+            return getattr(error, "winerror", None) == ERROR_PIPE_BUSY
 
     def writer_event(self, event, **fields):
         report = getattr(self, "report", None)

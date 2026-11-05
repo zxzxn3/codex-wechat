@@ -542,3 +542,26 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(endpoint, "https://example.com/v1")
         self.assertEqual(env["HTTPS_PROXY"], "http://localhost:1234")
         self.assertNotIn("API_KEY", env)
+
+
+class AppAvailabilityTests(unittest.TestCase):
+    """pathlib raises for a busy pipe instead of reporting it missing."""
+
+    def _backend(self):
+        return CodexBackend({}, "/tmp", lambda _: None)
+
+    def test_busy_pipe_still_counts_as_available(self):
+        busy = OSError("所有的管道实例都在使用中。")
+        busy.winerror = 231
+        with patch("app_ipc.ipc_path", return_value=r"\\.\pipe\codex-ipc"), \
+                patch("backend.Path.exists", side_effect=busy):
+            self.assertTrue(self._backend().app_available())
+
+    def test_other_pipe_errors_mean_unavailable(self):
+        with patch("app_ipc.ipc_path", return_value=r"\\.\pipe\codex-ipc"), \
+                patch("backend.Path.exists", side_effect=OSError(2, "missing")):
+            self.assertFalse(self._backend().app_available())
+
+    def test_without_a_candidate_path_nothing_is_available(self):
+        with patch("app_ipc.ipc_path", return_value=None):
+            self.assertFalse(self._backend().app_available())
