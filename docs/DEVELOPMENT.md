@@ -1,7 +1,8 @@
 # 开发与检查
 
 本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，能力边界见
-[CAPABILITIES](CAPABILITIES.md)，外部依据见 [SOURCES](SOURCES.md)。
+[CAPABILITIES](CAPABILITIES.md)，命令词表与平台差异见 [COMMANDS](COMMANDS.md)，外部依据见
+[SOURCES](SOURCES.md)。
 
 ## 兼容策略
 
