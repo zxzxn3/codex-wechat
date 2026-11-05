@@ -791,7 +791,11 @@ async def status_payload_with_service(store, host_state=None):
     try:
         current = (service_adapter.parse_host_json(host_state) if host_state
                    else await service_adapter.status())
-    except (ValueError, RuntimeError, OSError):
+    except (ValueError, RuntimeError, OSError) as error:
+        if host_state:
+            # A forwarded payload that does not parse is a bug in the entry point
+            # rather than a user condition, so say so - but never on stdout.
+            print(f"服务宿主状态无法解析：{error}", file=sys.stderr)
         return payload
     service = {"installed": current.installed, "running": current.running}
     if current.state:

@@ -1,4 +1,6 @@
 """CLI gates for login and the background service, without a real install."""
+import contextlib
+import io
 from pathlib import Path
 import sys
 import tempfile
@@ -161,3 +163,11 @@ class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
         host = '{"installed":true,"owned":false,"running":false,"state":"Ready"}'
         payload = await codex_wechat.status_payload_with_service(store, host)
         self.assertNotIn("service", payload)
+
+    async def test_an_unparsable_forwarded_payload_is_reported_on_stderr(self):
+        store = await self.store()
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            payload = await codex_wechat.status_payload_with_service(store, "{installed:true}")
+        self.assertNotIn("service", payload)
+        self.assertIn("服务宿主状态无法解析", stderr.getvalue())
