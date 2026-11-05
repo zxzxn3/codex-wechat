@@ -167,7 +167,10 @@ typing 的认证失效进入同一暂停与重绑通知流程，但发现失效�
 rate_limit_hint、other），仅按明确提示归类，不保存 errmsg，也不将 -2 自动认定为限流。
 发送是否成功以服务端返回的消息 id 为准：HTTP 200 且 ret=0、但响应不含 msgid/msg_id/
 message_id/messageId/msgId 时判定为未投递（WeChatNotAcknowledged），按可重试处理，
-重试耗尽后进入 failedOutbox 并计入连续发送失败，不再记 output.sent。该错误属于响应内容
+重试耗尽后进入 failedOutbox 并计入连续发送失败，不再记 output.sent。这是**经验判据而非契约**：
+协议文档的成功响应示例就是 `{"ret":0,"errmsg":""}`，字段表没有消息 id，官方维护者也说明
+"ret=0 只代表 API 层接受、不保证投递"，契约本身无法区分投递与静默过滤（出处见
+[SOURCES](SOURCES.md) 的"微信下行投递"一节）。该错误属于响应内容
 而非请求本身，日志里体现为 output.send_failed / output.failed 的
 error_type=WeChatNotAcknowledged 与 error_code=服务端 ret，不计入 api_error_kind。
 实测依据：某 bot 出站文本被服务端静默丢弃期间，sendtyping 和 getconfig 全程正常，
@@ -192,6 +195,17 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
 - C 熔断：连续 N 条 `not_acknowledged` 后暂停出站，等新入站消息唤醒。
 
 三者互不排斥，但都会改变"一条回复最多发几次"的可观测行为，因此不擅自实现。
+
+### 待决策：每条入站消息约 10 条回复的配额
+
+社区实测（[SOURCES](SOURCES.md) 有出处）每条入站消息约允许 10 条主动回复，超出返回 `ret:-2`，
+官方未文档化。当前实现没有任何预算概念：`slicing.targetChars` 默认 600，一段很长的回答本来就
+可能切成 10 段，再加上处理回执、完成通知、失败通知与附件，很容易越过这条线，而越界后
+我们只会把它当成 `prepare_failed`（不可重试、等新入站）——用户看到的是回复被腰斩。
+
+要定的是：预算里算哪些条目（回执、正文分段、完成通知、失败通知、附件）、触发上限时怎么退
+（合并剩余段、截断并提示到桌面查看、还是只发前 N 段并记日志）。这也会反过来约束
+`slicing.targetChars` 的默认值，所以不单独改切片。
 当前用户私聊在路由前记录input.observed：消息类型、状态、内容类别、字数、项数及跳过原因，
 用于区分上游未投递与本地过滤/去重；不记录正文或消息标识。
 

@@ -95,3 +95,20 @@ Windows 监督器的 Mutex 与 Job Object 使用 pywin32 的 win32event/win32job
 [Job Object](https://mhammond.github.io/pywin32/win32job.html)。仅 Windows 安装此依赖；
 父进程只读快照仍用现有 ctypes，服务策略不由库决定。CDN 上传/下载复用 curl_cffi 0.17
 异步请求与连接池，使用独立请求头、按附件上限中止回调，不输出带令牌的 URL。
+
+## 微信下行投递：官方口径与社区证据
+
+2026-11-06 核对。下面区分官方文档/官方人员表述和社区观测，两者都不能替代本机验收。
+
+**官方口径。**
+
+- `ret=0` 只表示 API 层接受并处理，**不保证消息被投递或展示**；出于平台安全与滥用防治，
+  微信可能对违规账号和消息做**静默限制或过滤，此时 API 仍返回成功**。该表述来自
+  [openclaw-weixin #278 的维护者回复](https://github.com/Tencent/openclaw-weixin/issues/278#issuecomment-5490284595)（2026-09-01）。
+- 协议文档里 `sendmessage` 的成功响应示例就是 `{ret:0,errmsg:"}`，字段表只有
+  `ret`/`errcode`/`errmsg`，见
+  [protocol_zh_CN.md](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md) 的响应示例与字段表。
+  也就是说**文档契约本身无法表达已投递**，成功与静默丢弃在响应形状上不可区分。
+- 文档化冷却只有一处：`getUpdates` 返回 `-14` 时触发**一小时的账号会话暂停**（同一文档的端点行为表）。
+- 官方**没有**文档化出站配额、频率阈值、24 小时回复窗口或内容审核流程；CHANGELOG 里只出现过
+  为

@@ -244,7 +244,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             attachment_reason(MediaError("附件超过大小限制，cdn 请求失败")), "文件超过大小限制")
         self.assertEqual(
-            attachment_reason(MediaError("cdn 请求失败，但缺少下载引用")), "微信附件服务未响应")
+            attachment_reason(MediaError("cdn 请求失败，但缺少下载引用")), "微信附件服务报错")
         self.assertEqual(
             backend_reason(RuntimeError("websocket 连接失败：依赖缺失")), "后端连接中断")
         self.assertEqual(attachment_reason(MediaError("没有匹配的文本")), "附件处理失败")
