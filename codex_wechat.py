@@ -327,9 +327,6 @@ class Bridge:
             return
         fields = {"component": "backend", "backend": self.backend_name,
                   "connected": connected}
-        if connected:
-            fields["backend_version"] = getattr(getattr(backend, "transport", None),
-                                                "server_version", "")
         if error is not None:
             fields.update(error_fields(error))
         log_event("backend.connected" if connected else "backend.disconnected",
