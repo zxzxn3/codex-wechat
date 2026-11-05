@@ -193,16 +193,30 @@ function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
     Fail "scheduled task '$TaskName' did not stop within $TimeoutSeconds seconds"
 }
 
-function Wait-TaskRunning([int]$TimeoutSeconds = 15) {
+function Wait-ServiceStable([int]$TimeoutSeconds = 15, [int]$SettleMilliseconds = 2000) {
+    # The task reports Running as soon as the process is created, so a bridge
+    # that dies on startup still looks started. Require it to stay Running.
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $runningSince = $null
     while ((Get-Date) -lt $deadline) {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if ($task -and $task.State -in @('Running', 'Queued')) {
-            return
+        $state = if ($task) { [string]$task.State } else { 'not-installed' }
+        if ($state -in @('Running', 'Queued')) {
+            if (-not $runningSince) {
+                $runningSince = Get-Date
+            } elseif (((Get-Date) - $runningSince).TotalMilliseconds -ge $SettleMilliseconds) {
+                return
+            }
+        } else {
+            if ($runningSince) {
+                $result = (Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult
+                Fail "后台服务启动后立即退出（state=$state last_result=$result）；日志: $BridgeLog"
+            }
+            $runningSince = $null
         }
         Start-Sleep -Milliseconds 250
     }
-    Fail "scheduled task '$TaskName' did not start within $TimeoutSeconds seconds"
+    Fail "后台服务未在 $TimeoutSeconds 秒内稳定运行；日志: $BridgeLog"
 }
 
 if (-not (Test-Path $VenvPython)) {
@@ -269,7 +283,7 @@ switch ($Command) {
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         }
         Start-ScheduledTask -TaskName $TaskName
-        Wait-TaskRunning
+        Wait-ServiceStable
         Write-Host '后台服务已启动；终端可以关闭。'
         Write-Host "完整日志: $BridgeLog"
     }
@@ -298,7 +312,7 @@ switch ($Command) {
             Wait-TaskStopped
         }
         Start-ScheduledTask -TaskName $TaskName
-        Wait-TaskRunning
+        Wait-ServiceStable
         Write-Host '后台服务已重启。'
         Write-Host "完整日志: $BridgeLog"
     }
