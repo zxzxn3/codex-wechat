@@ -223,6 +223,12 @@ class InstallerTests(unittest.TestCase):
                 ]), 0)
         self.assertEqual(self.target.read_text(), "keep")
 
+    def test_main_refuses_an_elevated_terminal(self):
+        with patch.object(installer, "_elevated", return_value=True), \
+             patch.object(installer, "install", side_effect=AssertionError("installed")):
+            with self.assertRaisesRegex(ValueError, "普通用户"):
+                installer.main(["install", "--dir", str(self.target), "--non-interactive"])
+
     @requires_symlinks
     def test_target_root_symlink_is_rejected(self):
         real_target = self.base / "real-target"

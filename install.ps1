@@ -116,7 +116,8 @@ if ($existing) {
             Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
         } catch {
             throw ("Task $TaskName cannot be modified by this account (it was registered by an administrator). " +
-                   "Run the installer elevated, or delete the task once and re-create it as this user.")
+                   "Delete it once from an elevated shell (schtasks /delete /tn `"$TaskName`" /f) " +
+                   "and re-run the installer as this user.")
         }
     }
 } else {

@@ -34,6 +34,17 @@ def subprocess_options():
     return {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
 
 
+def is_elevated() -> bool:
+    """True when this process holds an administrator token (Windows only)."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:  # a locked-down shell may refuse the call itself
+        return False
+
+
 _ACCOUNT_IDENTITY = None
 
 

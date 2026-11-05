@@ -317,6 +317,23 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 本机实机确认气泡可见，但该结论只覆盖当时的登录会话。App/CLI/微信三端共享仍未实机验证，
 具体覆盖以验收报告为准。
 
+## 不要在管理员终端里运行
+
+`codex_wechat.py` 与 `installer.py` 启动时都会检查 `shell32.IsUserAnAdmin()`
+（[platform_support.is_elevated()](../platform_support.py)、`installer._elevated()`），
+命中就直接报「请以普通用户身份运行，不要使用管理员终端。」并以 `78` / `1` 退出，
+不做任何安装或启动动作。`codex-wechat.ps1` 的所有命令都会经过这两处。
+
+不需要管理员的原因：计划任务以当前用户、`-LogonType Interactive -RunLevel Limited` 注册，
+状态目录在 `%LOCALAPPDATA%`，命名管道用 `Local\` 命名空间。提权只有两种结果：
+
+- 任务归 `Administrators` 所有，之后普通用户更新时 `Set-ScheduledTask` 失败
+  （`install.ps1` 会提示先用管理员 `schtasks /delete /tn CodexWeChat /f` 清掉再以本用户安装）；
+- 提权创建的文件 owner 是 `Administrators`，一旦 DACL 被收窄，普通用户的 `pythonw`
+  读不到入口，表现为"装好了但服务什么都不写"——`installer.check_user_access()` 就是为这个写的。
+
+唯一的例外是 `uninstall.ps1`：它不在闸门内，因为清理一个历史上由管理员注册的任务确实需要提权。
+
 ## 命令入口：`~/.local/bin/codex-wechat.cmd`
 
 安装时若 `%USERPROFILE%\.local\bin` **已经存在且在用户 PATH 中**，安装器写入一个 `.cmd`

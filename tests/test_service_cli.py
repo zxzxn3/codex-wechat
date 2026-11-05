@@ -58,6 +58,15 @@ class LoginGateTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ConfigurationError, "不属于"):
                 await codex_wechat.require_login_allowed()
 
+    async def test_main_refuses_an_elevated_terminal(self):
+        startup_store = AsyncMock()
+        with patch.object(sys, "argv", ["codex_wechat.py", "status"]), \
+                patch.object(codex_wechat, "is_elevated", return_value=True), \
+                patch.object(codex_wechat, "startup_store", startup_store):
+            with self.assertRaisesRegex(ConfigurationError, "普通用户"):
+                await codex_wechat.main()
+        startup_store.assert_not_awaited()
+
     async def test_main_gates_login_before_taking_the_bridge_lock(self):
         gate = AsyncMock(side_effect=ConfigurationError("blocked"))
         startup_store = AsyncMock()

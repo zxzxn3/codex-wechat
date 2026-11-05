@@ -46,7 +46,7 @@ from wechat_content import (
     remember_quote,
 )
 from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, WeChatPollTimeout, backend_reason
-from platform_support import IS_WINDOWS, data_root
+from platform_support import IS_WINDOWS, data_root, is_elevated
 from diagnostics import error_fields, log_event, log_path, new_request_id
 from log_viewer import show_logs
 from prompts import (render_ack, status_fields, duration_label)
@@ -868,6 +868,8 @@ async def main():
                         help="同时查看未脱敏的 supervisor/service.log")
     parser.add_argument("--starting", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if is_elevated():
+        raise ConfigurationError("请以普通用户身份运行，不要使用管理员终端。")
     if args.action != "rebind" and args.stop_active:
         parser.error("--stop-active 只能与 rebind 一起使用")
     if args.action != "logs" and args.follow:

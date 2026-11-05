@@ -1392,9 +1392,22 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def _elevated() -> bool:
+    """An elevated installer creates files and a task owned by Administrators."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:  # a locked-down shell may refuse the call itself
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     global NON_INTERACTIVE
     options = parser().parse_args(argv)
+    if _elevated():
+        raise ValueError("请以普通用户身份运行，不要使用管理员终端。")
     if options.command == "bootstrap" and not options.repo:
         raise ValueError("一行安装入口需要 --repo；不会使用旧仓库。")
     if options.source is not None and (options.repo or options.ref):

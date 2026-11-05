@@ -25,6 +25,12 @@ Windows 的命令入口是 `%USERPROFILE%\.local\bin\codex-wechat.cmd`，和 Lin
 该目录不在 PATH 时安装器**降级而不修改 PATH**，只在输出的"命令入口"一行说明原因；
 `uninstall.ps1` 只删除带 `rem codex-wechat command shim` 标记的那个文件，不会碰别人的文件。
 
+Windows 上提权运行会被硬拒绝：`codex_wechat.py` 与 `installer.py` 在启动时检查
+`IsUserAnAdmin()`，命中就报「请以普通用户身份运行，不要使用管理员终端。」（退出码 78 / 1）。
+`install`、`update`、`start`、`service-*` 全在内；只有 `uninstall.ps1` 不过闸门，
+因为清理历史上由管理员注册的任务确实需要提权。理由见 [WINDOWS](WINDOWS.md) 的
+「不要在管理员终端里运行」。
+
 ## 命令词表
 
 `✅` 表示该词被入口接受，`❌` 表示入口直接拒绝（Linux 为 argparse 的 `invalid choice`，Windows 为
