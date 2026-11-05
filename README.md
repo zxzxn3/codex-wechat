@@ -103,6 +103,9 @@ codex-wechat autostart
 codex-wechat autostart true
 ```
 
+无参数运行默认执行 `status`。`service-restart` 会等待服务稳定运行后再返回，而不是只提交
+一个异步重启请求。未注册后台服务时，`autostart` 查询返回 `false`。
+
 Windows 使用同一入口执行这些命令；命令入口未生成时，用
 `& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" ...` 的完整路径。
 后台服务运行时不能在前台再执行 `start`；前台桥接运行时也不能执行 `service-start`，
@@ -274,10 +277,10 @@ Windows 使用 `.ps1 rebind`。等待扫码时服务继续运行，仅提交绑�
 
 Linux 使用 `codex-wechat logs`，Windows 使用 `.\codex-wechat.ps1 logs`；追加 `--follow` /
 `-Follow` 持续查看。默认只显示结构化日志；需要排查 supervisor/子进程控制台时再加
-`--service` / `-Service`。结构化日志写入数据目录的 `logs/bridge.jsonl`，按 5 MiB 轮转并保留
-3 份备份。Windows 的 `logs/service.log` 是未结构化控制台输出，可能包含路径或错误文本，
-不应当作隐私安全日志外传；Linux 的 systemd 控制台输出仍在
-`journalctl --user -u codex-wechat`。
+`--service` / `-Service`：Windows 读取 `logs/service.log`，Linux 读取
+`journalctl --user -u codex-wechat`。结构化日志写入数据目录的 `logs/bridge.jsonl`，按
+5 MiB 轮转并保留 3 份备份。Windows 的 `logs/service.log` 是未结构化控制台输出，可能包含
+路径或错误文本，不应当作隐私安全日志外传。
 
 `bridge.jsonl` 每行一个 JSON 事件，包含时间、级别、事件名、平台、版本、进程号、随机
 请求号和必要元数据。由微信输入触发的任务会用 `request_id` 关联接收、准备、提交、输出入队、

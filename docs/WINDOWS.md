@@ -11,9 +11,11 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
 - [ ] `codex-wechat.cmd` → 薄 `codex-wechat.ps1` → `codex_wechat.py` 的完整链路；
   `start`、`stop`、`status`、`service-start`、`service-restart`、`autostart`、
   `autostart true|false`、`uninstall`、`uninstall -PurgeData` 各跑一次。
+- [ ] 无参数运行等价于 `status`；服务未安装时 `autostart` 输出 `false` 并退出 0。
 - [ ] 后台服务运行时 `start` 被拒绝；前台桥接持锁时 `service-start` 被拒绝。
 - [ ] 内部 `windows/task-service.ps1` 的 `start` 只在任务持续 Running 2 秒后成功，
   Queued 不再被当成稳定运行；失败输出仍带日志路径。
+- [ ] `service-restart` 在任务停止并重新 Running 稳定后才返回；启动即退出会失败。
 - [ ] 管理员终端下写操作被拒绝；`status`、`logs`、`uninstall` 仍可执行；
   `codex-desktop.ps1 cli` 也拒绝管理员终端。
 - [ ] `uninstall` 默认保留 `%LOCALAPPDATA%\codex-wechat`；`-PurgeData` 才停止共享后台并删除

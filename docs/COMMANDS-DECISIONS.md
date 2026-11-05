@@ -22,6 +22,9 @@
 - Windows 原生计划任务操作集中到内部 `windows/task-service.ps1`。
 - `start` / `service-start` 的互斥检查已在 Python 层统一。
 - `autostart`、`uninstall` 已跨平台；Linux 卸载默认保留数据。
+- 无参数运行默认执行 `status`；未安装服务时 `autostart` 查询统一返回 `false`。
+- `service-start` / `service-restart` 统一以“稳定运行”为成功条件。
+- `logs --service` 统一为读取各平台原生服务控制台来源，而不是强制生成同一种文件。
 
 ## 当前设计含义
 

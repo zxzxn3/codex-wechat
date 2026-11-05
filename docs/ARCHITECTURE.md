@@ -110,11 +110,14 @@ Token优先原生事件，缺失时只读当前Thread.path的有界尾部，按�
 `codex-wechat` / Windows `.cmd`，二者最终进入 `codex_wechat.py`；Windows 原生任务操作
 集中在内部 `windows/task-service.ps1`。`autostart` 只控制登录触发器，不停止当前进程也不
 启动服务；`service-start` 只启动已注册的服务，服务已在运行时直接返回；`service-restart`
-请求重启已注册的服务。`start` 在后台服务运行时拒绝，`service-start` 在前台锁存在时拒绝。
+请求重启已注册的服务，并等待服务稳定运行后再返回。`start` 在后台服务运行时拒绝，
+`service-start` 在前台锁存在时拒绝。
 `uninstall` 默认只移除服务和入口，显式 purge 才删除用户数据。旧版本按自己的文件清单核对，
 不能用新打包规则重新定义旧版本。候选连接能力和本地导入在激活前检查；dry-run不执行环境副作用。
 服务启动的桥接子进程由 systemd unit 或 Windows supervisor 设置
 `CODEX_WECHAT_SERVICE_CHILD=1`，因此不会被用户前台 `start` 的互斥检查误伤。
+`logs --service` 保持平台原生来源：Windows 为 `service.log`，Linux 为
+`journalctl --user -u codex-wechat`。
 
 ## 诊断与隐私
 

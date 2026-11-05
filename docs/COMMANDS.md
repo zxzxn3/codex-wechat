@@ -22,15 +22,16 @@ Python，不再实现服务状态机。`codex-desktop.ps1` 保留给需要显式
 
 | 命令 | 说明 |
 |---|---|
+| 无参数 | 默认执行 `status` |
 | `start` | 前台启动。服务正在运行时拒绝，避免争抢状态目录 |
 | `service-start` | 启动已注册的后台服务；未绑定时在当前终端扫码。前台桥接正在运行时拒绝 |
 | `stop` | 停止后台服务；前台桥接用 `Ctrl+C` 停止 |
-| `service-restart` | 重启已注册的后台服务 |
+| `service-restart` | 重启已注册的后台服务；两个平台都等待服务稳定运行，超时才报错 |
 | `status` | 输出桥接状态 JSON；`service` 段包含 `installed`、`running`，可用的原生状态还会带 `state` 和 `last_result` |
-| `logs [--follow] [--service]` | 查看结构化日志；Windows 参数写作 `-Follow` / `-Service` |
+| `logs [--follow] [--service]` | 查看结构化日志；Windows 参数写作 `-Follow` / `-Service`。Linux 的 `--service` 读取 systemd journal，Windows 读取 `service.log` |
 | `login` | 交互式扫码登录；后台服务必须已停止 |
 | `rebind [--stop-active]` | 重新绑定微信；Windows 写作 `-StopActive` |
-| `autostart` | 查询登录自启，输出 `true` / `false` |
+| `autostart` | 查询登录自启，输出 `true` / `false`；服务未安装时也是 `false` |
 | `autostart true\|false` | 开启或关闭登录自启；只改登录触发器，不启动、停止或接管当前桥接 |
 | `uninstall [-PurgeData]` | 停止并移除后台服务与命令入口；默认保留用户数据。Linux 用 `--purge-data` |
 | `update` / `install` / `menu` / `components` | 转交同一个 `installer.py` |
@@ -60,6 +61,9 @@ Linux 以实际 `euid == 0` 判断 root，Windows 以管理员令牌判断提权
 Windows 的 `uninstall.ps1` 仍负责原生计划任务和共享后台清理；Python 只做统一路由。
 Linux 停止并移除用户 unit、命令软链；默认保留 `config.json`、`.state`、`workspace`、
 `logs` 和 `shared`。`--purge-data` 才删除这些用户数据。
+
+服务未安装时，`autostart` 查询统一返回 `false` 并退出 0；只有同名服务/任务属于另一个
+安装目录时才报错。
 
 ### 版本指针
 
