@@ -9,6 +9,7 @@ from codex_wechat import Bridge
 from commands import HANDLERS, SETTINGS
 from command_specs import HELP, HELP_ALL, REGISTRY
 from configuration import Sending
+from errors import WeChatApiError, WeChatNotAcknowledged
 from storage import Store
 
 
@@ -98,7 +99,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
-    async def test_a_failed_send_does_not_spend_the_budget(self):
+    async def test_a_request_that_never_arrived_does_not_spend_the_budget(self):
         bridge = self.bridge
         bridge.reply("retried")
         calls = 0
@@ -116,6 +117,53 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
             try:
                 self.assertTrue(await self.wait_for(lambda: not bridge.state["outbox"]))
                 self.assertEqual(calls, 3)  # two failures, one success
+                # The failures never reached the server, so only the answer counts.
+                self.assertEqual(bridge.budget_state()["used"], 1)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_a_dropped_reply_costs_the_budget_once_per_attempt(self):
+        bridge = self.bridge
+        bridge.reply("dropped")
+        calls = 0
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            raise WeChatNotAcknowledged(0)
+
+        bridge.channel.send = send
+        with patch.object(Bridge, "reply_budget", lambda self: 9), \
+                patch("output_delivery.log_event"), \
+                patch("output_delivery.SEND_RETRY_SECONDS", 0):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                self.assertTrue(await self.wait_for(lambda: not bridge.state["outbox"]))
+                self.assertEqual(calls, 3)
+                # Every attempt got an answer, so every attempt is charged.
+                self.assertEqual(bridge.budget_state()["used"], 3)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_a_refused_reply_costs_once_and_holds_the_queue(self):
+        bridge = self.bridge
+        bridge.reply("refused")
+        calls = 0
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            raise WeChatApiError(-2, "prepare_failed")
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event"):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                self.assertTrue(await self.wait_for(
+                    lambda: bridge.state.get("wechatContextPending")))
+                self.assertEqual(calls, 1)
                 self.assertEqual(bridge.budget_state()["used"], 1)
             finally:
                 task.cancel()

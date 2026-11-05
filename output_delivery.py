@@ -241,6 +241,18 @@ class OutputDelivery:
             self._queued_at[entry["id"]] = time.perf_counter()
         return entries
 
+    def charge_reply(self, entry):
+        """Charge one reply the server answered; the budget notice is exempt.
+
+        A request that never arrived (timeout, connection failure) is free because
+        the platform never saw it; a reply it answered - delivered, silently
+        dropped or refused - is not. Charging on success alone let the brake go
+        slack exactly while the channel was dropping messages.
+        """
+        if entry.get("budgetNotice"):
+            return
+        self.bridge.spend_reply_budget()
+
     async def _next_sendable(self):
         """Block until an entry may be sent; None means the caller re-checks.
 
@@ -295,12 +307,13 @@ class OutputDelivery:
                           parts=entry.get("parts"), job_id=entry.get("group"),
                           request_id=entry.get("requestId"), **waiting)
                 send_started = time.perf_counter()
-                response = await bridge.channel.send(entry)
+                try:
+                    response = await bridge.channel.send(entry)
+                except WeChatApiError:
+                    self.charge_reply(entry)
+                    raise
                 send_ms = (time.perf_counter() - send_started) * 1000
-                if not entry.get("budgetNotice"):
-                    # Only a delivered message counts against the inbound turn, the
-                    # same way the platform charges for what it accepted.
-                    bridge.spend_reply_budget()
+                self.charge_reply(entry)
                 if isinstance(response, dict) and response.get("message_id") is not None:
                     remember_quote(bridge.state, response["message_id"], entry_summary(entry))
             except WeChatAuthExpired:
