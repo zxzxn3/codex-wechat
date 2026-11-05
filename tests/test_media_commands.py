@@ -65,8 +65,21 @@ class GetOrderingTests(unittest.IsolatedAsyncioTestCase):
         calls = []
         value = "/tmp/" + "a" * 400
         await command_get(bridge(calls), "/get", value)
-        echoed = next(line for line in calls[1][1].splitlines() if line.startswith("路径: "))
-        self.assertEqual(len(echoed[len("路径: "):]), 300)
+        block = calls[1][1].split("```")[1].strip()
+        self.assertEqual(len(block), 300)
+
+    async def test_the_echoed_path_sits_in_its_own_code_block(self):
+        # WeChat renders a copy button on fenced blocks, so the path must be the
+        # whole block content rather than trailing text.
+        calls = []
+        await command_get(bridge(calls), "/get", "/tmp/missing.txt")
+        self.assertIn("```\n/tmp/missing.txt\n```", calls[1][1])
+
+    async def test_the_echoed_path_cannot_break_out_of_the_block(self):
+        calls = []
+        await command_get(bridge(calls), "/get", "a```b\nc.txt")
+        self.assertEqual(calls[1][1].count("```"), 2)
+        self.assertNotIn("\n", calls[1][1].split("```")[1].strip())
 
     async def test_getfile_forces_the_file_kind(self):
         calls = []

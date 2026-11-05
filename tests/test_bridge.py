@@ -250,6 +250,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attachment_reason(MediaError("没有匹配的文本")), "附件处理失败")
         self.assertEqual(attachment_reason(FileNotFoundError(
             2, "系统找不到指定的文件。", "C:/Temp/a.txt")), "文件不存在或不可读")
+        self.assertEqual(attachment_reason(MediaError(
+            "不支持网络共享、设备路径、驱动器相对路径或 NTFS 附加数据流。")),
+            "路径格式不受支持，请只填文件路径本身")
 
     async def test_desktop_session_info_uses_status_without_followup_note(self):
         self.bridge.state["thread"] = "01a13162-8d25-7883-ae2b-c70389dc9d58"

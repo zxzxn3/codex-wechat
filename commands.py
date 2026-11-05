@@ -786,8 +786,11 @@ async def command_get(bridge, command, argument, received=None):
         bridge.reply(bridge.prompt("ATTACHMENT_QUEUED"))
         bridge.queue_asset(asset, origin=origin)
     except (MediaError, ValueError, OSError) as error:
+        # The path goes into a code block so WeChat can copy it; a stray fence or
+        # newline in the echoed text would end the block early.
+        echoed = " ".join(argument[:300].split()).replace("```", "'''")
         bridge.reply(bridge.prompt("SEND_FILE_FAILED", {
-            "reason": attachment_reason(error), "path": argument[:300]}))
+            "reason": attachment_reason(error), "path": echoed}))
 
 
 async def command_restart(bridge, command, argument, received=None):
