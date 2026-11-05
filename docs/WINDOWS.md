@@ -445,6 +445,9 @@ CLI 为主保持 `true`，App 为主改为 `false`。
   换成一个不允许 breakaway 的 job（例如去掉 `SILENT_BREAKAWAY_OK`、只留
   `KILL_ON_JOB_CLOSE`）才会走到 WMI 那条路。桥接仍然保留"先直连、失败再用 WMI 启动"的结构，
   因为 WMI 起的进程也不在我们的 job 里，不会被 job 关闭时带走。
+  注意 `SILENT_BREAKAWAY_OK` 的副作用：supervisor 的所有子进程都不进 job，所以停服务只杀
+  supervisor，`codex app-server` 会继续活着——这正是"重启后仍是同一个 daemon、旧写者要过一会儿
+  才放手"的原因；WMI 那条路本来也是这个效果。
   WMI 调用优先走管道：`pywin32` 的 COM 接口约 0.07 秒，而
   `powershell -Command Invoke-CimMethod` 要约 1.9 秒（PowerShell 启动开销），后者仅作为
   pywin32 不可用时的回退。实测（2026-11-04）：停掉 daemon 后经 `Start-ScheduledTask` 重启桥接，
