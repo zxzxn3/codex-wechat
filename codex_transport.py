@@ -186,7 +186,7 @@ class CodexTransport:
             for key in ("userAgent", "user_agent"):
                 value = greeting.get(key)
                 if isinstance(value, str) and value:
-                    self.server_version = value[:64]
+                    self.server_version = value[:96]
                     break
         await self.write({"method": "initialized", "params": {}})
         # Keep project-owned skills local to this app-server connection instead
