@@ -1,52 +1,29 @@
 # 命令面决策记录
 
-更新时间：2026-11-05。本文只记录产品决策，不代替代码或运行契约。
+更新时间：2026-11-05。本文只记录已作出的产品选择及其理由；当前可执行行为以
+[COMMANDS](COMMANDS.md) 和 [PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md) 为准。
 
-## 已确认
+## 入口
 
-- Windows 保留 `.cmd` 短命令入口；它只是转交稳定 PowerShell 入口的启动器，不承载业务逻辑。
-- Windows 的管理员终端拒绝策略补到 PowerShell 入口；`uninstall` 仍可例外。
-- 从用户可见命令面移除 Windows 的 `service-stop`、`service-status`，底层服务控制保留为内部实现；Linux 不新增这两个重复顶层命令。
-- 补 Linux `autostart`；Windows 同步改为接受 `true|false`，不保留 `on|off` 兼容。
-- 补跨平台 `uninstall`；默认保留用户数据，显式 purge 才删除。
-- 卸载必须能从稳定入口执行，不依赖 `current` 的完整性；`current` 损坏时仍应能移除服务、命令入口和可选用户数据。
-- purge 只删除已知用户数据项，不递归删除用户提供的自定义数据根目录；前台桥接持锁时 fail-closed。
-- Windows 自定义数据目录通过 `-DataRoot`/`CODEX_WECHAT_DATA_ROOT` 传递，卸载不得静默回落到默认目录。
-- 用户只通过公开入口卸载；Linux 使用 stable `uninstall.py`，Windows 使用 stable `uninstall.ps1`。已删除 `codex_wechat.py uninstall` 次级路径，避免两套锁、超时和数据目录语义漂移。
-- 保留 `cli`；Windows 暂不增加薄转发，继续使用 `codex-desktop.ps1 cli`。`cli` 的真实价值主要在 `websocketUrl` 模式。
-- 删除 `codex-wechat desktop` 别名；保留 `codex-desktop` 本身。
-- `start` / `service-start` 的前置互斥检查下沉到共享 Python 层。
-- `status` 的 `service` 段写入平台运行契约；Linux 和 Windows 使用相同字段形状，平台原生状态值单独说明。
-- 合并平台命令入口和服务控制层，减少 PowerShell、Python、`.cmd` 之间的重复职责。
-- Linux 默认拒绝 root/sudo：普通安装、更新、启动、登录、重绑、自启和服务控制都要求以普通用户运行；以实际 `euid == 0` 判断，不只检测 `sudo`。`uninstall` 作为显式例外，只读 `status` / `logs` 也放行；CI/容器保留 `CODEX_WECHAT_ALLOW_ROOT=1` 逃生口。
+- 用户只通过 Linux `codex-wechat` 或 Windows `codex-wechat.cmd` 操作；Windows `.cmd` 只是
+  调用 stable `codex-wechat.ps1` 的薄启动器，不承载业务逻辑。
+- Windows 原生计划任务操作集中在内部 `windows/task-service.ps1`，不暴露顶层
+  `service-stop` / `service-status`；统一使用 `stop` / `status`。
+- 保留 `cli`；Windows 当前使用 `codex-desktop.ps1 cli`，暂不增加第二个薄转发入口。
+- 删除 `codex-wechat desktop` 别名；`codex-desktop` / `codex-desktop.ps1` 继续保留。
 
-## 已实现
+## 命令语义
 
-- `codex-wechat.ps1` 只定位 release 并转发到 `codex_wechat.py`；`-TaskOnly` 已删除。
-- Windows 原生计划任务操作集中到内部 `windows/task-service.ps1`。
-- `start` / `service-start` 的互斥检查已在 Python 层统一。
-- `autostart`、`uninstall` 已跨平台；Linux 卸载默认保留数据。
-- 无参数运行默认执行 `status`；未安装服务时 `autostart` 查询统一返回 `false`。
-- `service-start` / `service-restart` 统一以“稳定运行”为成功条件。
-- `logs --service` 统一为读取各平台原生服务控制台来源，而不是强制生成同一种文件。
+- `autostart` 只接受 `true|false`，不保留 `on|off` 兼容；未注册服务时查询返回 `false`。
+- `start` 与 `service-start` 的前置互斥检查统一在 Python 层，平台脚本只负责入口适配。
+- `service-start` / `service-restart` 以稳定运行作为成功条件，不能只提交异步请求。
+- `uninstall` 默认保留用户数据，显式 purge 才删除；卸载从 stable 入口分派，不依赖
+  `current` 或活动 release 的完整性。
 
-## 当前设计含义
+## 安全与权限
 
-`.cmd` 的调用链是：
-
-```text
-codex-wechat <args>
-  -> %USERPROFILE%\.local\bin\codex-wechat.cmd
-  -> powershell -ExecutionPolicy Bypass -File <stable>\codex-wechat.ps1 <args>
-```
-
-它不修改 PATH；只有 `~/.local/bin` 已存在且在 PATH 中时才会安装。
-
-当前合并形态是：
-
-```text
-codex-wechat / codex-wechat.cmd
-  -> codex_wechat.py（唯一公开命令路由）
-       -> Linux systemd adapter
-       -> Windows 原生任务 helper（只做启动/停止/查询）
-```
+- Linux 以实际 `euid == 0` 拒绝 root；Windows 以管理员令牌拒绝提权终端。
+- 只读 `status` / `logs` 和显式 `uninstall` 例外；CI/容器保留
+  `CODEX_WECHAT_ALLOW_ROOT=1` 逃生口。
+- 用户只通过公开入口卸载；Linux stable `uninstall.py` 和 Windows stable `uninstall.ps1`
+  是内部实现，避免出现第二套锁、超时和数据目录语义。

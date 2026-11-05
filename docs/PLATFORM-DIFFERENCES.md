@@ -3,13 +3,16 @@
 更新：2026-11-05。本文记录用户可观察或影响运行契约的平台差异，以及每项的理由。
 它不是逐行枚举所有 `if IS_WINDOWS`，而是按职责合并同类实现。
 
+安装、更新和卸载流程见 [INSTALL](INSTALL.md)；命令参数和稳定入口见
+[COMMANDS](COMMANDS.md)。
+
 ## 已确定
 
 | 领域 | Linux | Windows | 决策与理由 |
 |---|---|---|---|
 | 公开命令入口 | `~/.local/bin/codex-wechat` | `%USERPROFILE%\.local\bin\codex-wechat.cmd` 转交 stable `codex-wechat.ps1` | Windows 的 `.ps1` 不在 `PATHEXT` 中，且受 PowerShell 执行策略限制；`.cmd` 是兼容 cmd 和 PowerShell 的薄 shim。安装器不修改 PATH |
 | 安装入口 | `install.sh` | `install.ps1` | 只做平台 shell 适配，最终都调用同一个 `installer.py` |
-| CLI 入口 | `codex-wechat cli -- ...` | `codex-desktop.ps1 cli -- ...` | 产品选择，不是硬平台限制：Windows 已有专门的 desktop CLI 包装器；暂不重复增加 `codex-wechat cli` 转发。后续可统一 |
+| CLI 入口 | `codex-wechat cli -- ...` | `codex-desktop.ps1 cli -- ...` | 当前有意差异，不是硬平台限制：Windows 已有专门的 desktop CLI 包装器；暂不重复增加 `codex-wechat cli` 转发 |
 | 参数拼写 | `--follow`、`--service`、`--stop-active`、`--purge-data` | `-Follow`、`-Service`、`-StopActive`、`-PurgeData` | POSIX shell 与 PowerShell 的参数习惯不同，语义相同 |
 | 命令入口安装 | 创建 `~/.local/bin/codex-wechat` 链接 | 仅当 `%USERPROFILE%\.local\bin` 已存在且在 PATH 中时创建 `.cmd` | 安装器不修改 PATH；Windows 不主动创建未受管理的 PATH 目录，否则提示使用完整入口路径 |
 | 程序与数据目录 | 安装根目录同时保存程序、配置和状态 | 程序在 `%LOCALAPPDATA%\codex-wechat\app`，数据根为 `%LOCALAPPDATA%\codex-wechat` | 遵循平台目录约定；Windows 将不可变程序与用户数据分开。两边都支持环境变量覆盖 |
@@ -32,25 +35,10 @@
 
 ## 卸载入口
 
-正常用户只应使用公开入口：
-
-```text
-Linux:   codex-wechat uninstall [--purge-data]
-Windows: codex-wechat.cmd uninstall [-PurgeData]
-```
-
-Windows `.cmd` 未生成时，使用完整 stable 入口：
-
-```powershell
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" uninstall
-```
-
-`uninstall.py` 是 Linux 稳定卸载组件，`uninstall.ps1` 是 Windows 稳定卸载组件，二者都属于
-内部入口；正常用户不应直接调用。它们绕过公开入口对平台参数、数据目录和稳定分发约定的一部分
-处理。只有在维护者排查损坏入口时，才应直接调用。
-
-Windows 公开入口在读取 `current` 之前直接调用 `uninstall.ps1`；Linux 公开入口在读取
-`current` 之前直接调用 stable `uninstall.py`。这是为了保证 `current` 损坏时仍能卸载。
+正常用户使用公开入口：Linux `codex-wechat uninstall [--purge-data]`，Windows
+`codex-wechat uninstall [-PurgeData]`。稳定 `uninstall.py` / `uninstall.ps1` 是内部实现，
+正常用户不应直接调用。完整流程、数据保留规则和损坏 `current` 的处理见
+[INSTALL](INSTALL.md#卸载)。
 
 ### 提示语言
 
@@ -58,13 +46,6 @@ Windows 公开入口在读取 `current` 之前直接调用 `uninstall.ps1`；Lin
 - `current` 缺失、无效、非普通文件、版本不完整及 release 损坏统一使用中文提示。
 - `uninstall` 的成功和保留数据提示统一使用中文；平台专用参数仍保留
   `--purge-data` / `-PurgeData` 的拼写差异。
-
-## 已移除
-
-`codex_wechat.py` 不再提供 `uninstall` action。Linux 只保留 stable `uninstall.py`，
-Windows 只保留 stable `uninstall.ps1`；不再维护“Python 公共 router 调 PowerShell”的次级
-卸载路径。这样卸载行为只有一个公开入口和一个平台 stable helper，避免两套锁、超时和数据目录
-语义再次漂移。
 
 ## 已对齐
 

@@ -1,13 +1,15 @@
 # 依据与兼容边界
 
-2026-11-02。文档/源码核对不等于功能验收；实际执行见测试报告。
+2026-11-05。文档/源码核对不等于功能验收；实际执行见 [VALIDATION](VALIDATION.md)。
+本文是外部依据和兼容性证据，当前运行契约以 [ARCHITECTURE](ARCHITECTURE.md) 和
+[PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md) 为准。
 
-| 范围 | 本轮依据 |
+| 范围 | 依据 |
 | --- | --- |
 | Codex 协议 | [官方 App Server](https://learn.chatgpt.com/docs/app-server)、[CLI 参数](https://learn.chatgpt.com/docs/cli/reference)；普通 CLI 本机版本 0.166.0 |
 | 原生后台 | [0.166.0 daemon](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/lib.rs)、[Windows 实现](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/backend/windows.rs)；原生负责锁、脱离启动和后台发现，不由桥接模拟 |
 | App 接入 | 本机 Linux 重打包 App 26.1027.51404，内置 CLI 0.166.0-alpha.5.1；app.asar 中 .vite/build/early-bootstrap-824-3c24dda6dba622ec.js 的连接选择：CODEX_APP_SERVER_WS_URL、CODEX_APP_SERVER_FORCE_CLI |
-| Windows App | Windows 交接记录 App 26.1027.3384.0 / CLI 0.166.0-alpha.5.1；[对应 App Server 源码](https://github.com/openai/codex/blob/rust-v0.166.0-alpha.5.1/codex-rs/app-server/src/lib.rs)，本轮无 Windows 实机 |
+| Windows App | 交接记录 App 26.1027.3384.0 / CLI 0.166.0-alpha.5.1；[对应 App Server 源码](https://github.com/openai/codex/blob/rust-v0.166.0-alpha.5.1/codex-rs/app-server/src/lib.rs)；Windows 实测覆盖见 [VALIDATION](VALIDATION.md) |
 | 微信 | [Tencent openclaw-weixin 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)及项目此前使用的2.4.10实现；认证、媒体参数以该协议为准 |
 | 网络与媒体 | [curl](https://curl.se/docs/manpage.html)、[websockets](https://websockets.readthedocs.io/en/stable/reference/asyncio/client.html)、[cryptography](https://cryptography.io/en/latest/hazmat/primitives/symmetric-encryption/)；采用成熟传输和密码实现 |
 | 原生服务与 UI | systemd 用户服务、Windows ScheduledTasks；二维码/通知的具体官方依据见 [PLATFORM-CAPABILITIES](PLATFORM-CAPABILITIES.md) |
@@ -20,11 +22,11 @@ Linux App IPC 依据同一 app.asar：early-bootstrap-339 的 IpcClient/IpcRoute
 请求路由；early-bootstrap-824 的 4 字节小端长度帧、私有 ipc.sock；early-bootstrap-439 的
 会话快照/Immer 增量、请求处理及状态转换；early-bootstrap.js 的方法版本表。
 本版本 thread-stream-state-changed=11、following-changed=1、start-turn=2、steer-turn=1、
-interrupt-turn=4。只有 initialize/owner discovery 已有本机只读查询证据，完整收发、审批和
-App 更新兼容性仍需验证；不是公开 App Server 协议，不据字段存在承诺幂等或原子 steer 条件。
+interrupt-turn=4。本版本已有真实收发和审批验收；App 更新兼容性仍需按版本复测。它不是
+公开 App Server 协议，不据字段存在承诺幂等或原子 steer 条件。
 App webview app-initial 的 continuation 检查直接使用 input.text_elements.some；IPC 文本需
 显式补空数组，不能依赖原生服务端的默认值。首次真实投递已触发并从 error boundary 堆栈确认
-该字段缺失会导致 App 渲染失败；修复后的真实投递仍待验证。
+该字段缺失会导致 App 渲染失败；修复后的真实投递结果见 [VALIDATION](VALIDATION.md)。
 原生共享后台继续用于 CLI 和微信；App 持有的会话只在明确的 writer 冲突后尝试 IPC 跟随。
 
 Windows IPC 适配另核对本机 App 26.1027.6604.0 的 early-bootstrap-824：Windows 端点为
@@ -33,7 +35,8 @@ Windows IPC 适配另核对本机 App 26.1027.6604.0 的 early-bootstrap-824：W
 以已连接管道的服务 PID 核对用户 token 和已注册 App 文件。权限依据
 [Named pipe security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)，
 事件循环限制见 [asyncio platform support](https://docs.python.org/3.12/library/asyncio-platforms.html)。
-这属于当前 App 源码适配依据；新增管道用例尚未执行，不据此声称真实收发、审批或多 home 已验收。
+这属于当前 App 源码适配依据；命名管道和空闲发现已有本机实测，多 home 仍未验收，具体见
+[VALIDATION](VALIDATION.md)。
 
 item/completed 提供完整 agentMessage；commentary/partial_answer 可即时转发，final_answer
 在轮次收口，reasoning/工具输出不混入聊天。原生请求仅回答本连接收到的部分。

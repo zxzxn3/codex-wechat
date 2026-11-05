@@ -1,0 +1,121 @@
+# 安装、更新与卸载
+
+本文是安装生命周期的单一说明。命令参数见 [COMMANDS](COMMANDS.md)，平台差异见
+[PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md)，运行期边界见 [ARCHITECTURE](ARCHITECTURE.md)。
+
+## 前提
+
+- Python 3.11+。
+- 已安装并登录 Codex；独立 CLI 或已注册的 App 内置 Codex 均可。
+- `curl`。缺少它不妨碍安装，但网络测速和部分网络操作不可用。
+- Linux 可选 systemd 用户服务；没有 `systemctl --user` 时安装器会跳过服务注册，仍可使用前台
+  `start`。
+- 二维码优先使用 `qrencode`；缺少时按安装器提示安装轻量 Python 回退。
+
+## 首次安装
+
+公开仓库地址尚未确定。网络安装命令中的 `OWNER/REPO` 需要替换为实际仓库。
+
+Linux：
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.sh | bash -s -- --repo https://github.com/OWNER/REPO --ref main'
+```
+
+Windows PowerShell：
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.ps1))) -Repo https://github.com/OWNER/REPO -Ref main
+```
+
+没有公开仓库时，将完整源码目录或源码压缩包交给使用者，在源码目录运行本地入口：
+
+```bash
+# Linux
+cd /path/to/codex-wechat
+bash install.sh
+```
+
+```powershell
+# Windows PowerShell
+Set-Location C:\path\to\codex-wechat
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+`install.sh` / `install.ps1` 只适配平台并调用同一个 `installer.py`；也可以直接运行
+`python3 installer.py install`，Windows 使用 `py -3 installer.py install`。源码包不应包含
+`.venv`、`.state`、`config.json`、`logs`、`workspace`、`releases` 等本机运行数据。
+
+安装器不会初始化微信账户、收集模型密钥、启动程序或默认开启登录自启。安装结束后的下一步以
+安装器输出为准；通常需要执行一次 `service-start` 并扫码。
+
+图片/文件回传所需的附件说明 skill 可从安装器的 `components` 入口单独安装，不影响主安装。
+
+## 第一次启动
+
+Linux：
+
+```bash
+~/.local/share/codex-wechat/codex-wechat service-start
+```
+
+Windows：
+
+```powershell
+codex-wechat service-start
+```
+
+未绑定时，`service-start` 在当前终端显示二维码；扫码后后台服务启动，终端可以关闭。
+若服务注册被跳过，使用前台 `start`，保持终端运行。微信默认只处理扫码账号的私聊，群聊
+不会响应。
+
+服务已在可用时注册：
+
+- Linux 注册 systemd 用户 unit；
+- Windows 注册当前用户的 Scheduled Task；
+- 两者都不自动开启登录自启；需要时在微信发送 `/settings autostart true`；
+- 自启设置只改登录触发器，不启动、停止或接管当前桥接。
+
+## 更新
+
+再次运行同一个网络入口或本地入口即可更新已有安装。更新会保留配置、登录、待办、工作目录、
+日志和已有的登录自启状态，不重启正在运行的桥接；新版本先进入独立 release 并完成检查和
+运行时准备，最后才切换 `current`。项目不提供安装回滚命令。
+
+每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
+release 通过 `current` / `active-release` 保留。详细阶段边界见 [ARCHITECTURE](ARCHITECTURE.md)
+的安装段落。
+
+## 卸载
+
+正常用户只使用公开入口：
+
+```bash
+codex-wechat uninstall              # 保留配置、登录、待办和工作目录
+codex-wechat uninstall --purge-data # Linux：同时删除已知用户数据
+```
+
+Windows 使用：
+
+```powershell
+codex-wechat uninstall              # 保留数据
+codex-wechat uninstall -PurgeData   # 删除已知用户数据
+```
+
+卸载不依赖 `current` 指向的 release；版本指针损坏或 release 不完整时仍可移除服务和入口。
+Linux stable `uninstall.py` 与 Windows stable `uninstall.ps1` 是内部实现，正常用户不应直接调用；
+它们只在维护者排查损坏入口时使用。
+
+`--purge-data` / `-PurgeData` 只删除已知用户数据项，不递归删除自定义数据根目录。前台桥接仍
+持有状态锁时，卸载会拒绝继续；先按 `Ctrl+C` 退出。自定义数据目录通过
+`CODEX_WECHAT_DATA_ROOT` 指定，Windows 内部 helper 另外接受 `-DataRoot`。
+
+## 目录和配置
+
+Linux 默认安装根目录同时保存程序、配置和状态；Windows 程序位于
+`%LOCALAPPDATA%\codex-wechat\app`，用户数据根为 `%LOCALAPPDATA%\codex-wechat`。可用
+`CODEX_WECHAT_DATA_ROOT` 和 `CODEX_WECHAT_INSTALL_ROOT` 明确分离位置。
+
+`current`、`active-release`、`releases/`、`.state/`、`logs/`、`workspace/`、`shared/` 和
+`config.json` 各有独立职责，不复制供应商凭据或会话历史。配置与提示的细节见
+[ARCHITECTURE](ARCHITECTURE.md#配置与资源)。

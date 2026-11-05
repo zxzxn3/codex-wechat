@@ -5,6 +5,8 @@
 `codex_wechat.py`；原生计划任务操作只存在于内部 helper
 `windows/task-service.ps1`，不是用户命令。
 
+产品决策和已移除项见 [COMMANDS-DECISIONS](COMMANDS-DECISIONS.md)。
+
 ## 入口
 
 | | Linux | Windows |
@@ -33,7 +35,7 @@ Python，不再实现服务状态机。`codex-desktop.ps1` 保留给需要显式
 | `rebind [--stop-active]` | 重新绑定微信；Windows 写作 `-StopActive` |
 | `autostart` | 查询登录自启，输出 `true` / `false`；服务未安装时也是 `false` |
 | `autostart true\|false` | 开启或关闭登录自启；只改登录触发器，不启动、停止或接管当前桥接 |
-| `uninstall [-PurgeData]` | 停止并移除后台服务与命令入口；默认保留用户数据。Linux 用 `--purge-data`；稳定入口不依赖 `current` |
+| `uninstall [--purge-data\|-PurgeData]` | 停止并移除后台服务与命令入口；默认保留用户数据。Linux 用 `--purge-data`，Windows 用 `-PurgeData`；稳定入口不依赖 `current` |
 | `update` / `install` / `menu` / `components` | 转交同一个 `installer.py` |
 | `cli -- ...` | Linux 专用；连接桥接使用的共享后端，参数原样转发 |
 
@@ -85,12 +87,5 @@ Linux stable 入口、Windows `codex-wechat.ps1`、Windows `codex-desktop.ps1` �
 `bootstrap_supervisor.py` 都只接受 16 位小写十六进制 release ID。`..`、斜杠和其它
 非规范值直接拒绝；PowerShell 入口使用大小写敏感匹配，避免大写 ID 被发现后再变成另一路径。
 
-## Windows 待实机验收
-
-- 新薄入口与 `.cmd`：`start`、`stop`、`status`、`service-start`、`service-restart`、
-  `autostart true|false`、`uninstall`、`uninstall -PurgeData` 的完整闭环。
-- Python 服务适配器的 `Running` 稳定性校验，以及前台锁/后台服务的双向互斥；
-  内部 `windows/task-service.ps1` 只负责原生 start/stop/status。
-- 管理员终端拒绝，以及 `status`、`logs`、`uninstall` 例外；`codex-desktop.ps1` 同样拒绝管理员。
-- `autostart true|false` 对已有计划任务、缺失任务、foreign task 的结果。
-- 卸载默认保留数据、`-PurgeData` 清理数据，以及 `.cmd` 安全删除。
+Windows 当前实机覆盖和剩余缺口见 [VALIDATION](VALIDATION.md)，不再在命令参考中维护第二份
+验收清单。

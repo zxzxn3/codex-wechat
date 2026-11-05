@@ -56,8 +56,9 @@ scripts/check.sh --audit   # 额外审计 requirements，需要网络
 它审计的是声明版本；当前 `.venv` 是否已同步，可用
 `.venv/bin/python -m pip_audit --local` 单独确认。
 
-coverage 不是测试生成器，而是记录测试执行时哪些行和分支从未走到。当前基线约 74%，先看
-报告定位错误恢复、附件失败和平台分支的缺口，不设硬性通过门槛。需要逐行查看时运行
+coverage 不是测试生成器，而是记录测试执行时哪些行和分支从未走到。不要把某个时点的覆盖率
+写死成长期基线；先看报告定位错误恢复、附件失败和平台分支的缺口，不设硬性通过门槛。
+需要逐行查看时运行
 `.venv/bin/python -m coverage html`，产物 `htmlcov/` 已被忽略且不会进入发行包。
 
 `pyproject.toml` 固定 ruff 的 Python 3.11 目标、行宽和规则集，并保存 coverage 的分支/排除
