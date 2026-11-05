@@ -240,7 +240,10 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   附件被彻底放弃。要修的话，重试必须强制新连接（`CurlOpt.FRESH_CONNECT`）。
   ② `media.py:22` 的注释写着"GET 重试安全、POST 重试待验证"，但 `transfer()` 对 GET 和 POST
   一视同仁。若坚持"未证实幂等就不在 POST 上重试"，应在 `transfer()` 里对 `data is not None` 关掉
-  就地重试——失败一律回去重新 `getuploadurl`，这本来就是其它所有失败分支的做法。）
+  就地重试——失败一律回去重新 `getuploadurl`，这本来就是其它所有失败分支的做法。
+
+  实验结束后把代理撤掉、服务恢复，同一个 `/get` 再跑一次仍然正常（`proxy_used=False`，
+  `media.transfer ok` 10297 ms，文件 md5 未变），说明这些打断没有留下残留状态。）
 
 ### 误在未绑定状态扫码后如何恢复（2026-11-05 实操）
 
