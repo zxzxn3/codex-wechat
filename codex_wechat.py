@@ -2,6 +2,7 @@
 """Local WeChat ↔ Codex bridge. Media transport uses cryptography."""
 import argparse
 import asyncio
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -52,6 +53,26 @@ from prompts import (render_ack, status_fields, duration_label)
 
 ROOT = Path(__file__).resolve().parent
 
+# The bridge assumes these keys always exist. A state file can be written before
+# the bridge ever runs (the login action persists auth on its own), so loading
+# must fill them in rather than trust the file.
+BRIDGE_STATE_DEFAULTS = {
+    "cursor": "",
+    "thread": None,
+    "inbox": [],
+    "outbox": [],
+    "seen": [],
+    "running": False,
+}
+
+
+def load_bridge_state(store):
+    """Read the saved state, repairing keys a partial writer never set."""
+    saved = store.load("bridge")
+    if not isinstance(saved, dict):
+        saved = {}
+    return {**deepcopy(BRIDGE_STATE_DEFAULTS), **saved}
+
 
 def mark_active_release():
     """Keep the release a running bridge was loaded from out of pruning."""
@@ -79,8 +100,7 @@ class Bridge:
         self.store, self.account, self.config = store, account, config
         ensure_backend_config(self.config)
         self.settings = ConfigLoader(config, config_path)
-        self.state = store.load("bridge", {"cursor": "", "thread": None,
-            "inbox": [], "outbox": [], "seen": [], "running": False})
+        self.state = load_bridge_state(store)
         self.state.setdefault("consecutiveSendFailures", 0)
         self.state.setdefault("quoteCache", {})
         self.wechat_paused = wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED
@@ -881,7 +901,7 @@ async def main():
     store = await startup_store(args)
     if args.action == "login":
         result = await login(store, starting=args.starting)
-        state = store.load("bridge", {})
+        state = load_bridge_state(store)
         if wechat_auth.mark_valid(state, result.account):
             store.save("bridge", state)
     elif args.action == "status":
