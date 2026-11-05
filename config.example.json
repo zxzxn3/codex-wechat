@@ -19,6 +19,9 @@
     "smart": true,
     "targetChars": 600
   },
+  "sending": {
+    "replyBudget": 9
+  },
   "compactionNotice": true,
   "quotaWarningThresholds": {
     "primary": [

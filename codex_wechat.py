@@ -55,6 +55,8 @@ BRIDGE_STATE_DEFAULTS = {
     "outbox": [],
     "seen": [],
     "running": False,
+    "inboundSeq": 0,
+    "replyBudget": {},
 }
 
 
@@ -153,6 +155,36 @@ class Bridge:
     @property
     def source_hint(self):
         return self.settings.hot.source_hint
+
+    def reply_budget(self):
+        """Replies one inbound message may spend before the bridge asks for more."""
+        return self.settings.hot.sending.reply_budget
+
+    def budget_state(self):
+        budget = self.state.get("replyBudget")
+        seq = self.state.get("inboundSeq", 0)
+        if not isinstance(budget, dict) or budget.get("seq") != seq:
+            budget = {"seq": seq, "used": 0}
+            self.state["replyBudget"] = budget
+        return budget
+
+    def spend_reply_budget(self):
+        budget = self.budget_state()
+        budget["used"] = budget.get("used", 0) + 1
+        return budget["used"]
+
+    def budget_exhausted(self):
+        return self.budget_state().get("used", 0) >= self.reply_budget()
+
+    def budget_remaining(self):
+        return max(0, self.reply_budget() - self.budget_state().get("used", 0))
+
+    def refresh_reply_budget(self):
+        """Every accepted inbound message refreshes what we may send back."""
+        self.state["inboundSeq"] = self.state.get("inboundSeq", 0) + 1
+        self.state["replyBudget"] = {"seq": self.state["inboundSeq"], "used": 0}
+        self.state.pop("budgetPromptSent", None)
+        self.send_wake.set()
 
     def reload_config(self):
         changed = self.settings.reload(self.state)

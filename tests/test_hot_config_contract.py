@@ -17,6 +17,7 @@ class HotConfigContractTests(unittest.TestCase):
             "quotaWarningThresholds": "notifications",
             "prompts": "prompts",
             "connectionIdleSeconds": "connection_idle_seconds",
+            "sending": "sending",
         }
         self.assertEqual(set(HOT_CONFIG_KEYS), set(key_fields))
         self.assertEqual({field for field in key_fields.values() if field},

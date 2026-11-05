@@ -102,7 +102,8 @@ COMMAND_FAILURE_LABELS = {
 COMMAND_FAILURE = "{action}: {reason}"
 
 SETTINGS_USAGE = ("用法:\n`/settings [autostart|shared|compactionNotice|slicing.smart] true|false`\n"
-                  "`/settings connectionIdleSeconds|media.maxMiB|slicing.targetChars <整数>`\n"
+                  "`/settings connectionIdleSeconds|media.maxMiB|slicing.targetChars|"
+                  "sending.replyBudget <整数>`\n"
                   "`/settings sourceHint <文本>`\n"
                   "`/settings ack|finish <模板>|\"\"|fields`")
 SETTINGS_HINT = ("以上设置可通过 `/settings [option] [value]` 更改。\n"
@@ -119,6 +120,7 @@ connectionIdleSeconds: 0–3600，微信 HTTP 连接池空闲秒数；0 表示�
 media.maxMiB: 1–100，单个微信附件的大小上限。
 slicing.smart: true|false，true 使用智能语义切片，false 按长度切片。
 slicing.targetChars: 80–20000，切片目标字符数。
+sending.replyBudget: 1–9，每条入站消息最多回多少条（含处理回执、结束提示和附件）；`/` 续传提示不计入。
 sourceHint: 附加到每条微信用户消息的来源说明；空字符串关闭。
 
 [无法直接修改]
@@ -226,6 +228,7 @@ STOP_CLEARED = "\n已清空待办: {count}"
 ANSWER_ACCEPTED = "已回答。"
 ANSWER_EXPIRED = "问题已失效或编号无效。"
 ANSWER_FAILED = "回答投递结果未确认，请查看桌面；未自动重发。"
+REPLY_BUDGET_PAUSED = "这一轮的回复条数已用完，还有 {count} 段待发。\n回复 `/` 继续。"
 SEND_FILE_FAILED = "附件未发送: {reason}\n```\n{path}\n```\n请稍后重试。"
 REPLY_SEND_FAILED = "这条回复未能完整发送，已停止其余部分。请在桌面查看。"
 INPUT_RECOVERED = "上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。"
@@ -281,6 +284,7 @@ HELP_ANSWER = '回答原生提问'
 HELP_GET = '从电脑取回文件、图片或视频'
 HELP_GETFILE = '作为文件回传'
 HELP_RESTART = '重启微信桥'
+HELP_CONTINUE = '继续发送因额度暂停的回复'
 HELP_HELP = '查看常用命令；`/help all` 查看全部；`/help settings` 查看设置说明'
 
 DEFAULT_PROMPTS = MappingProxyType({name: value for name, value in tuple(globals().items())
@@ -623,7 +627,7 @@ def status_summary(**kwargs):
 
 def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None,
                      completion_notice="", source_hint=None, autostart=None, shared=None,
-                     connection_idle_seconds=None, text=prompt_text):
+                     connection_idle_seconds=None, reply_budget=None, text=prompt_text):
     def display_template(value):
         value = str(value or VALUE_EMPTY)
         if len(value) >= 2 and value[0] == value[-1] == "`":
@@ -646,6 +650,8 @@ def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None
         editable.append(f"slicing.targetChars: {slicing.target_chars}")
     if source_hint is not None:
         editable.append(f"sourceHint: {source_hint or VALUE_EMPTY}")
+    if reply_budget is not None:
+        editable.append(f"sending.replyBudget: {reply_budget}")
     readonly = []
     if notifications is not None:
         for window in ("primary", "secondary"):

@@ -227,6 +227,18 @@ class OutputDelivery:
         if not bridge.state["outbox"]:
             bridge.outbox_drained.set()
 
+    def budget_notice_entries(self):
+        """The one notice that asks the user for the next inbound message."""
+        bridge = self.bridge
+        pending = sum(1 for entry in bridge.state["outbox"] if not entry.get("budgetNotice"))
+        entries = bridge.text_entries(
+            bridge.prompt("REPLY_BUDGET_PAUSED", {"count": pending}),
+            group=str(uuid.uuid4()), context=bridge.state.get("context", ""), role="notice")
+        for entry in entries:
+            entry["budgetNotice"] = True
+            self._queued_at[entry["id"]] = time.perf_counter()
+        return entries
+
     async def sender(self):
         bridge = self.bridge
         while True:
@@ -243,6 +255,17 @@ class OutputDelivery:
                 await asyncio.sleep(min(paused, 5))
                 continue
             entry = bridge.state["outbox"][0]
+            if not entry.get("budgetNotice") and bridge.budget_exhausted():
+                # The platform counts replies per inbound message; ask for another
+                # one instead of spending the notice slot on a dropped send.
+                if not bridge.state.get("budgetPromptSent"):
+                    bridge.state["budgetPromptSent"] = True
+                    bridge.state["outbox"][0:0] = self.budget_notice_entries()
+                    bridge.save()
+                    continue
+                bridge.send_wake.clear()
+                await bridge.send_wake.wait()
+                continue
             try:
                 if "asset" in entry and "item" not in entry:
                     entry["item"] = await bridge.media.upload(entry)
@@ -258,6 +281,8 @@ class OutputDelivery:
                           parts=entry.get("parts"), job_id=entry.get("group"),
                           request_id=entry.get("requestId"), **waiting)
                 send_started = time.perf_counter()
+                if not entry.get("budgetNotice"):
+                    bridge.spend_reply_budget()
                 response = await bridge.channel.send(entry)
                 send_ms = (time.perf_counter() - send_started) * 1000
                 if isinstance(response, dict) and response.get("message_id") is not None:

@@ -27,6 +27,7 @@ from prompts import (
 from command_specs import REGISTRY, COMMANDS, help_text
 from configuration import (
     CONNECTION_IDLE_MAX, CONNECTION_IDLE_MIN, HotSettings,
+    REPLY_BUDGET_MAX, REPLY_BUDGET_MIN,
     SOURCE_HINT_LIMIT_BYTES,
     SLICING_TARGET_MAX, SLICING_TARGET_MIN,
     completion_template, processing_template, write_config,
@@ -137,6 +138,7 @@ NUMERIC_SETTINGS = {
     "connectionIdleSeconds": (CONNECTION_IDLE_MIN, CONNECTION_IDLE_MAX),
     "media.maxMiB": (MEDIA_MAX_MIB_MIN, MEDIA_MAX_MIB_MAX),
     "slicing.targetChars": (SLICING_TARGET_MIN, SLICING_TARGET_MAX),
+    "sending.replyBudget": (REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
 }
 SETTING_PATHS = {
     "compactionNotice": ("compactionNotice",),
@@ -145,6 +147,7 @@ SETTING_PATHS = {
     "sourceHint": ("sourceHint",),
     "slicing.smart": ("slicing", "smart"),
     "slicing.targetChars": ("slicing", "targetChars"),
+    "sending.replyBudget": ("sending", "replyBudget"),
 }
 
 
@@ -343,6 +346,7 @@ async def command_settings(bridge, command, argument, received=None):
         notice=notice(bridge),
         completion_notice=completion_template(bridge.reload_config(), bridge.state),
         source_hint=bridge.source_hint,
+        reply_budget=bridge.reply_budget(),
         attachment_mib=bridge.media.limit // (1024 * 1024),
         slicing=bridge.slicing,
         notifications=bridge.notifications,
@@ -793,6 +797,12 @@ async def command_get(bridge, command, argument, received=None):
             "reason": attachment_reason(error), "path": echoed}))
 
 
+async def command_continue(bridge, command, argument, received=None):
+    """Every inbound message refreshes the budget; this command only exists as the
+    documented way to ask for more, so it answers nothing and sends nothing."""
+    return None
+
+
 async def command_restart(bridge, command, argument, received=None):
     if argument:
         bridge.reply(bridge.prompt("RESTART_USAGE"))
@@ -890,6 +900,7 @@ _HANDLER_FUNCTIONS = {
     "answer": command_answer,
     "get": command_get,
     "restart": command_restart,
+    "continue": command_continue,
     "help": command_help,
 }
 HANDLERS = {

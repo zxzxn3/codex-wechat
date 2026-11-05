@@ -50,6 +50,7 @@ class Ingress:
                         or identity in bridge.state["seen"]):
                     continue
                 wechat_auth.accept_context(bridge.state, msg["context_token"])
+                bridge.refresh_reply_budget()
                 bridge.state["seen"].append(identity)
                 bridge.reject_input(request_id, "unsupported", "unsupported_type")
                 bridge.reply(bridge.prompt("UNSUPPORTED_MESSAGE_TYPE"), request_id=request_id)
@@ -61,6 +62,7 @@ class Ingress:
             if identity in bridge.state["seen"]:
                 continue
             bridge.state["seen"].append(identity)
+            bridge.refresh_reply_budget()
             body_text = message_text(msg)
             quote = quote_context(msg, bridge.state["quoteCache"])
             text = quoted_prompt(body_text, quote)

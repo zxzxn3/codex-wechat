@@ -9,10 +9,16 @@ from diagnostics import error_fields, log_event
 
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
-                   "compactionNotice", "quotaWarningThresholds", "prompts", "connectionIdleSeconds")
+                   "compactionNotice", "quotaWarningThresholds", "prompts", "connectionIdleSeconds",
+                   "sending")
 DEFAULT_CONNECTION_IDLE_SECONDS = 60
 CONNECTION_IDLE_MIN = 0
 CONNECTION_IDLE_MAX = 3600
+REPLY_BUDGET_MIN = 1
+# The platform tolerates roughly ten replies per inbound message; the "/" notice
+# that asks for more is sent on top of this, so the ceiling stays at nine.
+REPLY_BUDGET_MAX = 9
+DEFAULT_REPLY_BUDGET = 9
 DEFAULT_COMPLETION_TEMPLATE = "`OUT > {turn_output_tokens} in {elapsed}`"
 DEFAULT_ACK_TEMPLATE = "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`"
 SLICING_TARGET_MIN = 80
@@ -88,12 +94,29 @@ class Slicing:
 
 
 @dataclass(frozen=True)
+class Sending:
+    reply_budget: int = DEFAULT_REPLY_BUDGET
+
+    @classmethod
+    def from_config(cls, value=None):
+        value = {} if value is None else value
+        if not isinstance(value, dict) or set(value) - {"replyBudget"}:
+            raise ValueError("sending 仅支持 replyBudget")
+        budget = value.get("replyBudget", cls.reply_budget)
+        if type(budget) is not int or not REPLY_BUDGET_MIN <= budget <= REPLY_BUDGET_MAX:
+            raise ValueError(
+                f"sending.replyBudget 必须是 {REPLY_BUDGET_MIN}–{REPLY_BUDGET_MAX} 的整数")
+        return cls(budget)
+
+
+@dataclass(frozen=True)
 class HotSettings:
     slicing: Slicing
     notifications: Notifications
     source_hint: str
     prompts: dict[str, str]
     connection_idle_seconds: int
+    sending: Sending
 
     @classmethod
     def from_config(cls, config):
@@ -110,7 +133,7 @@ class HotSettings:
             raise ValueError(
                 f"connectionIdleSeconds 必须是 {CONNECTION_IDLE_MIN}–{CONNECTION_IDLE_MAX} 的整数")
         return cls(Slicing.from_config(config.get("slicing")), Notifications.from_config(config), hint,
-                   templates, idle)
+                   templates, idle, Sending.from_config(config.get("sending")))
 
 
 def processing_template(config, state):
