@@ -40,7 +40,7 @@ Windows 上提权运行会被硬拒绝：`codex_wechat.py` 与 `installer.py` �
 |---|---|---|---|
 | `start` | ✅ | ✅ | 对称（但互斥检查方式不同，见下节） |
 | `stop` | ✅ | ✅ | 对称：Windows 的 `stop` 也转发到同一个 Python 实现 |
-| `status` | ✅ | ✅ | Windows 额外打印一行任务状态 |
+| `status` | ✅ | ✅ | 同一份 JSON；`service` 段见下文（Linux 暂缺 `state`/`last_result`） |
 | `rebind` | ✅ | ✅ | 对称 |
 | `logs` | ✅ `--follow` / `--service` | ✅ `-Follow` / `-Service` | 仅参数拼写不同，合理 |
 | `login` | ✅ | ✅ | **守卫不同**，见下节 |
@@ -200,6 +200,26 @@ service-start    exit=78  尚未注册后台服务，请重新运行安装器。
 service-restart  exit=78  尚未注册后台服务，请重新运行安装器。
 ```
 
+### `status -Json` 与 `service` 段（2026-11-05 起两个平台同一份 JSON）
+
+`codex-wechat status` 输出**一份** JSON：`bound / auth / available / rebind_required / thread /
+backend / unfinished_at_last_save / queued / unsent`，加上 2026-11-05 新增的 `service` 段——
+也就是"跑桥的那个宿主"现在的状态。
+
+| 字段 | Windows（计划任务） | Linux（systemd --user unit） |
+|---|---|---|
+| `installed` | 任务是否存在 | unit 是否存在（`LoadState` + `FragmentPath` 校验归属） |
+| `running` | 任务是否为 Running/Queued | `ActiveState=active` |
+| `state` | 任务的 `State`：`Running`/`Ready`/`Disabled` | 待补：`ActiveState` 原值 |
+| `last_result` | `LastTaskResult`：`267009` 运行中、`267014` 被停止、`0` 正常退出、`78` 配置/凭据错误 | 待补：`ExecMainStatus`（配合 `Result`） |
+
+注意 `running` 是归一化的布尔值（两个平台都填），`state` 保留宿主自己的原值便于排障。
+宿主读不出来时（例如从克隆目录跑、任务不属于本安装）不报错，只是省略 `service` 段——
+`status` 不能因为查不到宿主就整个失败。
+
+Windows 侧的取值链：`codex_wechat.status_payload_with_service()` →
+`service_adapter.status()` → ps1 的 `service-status -Json`（含 `last_result`）。
+
 ## 只记录、不建议现在处理
 
 - `/get` 的路径规则是"认本平台原生写法"，没有跨平台转换：Windows 上 `C:\x\a.txt` 与 `C:/x/a.txt`
@@ -218,5 +238,8 @@ service-restart  exit=78  尚未注册后台服务，请重新运行安装器。
   开始传，所以"上传中"有一点过于具体。改一行 `prompts.ATTACHMENT_QUEUED` 即可。
 - `make_private()` 去掉了"目录已存在就返回"的早退，Windows 上每次构造 `Store` 都会跑一次 `icacls`
   （每次 CLI 调用多一个子进程）。好处是能自愈被提权破坏的 ACL，属于有意的取舍。
-- Windows 的 `status` 比 Linux 多打印一行 `task=…`，未做统一。
+- ~~Windows 的 `status` 比 Linux 多打印一行 `task=…`~~ 已统一（2026-11-05）：那行散装文本删掉了，
+  任务状态与上次退出码并入 `status` 的 `service` 段，两个平台同一份 JSON。
+  Linux 侧还差 `state`/`last_result` 两个字段（`service_adapter.status()` 的 systemctl 分支
+  需要多读 `ActiveState` 与 `Result`/`ExecMainStatus`），`installed`/`running` 今天就有。
 - `docs/WINDOWS.md` 与本文有少量重叠：前者面向 Windows 用户的操作与排障，本文只对照命令面。

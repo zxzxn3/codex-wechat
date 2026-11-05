@@ -22,6 +22,9 @@ class ServiceState:
     installed: bool
     running: bool
     detail: str = ""
+    # Native host state and last exit code, when the platform exposes them.
+    state: str = ""
+    last_result: int | None = None
 
 
 async def _run(command, *, timeout):
@@ -63,7 +66,11 @@ async def status():
             raise RuntimeError("Windows 服务状态响应无效。")
         if installed and not owned:
             raise ValueError("名为 CodexWeChat 的计划任务不属于当前安装目录。")
-        return ServiceState(installed, running)
+        last_result = value.get("last_result")
+        if type(last_result) is not int:
+            last_result = None
+        return ServiceState(installed, running, state=str(value.get("state") or ""),
+                            last_result=last_result)
 
     output = await systemctl(
         "show", UNIT,

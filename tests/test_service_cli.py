@@ -1,6 +1,7 @@
 """CLI gates for login and the background service, without a real install."""
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -9,6 +10,7 @@ import codex_wechat
 import service_adapter
 from configuration import ConfigurationError
 from service_adapter import ServiceState
+from storage import Store
 
 
 def interactive(input_is_tty=True, output_is_tty=True):
@@ -105,3 +107,40 @@ class ServiceFailureShapeTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError) as raised:
                     await command()
                 self.assertEqual(str(raised.exception), service_adapter.NOT_INSTALLED)
+
+
+class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
+    """`status` reports the host that runs the bridge, not just saved state."""
+
+    async def store(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = Store(Path(temp.name) / "state")
+        self.addCleanup(store.lock.close)
+        return store
+
+    async def test_the_host_state_and_exit_code_land_in_the_json(self):
+        store = await self.store()
+        with patch.object(codex_wechat.service_adapter, "status", AsyncMock(
+                return_value=ServiceState(True, False, state="Ready", last_result=78))):
+            payload = await codex_wechat.status_payload_with_service(store)
+        self.assertEqual(payload["service"],
+                         {"installed": True, "running": False,
+                          "state": "Ready", "last_result": 78})
+
+    async def test_an_unreadable_host_is_omitted_instead_of_failing_status(self):
+        store = await self.store()
+        with patch.object(codex_wechat.service_adapter, "status",
+                          AsyncMock(side_effect=ValueError("不属于这个安装目录"))):
+            payload = await codex_wechat.status_payload_with_service(store)
+        self.assertNotIn("service", payload)
+        self.assertIn("bound", payload)
+
+    async def test_windows_json_carries_the_native_state_and_exit_code(self):
+        output = ('{"installed":true,"owned":true,"running":false,'
+                  '"state":"Ready","last_result":78}')
+        with patch.object(service_adapter, "_windows_request", AsyncMock(return_value=output)), \
+                patch.object(service_adapter, "IS_WINDOWS", True):
+            current = await service_adapter.status()
+        self.assertEqual((current.installed, current.running), (True, False))
+        self.assertEqual((current.state, current.last_result), ("Ready", 78))

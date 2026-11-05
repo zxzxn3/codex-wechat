@@ -266,15 +266,7 @@ switch ($Command) {
     }
     'status' {
         & $VenvPython -u $Agent status --state-dir $StateDir --config $ConfigPath
-        $agentExit = $LASTEXITCODE
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if ($task) {
-            $info = Get-ScheduledTaskInfo -TaskName $TaskName
-            Write-Host "task=$($task.State) last_result=$($info.LastTaskResult)"
-        } else {
-            Write-Host 'task=not-installed'
-        }
-        exit $agentExit
+        exit $LASTEXITCODE
     }
     'service-start' {
         $task = Get-InstalledTask
@@ -329,11 +321,16 @@ switch ($Command) {
         $running = $installed -and $task.State -in @('Running', 'Queued')
         $taskState = if ($installed) { [string]$task.State } else { 'not-installed' }
         if ($Json) {
+            $lastResult = $null
+            if ($installed) {
+                $lastResult = (Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult
+            }
             [ordered]@{
                 installed = [bool]$installed
                 owned = [bool]$owned
                 running = [bool]$running
                 state = $taskState
+                last_result = $lastResult
             } | ConvertTo-Json -Compress
             exit 0
         }

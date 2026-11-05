@@ -777,6 +777,22 @@ def status_payload(store):
     return payload
 
 
+async def status_payload_with_service(store):
+    """Bridge state plus the host that runs it, when the host can be read."""
+    payload = status_payload(store)
+    try:
+        current = await service_adapter.status()
+    except (ValueError, RuntimeError, OSError):
+        return payload
+    service = {"installed": current.installed, "running": current.running}
+    if current.state:
+        service["state"] = current.state
+    if current.last_result is not None:
+        service["last_result"] = current.last_result
+    payload["service"] = service
+    return payload
+
+
 def stop_notification_text(config_path):
     try:
         config = json.loads(config_path.read_text(encoding="utf-8-sig"))
@@ -913,7 +929,8 @@ async def main():
         if wechat_auth.mark_valid(state, result.account):
             store.save("bridge", state)
     elif args.action == "status":
-        print(json.dumps(status_payload(store), ensure_ascii=False, indent=2))
+        payload = await status_payload_with_service(store)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         account = await startup_account(store)
         try:

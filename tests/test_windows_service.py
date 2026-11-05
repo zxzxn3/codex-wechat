@@ -292,6 +292,9 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[char]::IsWhiteSpace", entry)
         self.assertIn(r"^[a-f0-9]{16}$", entry)
         self.assertIn("尚未绑定微信，请在当前终端扫码", entry)
+        # The task state belongs in the status JSON, not on its own console line.
+        self.assertIn("last_result = $lastResult", entry)
+        self.assertNotIn('task=$($task.State) last_result', entry)
         self.assertIn("[char]::IsWhiteSpace", install)
         self.assertIn("$trigger.Enabled = $enabled", entry)
         self.assertIn("Set-ScheduledTask -TaskName $TaskName -Trigger $triggers", entry)
