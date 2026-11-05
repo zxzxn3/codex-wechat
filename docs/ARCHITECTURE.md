@@ -39,8 +39,11 @@ Windows 管道不是按 CODEX_HOME 隔离，只允许主 home；独立后端仍�
 App 请求结果超时/断连仍为投递不确定，不切回原生后台重发；审批/问题答案始终返回原 App owner，
 已失效请求不落入另一个后台。关闭桥接只关闭 follower 连接。
 IPC steer 在发出前核对快照中的 expectedTurnId；App 内部 follower 接口没有同名原子前置条件，
-因此不能承诺与原生 turn/steer 相同的跨客户端竞态保证。项目不再维护专用 App 启动入口；
-默认使用正常 App 入口时，仍需先在 App 打开目标会话，再从微信跟随，反向接入尚未实现。
+因此不能承诺与原生 turn/steer 相同的跨客户端竞态保证。项目不再维护专用 App 启动入口。
+默认使用正常 App 入口时，微信发起的回合仍跑在同一个 thread 上：App 停在该会话时，
+微信里的输入与回复会出现在 App 里，本机已观测到这种用法。"反向接入"只指另一件事——
+让 App 跳到它没打开的会话。follower 接口只有 start-turn、steer、interrupt 和 stream 状态，
+没有打开或聚焦会话的方法，所以桥不承诺这一条。
 切换会话时会请求旧会话的 `thread/unsubscribe`，交还 Bridge 持有的写入者；这是 app-server
 暴露的唯一释放手段（没有 `thread/unload`），失败只记日志、不阻断切换。
 后台与代理职责仍各自独立，不把微信后台是否就绪作为普通 App 启动的前置条件。
