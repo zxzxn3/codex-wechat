@@ -162,6 +162,15 @@ typing 的认证失效进入同一暂停与重绑通知流程，但发现失效�
 超时及其它接口的超时仍为故障，外部取消继续传播。
 业务错误额外记录固定 api_error_kind（auth_expired、prepare_failed、unknown_error、
 rate_limit_hint、other），仅按明确提示归类，不保存 errmsg，也不将 -2 自动认定为限流。
+发送是否成功以服务端返回的消息 id 为准：HTTP 200 且 ret=0、但响应不含 msgid/msg_id/
+message_id/messageId/msgId 时判定为未投递（WeChatNotAcknowledged），按可重试处理，
+重试耗尽后进入 failedOutbox 并计入连续发送失败，不再记 output.sent。该错误属于响应内容
+而非请求本身，日志里体现为 output.send_failed / output.failed 的
+error_type=WeChatNotAcknowledged 与 error_code=服务端 ret，不计入 api_error_kind。
+实测依据：某 bot 出站文本被服务端静默丢弃期间，sendtyping 和 getconfig 全程正常，
+sendmessage 一律返回 {"ret":0} 且无 id；若把这种响应当成功，条目会离开发件箱而用户
+收不到任何内容，只有 wechat.send_ack 的 status=no_id 留有痕迹。排查投递失败与本地过滤
+时，先看该事件的 acked/no_id 计数。
 output.failed 的 send_failures 保存当时连续发送失败条目数，成功清零规则不变。
 当前用户私聊在路由前记录input.observed：消息类型、状态、内容类别、字数、项数及跳过原因，
 用于区分上游未投递与本地过滤/去重；不记录正文或消息标识。

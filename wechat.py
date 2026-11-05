@@ -8,7 +8,8 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from errors import WeChatApiError, WeChatAuthExpired, WeChatPollTimeout
+from errors import (WeChatApiError, WeChatAuthExpired, WeChatNotAcknowledged,
+                    WeChatPollTimeout)
 from diagnostics import error_fields, log_event
 from latency import timeout_stage
 from wechat_http import PooledHTTP
@@ -176,6 +177,11 @@ class WeChat:
         log_event("wechat.send_ack", component="wechat",
                   status="acked" if acknowledged else "no_id", count=len(keys),
                   request_id=entry.get("requestId"))
+        if not acknowledged:
+            # Returning normally here made the caller record output.sent and drop
+            # the entry, so a dropped message looked delivered to everyone but the
+            # log. Raising lets the outbox retry and, at the limit, report failure.
+            raise WeChatNotAcknowledged(keys.get("ret"))
         return result
 
     async def typing_ticket(self, user, context=None):

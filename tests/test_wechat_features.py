@@ -12,7 +12,7 @@ from media import Media, split_answer
 from storage import Store
 from wechat import SEND_TIMEOUT, TYPING_TIMEOUT, WeChat
 from wechat_content import remember_quote
-from errors import WeChatAuthExpired
+from errors import WeChatAuthExpired, WeChatNotAcknowledged
 
 
 class FakeChannel:
@@ -223,11 +223,32 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_message_uses_short_timeout(self):
         client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
-        client.request = AsyncMock(return_value={"ret": 0})
+        client.request = AsyncMock(return_value={"msgid": 900})
         await client.send({
             "id": "client", "user": "owner", "context": "context", "text": "answer",
         })
         self.assertEqual(client.request.await_args.kwargs["timeout"], SEND_TIMEOUT)
+
+    async def test_a_200_without_a_message_id_is_not_reported_as_sent(self):
+        # Observed in the wild: the bot's outbound text channel was blocked, the
+        # server answered {"ret": 0} and delivered nothing while sendtyping kept
+        # working. Returning normally lost the reply silently.
+        client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
+        client.request = AsyncMock(return_value={"ret": 0})
+        with self.assertRaises(WeChatNotAcknowledged) as raised:
+            await client.send({
+                "id": "client", "user": "owner", "context": "context", "text": "answer",
+            })
+        self.assertEqual(raised.exception.kind, "not_acknowledged")
+        self.assertEqual(raised.exception.code, 0)
+
+    async def test_an_empty_response_is_not_reported_as_sent(self):
+        client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
+        client.request = AsyncMock(return_value={})
+        with self.assertRaises(WeChatNotAcknowledged):
+            await client.send({
+                "id": "client", "user": "owner", "context": "context", "text": "answer",
+            })
 
     async def test_video_snapshot_and_upload_item(self):
         with tempfile.TemporaryDirectory() as source:

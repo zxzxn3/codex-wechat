@@ -84,6 +84,7 @@ class PollTimeoutTests(unittest.IsolatedAsyncioTestCase):
             request.return_value = {'longpolling_timeout_ms': 10**9}
             await self.client.poll('cursor')
             self.assertEqual(self.client.poll_timeout, 120)
+            request.return_value = {'msgid': 900}
             await self.client.send({'id': 'id', 'user': 'owner', 'context': 'ctx', 'text': 'x'})
             self.assertEqual(request.await_args.kwargs['timeout'], 5)
 

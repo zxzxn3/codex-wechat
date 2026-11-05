@@ -6,7 +6,8 @@ import unittest
 from unittest.mock import patch
 
 from codex_wechat import Bridge
-from errors import WeChatApiError
+from errors import WeChatApiError, WeChatNotAcknowledged
+from output_delivery import SEND_ATTEMPTS
 from profiles import restore
 from storage import Store
 
@@ -100,6 +101,42 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 rejected = next(call for call in log_event.call_args_list
                                 if call.args and call.args[0] == "output.send_rejected")
                 self.assertEqual(rejected.kwargs["api_error_kind"], "prepare_failed")
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_an_unacknowledged_send_is_retried_then_reported_as_a_failure(self):
+        # A 200 with no message id means nothing was delivered. Retrying keeps the
+        # reply in the outbox instead of dropping the only copy we have.
+        bridge = self.bridge
+        bridge.reply("answer")
+        calls = 0
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            raise WeChatNotAcknowledged(0)
+
+        bridge.channel.send = send
+        with (patch("output_delivery.log_event") as log_event,
+              patch("output_delivery.SEND_RETRY_SECONDS", 0)):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("failedOutbox"):
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertGreater(calls, 1)  # retried, unlike a prepare_failed rejection
+                self.assertFalse(bridge.state.get("wechatContextPending"))
+                self.assertGreaterEqual(bridge.prompt_fields()["send_failures"], 1)
+                self.assertGreaterEqual(len(bridge.state["failedOutbox"]), 1)
+                self.assertEqual(bridge.state["failedOutbox"][0]["attempts"], SEND_ATTEMPTS)
+                events = [call.args[0] for call in log_event.call_args_list if call.args]
+                self.assertNotIn("output.sent", events)
+                self.assertIn("output.failed", events)
+                failed = next(call for call in log_event.call_args_list
+                              if call.args and call.args[0] == "output.send_failed")
+                self.assertEqual(failed.kwargs["error_type"], "WeChatNotAcknowledged")
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)

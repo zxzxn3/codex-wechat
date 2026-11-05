@@ -74,6 +74,24 @@ class WeChatApiError(RuntimeError):
         super().__init__(f"微信 API 错误 {code}")
 
 
+class WeChatNotAcknowledged(WeChatApiError):
+    """The call succeeded but no message id came back, so nothing was delivered.
+
+    The server answers 200 with `{"ret": 0}` while dropping the message (observed
+    while a bot's outbound text channel was blocked: `sendtyping` still worked).
+    Treating that as success removed the entry from the outbox, so the user saw
+    nothing and only the log knew.
+    """
+
+    error_actions = ErrorAction.RETRYABLE
+
+    def __init__(self, ret=None):
+        super().__init__("no_id" if ret is None else ret, "not_acknowledged")
+
+    def __str__(self):
+        return f"微信未确认消息投递（ret={self.code}）"
+
+
 def writer_conflict(error):
     """A resume rejected because another client still holds the thread's writer."""
     return (getattr(error, "code", None) == -32600
