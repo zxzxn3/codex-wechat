@@ -404,8 +404,8 @@ Administrators"并断开继承；其下所有目录改为普通创建、继承�
 
 - [ ] `uninstall` 在前台桥接持有状态锁时拒绝并给出退出提示；先 `Ctrl+C` 后重试成功。
 - [ ] 让服务状态查询失败时，`uninstall` 必须在删除前报错退出，而不是继续清理。
-- [ ] 通过 Python `uninstall.py` 路由调用 Windows `uninstall.ps1` 时，启动失败或卡住最多
-      等待 60 秒并结束子进程；这是超时保护，不代表真实 PowerShell 行为已经验收。
+- [ ] 通过 `codex-wechat.cmd uninstall` 验证公开入口直接调用 stable `uninstall.ps1`，
+      不经过已删除的 Python `uninstall.py` 次级路径。
 - [ ] 连接池失败退役测试在 Windows 实机网络下复测：长期请求不应阻止旧 session 关闭，
       连续失败后 `retiring` 不应无界增长。
 - [ ] `.cmd` 仍以 UTF-8 无 BOM 生成；在非 ASCII 用户目录和 Windows PowerShell 5.1 下

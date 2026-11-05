@@ -154,8 +154,5 @@ if ($Command -eq 'rebind' -and $StopActive) {
 if ($Command -eq 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
     $Arguments += $Value
 }
-if ($Command -eq 'uninstall' -and $PurgeData) {
-    $Arguments += '--purge-data'
-}
 & $VenvPython -u @Arguments
 exit $LASTEXITCODE
