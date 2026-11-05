@@ -52,6 +52,13 @@ Windows `.cmd` 未生成时，使用完整 stable 入口：
 Windows 公开入口在读取 `current` 之前直接调用 `uninstall.ps1`；Linux 公开入口在读取
 `current` 之前直接调用 stable `uninstall.py`。这是为了保证 `current` 损坏时仍能卸载。
 
+### 提示语言
+
+- root/管理员拒绝统一使用「请以普通用户身份运行，不要使用 root/sudo 或管理员终端。」
+- `current` 缺失、无效、非普通文件、版本不完整及 release 损坏统一使用中文提示。
+- `uninstall` 的成功和保留数据提示统一使用中文；平台专用参数仍保留
+  `--purge-data` / `-PurgeData` 的拼写差异。
+
 ## 已移除
 
 `codex_wechat.py` 不再提供 `uninstall` action。Linux 只保留 stable `uninstall.py`，

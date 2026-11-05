@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 [CmdletBinding()]
 param(
     [switch]$PurgeData,
@@ -48,7 +48,7 @@ function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
         }
         Start-Sleep -Milliseconds 250
     }
-    Fail "scheduled task '$TaskName' did not stop within $TimeoutSeconds seconds"
+    Fail "计划任务 '$TaskName' 未在 $TimeoutSeconds 秒内停止"
 }
 
 function Remove-DataPath([string]$Name) {
@@ -79,7 +79,7 @@ function Assert-NoForegroundBridge {
             [IO.FileAccess]::ReadWrite,
             [IO.FileShare]::None)
     } catch {
-        Fail 'foreground bridge is still running; stop it with Ctrl+C before uninstalling'
+        Fail '前台桥接仍在运行，请先按 Ctrl+C 退出后再卸载。'
     } finally {
         if ($stream) {
             $stream.Dispose()
@@ -113,7 +113,7 @@ function Stop-SharedBackends {
         }
         if (-not $process.ExecutablePath -or $process.ExecutablePath -ne $value.executable -or
                 $process.CreationDate.ToUniversalTime().ToString('o') -ne $value.creationTimeUtc) {
-            Write-Warning "skipping shared backend ${id}: recorded identity no longer matches"
+            Write-Warning "跳过共享后台 ${id}: 记录的身份已不匹配"
             continue
         }
         $port = 0
@@ -134,7 +134,7 @@ function Stop-SharedBackends {
                     $owner = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
                     if ($owner) { "$($owner.ProcessName)($($owner.Id))" } else { "pid $($_.OwningProcess)" }
                 }) -join ', '
-                Fail "shared backend $id still has attached clients: $owners; close them first or pass -Force"
+                Fail "共享后台 $id 仍有已连接的客户端: $owners；请先关闭它们或使用 -Force"
             }
         }
         Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
@@ -143,9 +143,9 @@ function Stop-SharedBackends {
             Start-Sleep -Milliseconds 250
         }
         if (Get-Process -Id $id -ErrorAction SilentlyContinue) {
-            Fail "shared backend $id did not stop"
+            Fail "共享后台 $id 未停止"
         }
-        Write-Host "stopped shared backend: $id"
+        Write-Host "已停止共享后台: $id"
     }
 }
 
@@ -168,15 +168,15 @@ if ($task) {
         }
     }
     if (-not $owned -and -not $Force) {
-        Fail "task '$TaskName' is not owned by this installation; use -Force to remove it anyway"
+        Fail "计划任务 '$TaskName' 不属于当前安装；如仍要删除请使用 -Force"
     }
     if ($task.State -in @('Running', 'Queued')) {
         Stop-ScheduledTask -TaskName $TaskName
         Wait-TaskStopped
-        Write-Host "stopped scheduled task: $TaskName"
+        Write-Host "已停止计划任务: $TaskName"
     }
 } else {
-    Write-Host "scheduled task is not installed: $TaskName"
+    Write-Host "未安装计划任务: $TaskName"
 }
 
 Assert-NoForegroundBridge
@@ -192,36 +192,36 @@ if ($PurgeData) {
     if ($resolvedRoot -eq $driveRoot -or $resolvedRoot -eq $resolvedUser -or
             $resolvedRoot -eq $resolvedLocal -or
             $resolvedUser.StartsWith($resolvedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        Fail "refusing to purge an overly broad data path: $DataRoot"
+        Fail "拒绝清理范围过大的数据目录: $DataRoot"
     }
     if (Test-Path $DataRoot) {
         $dataItem = Get-Item -LiteralPath $DataRoot -Force
         if ((-not $dataItem.PSIsContainer) -or
                 ((($dataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
-            Fail "refusing to purge non-directory or reparse-point data path: $DataRoot"
+            Fail "拒绝清理非目录或重解析点数据目录: $DataRoot"
         }
         Stop-SharedBackends
         foreach ($name in $DataPaths) {
             Remove-DataPath $name
         }
-        Write-Host "removed user data under: $DataRoot"
+        Write-Host "已删除数据目录中的用户数据: $DataRoot"
     }
 } else {
-    Write-Host "data retained: $DataRoot (use -PurgeData only when credentials and state are no longer needed)"
-    Write-Host 'a shared Codex backend under the data root is left running'
+    Write-Host "用户数据已保留: $DataRoot（仅在不再需要凭据和状态时使用 -PurgeData）"
+    Write-Host '数据目录下的共享 Codex 后台仍在运行'
 }
 if ($task) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Write-Host "removed scheduled task: $TaskName"
+    Write-Host "已移除计划任务: $TaskName"
 }
 $Shim = Join-Path $env:USERPROFILE '.local\bin\codex-wechat.cmd'
 if (Test-Path -LiteralPath $Shim -PathType Leaf) {
     $shimText = Get-Content -LiteralPath $Shim -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     if ($shimText -and $shimText.Contains('rem codex-wechat command shim')) {
         Remove-Item -LiteralPath $Shim -Force
-        Write-Host "removed command shim: $Shim"
+        Write-Host "已移除命令入口: $Shim"
     } else {
-        Write-Warning "left $Shim in place: it is not this project's command shim"
+        Write-Warning "保留 $Shim：它不是本项目的命令入口"
     }
 }
-Write-Host 'project files and the virtual environment were not removed'
+Write-Host '项目文件和虚拟环境未删除'

@@ -1444,7 +1444,7 @@ def main(argv: list[str] | None = None) -> int:
     global NON_INTERACTIVE
     options = parser().parse_args(argv)
     if _elevated() and os.environ.get("CODEX_WECHAT_ALLOW_ROOT") != "1":
-        raise ValueError("请以普通用户身份运行，不要使用管理员终端。")
+        raise ValueError("请以普通用户身份运行，不要使用 root/sudo 或管理员终端。")
     if options.command == "bootstrap" and not options.repo:
         raise ValueError("一行安装入口需要 --repo；不会使用旧仓库。")
     if options.source is not None and (options.repo or options.ref):

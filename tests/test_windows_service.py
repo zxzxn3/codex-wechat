@@ -331,15 +331,15 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_uninstall_preserves_data_by_default(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("if ($PurgeData)", text)
-        self.assertIn("data retained", text)
-        self.assertIn("project files and the virtual environment were not removed", text)
+        self.assertIn("用户数据已保留", text)
+        self.assertIn("项目文件和虚拟环境未删除", text)
 
     def test_uninstall_refuses_a_live_foreground_bridge(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("Assert-NoForegroundBridge", text)
         self.assertIn("[IO.FileShare]::None", text)
         check = text.index("Assert-NoForegroundBridge\n\n# Data removal")
-        self.assertLess(text.index("scheduled task is not installed"), check)
+        self.assertLess(text.index("未安装计划任务"), check)
         self.assertLess(check, text.index("if ($PurgeData)"))
 
     def test_uninstall_checks_exact_task_ownership_before_stopping(self):
@@ -358,9 +358,9 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(text.rindex("Stop-SharedBackends"),
                         text.index("Remove-DataPath $name"))
         self.assertIn("shared-backend-process.json", text)
-        self.assertIn("recorded identity no longer matches", text)
-        self.assertIn("still has attached clients", text)
-        self.assertIn("a shared Codex backend under the data root is left running", text)
+        self.assertIn("记录的身份已不匹配", text)
+        self.assertIn("仍有已连接的客户端", text)
+        self.assertIn("共享 Codex 后台仍在运行", text)
 
     def test_uninstall_removes_the_task_only_after_purging_data(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")

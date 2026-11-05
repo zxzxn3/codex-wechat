@@ -36,7 +36,7 @@ function Test-Elevated {
 
 if ($Command -notin @('status', 'logs', 'uninstall') -and
         (Test-Elevated) -and $env:CODEX_WECHAT_ALLOW_ROOT -ne '1') {
-    [Console]::Error.WriteLine('请以普通用户身份运行，不要使用管理员终端。')
+    [Console]::Error.WriteLine('请以普通用户身份运行，不要使用 root/sudo 或管理员终端。')
     exit 78
 }
 
@@ -114,21 +114,23 @@ if ($Command -eq 'uninstall') {
 $Project = $InstallRoot
 $CurrentFile = Join-Path $InstallRoot 'current'
 $CurrentItem = Get-Item -LiteralPath $CurrentFile -Force -ErrorAction SilentlyContinue
-if ($null -ne $CurrentItem) {
+if ($null -eq $CurrentItem) {
+    throw "codex-wechat.ps1: 当前版本指针 current 缺失: $CurrentFile"
+} else {
     if ($CurrentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        throw "codex-wechat.ps1: current must not be a reparse point: $CurrentFile"
+        throw "codex-wechat.ps1: 当前版本指针 current 不能是符号链接或重解析点: $CurrentFile"
     }
     if ($CurrentItem.PSIsContainer) {
-        throw "codex-wechat.ps1: current must be a file: $CurrentFile"
+        throw "codex-wechat.ps1: 当前版本指针 current 必须是普通文件: $CurrentFile"
     }
     $ReleaseId = (Get-Content -LiteralPath $CurrentFile -TotalCount 1).Trim()
     if (-not $ReleaseId -or $ReleaseId -cnotmatch '^[a-f0-9]{16}$') {
-        throw "codex-wechat.ps1: invalid release id in $CurrentFile"
+        throw "codex-wechat.ps1: 当前版本指针 current 包含无效版本标识: $CurrentFile"
     }
     $Project = Join-Path $InstallRoot "releases\$ReleaseId"
 }
 if (-not (Test-Path -LiteralPath (Join-Path $Project 'codex_wechat.py') -PathType Leaf)) {
-    throw "codex-wechat.ps1: active project files are missing: $Project"
+    throw "codex-wechat.ps1: 当前版本不完整: $Project`n请从新源码重新运行 update。"
 }
 
 $env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot

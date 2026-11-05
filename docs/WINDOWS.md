@@ -321,7 +321,7 @@ Windows原生通知使用NotifyIcon；通知开关、无桌面等情况可导致
 
 `codex_wechat.py`、`installer.py` 与入口脚本都会检查提权状态
 （[platform_support.is_elevated()](../platform_support.py)、`installer._elevated()`）。
-写操作命中就直接报「请以普通用户身份运行，不要使用管理员终端。」并以 `78` / `1` 退出；
+写操作命中就直接报「请以普通用户身份运行，不要使用 root/sudo 或管理员终端。」并以 `78` / `1` 退出；
 只读 `status` / `logs` 和显式 `uninstall` 放行。容器/一次性 CI 可设置
 `CODEX_WECHAT_ALLOW_ROOT=1`；这是逃生口，不是推荐运行方式。
 

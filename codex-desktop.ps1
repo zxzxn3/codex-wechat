@@ -6,7 +6,7 @@ if ($env:CODEX_WECHAT_ALLOW_ROOT -ne '1') {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
         $principal = New-Object Security.Principal.WindowsPrincipal($identity)
         if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-            [Console]::Error.WriteLine('请以普通用户身份运行，不要使用管理员终端。')
+            [Console]::Error.WriteLine('请以普通用户身份运行，不要使用 root/sudo 或管理员终端。')
             exit 78
         }
     } catch {
@@ -20,11 +20,21 @@ $installRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
 } else { $PSScriptRoot }
 $project = $installRoot
 $current = Join-Path $installRoot 'current'
+if (-not (Test-Path -LiteralPath $current)) {
+    throw "codex-desktop.ps1: 当前版本指针 current 缺失: $current"
+}
 if (Test-Path -LiteralPath $current) {
     $item = Get-Item -LiteralPath $current -Force
-    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid current pointer.' }
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "codex-desktop.ps1: 当前版本指针 current 不能是符号链接或重解析点: $current"
+    }
+    if ($item.PSIsContainer) {
+        throw "codex-desktop.ps1: 当前版本指针 current 必须是普通文件: $current"
+    }
     $identifier = (Get-Content -LiteralPath $current -Raw -Encoding UTF8).Trim()
-    if ($identifier -cnotmatch '^[a-f0-9]{16}$') { throw 'Invalid current version.' }
+    if ($identifier -cnotmatch '^[a-f0-9]{16}$') {
+        throw "codex-desktop.ps1: 当前版本指针 current 包含无效版本标识: $current"
+    }
     $project = Join-Path $installRoot ('releases\' + $identifier)
 }
 $python = Join-Path $project '.venv\Scripts\python.exe'
@@ -35,7 +45,7 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 }
 $script = Join-Path $project 'desktop.py'
 if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
-    throw 'Desktop entry is missing.'
+    throw "codex-desktop.ps1: 当前版本不完整: $project`n请从新源码重新运行 update。"
 }
 $before = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT','Process')
 try {

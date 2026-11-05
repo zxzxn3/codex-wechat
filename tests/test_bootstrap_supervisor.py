@@ -18,7 +18,7 @@ MISSING_RELEASE = "0123456789abcdef"
 class BootstrapSupervisorTests(unittest.TestCase):
     def test_missing_current_pointer_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "version pointer is missing"):
+            with self.assertRaisesRegex(ValueError, "当前版本指针 current 缺失"):
                 bootstrap_supervisor.active_release(Path(directory))
 
     def test_current_pointer_selects_immutable_release(self):
@@ -34,13 +34,13 @@ class BootstrapSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "current").write_text("../escape\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "invalid release id"):
+            with self.assertRaisesRegex(ValueError, "无效版本标识"):
                 bootstrap_supervisor.active_release(root)
             (root / "current").write_text("ABC123\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "invalid release id"):
+            with self.assertRaisesRegex(ValueError, "无效版本标识"):
                 bootstrap_supervisor.active_release(root)
             (root / "current").write_text(MISSING_RELEASE + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "incomplete"):
+            with self.assertRaisesRegex(ValueError, "当前版本不完整"):
                 bootstrap_supervisor.active_release(root)
 
     def test_dotdot_in_the_pointer_cannot_escape_to_the_install_root(self):
@@ -49,7 +49,7 @@ class BootstrapSupervisorTests(unittest.TestCase):
             (root / "windows_service.py").write_text("", encoding="utf-8")
             (root / "releases").mkdir()
             (root / "current").write_text("..\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "invalid release id"):
+            with self.assertRaisesRegex(ValueError, "无效版本标识"):
                 bootstrap_supervisor.active_release(root)
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symbolic links unavailable")
@@ -60,7 +60,7 @@ class BootstrapSupervisorTests(unittest.TestCase):
             external = root / "external"
             external.mkdir()
             (root / "current").symlink_to(external / "pointer")
-            with self.assertRaisesRegex(ValueError, "pointer must not be a symlink"):
+            with self.assertRaisesRegex(ValueError, "不能是符号链接或重解析点"):
                 bootstrap_supervisor.active_release(root)
 
             (root / "current").unlink()
@@ -70,7 +70,7 @@ class BootstrapSupervisorTests(unittest.TestCase):
             (release / "windows_service.py").write_text("", encoding="utf-8")
             (root / "releases").symlink_to(outside_releases, target_is_directory=True)
             (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "releases directory must not be a symlink"):
+            with self.assertRaisesRegex(ValueError, "releases 目录不能是符号链接"):
                 bootstrap_supervisor.active_release(root)
 
 
@@ -119,7 +119,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(loaded, [FIRST_RELEASE, SECOND_RELEASE])
             log = (Path(directory) / "service.log").read_text(encoding="utf-8")
-            self.assertIn(f"version pointer changed; loading {SECOND_RELEASE}", log)
+            self.assertIn(f"版本指针已变化，正在加载 {SECOND_RELEASE}", log)
 
     def test_broken_pointer_keeps_the_running_release(self):
         with tempfile.TemporaryDirectory() as directory:

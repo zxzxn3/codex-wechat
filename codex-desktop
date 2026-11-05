@@ -5,7 +5,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; t
     case "${1:-}" in
         -h|--help) ;;
         *)
-            echo 'codex-desktop: 请以普通用户身份运行，不要使用 root/sudo。' >&2
+            echo 'codex-desktop: 请以普通用户身份运行，不要使用 root/sudo 或管理员终端。' >&2
             exit 78
             ;;
     esac
@@ -13,17 +13,30 @@ fi
 INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 PROJECT_DIR="$INSTALL_ROOT"
 if [ -L "$INSTALL_ROOT/current" ]; then
-    echo 'codex-desktop: current must not be a symlink' >&2
+    echo "codex-desktop: 当前版本指针 current 不能是符号链接或重解析点: $INSTALL_ROOT/current" >&2
+    exit 1
+fi
+if [ -e "$INSTALL_ROOT/current" ] && [ ! -f "$INSTALL_ROOT/current" ]; then
+    echo "codex-desktop: 当前版本指针 current 必须是普通文件: $INSTALL_ROOT/current" >&2
+    exit 1
+fi
+if [ ! -f "$INSTALL_ROOT/current" ]; then
+    echo "codex-desktop: 当前版本指针 current 缺失: $INSTALL_ROOT/current" >&2
     exit 1
 fi
 if [ -f "$INSTALL_ROOT/current" ]; then
     IFS= read -r VERSION < "$INSTALL_ROOT/current" || true
     if [[ ! "$VERSION" =~ ^[a-f0-9]{16}$ ]]; then
-        echo 'codex-desktop: invalid current version' >&2
+        echo "codex-desktop: 当前版本指针 current 包含无效版本标识: $INSTALL_ROOT/current" >&2
         exit 1
     fi
     PROJECT_DIR="$INSTALL_ROOT/releases/$VERSION"
     export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"
+fi
+if [ ! -f "$PROJECT_DIR/desktop.py" ]; then
+    echo "codex-desktop: 当前版本不完整: $PROJECT_DIR" >&2
+    echo '请从新源码重新运行 update。' >&2
+    exit 1
 fi
 export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
 PYTHON=python3

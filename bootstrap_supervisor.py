@@ -24,26 +24,28 @@ RELEASE_ID = re.compile(r"[a-f0-9]{16}")
 def active_release(install_root: Path) -> Path:
     install_root = Path(install_root).expanduser()
     if install_root.is_symlink():
-        raise ValueError(f"install root must not be a symlink: {install_root}")
+        raise ValueError(f"安装根目录不能是符号链接: {install_root}")
     install_root = install_root.resolve()
     current = install_root / "current"
     if current.is_symlink():
-        raise ValueError(f"version pointer must not be a symlink: {current}")
+        raise ValueError(f"当前版本指针 current 不能是符号链接或重解析点: {current}")
     if not current.exists():
-        raise ValueError(f"version pointer is missing: {current}")
+        raise ValueError(f"当前版本指针 current 缺失: {current}")
+    if not current.is_file():
+        raise ValueError(f"当前版本指针 current 必须是普通文件: {current}")
     identifier = current.read_text(encoding="utf-8").strip()
     # The installer writes the first 16 hex digits of the release hash; anything
     # else (notably "..", which would resolve to the install root) is corruption.
     if not RELEASE_ID.fullmatch(identifier):
-        raise ValueError(f"invalid release id in {current}")
+        raise ValueError(f"当前版本指针 current 包含无效版本标识: {current}")
     releases = install_root / "releases"
     if releases.is_symlink():
-        raise ValueError(f"releases directory must not be a symlink: {releases}")
+        raise ValueError(f"releases 目录不能是符号链接: {releases}")
     release = releases / identifier
     if release.is_symlink():
-        raise ValueError(f"release directory must not be a symlink: {release}")
+        raise ValueError(f"release 目录不能是符号链接: {release}")
     if not (release / "windows_service.py").is_file():
-        raise ValueError(f"active release is incomplete: {release}")
+        raise ValueError(f"当前版本不完整: {release}")
     return release
 
 
@@ -108,7 +110,7 @@ def main(argv=None) -> int:
             release = active_release(install_root)
             python = release / ".venv" / "Scripts" / "python.exe"
             if not python.is_file():
-                raise FileNotFoundError(f"release Python environment is missing: {python}")
+                raise FileNotFoundError(f"当前版本的 Python 环境缺失: {python}")
             module = load_supervisor(release)
         except Exception as error:
             if active is None:
@@ -122,7 +124,7 @@ def main(argv=None) -> int:
         else:
             last_failure = None
             if active is not None and release != active[0]:
-                write_log(log_path, f"version pointer changed; loading {release.name}")
+                write_log(log_path, f"版本指针已变化，正在加载 {release.name}")
             active = (release, python, module)
         try:
             code = asyncio.run(module.supervise(

@@ -8,7 +8,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; t
     case "${1:-status}" in
         status|logs|uninstall|-h|--help) ;;
         *)
-            echo "codex-wechat: 请以普通用户身份运行，不要使用 root/sudo。" >&2
+            echo "codex-wechat: 请以普通用户身份运行，不要使用 root/sudo 或管理员终端。" >&2
             exit 78
             ;;
     esac
@@ -34,13 +34,21 @@ if [ "${1:-}" = "uninstall" ]; then
     exec python3 -B -u "$UNINSTALLER" "$@"
 fi
 if [ -L "$CURRENT_FILE" ]; then
-    echo "codex-wechat: current 不能是符号链接" >&2
+    echo "codex-wechat: 当前版本指针 current 不能是符号链接或重解析点: $CURRENT_FILE" >&2
+    exit 1
+fi
+if [ -e "$CURRENT_FILE" ] && [ ! -f "$CURRENT_FILE" ]; then
+    echo "codex-wechat: 当前版本指针 current 必须是普通文件: $CURRENT_FILE" >&2
+    exit 1
+fi
+if [ ! -f "$CURRENT_FILE" ]; then
+    echo "codex-wechat: 当前版本指针 current 缺失: $CURRENT_FILE" >&2
     exit 1
 fi
 if [ -f "$CURRENT_FILE" ]; then
     IFS= read -r RELEASE_ID < "$CURRENT_FILE" || true
     if [[ ! "$RELEASE_ID" =~ ^[a-f0-9]{16}$ ]]; then
-        echo "codex-wechat: current 文件包含无效版本标识" >&2
+        echo "codex-wechat: 当前版本指针 current 包含无效版本标识: $CURRENT_FILE" >&2
         exit 1
     fi
     PROJECT_DIR="$INSTALL_ROOT/releases/$RELEASE_ID"

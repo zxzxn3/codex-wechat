@@ -919,7 +919,7 @@ async def manage_autostart(value):
 def require_regular_user(action):
     if (is_elevated() and not root_override_enabled()
             and action not in {"status", "logs"}):
-        raise ConfigurationError("请以普通用户身份运行，不要使用管理员终端。")
+        raise ConfigurationError("请以普通用户身份运行，不要使用 root/sudo 或管理员终端。")
 
 
 async def main():
