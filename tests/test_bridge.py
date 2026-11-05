@@ -209,7 +209,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                          "```\nack: IN < ~{turn_total_tokens} ({ingress_ms}ms)\n"
                          "finish: OUT > {turn_output_tokens} in {elapsed}\n"
                          "media.maxMiB: 20\n```\n\n"
-                         "以上设置可通过 `/settings [option] [value]` 更改。")
+                         "以上设置可通过 `/settings [option] [value]` 更改。\n"
+                         "使用 `/help settings` 查看设置说明。")
         status = status_summary(status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",

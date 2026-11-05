@@ -106,7 +106,25 @@ SETTINGS_USAGE = ("用法:\n`/settings [autostart|shared|compactionNotice|slicin
                   "`/settings connectionIdleSeconds|media.maxMiB|slicing.targetChars <整数>`\n"
                   "`/settings sourceHint <文本>`\n"
                   "`/settings ack|finish <模板>|\"\"|fields`")
-SETTINGS_HINT = "以上设置可通过 `/settings [option] [value]` 更改。"
+SETTINGS_HINT = ("以上设置可通过 `/settings [option] [value]` 更改。\n"
+                 "使用 `/help settings` 查看设置说明。")
+SETTINGS_HELP = """设置说明
+`/settings` 查看当前值；`/settings 名称 值` 修改。
+
+ack: 接收提示模板；空字符串关闭；`/settings ack fields` 查看字段。
+finish: 结束提示模板；空字符串关闭；`/settings finish fields` 查看字段。
+autostart: true|false，登录时自动启动后台服务。
+shared: true|false，与 Codex CLI 共用 app-server；默认 Windows 为 false、Linux 为 true；开启后 App 可能锁定当前会话。
+compactionNotice: true|false，上下文压缩开始和结束时发送提示。
+connectionIdleSeconds: 0–3600，微信 HTTP 连接池空闲秒数；0 表示不主动回收。
+media.maxMiB: 1–100，单个微信附件的大小上限。
+slicing.smart: true|false，true 使用智能语义切片，false 按长度切片。
+slicing.targetChars: 80–20000，切片目标字符数。
+sourceHint: 附加到微信用户消息的来源说明。
+
+[无法直接修改]
+quotaWarningThresholds.primary: 5 小时限额提醒阈值；修改 config.json 后热加载。
+quotaWarningThresholds.secondary: 7 天限额提醒阈值；修改 config.json 后热加载。"""
 SETTINGS_NUMBER = "{name} 必须是 {minimum}–{maximum} 的整数"
 SETTINGS_WRITE_FAILED = "未保存设置: 配置文件不可写或格式无效"
 SETTINGS_NOT_APPLIED = "设置已写入，但未生效；请检查配置文件。"
@@ -218,7 +236,7 @@ CONTROL_TIMEOUT = "控制请求未确认，请查看 `/status`；不会自动重
 CONTROL_FAILED = "指令未完成，请查看 `/status` 后重试。"
 GENERIC_FAILURE = "操作失败"
 COMMAND_USAGE = "用法: `{usage}`"
-HELP_USAGE = "用法: `/help` 或 `/help all`"
+HELP_USAGE = "用法: `/help`、`/help all` 或 `/help settings`"
 INPUT_SUBMISSION_UNCERTAIN = "消息提交结果未确认，未自动重发。"
 BACKEND_UNREADY = "后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。"
 RESULT_PREPARE_FAILED = "结果准备失败，请在桌面查看该轮回答。"
@@ -264,7 +282,7 @@ HELP_ANSWER = '回答原生提问'
 HELP_GET = '从电脑取回文件、图片或视频'
 HELP_GETFILE = '作为文件回传'
 HELP_RESTART = '重启微信桥'
-HELP_HELP = '查看常用命令；`/help all` 查看全部'
+HELP_HELP = '查看常用命令；`/help all` 查看全部；`/help settings` 查看设置说明'
 
 DEFAULT_PROMPTS = MappingProxyType({name: value for name, value in tuple(globals().items())
                                   if name.isupper() and isinstance(value, str)} |

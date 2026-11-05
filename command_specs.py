@@ -45,7 +45,7 @@ COMMANDS = (
     Command("/get", "/get {路径}", HELP_DESCRIPTIONS['/get'], lane="media", section="附件", handler="get", default_help=False),
     Command("/getfile", "/getfile {路径}", HELP_DESCRIPTIONS['/getfile'], lane="media", section="附件", handler="get", default_help=False),
     Command("/restart", "/restart", HELP_DESCRIPTIONS['/restart'], lane="local"),
-    Command("/help", "/help [all]", HELP_DESCRIPTIONS['/help'], lane="local",
+    Command("/help", "/help [all|settings]", HELP_DESCRIPTIONS['/help'], lane="local",
             aliases=("/h",), help_usage="/help"),
 )
 CONTROL_LANES = tuple(dict.fromkeys(spec.lane for spec in COMMANDS if spec.route != "input"))

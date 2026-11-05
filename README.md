@@ -136,7 +136,7 @@ Windows 使用 `codex-desktop.ps1 cli -- resume`。`desktop setup` / `ensure` �
 - `/stop` 中断当前共享轮次并清待办，不能撤销已发生的操作；`/restart` 保留确定未提交输入。
 - 重启后不自动重放已接受或提交结果不确定的输入；当前不补发断线期间的所有历史回答。
 
-提示、切片、限额阈值、压缩通知及来源 hint 在同一 config.json 中热加载。接收/结束提示也可在微信即时修改；已提交输入和已入发件箱的文本不追溯改变。`/settings ack fields` 列出模板字段，使用缓存快照，不额外请求模型。可写项包括 `ack`、`finish`、`sourceHint`、`autostart`、`shared`、`compactionNotice`、`slicing.smart`，以及数值项 `connectionIdleSeconds`、`media.maxMiB`、`slicing.targetChars`；其余设置项在 config.json 中修改。
+提示、切片、限额阈值、压缩通知及来源 hint 在同一 config.json 中热加载。接收/结束提示也可在微信即时修改；已提交输入和已入发件箱的文本不追溯改变。`/settings ack fields` 列出模板字段，使用缓存快照，不额外请求模型。可写项包括 `ack`、`finish`、`sourceHint`、`autostart`、`shared`、`compactionNotice`、`slicing.smart`，以及数值项 `connectionIdleSeconds`、`media.maxMiB`、`slicing.targetChars`；其余设置项在 config.json 中修改。`/help settings` 查看每项设置说明。
 `connectionIdleSeconds` 控制微信 API 连接空闲保留秒数，默认 60，允许 0–3600。
 0 表示不主动按空闲时间回收；服务退出、对端或代理断开、连接故障仍会关闭连接，不保证永久有效。
 在 config.json 中设置如 `"connectionIdleSeconds": 2`，下次热配置读取时生效，无需重启；

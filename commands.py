@@ -745,8 +745,11 @@ async def command_cwd(bridge, command, argument, received=None):
 
 
 async def command_help(bridge, command, argument, received=None):
-    if argument not in ("", "all"):
+    if argument not in ("", "all", "settings"):
         bridge.reply(bridge.prompt("HELP_USAGE"))
+        return
+    if argument == "settings":
+        bridge.reply(bridge.prompt("SETTINGS_HELP"))
         return
     bridge.reply(help_text(show_all=argument == "all", text=bridge.prompt))
 

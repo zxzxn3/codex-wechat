@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from codex_wechat import Bridge
 from command_specs import REGISTRY, command_lane, HELP, HELP_ALL
 from commands import dispatch
+from prompts import SETTINGS_HELP
 from storage import Store
 
 
@@ -34,7 +35,7 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("/ack", REGISTRY)
         self.assertNotIn("/finish", REGISTRY)
         self.assertIn("`/settings` 查看设置", HELP)
-        self.assertIn("`/help` 查看常用命令；`/help all` 查看全部", HELP)
+        self.assertIn("`/help settings` 查看设置说明", HELP)
         self.assertNotIn("`/help [all]`", HELP)
 
     async def test_status_alias_is_local_and_rejects_extra_args(self):
@@ -52,8 +53,13 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         await dispatch(self.bridge, "/h all")
         self.assertEqual(self.bridge.state["outbox"][-1]["text"], HELP_ALL)
         await dispatch(self.bridge, "/help invalid")
-        self.assertIn("`/help` 或 `/help all`", self.bridge.state["outbox"][-1]["text"])
+        self.assertIn("`/help`、`/help all` 或 `/help settings`",
+                      self.bridge.state["outbox"][-1]["text"])
         self.bridge.ensure_backend.assert_not_called()
+
+    async def test_help_settings_explains_settings(self):
+        await dispatch(self.bridge, "/help settings")
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], SETTINGS_HELP)
 
     async def test_model_alias_passes_arguments_to_canonical_handler(self):
         handler = AsyncMock()
