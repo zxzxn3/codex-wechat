@@ -4,23 +4,21 @@
 codex.exe 均可发现；显式 command 始终优先，不把 .cmd/.bat 当原生 exe 自动执行。
 App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径。也可显式配置完整命令数组。
 
-## 待 Windows 实机验证（优先）
+## 命名管道存在性判断（2026-11-05 三种状态已实测）
 
-**命名管道存在性判断尚未在 Windows 实机确认。** `CodexBackend.app_available()` 当前用
-`Path(r"\\.\pipe\codex-ipc").exists()` 判断 App IPC 是否出现。Windows 对命名管道路径的
-`stat` 行为可能与普通文件不同；如果这里返回 `False`，桥接空闲时每 5 秒的自动 follower
-检查会被跳过，表现为 App 后启动并接管会话后，桌面端回复不进入微信。Linux mock 不能
-证明这一点，也不能据此直接判定为缺陷。
+这一项曾标为最优先的未验证假设：`CodexBackend.app_available()` 用
+`Path(r"\\.\pipe\codex-ipc").exists()` 判断 App IPC 是否出现，而 Windows 对命名管道路径的
+`stat` 行为可能与普通文件不同；若是返回 `False`，桥接空闲时每 5 秒的自动 follower 检查会被
+跳过，表现为 App 后启动并接管会话后，桌面端回复不进入微信。
 
-请在 Windows 上按以下三种状态实测，并记录 App/CLI 版本与日志：
+2026-11-05 在本机把三种状态都跑了一遍（运行 release `dfda4b925308c7d2`，已含 `ERROR_PIPE_BUSY`
+修复），**结论：判断本身可用，但"管道忙"曾被误判为不存在，已修**（机制与采样数据见下一小节）。
 
-1. 无 App 时启动桥接，确认不会误报已连接 App。
-2. App 已启动并持有目标会话时，从微信 `/switch`，确认输入可达且桌面回复进入微信。
-3. 桥接先空闲，随后启动 App 并让它接管当前会话，等待超过 5 秒；预期日志出现
-   `backend.app_followed`，桌面端后续回复进入微信。
-
-若第 3 项失败，应把存在性判断改为直接尝试有界连接，或提供等价的 Windows 专用探测；
-仅改 mock 或把测试标绿不算实机验收。
+| 状态 | 结果 |
+|---|---|
+| 1. 无 App 时启动桥接 | ✅ 不会误报。完全退出 App 后（`\\.\pipe\codex-ipc` 不存在，`\\.\pipe\*codex*` 一个都没有）重启桥接：本次会话 `app_ipc.*` 与 `backend.app_*` 事件均为 **0**，`Path.exists()` 20/20 返回 `False`（不抛异常），`app_available()` 10/10 为 `False`，`backend.connected` 在启动后 0.3 秒完成 |
+| 2. App 已持有会话时从微信 `/switch` | ✅ 输入可达、桌面回复进微信（时间线见后） |
+| 3. 桥接先空闲，随后 App 接管 | ✅ 出现 `backend.app_followed`，桌面端后续回复进微信 |
 
 ### 2026-11-05 实测：`Path.exists()` 会抛异常，而不是返回 False
 
@@ -52,7 +50,7 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 - 不要改用 `os.path.exists()`：它对忙管道恒 `False`，比 `Path.exists()` 更差。
 - 若将来要更彻底，可换成有界连接；代价是空闲时每 5 秒一次建连。
 
-### 上面第 2、3 种状态已实测通过（2026-11-05，真实 App + 真实微信）
+### 状态 2、3 的实测时间线（2026-11-05，真实 App + 真实微信）
 
 操作者按下面的顺序用了一轮，日志时间线与之对应（`bridge.jsonl`）：
 
@@ -124,8 +122,8 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   对"已安装但非本安装"直接抛错。见 `tests/test_autostart_windows.py`。
 - [x] 在真实 Windows App 上观察 `\\.\pipe\codex-ipc` 的 `Path.exists()`、App 空闲
   后接管会话和空闲 follower；结果写入验收记录，不能用 Linux mock 代替。
-  2026-11-05 实测通过：`backend.app_followed` 与后续 `writer_kept(followed)` 均出现，
-  双向收发可用；第 1 种状态（先关 App 再启动）未测。
+  2026-11-05 三种状态全部实测通过：先关 App 再启动桥接不会误报（`app_ipc.*` 事件为 0）、
+  App 持有会话时 `/switch` 可用、空闲后接管出现 `backend.app_followed` 并双向收发。
 - [ ] 断开/重启 App，检查 `initialize`、owner discovery、turn start/steer 响应缺少
   字段时是否以受控失败结束，而不是让 `KeyError` 穿透到输入投递层。
   （2026-11-05：缺字段路径已在 `app_ipc.py` 逐项校验并抛 `CodexRpcError(-32603)`。
