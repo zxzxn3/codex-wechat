@@ -327,6 +327,9 @@ class Bridge:
             return
         fields = {"component": "backend", "backend": self.backend_name,
                   "connected": connected}
+        if connected:
+            fields["backend_version"] = getattr(getattr(backend, "transport", None),
+                                                "server_version", "")
         if error is not None:
             fields.update(error_fields(error))
         log_event("backend.connected" if connected else "backend.disconnected",
@@ -568,9 +571,7 @@ class Bridge:
                       self.external_result_worker, self.sender, self.maintain_backend)]
             tasks.extend(asyncio.create_task(self.control_worker(lane)) for lane in self.controls)
             log_event("bridge.start", component="bridge", backend=self.backend_name,
-                      connected=self.backend.connected,
-                      backend_version=getattr(getattr(self.backend, "transport", None),
-                                              "server_version", ""))
+                      connected=self.backend.connected)
             print("微信桥已启动；Ctrl+C 停止。", flush=True)
             show_log_path()
             await asyncio.gather(*tasks)

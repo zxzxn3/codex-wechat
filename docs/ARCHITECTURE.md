@@ -145,7 +145,7 @@ endpoint、HTTP/curl状态和耗时。事件字段由固定白名单校验，正
 默认保留命令处理、输出入队与结果及网络计时，便于判断延迟所在阶段；`output.send_start`、
 `wechat.send_ack`、poll、getconfig、sendtyping 成功以及 2 秒内完成的微信请求只记 debug，
 故障与慢请求仍在 info/warning。`output.sent` 带 `queue_wait_ms`，不再靠 send_start 才能拿到
-排队等待。每条记录都带桥的 `version` 与 `platform`；`bridge.start` 额外记一次
+排队等待。每条记录都带桥的 `version` 与 `platform`；`backend.connected` 额外记
 `backend_version`（取自 app-server initialize 响应的 `userAgent`），用于区分 Codex 侧的版本。
 typing 的 getconfig/sendtyping 与输入处理并行，不等待网络完成再准备或提交消息。
 并发输入共用引用计数，最后一项结束时取消启动/保活任务，再尽力发送停止状态。
