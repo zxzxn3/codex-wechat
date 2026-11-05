@@ -110,15 +110,22 @@ login  start  stop  status  rebind  logs  service-start  service-restart
 修复前 Windows 只看 `Wait-TaskRunning`（`codex-wechat.ps1:196`，已删除），而任务状态在进程刚拉起时
 就是 Running，所以"起来后立刻退出"会被当成成功；见待修问题 1。
 
-### 版本号校验两处不一致
+### 版本号校验（2026-11-05 起三处一致）
 
-| 文件 | 正则 |
+| 文件 | 校验 |
 |---|---|
-| `codex-wechat.ps1:76` | `^[A-Za-z0-9._-]+$` |
+| `codex-wechat.ps1:81` | `^[a-f0-9]{16}$` |
 | `codex-desktop.ps1:15` | `^[a-f0-9]{16}$` |
+| `bootstrap_supervisor.py` 的 `active_release()` | `RELEASE_ID.fullmatch()`，同一个 16 位十六进制 |
 
-安装器生成的 release 标识是 16 位十六进制，`codex-desktop.ps1` 与之匹配；`codex-wechat.ps1` 的正则
-明显更宽（`..` 也能通过，解析结果会退化为安装根）。
+安装器写入 `current` 的唯一入口是 `_write_pointer()`（`installer.py:768`），值是
+`release_identifier()` 的 `sha256(...)[:16]`，所以"16 位十六进制"就是这份文件的真实格式。
+
+修复前 `codex-wechat.ps1` 用 `^[A-Za-z0-9._-]+$`、`bootstrap_supervisor` 用字符白名单，两处都能放过
+**`..`**：`releases\..` 就是安装根，而安装根里有 `codex_wechat.py` / `windows_service.py`，
+于是校验通过、静默地去跑稳定副本而不是某个 release。`../escape`（带斜杠）一直是被拒的，
+所以测试只覆盖到那一种，漏掉了单独一个 `..`。现在三处都要求严格的 16 位十六进制，
+`tests/test_bootstrap_supervisor.py` 补了 `..` 的用例，`tests/test_windows_service.py` 钉住了 ps1 的正则。
 
 ## 待修问题
 
@@ -152,16 +159,21 @@ Linux 不受影响：`start_background_service()` 在 `service_adapter.start()` 
 `service-start` 多一次 PowerShell→Python→PowerShell 往返，而校验收敛到
 `Wait-ServiceStable` 一处即可。
 
-### 4. 未绑定时 `start` 与 `service-start` 的提示文案差一行（低，未修）
+### 4. ~~未绑定时 `start` 与 `service-start` 的提示文案差一行~~ 已修复（2026-11-05，选"补提示"）
 
 两个入口都能进入扫码闸门（2026-11-05 实测），但 `start` 会多打印一行
 「尚未绑定微信，请在当前终端扫码；绑定后会继续启动。」：它走 `startup_account()`
 （`codex_wechat.py:726`），而 Windows 的 `service-start` 直接调 `login --starting`
-（`codex-wechat.ps1:282` 的 `service-start` 分支）。
+（`codex-wechat.ps1:287`）。
 
-不影响行为，只是同一件事两套说法。若要统一，让 ps1 的 `service-start` 在没有
-`account.json` 时也走 Python 的 `service-start`（它在 `startup_account()` 之后才
-`Start-ScheduledTask`），或在 ps1 里补同一句提示。
+现在 ps1 的 `service-start` 在调用 `login --starting` 之前打印同一句
+（`codex-wechat.ps1:287`），文案由 `tests/test_windows_service.py` 钉住。
+
+没有选"让 ps1 走 Python 的 `start_background_service()`"：`service_adapter.start()`
+在 Windows 上本来就是回调 ps1 的 `service-start`（`service_adapter.py:114`），
+直接委托会形成 ps1 → Python → ps1 的循环，必须先给 ps1 加一个"只启动不校验绑定"的内部开关。
+那件事与"命令面统一"是同一件工作，留到那时一起做。代价是这句话现在有两处副本，
+改文案要同时改 `prompts.py` 与 ps1。
 
 ### 2. ~~`login` 缺少 Python 层守卫~~ 已修复（2026-11-05）
 
@@ -197,10 +209,13 @@ service-restart  exit=78  尚未注册后台服务，请重新运行安装器。
   （`C:a.txt`）和 NTFS 数据流（`a.txt:stream`）在 Windows 上是明确拒绝的。
   不额外加"Linux 风格路径不被支持"的专门报错：路径是用户自己给的，落到不存在就报不存在，
   已经能定位问题，再加分支只是换一句话。
-- `/get` 的「附件已排队」提示总在**文件之后**到达（2026-11-05 实测）。`command_get()` 先把附件
-  入队（`queue_file`），紧接着 `reply(ATTACHMENT_QUEUED)`；出站队列是 FIFO，而附件要等整份上传完
-  （15 MiB 约 12 秒）才发出，所以那句确认在用户视角是"文件已经到了，却说还在排队"。
-  要不要改成"入队即回执"或干脆去掉，取决于是否希望它在长上传时先安抚用户。
+- ~~`/get` 的「附件已排队」提示总在**文件之后**到达~~ 已修复（2026-11-05）：`command_get()` 现在
+  先 `prepare_asset()`（快照 + 本地校验），再回执，最后 `queue_asset()` 入队。这样本地错误
+  （文件不存在、超限、凭据目录）仍然先报原因、不产生假回执，而回执本身赶在附件之前发出，
+  不再被整份上传（15 MiB 约 12 秒）压在后面。
+  剩下的只是**文案**：现在这句在文件之前到达，"已排队"字面上没错（它确实刚进队列），但用户随后
+  要等十几秒，改成「正在发送附件…」更贴合实际观感；若出站队列正好被别的消息占着，它其实还没
+  开始传，所以"上传中"有一点过于具体。改一行 `prompts.ATTACHMENT_QUEUED` 即可。
 - `make_private()` 去掉了"目录已存在就返回"的早退，Windows 上每次构造 `Store` 都会跑一次 `icacls`
   （每次 CLI 调用多一个子进程）。好处是能自愈被提权破坏的 ACL，属于有意的取舍。
 - Windows 的 `status` 比 Linux 多打印一行 `task=…`，未做统一。

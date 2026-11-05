@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from codex_wechat import Bridge
 from backend import CodexBackend
@@ -171,7 +171,9 @@ class MediaSnapshotExtraTests(unittest.IsolatedAsyncioTestCase):
                 bridge.state["context"] = "context-old"
                 bridge.state["thread"] = "thread-old"
                 bridge.backend.info["cwd"] = "/origin"
-                bridge.queue_file = AsyncMock()
+                bridge.prepare_asset = AsyncMock(return_value={
+                    "path": "/origin/snapshot.txt", "name": "file.txt", "kind": "file"})
+                bridge.queue_asset = Mock()
                 await bridge.receive({"msgs": [{
                     "message_id": "send",
                     "from_user_id": "owner",
@@ -185,12 +187,13 @@ class MediaSnapshotExtraTests(unittest.IsolatedAsyncioTestCase):
                 bridge.state["thread"] = "thread-new"
                 bridge.backend.info["cwd"] = "/changed"
                 await handle(bridge, *parse_control(text), received=received)
-                origin = bridge.queue_file.await_args.kwargs["origin"]
+                origin = bridge.prepare_asset.await_args.kwargs["origin"]
                 self.assertEqual(origin["context"], "context-old")
                 self.assertEqual(origin["cwd"], "/origin")
                 self.assertEqual(origin["source"].thread, "thread-old")
-                self.assertEqual(bridge.queue_file.await_args.args,
+                self.assertEqual(bridge.prepare_asset.await_args.args,
                                  ("/origin/file.txt", "file"))
+                self.assertIs(bridge.queue_asset.call_args.kwargs["origin"], origin)
             finally:
                 store.lock.close()
 

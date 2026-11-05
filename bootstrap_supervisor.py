@@ -11,11 +11,14 @@ import asyncio
 import importlib.util
 import os
 from pathlib import Path
+import re
 import sys
 import time
 
 # Let the previous child finish closing before the next supervisor starts.
 RESTART_SETTLE_SECONDS = 0.2
+# `installer.release_identifier()` writes the first 16 hex digits of the hash.
+RELEASE_ID = re.compile(r"[a-f0-9]{16}")
 
 
 def active_release(install_root: Path) -> Path:
@@ -29,8 +32,9 @@ def active_release(install_root: Path) -> Path:
     if not current.exists():
         raise ValueError(f"version pointer is missing: {current}")
     identifier = current.read_text(encoding="utf-8").strip()
-    if (not identifier or not identifier.isascii()
-            or not all(char.isalnum() or char in "._-" for char in identifier)):
+    # The installer writes the first 16 hex digits of the release hash; anything
+    # else (notably "..", which would resolve to the install root) is corruption.
+    if not RELEASE_ID.fullmatch(identifier):
         raise ValueError(f"invalid release id in {current}")
     releases = install_root / "releases"
     if releases.is_symlink():

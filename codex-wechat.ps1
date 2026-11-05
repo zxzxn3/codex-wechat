@@ -78,7 +78,7 @@ if ($null -ne $CurrentItem) {
         throw "codex-wechat.ps1: current must be a file: $CurrentFile"
     }
     $ReleaseId = (Get-Content -LiteralPath $CurrentFile -TotalCount 1).Trim()
-    if (-not $ReleaseId -or $ReleaseId -notmatch '^[A-Za-z0-9._-]+$') {
+    if (-not $ReleaseId -or $ReleaseId -notmatch '^[a-f0-9]{16}$') {
         throw "codex-wechat.ps1: invalid release id in $CurrentFile"
     }
     $Project = Join-Path $InstallRoot "releases\$ReleaseId"
@@ -284,6 +284,7 @@ switch ($Command) {
             exit 0
         }
         if (-not (Test-Path (Join-Path $StateDir 'account.json'))) {
+            Write-Host '尚未绑定微信，请在当前终端扫码；绑定后会继续启动。'
             & $VenvPython -u $Agent login --state-dir $StateDir --config $ConfigPath --starting
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         }

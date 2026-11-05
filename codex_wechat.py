@@ -379,6 +379,12 @@ class Bridge:
     async def queue_file(self, path, kind="auto", *, origin=None):
         return await self.output.queue_file(path, kind, origin=origin)
 
+    async def prepare_asset(self, path, kind="auto", *, origin=None):
+        return await self.output.prepare_asset(path, kind, origin=origin)
+
+    def queue_asset(self, asset, *, origin=None):
+        return self.output.queue_asset(asset, origin=origin)
+
     def media_origin(self):
         return {"cwd": self.backend.info.get("cwd") or self.backend.cwd,
                 "context": self.state["context"], "source": self.backend.source(self.state["thread"])}

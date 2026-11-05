@@ -98,13 +98,22 @@ class OutputDelivery:
                 "asset": asset, **({"source": asdict(source)} if source else {}),
                 **({"requestId": request_id} if request_id else {})}
 
-    async def queue_file(self, path, kind="auto", *, origin=None):
+    def queue_asset(self, asset, *, origin=None):
         bridge = self.bridge
         origin = origin or bridge.media_origin()
-        cwd, context, source = origin["cwd"], origin["context"], origin["source"]
-        asset = await asyncio.to_thread(bridge.media.snapshot, path, cwd, kind)
-        bridge.enqueue([bridge.asset_entry(asset, context=context, source=source,
-                                            request_id=current_request_id())])
+        bridge.enqueue([bridge.asset_entry(asset, context=origin["context"],
+                                             source=origin["source"],
+                                             request_id=current_request_id())])
+
+    async def prepare_asset(self, path, kind="auto", *, origin=None):
+        """Snapshot a file and run the local checks, without queueing anything."""
+        bridge = self.bridge
+        origin = origin or bridge.media_origin()
+        return await asyncio.to_thread(bridge.media.snapshot, path, origin["cwd"], kind)
+
+    async def queue_file(self, path, kind="auto", *, origin=None):
+        asset = await self.prepare_asset(path, kind, origin=origin)
+        self.queue_asset(asset, origin=origin)
 
     async def deliver_answer(self, answer, *, finish_running=True, cwd=None,
                              notify_completion=False, source=None, require_current=False,

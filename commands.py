@@ -778,9 +778,14 @@ async def command_get(bridge, command, argument, received=None):
             return
         if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
             argument = argument[1:-1]
-        await bridge.queue_file(argument, {"/getfile": "file"}.get(command, "auto"),
-                              origin=(received or {}).get("media"))
+        origin = (received or {}).get("media")
+        # Snapshot first: a missing or oversized file must answer with the reason
+        # instead of a receipt. Then acknowledge before the upload starts, so the
+        # text does not queue behind a slow attachment.
+        asset = await bridge.prepare_asset(
+            argument, {"/getfile": "file"}.get(command, "auto"), origin=origin)
         bridge.reply(bridge.prompt("ATTACHMENT_QUEUED"))
+        bridge.queue_asset(asset, origin=origin)
     except (MediaError, ValueError, OSError) as error:
         bridge.reply(bridge.prompt("SEND_FILE_FAILED", {"reason": attachment_reason(error)}))
 

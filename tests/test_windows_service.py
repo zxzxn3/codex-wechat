@@ -290,6 +290,8 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[switch]$Json", entry)
         self.assertIn("only valid with the autostart command", entry)
         self.assertIn("[char]::IsWhiteSpace", entry)
+        self.assertIn(r"^[a-f0-9]{16}$", entry)
+        self.assertIn("尚未绑定微信，请在当前终端扫码", entry)
         self.assertIn("[char]::IsWhiteSpace", install)
         self.assertIn("$trigger.Enabled = $enabled", entry)
         self.assertIn("Set-ScheduledTask -TaskName $TaskName -Trigger $triggers", entry)
