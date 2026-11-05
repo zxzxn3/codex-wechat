@@ -4,12 +4,13 @@ from types import SimpleNamespace
 
 from commands import command_get
 from media import MediaError
+from prompts import SEND_FILE_FAILED
 
 
 def prompt(name, values=None):
     if name == "ATTACHMENT_QUEUED":
         return "附件已排队"
-    return f"发送失败:{values['reason']}"
+    return SEND_FILE_FAILED.format(**values)
 
 
 def bridge(calls, *, snapshot=None):
@@ -44,6 +45,28 @@ class GetOrderingTests(unittest.IsolatedAsyncioTestCase):
         await command_get(bridge(calls), "/get", "/tmp/missing.txt")
         self.assertEqual([call[0] for call in calls], ["prepare", "reply"])
         self.assertIn("文件不存在", calls[1][1])
+        self.assertIn("/tmp/missing.txt", calls[1][1])
+
+    async def test_a_missing_windows_path_reports_the_typo_not_a_generic_error(self):
+        # resolve(strict=True) raises a localized OSError whose text carries no
+        # "不存在"; without the WinError wording the user only saw "附件处理失败".
+        calls = []
+        async def prepare_asset(path, kind="auto", *, origin=None):
+            calls.append(("prepare", path, kind))
+            raise FileNotFoundError(
+                2, "系统找不到指定的文件。", r"C:\Temp\wechat-tst.txt")
+        failing = bridge(calls)
+        failing.prepare_asset = prepare_asset
+        await command_get(failing, "/get", r"C:\Temp\wechat-tst.txt")
+        self.assertIn("文件不存在或不可读", calls[1][1])
+        self.assertIn(r"C:\Temp\wechat-tst.txt", calls[1][1])
+
+    async def test_the_echoed_path_is_bounded(self):
+        calls = []
+        value = "/tmp/" + "a" * 400
+        await command_get(bridge(calls), "/get", value)
+        echoed = next(line for line in calls[1][1].splitlines() if line.startswith("路径: "))
+        self.assertEqual(len(echoed[len("路径: "):]), 300)
 
     async def test_getfile_forces_the_file_kind(self):
         calls = []

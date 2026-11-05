@@ -248,6 +248,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             backend_reason(RuntimeError("websocket 连接失败：依赖缺失")), "后端连接中断")
         self.assertEqual(attachment_reason(MediaError("没有匹配的文本")), "附件处理失败")
+        self.assertEqual(attachment_reason(FileNotFoundError(
+            2, "系统找不到指定的文件。", "C:/Temp/a.txt")), "文件不存在或不可读")
 
     async def test_desktop_session_info_uses_status_without_followup_note(self):
         self.bridge.state["thread"] = "01a13162-8d25-7883-ae2b-c70389dc9d58"

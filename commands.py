@@ -786,7 +786,8 @@ async def command_get(bridge, command, argument, received=None):
         bridge.reply(bridge.prompt("ATTACHMENT_QUEUED"))
         bridge.queue_asset(asset, origin=origin)
     except (MediaError, ValueError, OSError) as error:
-        bridge.reply(bridge.prompt("SEND_FILE_FAILED", {"reason": attachment_reason(error)}))
+        bridge.reply(bridge.prompt("SEND_FILE_FAILED", {
+            "reason": attachment_reason(error), "path": argument[:300]}))
 
 
 async def command_restart(bridge, command, argument, received=None):
