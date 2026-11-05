@@ -1,9 +1,67 @@
 """Bounded diagnostic log viewing and rotation following; no bridge lifecycle."""
 import codecs
 import os
+import shutil
+import subprocess
 import time
+import threading
 
 from diagnostics import BACKUP_COUNT, log_path
+from platform_support import IS_WINDOWS
+from service_control import UNIT
+
+
+def _journalctl_command(follow):
+    return ["journalctl", "--user", "-u", UNIT, "--no-pager", "-n", "200"] + (
+        ["-f"] if follow else [])
+
+
+def _show_journal_service(follow):
+    if IS_WINDOWS:
+        return None
+    executable = shutil.which("journalctl")
+    if not executable:
+        print("未找到 journalctl；无法显示 systemd 控制台日志。")
+        return None
+    command = [executable, *_journalctl_command(follow)[1:]]
+    print("==> journalctl --user -u " + UNIT + " <==", flush=True)
+    if not follow:
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.stdout:
+            print(result.stdout, end="", flush=True)
+        return None
+    try:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return None
+
+    def pump():
+        assert process.stdout is not None
+        for line in process.stdout:
+            print(line, end="", flush=True)
+
+    threading.Thread(target=pump, daemon=True).start()
+    return process
+
+
+def _stop_journal(process):
+    if process is None:
+        return
+    try:
+        process.terminate()
+    except OSError:
+        return
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
 
 
 def _log_files(include_service=False):
@@ -87,7 +145,7 @@ def _read_log_updates(files, positions, *, initial=False):
 
 def show_logs(follow=False, include_service=False):
     files = _log_files(include_service)
-    if not files and not follow:
+    if not files and not follow and (IS_WINDOWS or not include_service):
         label = "诊断日志" if include_service else "结构化诊断日志"
         print(f"暂无{label}；运行 start 或 service-start 后生成。")
         if not include_service:
@@ -95,11 +153,15 @@ def show_logs(follow=False, include_service=False):
         return
     positions = {}
     _read_log_updates(files, positions, initial=True)
+    journal = _show_journal_service(follow) if include_service else None
     if not follow:
         return
-    if not files:
-        hint = "" if include_service else "；supervisor 输出请加 --service / -Service"
-        print(f"等待诊断日志{hint}；按 Ctrl+C 停止。", flush=True)
-    while True:
-        time.sleep(0.5)
-        _read_log_updates(_log_files(include_service), positions)
+    try:
+        if not files:
+            hint = "" if include_service else "；supervisor 输出请加 --service / -Service"
+            print(f"等待诊断日志{hint}；按 Ctrl+C 停止。", flush=True)
+        while True:
+            time.sleep(0.5)
+            _read_log_updates(_log_files(include_service), positions)
+    finally:
+        _stop_journal(journal)

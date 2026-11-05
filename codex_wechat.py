@@ -919,7 +919,7 @@ def require_regular_user(action):
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=(
+    parser.add_argument("action", nargs="?", default="status", choices=(
         "login", "start", "stop", "status", "rebind", "logs", "service-start",
         "service-restart", "autostart", "uninstall"))
     parser.add_argument("value", nargs="?", choices=("true", "false"))

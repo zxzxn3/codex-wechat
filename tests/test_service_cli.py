@@ -225,3 +225,14 @@ class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
             current = await service_adapter.status()
         self.assertEqual((current.installed, current.running), (True, False))
         self.assertEqual((current.state, current.last_result), ("Ready", 78))
+
+    async def test_no_action_defaults_to_status(self):
+        store = await self.store()
+        with patch.object(sys, "argv", ["codex_wechat.py"]), \
+                patch.object(codex_wechat.os, "umask"), \
+                patch.object(codex_wechat, "startup_store", AsyncMock(return_value=store)), \
+                patch.object(codex_wechat, "status_payload_with_service",
+                             AsyncMock(return_value={"bound": False})), \
+                patch("builtins.print") as output:
+            await codex_wechat.main()
+        self.assertIn('"bound": false', output.call_args.args[0])

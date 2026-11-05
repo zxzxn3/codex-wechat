@@ -15,6 +15,7 @@ from subprocess_io import communicate
 
 # One wording for "no service registered", shared by every entry point.
 NOT_INSTALLED = "尚未注册后台服务，请重新运行安装器。"
+STABLE_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -127,16 +128,11 @@ async def start():
         return current
     if IS_WINDOWS:
         await _windows_request(["start"], timeout=20)
+        settle = 0
     else:
         await systemctl("start", UNIT)
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + 10
-    while loop.time() < deadline:
-        current = await status()
-        if current.running:
-            return current
-        await asyncio.sleep(0.25)
-    raise RuntimeError("后台服务启动请求已提交，但未能确认运行状态")
+        settle = STABLE_SECONDS
+    return await _wait_running_stable(timeout=10, settle=settle)
 
 
 async def restart():
@@ -147,8 +143,33 @@ async def restart():
         # The helper may spend 15 seconds stopping and 15 seconds waiting for
         # a stable start; the outer request must cover both phases.
         await _windows_request(["restart"], timeout=40)
+        settle = 0
     else:
-        await systemctl("--no-block", "restart", UNIT)
+        await systemctl("restart", UNIT, timeout=30)
+        settle = STABLE_SECONDS
+    return await _wait_running_stable(timeout=20, settle=settle)
+
+
+async def _wait_running_stable(*, timeout, settle):
+    """Wait out a crash-on-start window instead of trusting one Running sample."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    running_since = None
+    while True:
+        current = await status()
+        stable_state = current.running and current.state in {"", "active", "Running"}
+        if stable_state:
+            if settle <= 0:
+                return current
+            if running_since is None:
+                running_since = loop.time()
+            elif loop.time() - running_since >= settle:
+                return current
+        else:
+            running_since = None
+        if loop.time() >= deadline:
+            raise RuntimeError("后台服务启动请求已提交，但未能稳定运行")
+        await asyncio.sleep(0.25)
 
 
 async def notify(title, message):

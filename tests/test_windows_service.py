@@ -308,6 +308,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Wait-ServiceStable", task)
         self.assertIn("exited during startup", task)
         self.assertIn("log: $BridgeLog", task)
+        self.assertIn("Write-AutostartStatus $false $false", task)
         self.assertNotIn("Wait-TaskRunning", task)
         self.assertIn("Stop-ScheduledTask", task)
         self.assertIn("Start-ScheduledTask", task)

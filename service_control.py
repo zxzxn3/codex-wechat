@@ -14,11 +14,11 @@ RESTART_EXIT_CODE = 75
 _restart_requested = False
 
 
-async def systemctl(*args):
+async def systemctl(*args, timeout=5):
     process = await asyncio.create_subprocess_exec(
         "systemctl", "--user", *args,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-    output, _ = await communicate(process, timeout=5)
+    output, _ = await communicate(process, timeout=timeout)
     if process.returncode:
         raise RuntimeError("无法控制 systemd 用户服务，请在电脑端查看服务状态。")
     return output.decode().strip()

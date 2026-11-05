@@ -124,8 +124,8 @@ function Write-TaskStatus {
     } | ConvertTo-Json -Compress
 }
 
-function Write-AutostartStatus([bool]$Enabled) {
-    [ordered]@{ enabled = $Enabled } | ConvertTo-Json -Compress
+function Write-AutostartStatus([bool]$Enabled, [bool]$Installed = $true) {
+    [ordered]@{ installed = $Installed; enabled = $Enabled } | ConvertTo-Json -Compress
 }
 
 switch ($Action) {
@@ -162,7 +162,17 @@ switch ($Action) {
         Wait-ServiceStable
     }
     'autostart' {
-        $task = Get-InstalledTask
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if (-not $task) {
+            if (-not $PSBoundParameters.ContainsKey('Value')) {
+                Write-AutostartStatus $false $false
+                return
+            }
+            Fail 'background service is not registered; rerun the installer'
+        }
+        if (-not (Test-OwnedTask $task)) {
+            Fail "scheduled task '$TaskName' belongs to another installation"
+        }
         $triggers = Get-LogonTriggers $task
         if ($triggers.Count -eq 0) {
             Fail "scheduled task '$TaskName' has no logon trigger"

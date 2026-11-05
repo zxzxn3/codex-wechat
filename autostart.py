@@ -14,6 +14,15 @@ TASK_TRIGGER_LOGON = 9
 
 
 async def _windows_request(mode):
+    return (await _windows_json(mode))["enabled"]
+
+
+async def _windows_status():
+    value = await _windows_json("status")
+    return bool(value["installed"]), bool(value["enabled"])
+
+
+async def _windows_json(mode):
     command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                "-File", str(INSTALL_ROOT / "windows/task-service.ps1"), "autostart"]
     if mode != "status":
@@ -32,9 +41,10 @@ async def _windows_request(mode):
     try:
         value = json.loads(output.decode("utf-8-sig"))
         enabled = value["enabled"]
-        if type(enabled) is not bool:
+        installed = value.get("installed", True)
+        if type(enabled) is not bool or type(installed) is not bool:
             raise ValueError()
-        return enabled
+        return {"installed": installed, "enabled": enabled}
     except (ValueError, KeyError, TypeError, UnicodeError):
         raise RuntimeError("自启状态响应无效。") from None
 
@@ -42,20 +52,20 @@ async def _windows_request(mode):
 async def installed():
     if IS_WINDOWS:
         try:
-            return (await asyncio.to_thread(windows_task_flags))[0]
+            installed_flag, owned, _enabled = await asyncio.to_thread(windows_task_flags)
+            return installed_flag and owned
         except Exception:  # no scheduler API or a foreign task: ask the script
-            await _windows_request("status")
-            return True
+            return (await _windows_status())[0]
     return await _linux_status() is not None
 
 
 def windows_task_flags():
-    """(installed, enabled) straight from the task definition.
+    """(installed, owned, enabled) straight from the task definition.
 
     Asking the launcher script costs about three seconds because it starts
     PowerShell; the scheduler's own COM API answers in about forty milliseconds.
-    The ownership check stays conservative: anything that does not look like the
-    task this project installs reports "not installed", and the caller falls back.
+    The ownership check stays conservative: a foreign task is distinguished from
+    a missing one, so status can fail instead of silently reporting disabled.
     """
     import pythoncom
 
@@ -91,15 +101,15 @@ def _read_task_flags():
     try:
         task = service.GetFolder("\\").GetTask(WINDOWS_TASK)
     except Exception:
-        return False, False
+        return False, False, False
     definition = task.Definition
     actions = definition.Actions
     if actions.Count != 1 or not _owned_supervisor_action(actions.Item(1)):
-        return False, False
+        return True, False, False
     triggers = [definition.Triggers.Item(index) for index in range(1, definition.Triggers.Count + 1)]
     logon = [trigger for trigger in triggers if trigger.Type == TASK_TRIGGER_LOGON]
     enabled = bool(task.Enabled) and any(bool(trigger.Enabled) for trigger in logon)
-    return True, enabled
+    return True, True, enabled
 
 
 async def _linux_status():
@@ -119,13 +129,14 @@ async def status():
     if not IS_WINDOWS:
         return bool(await _linux_status())
     try:
-        installed_flag, enabled = await asyncio.to_thread(windows_task_flags)
+        installed_flag, owned, enabled = await asyncio.to_thread(windows_task_flags)
     except Exception:
         # No scheduler API here: the launcher script is slower but authoritative.
         log_event("autostart.task_read_failed", level="warning", component="autostart")
-        return await _windows_request("status")
+        return (await _windows_status())[1]
     if not installed_flag:
-        # Missing, or a CodexWeChat task that belongs to another installation.
+        return False
+    if not owned:
         raise ValueError("尚未安装本项目的计划任务，或该任务属于另一个目录。")
     return enabled
 

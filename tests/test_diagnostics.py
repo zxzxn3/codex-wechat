@@ -206,6 +206,21 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIn("--service", script)
         self.assertNotIn("Get-Content -LiteralPath $BridgeLog", script)
 
+    def test_linux_service_logs_use_journald(self):
+        diagnostics.log_event("bridge.start", component="bridge")
+        output = StringIO()
+        result = SimpleNamespace(stdout="systemd service output\n", returncode=0)
+        with patch("log_viewer.IS_WINDOWS", False), \
+                patch("log_viewer.shutil.which", return_value="/usr/bin/journalctl"), \
+                patch("log_viewer.subprocess.run", return_value=result) as run, \
+                redirect_stdout(output):
+            show_logs(include_service=True)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:4], [
+            "/usr/bin/journalctl", "--user", "-u", "codex-wechat.service",
+        ])
+        self.assertIn("systemd service output", output.getvalue())
+
 
 class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

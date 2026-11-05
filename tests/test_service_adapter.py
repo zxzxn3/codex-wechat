@@ -94,7 +94,7 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(service_adapter, "systemctl", command):
             await service_adapter.restart()
         command.assert_awaited_once_with(
-            "--no-block", "restart", service_adapter.UNIT)
+            "restart", service_adapter.UNIT, timeout=30)
 
     async def test_windows_start_asks_only_for_the_task(self):
         status = AsyncMock(side_effect=[service_adapter.ServiceState(True, False),
@@ -124,6 +124,28 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await service_adapter.restart()
         command.assert_not_awaited()
+
+    async def test_linux_restart_waits_for_a_stable_running_state(self):
+        status = AsyncMock(return_value=service_adapter.ServiceState(True, True, state="active"))
+        wait = AsyncMock(return_value=status.return_value)
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter, "IS_WINDOWS", False), \
+                patch.object(service_adapter, "systemctl", AsyncMock()), \
+                patch.object(service_adapter, "_wait_running_stable", wait):
+            result = await service_adapter.restart()
+        self.assertTrue(result.running)
+        wait.assert_awaited_once_with(timeout=20, settle=service_adapter.STABLE_SECONDS)
+
+    async def test_stable_wait_ignores_an_activating_sample(self):
+        status = AsyncMock(side_effect=[
+            service_adapter.ServiceState(True, True, state="activating"),
+            service_adapter.ServiceState(True, True, state="active"),
+        ])
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter.asyncio, "sleep", AsyncMock()):
+            current = await service_adapter._wait_running_stable(timeout=1, settle=0)
+        self.assertEqual(current.state, "active")
+        self.assertEqual(status.await_count, 2)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ from storage import Store
 class AutostartTests(unittest.IsolatedAsyncioTestCase):
     async def test_windows_reads_the_task_without_starting_powershell(self):
         with patch.object(autostart, "IS_WINDOWS", True), \
-                patch.object(autostart, "windows_task_flags", return_value=(True, True)), \
+                patch.object(autostart, "windows_task_flags", return_value=(True, True, True)), \
                 patch.object(autostart, "_windows_request", AsyncMock()) as script:
             self.assertTrue(await autostart.status())
             self.assertTrue(await autostart.installed())
@@ -23,14 +23,23 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
     async def test_windows_falls_back_to_the_launcher_script(self):
         with patch.object(autostart, "IS_WINDOWS", True), \
                 patch.object(autostart, "windows_task_flags", side_effect=OSError("no scheduler")), \
-                patch.object(autostart, "_windows_request", AsyncMock(return_value=False)) as script, \
+                patch.object(autostart, "_windows_status",
+                             AsyncMock(return_value=(True, False))) as script, \
                 patch.object(autostart, "log_event"):
             self.assertFalse(await autostart.status())
-        script.assert_awaited_once_with("status")
+        script.assert_awaited_once_with()
 
-    async def test_windows_without_the_task_reports_unavailable(self):
+    async def test_windows_without_the_task_reports_disabled(self):
         with patch.object(autostart, "IS_WINDOWS", True), \
-                patch.object(autostart, "windows_task_flags", return_value=(False, False)):
+                patch.object(autostart, "windows_task_flags",
+                             return_value=(False, False, False)):
+            self.assertFalse(await autostart.status())
+            self.assertFalse(await autostart.installed())
+
+    async def test_windows_foreign_task_is_not_silently_disabled(self):
+        with patch.object(autostart, "IS_WINDOWS", True), \
+                patch.object(autostart, "windows_task_flags",
+                             return_value=(True, False, False)):
             with self.assertRaises(ValueError):
                 await autostart.status()
             self.assertFalse(await autostart.installed())
@@ -97,6 +106,15 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(autostart.asyncio, "create_subprocess_exec", AsyncMock(return_value=process)):
                 with self.assertRaises((ValueError, RuntimeError)):
                     await autostart._windows_request("status")
+
+    async def test_windows_fallback_distinguishes_missing_from_installed(self):
+        process = SimpleNamespace(
+            returncode=0,
+            communicate=AsyncMock(return_value=(b'{"installed":false,"enabled":false}', b'')),
+        )
+        with patch.object(autostart.asyncio, "create_subprocess_exec",
+                          AsyncMock(return_value=process)):
+            self.assertEqual(await autostart._windows_status(), (False, False))
 
     async def test_settings_are_live_and_do_not_call_backend_or_write_config(self):
         with tempfile.TemporaryDirectory() as directory:
