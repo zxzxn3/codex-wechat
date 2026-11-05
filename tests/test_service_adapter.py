@@ -36,6 +36,36 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError):
                     await service_adapter.status()
 
+    async def test_linux_status_reports_the_native_state_and_exit_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            unit = root / "codex-wechat.service"
+            unit.write_text("", encoding="utf-8")
+            command = AsyncMock(return_value=(
+                f"LoadState=loaded\nActiveState=failed\nFragmentPath={unit}\n"
+                "Result=exit-code\nExecMainStatus=78"))
+            with patch.object(service_adapter, "IS_WINDOWS", False), \
+                    patch.object(service_adapter, "INSTALL_ROOT", root), \
+                    patch.object(service_adapter, "systemctl", command):
+                state = await service_adapter.status()
+        self.assertEqual((state.installed, state.running), (True, False))
+        self.assertEqual((state.state, state.last_result), ("failed", 78))
+        self.assertIn("--property=ExecMainStatus", command.await_args.args)
+
+    async def test_linux_status_leaves_the_exit_code_empty_before_the_first_run(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            unit = root / "codex-wechat.service"
+            unit.write_text("", encoding="utf-8")
+            command = AsyncMock(return_value=(
+                f"LoadState=loaded\nActiveState=inactive\nFragmentPath={unit}\n"
+                "Result=success\nExecMainStatus="))
+            with patch.object(service_adapter, "IS_WINDOWS", False), \
+                    patch.object(service_adapter, "INSTALL_ROOT", root), \
+                    patch.object(service_adapter, "systemctl", command):
+                state = await service_adapter.status()
+        self.assertEqual((state.state, state.last_result), ("inactive", None))
+
     async def test_windows_status_parses_owned_task_json(self):
         request = AsyncMock(return_value=(
             '{"installed":true,"owned":true,"running":true,"state":"Running"}'

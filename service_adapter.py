@@ -75,6 +75,7 @@ async def status():
     output = await systemctl(
         "show", UNIT,
         "--property=LoadState", "--property=ActiveState", "--property=FragmentPath",
+        "--property=Result", "--property=ExecMainStatus",
     )
     fields = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
     fragment = fields.get("FragmentPath", "")
@@ -88,7 +89,11 @@ async def status():
     if not owned:
         raise ValueError("当前用户服务不属于这个安装目录，拒绝自动停止或启动。")
     active = fields.get("ActiveState", "")
-    return ServiceState(True, active in {"active", "activating", "reloading", "deactivating"})
+    # ExecMainStatus is the main process exit status; empty until it has run once.
+    exit_code = fields.get("ExecMainStatus", "").strip()
+    return ServiceState(True, active in {"active", "activating", "reloading", "deactivating"},
+                        state=active,
+                        last_result=int(exit_code) if exit_code.isdigit() else None)
 
 
 async def stop_and_wait(timeout=20):
