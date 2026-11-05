@@ -51,8 +51,8 @@ Windows 上提权运行会被硬拒绝：`codex_wechat.py` 与 `installer.py` �
 | `autostart on\|off` | ❌ | ✅ | **可合并**，底层已跨平台 |
 | `uninstall [-PurgeData]` | ❌ | ✅ | **需新写** |
 | `update` / `install` / `menu` / `components` | ✅ | ✅ | 对称，均转发同一个 `installer.py` |
-| `cli` | ✅ `codex-wechat cli` | ❌ 只能 `codex-desktop.ps1` | **可合并** |
-| `desktop` | ✅ `codex-wechat desktop` | ❌ 只能 `codex-desktop.ps1` | **可合并** |
+| `cli` | ✅ `codex-wechat cli` | ❌ 只能 `codex-desktop.ps1` | **待定，见下节**（默认配置下与直接跑 `codex` 等价） |
+| `desktop` | ✅ `codex-wechat desktop` | ❌ 只能 `codex-desktop.ps1` | **建议删除**：无独立语义，见下节 |
 | `status -Json` | ❌ | ✅ | 可合并 |
 
 Python 层接受的动作只有六个加两个服务词（`codex_wechat.py:840`）：
@@ -128,6 +128,58 @@ Windows 那道预检在 ps1 里，Python 层没有对应实现，所以"统一"�
 于是校验通过、静默地去跑稳定副本而不是某个 release。`../escape`（带斜杠）一直是被拒的，
 所以测试只覆盖到那一种，漏掉了单独一个 `..`。现在三处都要求严格的 16 位十六进制，
 `tests/test_bootstrap_supervisor.py` 补了 `..` 的用例，`tests/test_windows_service.py` 钉住了 ps1 的正则。
+
+### `cli` / `desktop` 两个词的实质不同（2026-11-05 查证，去留待 Linux 侧定）
+
+命令词表里这两行原写作"可合并"，查证后应当拆开——它们不是同一类东西。
+
+**`cli` 有真实功能，但只在一种配置下不可替代。** `desktop.py:133-140`：
+
+```python
+spec, env = await ensure(args.backend, backend)        # 先确保后台就绪
+command = spec.resolve(env, client=True)               # 原生 codex
+command += ["--remote", spec.endpoint or "unix://", *forwarded]
+return subprocess.call(command, env=env)               # 终端交给 TUI
+```
+
+`ensure()` 有两条路（`desktop.py:88`）：配置里有 `websocketUrl`（`codex_connection.py:40`，
+只允许本机回环）时，桥自己拉一个带端口的 app-server，运行时目录在 `data_root()/shared/<hash>`；
+否则走 `sharedDaemon`，即 `ensure_native(["codex", "app-server"])`。
+
+- **`websocketUrl` 模式**：端点不是默认 socket，原生 `codex` 不知道该连哪里，必须显式
+  `--remote ws://127.0.0.1:<port>`。这时 `cli` 不可替代。
+- **默认（`sharedDaemon`）模式**：`spec.endpoint` 为空，拼出来是 `codex --remote unix://`，
+  而 Codex CLI 默认就挂在共享 daemon 上（`codex --help` 里 `--no-daemon` 的说明是
+  "Run without the shared background server, even if it is already running"），
+  所以 `codex-wechat cli -- …` **等同于直接跑 `codex …`**。作者本人在 Linux 上一直直接开
+  `codex` 而没有差异感，原因就在这里。
+
+它还有一处刻意约束：用户自己传 `--remote` / `--remote-auth-token-env` / `--no-daemon` 会被
+`ValueError` 拒绝（"此入口固定使用选定后台"）——它想当那个端点的唯一入口。
+
+**`desktop` 没有自己的语义。** Linux 入口里它只是：
+
+```bash
+desktop) shift; exec "$INSTALL_ROOT/codex-desktop" "$@" ;;
+```
+
+而 `desktop.py` 的动作只有 `cli` / `ensure` / `setup`（`desktop.py:105`）。所以
+`codex-wechat desktop setup` ≡ `codex-desktop setup`，`codex-wechat desktop` 单独跑则直接
+argparse 报"缺少 action"。名字还误导：它听起来像"启动桌面 App"，但 App 启动入口是**刻意**
+移除的（README 第 140 行"项目不再提供 App 启动命令或桌面入口覆盖"，WINDOWS.md 同款说明）。
+
+**待定项：**
+
+1. `desktop`：建议删掉。Linux 删那个 `case` 分支，Windows 不补。理由是无独立语义、名字误导、
+   与 `cli` 重叠。
+2. `cli`：去留取决于还要不要支持 `websocketUrl` 模式。
+   - 保留（现状）：Linux 有、Windows 没有——词表不对称，但功能不对称也是真实的；
+   - 两边都删：websocket 用户自己 `codex --remote ws://127.0.0.1:<port>`，词表就只剩
+     `uninstall [-PurgeData]` 一项差异；
+   - 或不删但补到 Windows（约 10 行，转发给 `codex-desktop.ps1 cli -- …`），只有在
+     websocket 这条路确实有人用时才值得。
+3. 无论选哪个，README 第 145 行 `codex-wechat cli -- resume` 与第 148 行
+   `codex-desktop.ps1 cli -- resume` 都要跟着改。
 
 ## 待修问题
 
