@@ -897,7 +897,14 @@ def operation_plan(operations: list[str]) -> None:
         )
 
 
-def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) -> int:
+def _common_install(
+    source: Path,
+    target: Path,
+    *,
+    dry_run: bool,
+    update: bool,
+    announce: bool = True,
+) -> int:
     source = _resolved_root(source, "源码目录")
     target = target.expanduser().absolute() if dry_run else _resolved_root(target, "安装目录")
     if not dry_run and source == target and read_pointer(target, CURRENT_FILE):
@@ -908,7 +915,8 @@ def _common_install(source: Path, target: Path, *, dry_run: bool, update: bool) 
     if source != SOURCE_ROOT:
         logo_banner(source)
         declaration(source, "start")
-    phase("演练模式，不会修改文件" if dry_run else ("更新" if update else "安装"))
+    if announce:
+        phase("演练模式，不会修改文件" if dry_run else ("更新" if update else "安装"))
     try:
         files = project_files(source)
     except (OSError, ValueError) as error:
@@ -1136,20 +1144,24 @@ def remote_update(target: Path, choice: dict, *, dry_run: bool = False) -> int:
 
 def bootstrap(target: Path, choice: dict, *, dry_run: bool = False) -> int:
     """One entry for first installation and repeated installation/update."""
-    phase("安装或更新")
-    print(f"来源: {choice['repo']} ({choice['ref']})")
     if dry_run:
-        return _common_install(SOURCE_ROOT, target, dry_run=True, update=False)
+        print(f"来源: {choice['repo']} ({choice['ref']})")
+        phase("演练模式，不会修改文件")
+        return _common_install(
+            SOURCE_ROOT, target, dry_run=True, update=False, announce=False)
     _check_target_path(target)
-    previous = read_pointer(target, CURRENT_FILE)
     updating = _installation_state(target) is not None
+    phase("更新" if updating else "安装")
+    print(f"来源: {choice['repo']} ({choice['ref']})")
+    previous = read_pointer(target, CURRENT_FILE)
     # Reject unrelated files before any network or install side effect.
     check_install_target(None, target, update=updating)
     print("检测到已有安装，将执行更新。" if updating else "未检测到已有安装，将执行首次安装。")
     with tempfile.TemporaryDirectory(prefix="codex-wechat-bootstrap-") as directory:
         source = Path(directory) / "source"
         fetch_update_source(choice, source)
-        result = _common_install(source, target, dry_run=False, update=updating)
+        result = _common_install(
+            source, target, dry_run=False, update=updating, announce=False)
         remember_update_source(target, source, choice, previous=previous)
         return result
 

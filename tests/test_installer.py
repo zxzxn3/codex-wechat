@@ -136,6 +136,41 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.install(self.source, self.target, dry_run=True), 0)
         self.assertFalse((self.target / installer.RELEASES_DIR).exists())
 
+    def test_install_and_update_show_the_actual_operation(self):
+        with contextlib.redirect_stdout(io.StringIO()) as install_output, \
+                patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        self.assertIn(":: 安装", install_output.getvalue())
+        self.assertNotIn("安装 / 更新", install_output.getvalue())
+        self.make_project(self.source, version="two")
+        with contextlib.redirect_stdout(io.StringIO()) as update_output, \
+                patch("builtins.input", return_value="y"):
+            installer.update(self.source, self.target)
+        self.assertIn(":: 更新", update_output.getvalue())
+        self.assertNotIn("安装 / 更新", update_output.getvalue())
+
+    def test_bootstrap_does_not_print_a_generic_install_or_update_title(self):
+        for existing, expected in ((False, ":: 安装"), (True, ":: 更新")):
+            with self.subTest(existing=existing):
+                output = io.StringIO()
+                with patch.object(
+                        installer, "_installation_state",
+                        return_value="current" if existing else None), \
+                        patch.object(installer, "_check_target_path"), \
+                        patch.object(installer, "check_install_target"), \
+                        patch.object(installer, "fetch_update_source"), \
+                        patch.object(installer, "remember_update_source"), \
+                        patch.object(installer, "_common_install", return_value=0), \
+                        contextlib.redirect_stdout(output):
+                    installer.bootstrap(
+                        self.target,
+                        {"repo": "https://example.invalid/project",
+                         "ref": "main"},
+                    )
+                text = output.getvalue()
+                self.assertIn(expected, text)
+                self.assertNotIn("安装或更新", text)
+
     def test_nonempty_unrelated_target_is_rejected_before_prompt(self):
         self.target.mkdir()
         marker = self.target / "unrelated"
