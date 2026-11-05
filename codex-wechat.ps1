@@ -86,6 +86,7 @@ $DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
 $LogRoot = Join-Path $DataRoot 'logs'
+$BridgeLog = Join-Path $LogRoot 'bridge.jsonl'
 $VenvPython = Join-Path $Project '.venv\Scripts\python.exe'
 $Agent = Join-Path $Project 'codex_wechat.py'
 $StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
@@ -192,6 +193,18 @@ function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
     Fail "scheduled task '$TaskName' did not stop within $TimeoutSeconds seconds"
 }
 
+function Wait-TaskRunning([int]$TimeoutSeconds = 15) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($task -and $task.State -in @('Running', 'Queued')) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    Fail "scheduled task '$TaskName' did not start within $TimeoutSeconds seconds"
+}
+
 if (-not (Test-Path $VenvPython)) {
     Fail "Python environment not found at $VenvPython; run .\install.ps1 first"
 }
@@ -246,16 +259,19 @@ switch ($Command) {
     }
     'service-start' {
         $task = Get-InstalledTask
-        if (-not (Test-Path (Join-Path $StateDir 'account.json'))) {
-            & $VenvPython -u $Agent login --state-dir $StateDir --config $ConfigPath
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        }
         if ($task.State -in @('Running', 'Queued')) {
-            Write-Host 'service is already running'
+            Write-Host '后台服务已在运行。'
+            Write-Host "完整日志: $BridgeLog"
             exit 0
         }
+        if (-not (Test-Path (Join-Path $StateDir 'account.json'))) {
+            & $VenvPython -u $Agent login --state-dir $StateDir --config $ConfigPath --starting
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
         Start-ScheduledTask -TaskName $TaskName
-        Write-Host "start requested; logs: $LogRoot"
+        Wait-TaskRunning
+        Write-Host '后台服务已启动；终端可以关闭。'
+        Write-Host "完整日志: $BridgeLog"
     }
     'service-stop' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -282,7 +298,9 @@ switch ($Command) {
             Wait-TaskStopped
         }
         Start-ScheduledTask -TaskName $TaskName
-        Write-Host "restart requested; logs: $LogRoot"
+        Wait-TaskRunning
+        Write-Host '后台服务已重启。'
+        Write-Host "完整日志: $BridgeLog"
     }
     'service-status' {
         $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

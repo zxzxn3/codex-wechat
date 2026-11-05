@@ -789,6 +789,7 @@ async def stop_background_service(state_dir, config_path):
 async def restart_background_service():
     await service_adapter.restart()
     print("后台服务重启已请求。")
+    show_log_path()
 
 
 async def start_background_service(args):
@@ -796,16 +797,22 @@ async def start_background_service(args):
     current = await service_adapter.status()
     if not current.installed:
         raise ConfigurationError("尚未注册后台服务，请重新运行安装器。")
+    if current.running:
+        print("后台服务已在运行。")
+        show_log_path()
+        return
     store = await startup_store(args)
     try:
         # service-start is still terminal-driven; a background task cannot show
         # a QR code. Use the same binding gate as foreground start.
         await startup_account(store)
-        await service_adapter.start()
-        print("后台服务已启动；终端可以关闭。")
-        show_log_path()
     finally:
+        # The service must be able to acquire the same state lock after launch;
+        # holding it here makes Windows Task Scheduler exit immediately.
         store.close()
+    await service_adapter.start()
+    print("后台服务已启动；终端可以关闭。")
+    show_log_path()
 
 
 async def main():
@@ -819,6 +826,7 @@ async def main():
     parser.add_argument("--follow", action="store_true")
     parser.add_argument("--service", action="store_true",
                         help="同时查看未脱敏的 supervisor/service.log")
+    parser.add_argument("--starting", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.action != "rebind" and args.stop_active:
         parser.error("--stop-active 只能与 rebind 一起使用")
@@ -826,6 +834,8 @@ async def main():
         parser.error("--follow 只能与 logs 一起使用")
     if args.action != "logs" and args.service:
         parser.error("--service 只能与 logs 一起使用")
+    if args.action != "login" and args.starting:
+        parser.error("--starting 只能与 login 一起使用")
     os.umask(0o077)
     if args.action == "logs":
         show_logs(args.follow, args.service)
@@ -848,7 +858,7 @@ async def main():
         return
     store = await startup_store(args)
     if args.action == "login":
-        result = await login(store)
+        result = await login(store, starting=args.starting)
         state = store.load("bridge", {})
         if wechat_auth.mark_valid(state, result.account):
             store.save("bridge", state)

@@ -4,7 +4,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from codex_wechat import startup_account, start_background_service
+from codex_wechat import (
+    restart_background_service,
+    start_background_service,
+    startup_account,
+)
 from configuration import ConfigurationError
 
 
@@ -12,7 +16,8 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
     async def test_service_start_uses_the_same_binding_gate(self):
         store = Mock()
         with patch("codex_wechat.service_adapter.status",
-                   AsyncMock(return_value=SimpleNamespace(installed=True))), \
+                   AsyncMock(return_value=SimpleNamespace(
+                       installed=True, running=False))), \
              patch("codex_wechat.startup_store", AsyncMock(return_value=store)), \
              patch("codex_wechat.startup_account", AsyncMock()) as account, \
              patch("codex_wechat.service_adapter.start", AsyncMock()) as start, \
@@ -22,6 +27,25 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
         start.assert_awaited_once()
         log_hint.assert_called_once_with()
         store.close.assert_called_once()
+
+    async def test_service_start_is_a_noop_when_the_service_is_running(self):
+        with patch("codex_wechat.service_adapter.status",
+                   AsyncMock(return_value=SimpleNamespace(
+                       installed=True, running=True))), \
+             patch("codex_wechat.startup_store", AsyncMock()) as store, \
+             patch("codex_wechat.service_adapter.start", AsyncMock()) as start, \
+             patch("codex_wechat.show_log_path") as log_hint:
+            await start_background_service(SimpleNamespace(action="service-start"))
+        store.assert_not_awaited()
+        start.assert_not_awaited()
+        log_hint.assert_called_once_with()
+
+    async def test_restart_prints_the_log_location(self):
+        with patch("codex_wechat.service_adapter.restart", AsyncMock()) as restart, \
+             patch("codex_wechat.show_log_path") as log_hint:
+            await restart_background_service()
+        restart.assert_awaited_once()
+        log_hint.assert_called_once_with()
 
     async def test_existing_binding_never_triggers_login_even_without_terminal(self):
         account = {"token": "fixture", "user": "owner"}

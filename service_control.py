@@ -31,7 +31,7 @@ async def require_service_owner():
     pid = await systemctl("show", UNIT, "--property=MainPID", "--value")
     if pid != str(os.getpid()):
         raise ValueError("当前桥接不是该用户服务的主进程，不能远程重启。"
-                         "请退出前台桥接后在电脑执行 systemctl --user start " + UNIT)
+                         "请退出前台桥接后在电脑执行 codex-wechat service-start。")
 
 
 def _require_windows_owner():

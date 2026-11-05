@@ -56,6 +56,35 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await service_adapter.status()
 
+    async def test_linux_restart_requests_the_owned_unit(self):
+        status = AsyncMock(return_value=service_adapter.ServiceState(True, True))
+        command = AsyncMock()
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter, "IS_WINDOWS", False), \
+                patch.object(service_adapter, "systemctl", command):
+            await service_adapter.restart()
+        command.assert_awaited_once_with(
+            "--no-block", "restart", service_adapter.UNIT)
+
+    async def test_windows_restart_uses_the_service_entry(self):
+        status = AsyncMock(return_value=service_adapter.ServiceState(True, True))
+        request = AsyncMock()
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter, "IS_WINDOWS", True), \
+                patch.object(service_adapter, "_windows_request", request):
+            await service_adapter.restart()
+        request.assert_awaited_once_with(["service-restart"], timeout=20)
+
+    async def test_restart_rejects_an_unregistered_service(self):
+        command = AsyncMock()
+        with patch.object(service_adapter, "status",
+                          AsyncMock(return_value=service_adapter.ServiceState(False, False))), \
+                patch.object(service_adapter, "IS_WINDOWS", False), \
+                patch.object(service_adapter, "systemctl", command):
+            with self.assertRaises(ValueError):
+                await service_adapter.restart()
+        command.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

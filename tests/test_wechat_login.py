@@ -1,5 +1,7 @@
 """Interactive login identity policy without contacting the WeChat API."""
 import tempfile
+import contextlib
+import io
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
@@ -100,6 +102,12 @@ class WeChatLoginPolicyTests(unittest.IsolatedAsyncioTestCase):
         saved = self.store.load("account")
         self.assertEqual(saved["base_url"], wechat.BASE_URL)
         self.assertEqual({key: saved[key] for key in refreshed}, refreshed)
+
+    async def test_starting_login_says_the_bridge_is_continuing(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            await self.login(self.old, starting=True)
+        self.assertIn("正在继续启动桥接", output.getvalue())
 
     async def test_same_user_bot_change_needs_no_prompt_or_extra_flag(self):
         changed = {**self.old, "token": "new", "bot": "bot-b"}
