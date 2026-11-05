@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 from copy import deepcopy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,40 +19,29 @@ import wechat_auth
 from backend import CodexBackend
 from output_delivery import OutputDelivery
 from input_delivery import InputDelivery
+from ingress import Ingress
+from backend_session import BackendSession
 from storage import Store
 from wechat import WeChat, login
-from commands import (
-    ensure_session,
-    dispatch,
-    notice,
-    parse_control,
-)
-from command_specs import REGISTRY, CONTROL_LANES, command_lane
+from commands import dispatch, notice, parse_control
+from command_specs import CONTROL_LANES
 from configuration import ConfigLoader, ConfigurationError, HotSettings, write_config
 from prompts import (prompt_text)
 from quota import quota_warnings
-from records import InputPhase
 from profiles import backend_label, definitions, ensure_backend_config, snapshot
 from rebind import run_rebind
-from media import Media, MAX_ATTACHMENTS
-from latency import Latency, message_timestamps
+from media import Media
+from latency import Latency
 from typing_indicator import TypingIndicator
-from wechat_content import (
-    message_key,
-    message_summary,
-    message_text,
-    quote_context,
-    quoted_prompt,
-    remember_quote,
-)
-from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, WeChatPollTimeout, backend_reason
+from errors import UserFacingError, WeChatAuthExpired, WeChatPollTimeout
 from platform_support import IS_WINDOWS, data_root, is_elevated, root_override_enabled
-from diagnostics import error_fields, log_event, log_path, new_request_id
+from diagnostics import error_fields, log_event, log_path
 from log_viewer import show_logs
 from prompts import (render_ack, status_fields, duration_label)
 
 ROOT = Path(__file__).resolve().parent
 SERVICE_CHILD_ENV = "CODEX_WECHAT_SERVICE_CHILD"
+__all__ = ["Bridge", "parse_control"]
 
 # The bridge assumes these keys always exist. A state file can be written before
 # the bridge ever runs (the login action persists auth on its own), so loading
@@ -149,6 +137,8 @@ class Bridge:
             self.outbox_drained.set()
         self.output = OutputDelivery(self)
         self.inputs = InputDelivery(self)
+        self.ingress = Ingress(self)
+        self.backend_session = BackendSession(self)
 
     @property
     def slicing(self):
@@ -346,21 +336,7 @@ class Bridge:
 
 
     async def ensure_backend(self):
-        async with self.connection_lock:
-            if self.backend_started and self.backend.connected:
-                return
-            self.backend_started = False
-            self.loaded = False
-            await self.backend.close()
-            try:
-                await self.backend.start()
-            except BaseException:
-                await self.backend.close()
-                raise
-            self.backend_started = True
-            self.backend_connection(self.backend, True)
-            self.input_paused = False
-            self.wake.set()
+        await self.backend_session.ensure()
 
     def text_entries(self, text, *, group, context, semantic=False, source=None, role="body",
                      request_id=None):
@@ -413,113 +389,7 @@ class Bridge:
                   kind=kind, status=status)
 
     async def receive(self, batch):
-        self.reload_config()
-        controls = []
-        for msg in batch.get("msgs", []):
-            request_id = new_request_id()
-            if msg.get("from_user_id") != self.account["user"] or msg.get("group_id"):
-                continue
-            # Use item IDs as the protocol fallback; hash only when every ID is absent.
-            identity = message_key(msg) or hashlib.sha256(
-                json.dumps(msg, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-            # Describe transport shape only, including messages skipped before routing.
-            # No body, IDs, context tokens or media references enter diagnostics.
-            kinds = {item.get("type") for item in msg.get("item_list", [])
-                     if isinstance(item, dict) and isinstance(item.get("type"), int)}
-            skip = ("unsupported_type" if msg.get("message_type") != 1 else
-                    "missing_context" if not msg.get("context_token") else
-                    "duplicate" if identity in self.state["seen"] else "eligible")
-            log_event("input.observed", component="input", request_id=request_id,
-                      status=skip, message_type=msg.get("message_type"),
-                      message_state=msg.get("message_state"),
-                      kind="voice" if 3 in kinds else "text" if 1 in kinds else "other",
-                      chars=len(message_text(msg)), count=len(msg.get("item_list", [])))
-            if msg.get("message_type") != 1:
-                # Type 2 is this bridge's outbound message shape; never answer it.
-                if (msg.get("message_type") == 2 or not msg.get("context_token")
-                        or identity in self.state["seen"]):
-                    continue
-                wechat_auth.accept_context(self.state, msg["context_token"])
-                self.state["seen"].append(identity)
-                self.reject_input(request_id, "unsupported", "unsupported_type")
-                self.reply(self.prompt("UNSUPPORTED_MESSAGE_TYPE"), request_id=request_id)
-                continue
-            if not msg.get("context_token"):
-                # Cannot safely reply without a context token; don't execute.
-                continue
-            wechat_auth.accept_context(self.state, msg["context_token"])
-            if identity in self.state["seen"]:
-                continue
-            self.state["seen"].append(identity)
-            body_text = message_text(msg)
-            quote = quote_context(msg, self.state["quoteCache"])
-            text = quoted_prompt(body_text, quote)
-            attachments = [item for item in msg.get("item_list", []) if item.get("type") in (2, 4, 5)]
-            remember_quote(self.state, identity, message_summary(msg))
-            command, argument = parse_control(body_text)
-            spec = REGISTRY.get(command)
-            queued = bool(spec and spec.route == "input")
-            received = self.latency.received_any(message_timestamps(msg))
-            if queued:
-                text = quoted_prompt(argument, quote)
-            kind = ("queued" if queued else
-                    "command" if body_text.startswith("/") and not attachments
-                    else "input" if text or attachments else "unsupported")
-            log_event("input.received", component="input", request_id=request_id,
-                      kind=kind, chars=len(text), count=len(attachments),
-                      command=spec.name if spec and kind in ("command", "queued") else None)
-            if queued and not text and not attachments:
-                self.reject_input(request_id, kind, "missing_argument")
-                self.reply(self.prompt("COMMAND_USAGE", {"usage": REGISTRY['/queue'].usage}),
-                           request_id=request_id)
-            elif len(attachments) > MAX_ATTACHMENTS:
-                self.reject_input(request_id, kind, "too_many_attachments")
-                self.reply(self.prompt("TOO_MANY_ATTACHMENTS", {"count": MAX_ATTACHMENTS}),
-                           request_id=request_id)
-            elif body_text.startswith("/") and not attachments and not queued:
-                received["request_id"] = request_id
-                received["command"] = spec.name if spec else None
-                if spec and spec.lane == "media":
-                    received["media"] = self.media_origin()
-                controls.append((body_text, received))
-            elif (text or attachments) and len(text) <= 20000:
-                if len(self.state["inbox"]) >= 20:
-                    self.reject_input(request_id, kind, "queue_full")
-                    self.reply(self.prompt("QUEUE_FULL", {"count": 20}), request_id=request_id)
-                else:
-                    self.state["inbox"].append({"id": identity, "text": text,
-                                               "attachments": attachments, "mode": "queue" if queued else "steer",
-                                               "clientId": str(uuid.uuid4()), "phase": InputPhase.PREPARING,
-                                               "ingress_ms": received.get("ingress_ms"),
-                                               "requestId": request_id})
-                    if queued:
-                        count = len(self.state["inbox"])
-                        self.reply(self.prompt("QUEUE_CONFIRMED", {"count": count, "unit": "条"}),
-                                   persist=False, request_id=request_id)
-            else:
-                status = "too_long" if len(text) > 20000 else "unsupported"
-                self.reject_input(request_id, kind, status)
-                self.reply(self.prompt("UNSUPPORTED_MESSAGE", {"count": 20000}),
-                           request_id=request_id)
-        self.state["seen"] = self.state["seen"][-2000:]
-        if batch.get("get_updates_buf"):
-            self.state["cursor"] = batch["get_updates_buf"]
-        # Persist cursor and incoming work together, before starting any agent work.
-        self.save()
-        self.send_wake.set()
-        for command, received in controls:
-            name, argument = parse_control(command)
-            queue = self.controls[command_lane(name, argument)]
-            try:
-                queue.put_nowait((command, received))
-            except asyncio.QueueFull:
-                request_id = received.get("request_id")
-                log_event("control.rejected", component="input", kind="command",
-                          status="queue_full", request_id=request_id,
-                          command=received.get("command"))
-                self.reply(self.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
-        self.wake.set()
-        self.steer_wake.set()
+        await self.ingress.receive(batch)
 
     async def control(self, text, *, received=None):
         await dispatch(self, text, received=received)
@@ -581,40 +451,7 @@ class Bridge:
                 self.wake.set()
 
     async def maintain_backend(self):
-        reported = None
-        while True:
-            delay = 10
-            if (not self.restarting and not self.running and not self.steering
-                    and not self.session_lock.locked()):
-                try:
-                    async with self.session_lock:
-                        self.backend_recovering = True
-                        try:
-                            await self.ensure_backend()
-                            if self.state["thread"]:
-                                await ensure_session(self)
-                        finally:
-                            self.backend_recovering = False
-                    self.input_paused = False
-                    self.wake.set()
-                    reported = None
-                except Exception as error:
-                    self.backend_started = self.backend.connected
-                    self.input_paused = True
-                    reason = backend_reason(error)
-                    if reason != reported:
-                        self.reply(self.prompt("BACKEND_CONNECT_FAILED", {"reason": reason}))
-                        reported = reason
-                    if isinstance(error, BackendStartupError):
-                        delay = error.retry_after
-                    log_event("backend.recover_failed", level="warning", component="backend",
-                              retry_in_ms=int(delay * 1000), **error_fields(error))
-                    print(f"后端恢复失败：{type(error).__name__}", file=sys.stderr, flush=True)
-            # Account reads are independent of the active model turn.
-            if not self.restarting and self.backend_started and self.backend.connected:
-                await self.backend.refresh_usage()
-                await self.backend.rate_limits()
-            await asyncio.sleep(delay)
+        await self.backend_session.maintain()
 
     async def worker(self):
         return await self.inputs.worker()
