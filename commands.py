@@ -8,6 +8,7 @@ import re
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 import autostart
 
 from profiles import backend_argument, backend_label, definitions, ensure_backend_config, switch
@@ -136,31 +137,44 @@ def backend_section(config, name):
     return section
 
 
-NUMERIC_SETTINGS = {
-    "connectionIdleSeconds": (CONNECTION_IDLE_MIN, CONNECTION_IDLE_MAX),
-    "media.maxMiB": (MEDIA_MAX_MIB_MIN, MEDIA_MAX_MIB_MAX),
-    "slicing.targetChars": (SLICING_TARGET_MIN, SLICING_TARGET_MAX),
-    "logs.keep": (LOG_KEEP_MIN, LOG_KEEP_MAX),
+@dataclass(frozen=True)
+class Setting:
+    """One /settings name: where it lives in config.json, plus numeric bounds.
+
+    A single table keeps the write path, the read-back and the limits from drifting
+    apart; `numeric` replaces the old second table that only carried bounds.
+    """
+
+    path: tuple[str, ...]
+    minimum: int | None = None
+    maximum: int | None = None
+
+    @property
+    def numeric(self):
+        return self.minimum is not None
+
+
+SETTINGS = {
+    "compactionNotice": Setting(("compactionNotice",)),
+    "sourceHint": Setting(("sourceHint",)),
+    "slicing.smart": Setting(("slicing", "smart")),
+    "connectionIdleSeconds": Setting(("connectionIdleSeconds",),
+                                      CONNECTION_IDLE_MIN, CONNECTION_IDLE_MAX),
+    "media.maxMiB": Setting(("media", "maxMiB"), MEDIA_MAX_MIB_MIN, MEDIA_MAX_MIB_MAX),
+    "slicing.targetChars": Setting(("slicing", "targetChars"),
+                                   SLICING_TARGET_MIN, SLICING_TARGET_MAX),
+    "logs.keep": Setting(("logs", "keep"), LOG_KEEP_MIN, LOG_KEEP_MAX),
     # Not advertised in the panel or in /help settings: an operator who knows the
     # name may raise it past the observed platform ceiling on purpose.
-    "budgets": (REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
-    "sending.replyBudget": (REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
-}
-SETTING_PATHS = {
-    "compactionNotice": ("compactionNotice",),
-    "connectionIdleSeconds": ("connectionIdleSeconds",),
-    "media.maxMiB": ("media", "maxMiB"),
-    "sourceHint": ("sourceHint",),
-    "slicing.smart": ("slicing", "smart"),
-    "slicing.targetChars": ("slicing", "targetChars"),
-    "logs.keep": ("logs", "keep"),
-    "budgets": ("sending", "replyBudget"),
-    "sending.replyBudget": ("sending", "replyBudget"),
+    "budgets": Setting(("sending", "replyBudget"), REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
+    "sending.replyBudget": Setting(("sending", "replyBudget"),
+                                   REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
 }
 
 
 def numeric_setting_value(bridge, name, value):
-    minimum, maximum = NUMERIC_SETTINGS[name]
+    setting = SETTINGS[name]
+    minimum, maximum = setting.minimum, setting.maximum
     if not value.isascii() or not value.isdecimal():
         raise UserFacingError(bridge.prompt("SETTINGS_NUMBER", {
             "name": name, "minimum": minimum, "maximum": maximum}))
@@ -180,7 +194,7 @@ async def write_hot_setting(bridge, name, value):
         if not isinstance(config, dict):
             raise ValueError("配置必须是 JSON 对象")
         section = config
-        for part in SETTING_PATHS[name][:-1]:
+        for part in SETTINGS[name].path[:-1]:
             child = section.get(part)
             if child is None:
                 child = {}
@@ -188,7 +202,7 @@ async def write_hot_setting(bridge, name, value):
             if not isinstance(child, dict):
                 raise ValueError(f"{part} 必须是对象")
             section = child
-        section[SETTING_PATHS[name][-1]] = value
+        section[SETTINGS[name].path[-1]] = value
         HotSettings.from_config(config)
         write_config(path, config)
     except (OSError, ValueError):
@@ -204,7 +218,7 @@ def text_setting_value(bridge, argument, max_bytes, too_long_key):
 
 
 def current_numeric_setting(bridge, name):
-    """Read back what the reload applied, derived from SETTING_PATHS itself.
+    """Read back what the reload applied, derived from SETTINGS itself.
 
     Adding a hot numeric setting therefore needs no entry here: the camelCase
     config path is walked over the hot settings object. media.maxMiB is the one
@@ -213,7 +227,7 @@ def current_numeric_setting(bridge, name):
     if name == "media.maxMiB":
         return bridge.media.limit // (1024 * 1024)
     node = bridge.settings.hot
-    for part in SETTING_PATHS[name]:
+    for part in SETTINGS[name].path:
         attribute = re.sub(r"(?<!^)(?=[A-Z])", "_", part).lower()
         node = getattr(node, attribute)
     return node
@@ -328,7 +342,7 @@ async def command_settings(bridge, command, argument, received=None):
         if name in ("ack", "finish"):
             await command_notice(bridge, "/" + name, value)
             return
-        if name in NUMERIC_SETTINGS:
+        if name in SETTINGS and SETTINGS[name].numeric:
             if not value:
                 bridge.reply(bridge.prompt("SETTINGS_USAGE"))
                 return

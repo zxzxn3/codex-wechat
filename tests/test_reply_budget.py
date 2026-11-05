@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from codex_wechat import Bridge
-from commands import HANDLERS, NUMERIC_SETTINGS, SETTING_PATHS
+from commands import HANDLERS, SETTINGS
 from command_specs import HELP, HELP_ALL, REGISTRY
 from configuration import Sending
 from storage import Store
@@ -43,8 +43,8 @@ class SendingConfigTests(unittest.TestCase):
     def test_the_knob_is_settable_but_absent_from_the_panel(self):
         from prompts import SETTINGS_HELP, settings_summary
         for name in ("budgets", "sending.replyBudget"):
-            self.assertEqual(NUMERIC_SETTINGS[name], (1, 100))
-            self.assertEqual(SETTING_PATHS[name], ("sending", "replyBudget"))
+            self.assertEqual(SETTINGS[name].maximum, 100)
+            self.assertEqual(SETTINGS[name].path, ("sending", "replyBudget"))
         self.assertNotIn("budgets", SETTINGS_HELP)
         self.assertNotIn("replyBudget", settings_summary(notice="", attachment_mib=20))
 
@@ -94,6 +94,29 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(await self.wait_for(lambda: len(sent) >= 5))
                 self.assertEqual([entry["text"] for entry in sent[3:]], ["three", "four"])
                 self.assertEqual(bridge.state["outbox"], [])
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_a_failed_send_does_not_spend_the_budget(self):
+        bridge = self.bridge
+        bridge.reply("retried")
+        calls = 0
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                raise OSError("simulated channel failure")
+            return {"message_id": calls}
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event"), patch("output_delivery.SEND_RETRY_SECONDS", 0):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                self.assertTrue(await self.wait_for(lambda: not bridge.state["outbox"]))
+                self.assertEqual(calls, 3)  # two failures, one success
+                self.assertEqual(bridge.budget_state()["used"], 1)
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)

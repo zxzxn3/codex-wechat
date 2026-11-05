@@ -295,10 +295,12 @@ class OutputDelivery:
                           parts=entry.get("parts"), job_id=entry.get("group"),
                           request_id=entry.get("requestId"), **waiting)
                 send_started = time.perf_counter()
-                if not entry.get("budgetNotice"):
-                    bridge.spend_reply_budget()
                 response = await bridge.channel.send(entry)
                 send_ms = (time.perf_counter() - send_started) * 1000
+                if not entry.get("budgetNotice"):
+                    # Only a delivered message counts against the inbound turn, the
+                    # same way the platform charges for what it accepted.
+                    bridge.spend_reply_budget()
                 if isinstance(response, dict) and response.get("message_id") is not None:
                     remember_quote(bridge.state, response["message_id"], entry_summary(entry))
             except WeChatAuthExpired:

@@ -5,8 +5,7 @@ import tempfile
 import unittest
 
 from codex_wechat import Bridge
-from commands import (NUMERIC_SETTINGS, SETTING_PATHS, current_numeric_setting,
-                      dispatch, handle, notice)
+from commands import SETTINGS, current_numeric_setting, dispatch, handle, notice
 from configuration import HotSettings, Notifications, completion_template
 from storage import Store
 
@@ -101,22 +100,23 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
 
 class NumericSettingsTests(unittest.IsolatedAsyncioTestCase):
     async def test_every_numeric_setting_round_trips_without_its_own_reader(self):
-        # A new numeric setting only needs the two tables to be covered by this loop.
+        # A new numeric setting only needs the table entry to be covered here.
+        numeric = {name: setting for name, setting in SETTINGS.items() if setting.numeric}
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "config.json"
             store = Store(Path(root) / "state")
             try:
                 bridge = Bridge(store, {"user": "owner"}, {}, config_path=path)
                 bridge.state["context"] = "ctx"
-                for name, (minimum, _maximum) in NUMERIC_SETTINGS.items():
+                for name, setting in numeric.items():
                     with self.subTest(name=name):
-                        value = minimum + 1
+                        value = setting.minimum + 1
                         await handle(bridge, "/settings", f"{name} {value}")
                         self.assertEqual(current_numeric_setting(bridge, name), value)
                         section = json.loads(path.read_text())
-                        for part in SETTING_PATHS[name][:-1]:
+                        for part in setting.path[:-1]:
                             section = section[part]
-                        self.assertEqual(section[SETTING_PATHS[name][-1]], value)
+                        self.assertEqual(section[setting.path[-1]], value)
             finally:
                 store.lock.close()
 
