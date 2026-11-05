@@ -172,6 +172,9 @@ Windows 默认让桥接自己启动一个 `codex app-server`（"独立进程"）
 app-server。**这是 Codex CLI 双向的唯一途径**：CLI 没有 IPC follower 可以借笔，只有共用一个
 app-server，两边的回合才会互相可见。
 
+选择上，Windows App 为主应保持 `false`，Windows Codex CLI 为主应改为 `true`；Linux 相反，
+CLI 为主保持 `true`，App 为主改为 `false`。
+
 | 能力 | 独立进程（默认） | 共享 daemon |
 |---|---|---|
 | 微信 ↔ Codex App | 双向（App 先持笔，桥接用 IPC follower 借笔） | App 先打开会话时仍可跟随；桥接先发过消息后该会话在 App 里显示锁定 |

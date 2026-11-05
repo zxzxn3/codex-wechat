@@ -50,6 +50,13 @@ Linux 若当前没有可用的 systemd 用户管理器，安装器会明确提�
 
 要用 Codex CLI 与微信双向收发，装完后在微信发送 `/settings shared true`（持久保存，`/settings shared false` 关闭）。该开关默认 Windows 为 false、Linux 为 true；开启后 Codex App 打开桥接当前会话会显示锁定，详见 [docs/WINDOWS.md](docs/WINDOWS.md)。
 
+选择原则：
+
+- Windows App 为主：保持 `false`
+- Windows Codex CLI 为主：改为 `true`
+- Linux Codex CLI 为主：保持 `true`
+- Linux App 为主：改为 `false`
+
 ## 第一次使用
 
 Linux：
