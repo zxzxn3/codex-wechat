@@ -52,6 +52,29 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 - 不要改用 `os.path.exists()`：它对忙管道恒 `False`，比 `Path.exists()` 更差。
 - 若将来要更彻底，可换成有界连接；代价是空闲时每 5 秒一次建连。
 
+### 上面第 2、3 种状态已实测通过（2026-11-05，真实 App + 真实微信）
+
+操作者按下面的顺序用了一轮，日志时间线与之对应（`bridge.jsonl`）：
+
+| 时间 | 事件 | 含义 |
+|---|---|---|
+| 02:23:18 | `control.started /switch` | 微信切到 App 尚未打开的会话 |
+| 02:23:20 | `backend.writer_released` mode=released | 派发后交还写者 |
+| 02:23:21 | `backend.app_attach_failed` `CodexRpcError` | 交还后立刻 attach 仍被拒；按 best-effort 记警告，不影响这一轮 |
+| 02:24:49 | `app_ipc.connected` → `backend.app_followed` mode=followed | App 接管后空闲轮询跟随成功 |
+| 02:25:07 | `backend.writer_kept` mode=followed | App 侧发消息，回信进微信 |
+| 02:27:11 | `/switch`（另一个会话）→ 02:27:13 `app_ipc.connected` + `writer_kept` | App 已持有该会话时，微信切换后立即跟随 |
+
+操作者同期确认：App 里该会话先显示锁定，等待数十秒后恢复正常；此后 App→微信、微信→Codex
+双向都可用，且换到另一个会话后同样成立。
+
+从 `writer_released`（02:23:39 那次）到 `app_followed`（02:24:49）约 70 秒，主要来自
+`FOLLOW_RETRY_SECONDS = 60`（`input_delivery.py:23`）：一次 attach 失败后要等 60 秒才允许重试，
+再叠加 5 秒轮询。当前行为与"释放是延迟的"这条描述一致，未修改；若希望 `/switch` 之后跟得更快，
+可以让前几次失败按 5–10 秒重试。
+
+**第 1 种状态仍未测**：需要先关闭 App 再启动桥接，确认不会出现 `app_ipc.connected`。
+
 ## 本轮修复后的 Windows 验证
 
 以下项目需要安装后的真实 Windows 进程、App、微信或 CDN 条件，不能只靠源码阅读或 Linux mock 判定。
@@ -84,8 +107,10 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   2026-11-05 代码 + 单测确认：`autostart._owned_supervisor_action()` 校验参数前缀、分隔符边界，
   且 `Execute` 必须是本安装 `.bootstrap-venv` 的 pythonw/python；`service_adapter.status()`
   对"已安装但非本安装"直接抛错。见 `tests/test_autostart_windows.py`。
-- [ ] 在真实 Windows App 上观察 `\\.\pipe\codex-ipc` 的 `Path.exists()`、App 空闲
+- [x] 在真实 Windows App 上观察 `\\.\pipe\codex-ipc` 的 `Path.exists()`、App 空闲
   后接管会话和空闲 follower；结果写入验收记录，不能用 Linux mock 代替。
+  2026-11-05 实测通过：`backend.app_followed` 与后续 `writer_kept(followed)` 均出现，
+  双向收发可用；第 1 种状态（先关 App 再启动）未测。
 - [ ] 断开/重启 App，检查 `initialize`、owner discovery、turn start/steer 响应缺少
   字段时是否以受控失败结束，而不是让 `KeyError` 穿透到输入投递层。
   （2026-11-05：缺字段路径已在 `app_ipc.py` 逐项校验并抛 `CodexRpcError(-32603)`，
@@ -104,9 +129,15 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 
 ### 2026-11-05 复核：状态说明与剩余依据
 
-同一台机器、同一提交（`main` @ `45d979c`）上的复核。上面 12 项里 **2 项已确认并勾选**
-（`active-release` 只读不改、同名任务不误报），其余 10 项仍需实机，其中 1 项被私有仓库阻塞。
-已确认项的判据写在对应条目下；未勾选的复选框一律代表"尚未验证"，不代表已通过。
+同一台机器、同一提交（`main` @ `45d979c`）上的复核。上面 12 项里 **3 项已确认并勾选**
+（`active-release` 只读不改、同名任务不误报、真实 App 的空闲 follower），其余 9 项仍需实机，
+其中 1 项被私有仓库阻塞。已确认项的判据写在对应条目下；未勾选的复选框一律代表"尚未验证"，
+不代表已通过。
+
+另外两项由操作者在 2026-11-05 的实机操作中确认可用，但没有留下可核对的日志（那段时间的
+`bridge.jsonl` 已被修复前的 `recover_failed` 与 `/sessions` 失败占满）：**④ 后台运行时执行
+`rebind` 后服务能重新启动**、以及**未绑定时 `service-start` 会弹二维码并完成绑定**。第 ② 项
+仍留待验证，因为它还要求核对"`start` 与 `service-start` 的扫码准入一致"以及具体提示文案。
 
 `release.py` 的下载前提已满足：`bootstrap.ps1:49-53` 与 `bootstrap.sh:43-44` 都下载
 `installer.py` 和 `release.py`，`ModuleNotFoundError: release` 不会再出现。但这不足以勾选第 1 项——
