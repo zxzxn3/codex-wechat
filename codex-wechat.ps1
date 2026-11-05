@@ -44,7 +44,12 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     }
     $UpdatePython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $UpdatePython -PathType Leaf)) {
-        $PythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+        # Get-Command returns every match; the WindowsApps alias is a 0-byte stub.
+        $PythonCommand = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
+            Where-Object {
+                (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
+                (Get-Item -LiteralPath $_.Source).Length -gt 0
+            } | Select-Object -First 1
         if (-not $PythonCommand) { throw 'Python is unavailable; run py -3 installer.py from new source' }
         $UpdatePython = $PythonCommand.Source
     }

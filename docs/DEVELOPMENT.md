@@ -90,6 +90,19 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
   `WriteAllText(..., UTF8Encoding($false))` 之类写回时特别容易漏掉这一点。
 - 提交按主题拆分；cfg 提交使用中文并附 `Committed-by` footer。
 
+改完安装器或入口脚本后，用本地克隆装一遍再验服务：
+
+```powershell
+$app = "$env:LOCALAPPDATA\codex-wechat\app"
+& "$app\.bootstrap-venv\Scripts\python.exe" installer.py update --source . --dir $app --non-interactive
+& "$app\codex-wechat.ps1" service-restart
+```
+
+注意：在克隆目录里直接跑 `.\codex-wechat.ps1 update` 会把这个克隆当成安装根，于是要求一个
+"已保存的更新源"（报 `尚未配置更新来源`），随后即使启动服务也会被任务归属校验拒绝
+（`scheduled task 'CodexWeChat' is not owned by this project`）。那两条报错都是预期行为——
+一个克隆不是一次安装，安装/重启服务要用 `$app` 下的稳定入口。
+
 ## 重构边界
 
 见 [COMPLEXITY](COMPLEXITY.md)：优先解决已观察到的边界问题，不按行数拆文件，不为跨平台

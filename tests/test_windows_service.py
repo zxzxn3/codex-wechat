@@ -306,6 +306,10 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--starting", entry)
         self.assertIn("bridge.jsonl", entry)
         self.assertIn("logs", entry)
+        # Get-Command returns every match, and Windows ships a 0-byte python.exe
+        # alias under WindowsApps; taking the array produced two paths.
+        self.assertIn("(Get-Item -LiteralPath $_.Source).Length -gt 0", entry)
+        self.assertIn("Select-Object -First 1", entry)
         self.assertIn("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE", service)
         self.assertIn("JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK", service)
         self.assertNotIn("taskkill", service.lower())
