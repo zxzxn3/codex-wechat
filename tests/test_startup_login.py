@@ -15,18 +15,22 @@ from configuration import ConfigurationError
 class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
     async def test_service_start_uses_the_same_binding_gate(self):
         store = Mock()
+        events = []
+        store.close.side_effect = lambda: events.append("closed")
         with patch("codex_wechat.service_adapter.status",
                    AsyncMock(return_value=SimpleNamespace(
                        installed=True, running=False))), \
              patch("codex_wechat.startup_store", AsyncMock(return_value=store)), \
              patch("codex_wechat.startup_account", AsyncMock()) as account, \
-             patch("codex_wechat.service_adapter.start", AsyncMock()) as start, \
+             patch("codex_wechat.service_adapter.start",
+                   AsyncMock(side_effect=lambda: events.append("started"))) as start, \
              patch("codex_wechat.show_log_path") as log_hint:
             await start_background_service(SimpleNamespace(action="service-start"))
         account.assert_awaited_once_with(store)
         start.assert_awaited_once()
         log_hint.assert_called_once_with()
         store.close.assert_called_once()
+        self.assertEqual(events, ["closed", "started"])
 
     async def test_service_start_is_a_noop_when_the_service_is_running(self):
         with patch("codex_wechat.service_adapter.status",
