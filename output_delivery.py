@@ -213,8 +213,10 @@ class OutputDelivery:
                   count=len(skipped), job_id=entry.get("group"),
                   request_id=entry.get("requestId"))
         # Never recursively report a failed failure notice, and never spend a
-        # request on one when the channel itself is dropping messages.
-        if notify and not entry.get("failureNotice"):
+        # request on one when the channel itself is dropping messages. A budget
+        # notice gets the same treatment: its replacement would be a notice about
+        # a notice, and the queue is already waiting for the user.
+        if notify and not entry.get("failureNotice") and not entry.get("budgetNotice"):
             text = (bridge.prompt("ATTACHMENT_SEND_FAILED", {"name": entry["asset"]["name"], "attempts": SEND_ATTEMPTS})
                     if "asset" in entry else bridge.prompt("REPLY_SEND_FAILED"))
             notes = bridge.text_entries(text, group=str(uuid.uuid4()), context=entry["context"],
@@ -239,6 +241,35 @@ class OutputDelivery:
             self._queued_at[entry["id"]] = time.perf_counter()
         return entries
 
+    async def _next_sendable(self):
+        """Block until an entry may be sent; None means the caller re-checks.
+
+        Three independent gates live here so the sender loop stays about sending:
+        an empty queue, a post-failure pause, and the per-inbound reply budget.
+        """
+        bridge = self.bridge
+        if not bridge.state["outbox"]:
+            bridge.send_wake.clear()
+            await bridge.send_wake.wait()
+            return None
+        pause = self._paused_until - time.monotonic()
+        if pause > 0:
+            await asyncio.sleep(min(pause, 5))
+            return None
+        entry = bridge.state["outbox"][0]
+        if entry.get("budgetNotice") or not bridge.budget_exhausted():
+            return entry
+        # The platform counts replies per inbound message; ask for another one
+        # instead of spending the notice slot on a dropped send.
+        if bridge.state.get("budgetPromptSent"):
+            bridge.send_wake.clear()
+            await bridge.send_wake.wait()
+            return None
+        bridge.state["budgetPromptSent"] = True
+        bridge.state["outbox"][0:0] = self.budget_notice_entries()
+        bridge.save()
+        return None
+
     async def sender(self):
         bridge = self.bridge
         while True:
@@ -246,25 +277,8 @@ class OutputDelivery:
                 bridge.send_wake.clear()
                 await bridge.send_wake.wait()
                 continue
-            if not bridge.state["outbox"]:
-                bridge.send_wake.clear()
-                await bridge.send_wake.wait()
-                continue
-            paused = self._paused_until - time.monotonic()
-            if paused > 0:
-                await asyncio.sleep(min(paused, 5))
-                continue
-            entry = bridge.state["outbox"][0]
-            if not entry.get("budgetNotice") and bridge.budget_exhausted():
-                # The platform counts replies per inbound message; ask for another
-                # one instead of spending the notice slot on a dropped send.
-                if not bridge.state.get("budgetPromptSent"):
-                    bridge.state["budgetPromptSent"] = True
-                    bridge.state["outbox"][0:0] = self.budget_notice_entries()
-                    bridge.save()
-                    continue
-                bridge.send_wake.clear()
-                await bridge.send_wake.wait()
+            entry = await self._next_sendable()
+            if entry is None:
                 continue
             try:
                 if "asset" in entry and "item" not in entry:

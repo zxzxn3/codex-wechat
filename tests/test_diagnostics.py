@@ -109,6 +109,15 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertFalse(self.path.with_name(
             f"{self.path.name}.{diagnostics.backup_count() + 1}").exists())
 
+    def test_lowering_the_kept_count_releases_the_extra_files(self):
+        # Otherwise a smaller logs.keep could never shrink what is already there.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for number in range(1, 6):
+            self.path.with_name(f"{self.path.name}.{number}").write_text("{}")
+        diagnostics.configure(path=self.path, backups=2)
+        remaining = sorted(p.name for p in self.path.parent.glob(f"{self.path.name}.*"))
+        self.assertEqual(remaining, [f"{self.path.name}.1", f"{self.path.name}.2"])
+
     def test_the_kept_file_count_is_configurable(self):
         diagnostics.configure(path=self.path, max_bytes=200, backups=5)
         for index in range(60):

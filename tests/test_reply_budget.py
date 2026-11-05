@@ -29,16 +29,16 @@ class SendingConfigTests(unittest.TestCase):
             Sending.from_config({"replyBudget": 3, "nope": 1})
 
     def test_log_retention_is_configured_with_a_floor_and_a_ceiling(self):
-        from configuration import log_keep
-        self.assertEqual(log_keep(None), 3)
-        self.assertEqual(log_keep({}), 3)
-        self.assertEqual(log_keep({"keep": 1}), 1)
-        self.assertEqual(log_keep({"keep": 100}), 100)
+        from configuration import Logs
+        self.assertEqual(Logs.from_config(None).keep, 3)
+        self.assertEqual(Logs.from_config({}).keep, 3)
+        self.assertEqual(Logs.from_config({"keep": 1}).keep, 1)
+        self.assertEqual(Logs.from_config({"keep": 100}).keep, 100)
         for value in (0, -1, 101, True, "3", 2.5):
             with self.assertRaises(ValueError):
-                log_keep({"keep": value})
+                Logs.from_config({"keep": value})
         with self.assertRaises(ValueError):
-            log_keep({"keep": 3, "maxMiB": 5})
+            Logs.from_config({"keep": 3, "maxMiB": 5})
 
     def test_the_knob_is_settable_but_absent_from_the_panel(self):
         from prompts import SETTINGS_HELP, settings_summary

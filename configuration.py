@@ -154,9 +154,13 @@ class HotSettings:
         if type(idle) is not int or not CONNECTION_IDLE_MIN <= idle <= CONNECTION_IDLE_MAX:
             raise ValueError(
                 f"connectionIdleSeconds 必须是 {CONNECTION_IDLE_MIN}–{CONNECTION_IDLE_MAX} 的整数")
-        return cls(Slicing.from_config(config.get("slicing")), Notifications.from_config(config), hint,
-                   templates, idle, Sending.from_config(config.get("sending")),
-                   Logs.from_config(config.get("logs")))
+        return cls(slicing=Slicing.from_config(config.get("slicing")),
+                   notifications=Notifications.from_config(config),
+                   source_hint=hint,
+                   prompts=templates,
+                   connection_idle_seconds=idle,
+                   sending=Sending.from_config(config.get("sending")),
+                   logs=Logs.from_config(config.get("logs")))
 
 
 def processing_template(config, state):
@@ -176,11 +180,6 @@ def completion_template(config, state):
             text = source
             break
     return text
-
-
-def log_keep(value=None):
-    """Rotated log files to keep, bounded so a stray value cannot fill the disk."""
-    return Logs.from_config(value).keep
 
 
 class ConfigLoader:

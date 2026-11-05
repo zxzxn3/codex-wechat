@@ -95,7 +95,27 @@ def configure(*, path=None, level=None, max_bytes=None, backups=None):
     if max_bytes is not None:
         _max_bytes = max(64, int(max_bytes))
     if backups is not None:
-        _backup_count = max(KEEP_MIN, int(backups))
+        wanted = max(KEEP_MIN, int(backups))
+        # Lowering the count must free the files that are now out of range,
+        # otherwise the disk usage only ever grows.
+        if wanted != _backup_count:
+            _backup_count = wanted
+            _prune_rotations(wanted)
+
+
+def _prune_rotations(keep):
+    """Remove rotated files past the configured count; bounded, best effort."""
+    try:
+        path = log_path()
+    except OSError:
+        return
+    # The configured ceiling is 100, so a few hundred probes covers every file a
+    # previous, larger setting could have left behind.
+    for number in range(keep + 1, keep + 257):
+        try:
+            (path.parent / f"{path.name}.{number}").unlink()
+        except OSError:
+            pass
 
 
 def backup_count():

@@ -25,8 +25,8 @@ from storage import Store
 from wechat import WeChat, login
 from commands import dispatch, notice, parse_control
 from command_specs import CONTROL_LANES
-from configuration import (ConfigLoader, ConfigurationError, HotSettings,
-                           REPLY_BUDGET_CEILING, log_keep, write_config)
+from configuration import (ConfigLoader, ConfigurationError, HotSettings, Logs,
+                           REPLY_BUDGET_CEILING, write_config)
 from prompts import (prompt_text)
 from quota import quota_warnings
 from profiles import backend_label, definitions, ensure_backend_config, snapshot
@@ -141,6 +141,7 @@ class Bridge:
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:
             self.outbox_drained.set()
+        self.noted_reply_budget = None
         self.output = OutputDelivery(self)
         self.inputs = InputDelivery(self)
         self.ingress = Ingress(self)
@@ -170,7 +171,10 @@ class Bridge:
     def note_reply_budget(self):
         """A budget past the observed ceiling is deliberate; leave a trace for support."""
         budget = self.reply_budget()
-        if budget <= REPLY_BUDGET_CEILING or budget == getattr(self, "noted_reply_budget", None):
+        if budget <= REPLY_BUDGET_CEILING:
+            self.noted_reply_budget = None
+            return
+        if budget == self.noted_reply_budget:
             return
         self.noted_reply_budget = budget
         log_event("config.reply_budget_above_ceiling", level="warning", component="config",
@@ -191,9 +195,6 @@ class Bridge:
 
     def budget_exhausted(self):
         return self.budget_state().get("used", 0) >= self.reply_budget()
-
-    def budget_remaining(self):
-        return max(0, self.reply_budget() - self.budget_state().get("used", 0))
 
     def refresh_reply_budget(self):
         """Every accepted inbound message refreshes what we may send back."""
@@ -902,7 +903,7 @@ async def main():
                 raise ValueError("配置必须是 JSON 对象。")
             if ensure_backend_config(config):
                 write_config(args.config, config)
-            configure_diagnostics(backups=log_keep(config.get("logs")))
+            configure_diagnostics(backups=Logs.from_config(config.get("logs")).keep)
             bridge = Bridge(store, account, config, config_path=args.config)
         except ValueError as error:
             raise ConfigurationError(str(error)) from None
