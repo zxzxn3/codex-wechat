@@ -14,23 +14,20 @@
 | Windows 卸载/重启 | 2026-11-06 实机复测：`service-restart` 跨"正在停止"状态 18.6 s 后 `backend.connected`；配置无效时 32.8 s 后 exit 78 且 `last_result=78`（不假成功）；`current` 损坏时 `uninstall` 仍 exit 0；`uninstall` 保留 7418 个数据文件；`uninstall -PurgeData` 删除已知数据项且重建后需重新扫码；通过短入口卸载 exit 0、stderr 无输出、入口在数秒后消失 | 已实机验证 |
 | Windows 提权拒绝 | 提权令牌下 `status`、`logs` 放行（只读例外），`autostart`、`service-start`、`service-restart`、`update` 均 exit 78 并提示「请以普通用户身份运行，不要使用 root/sudo 或管理员终端。」。`service-start` 由操作者在管理员终端实际撞到 | 已实机验证 |
 | App / CLI / 微信三端并发 | 2026-11-06 实机：App 侧发起后 `backend.writer_kept status=followed` 成功跟随 App 会话，App 回复经 `output.enqueued`（body + completion）进入发件箱，即"跟随 + 转发"跑通；但这几条出站被服务端静默丢弃（见下一行），微信→CLI 一支未测（`sharedDaemon=false` 时按设计不支持双向） | 部分覆盖 |
-| 出站投递确认 | 2026-11-06 实机正面撞上：bot 文本出站被服务端静默丢弃，`sendmessage` 一律返回 HTTP 200 + `{"ret":0}` 且无消息 id，同期 `sendtyping`、`getconfig` 全程正常，重启服务无效，手工直连 API 三次也全部未送达。原实现只看 HTTP 状态，`output.sent` 照记，回复离开发件箱而用户看不到任何东西。现改为"无消息 id 即未投递"（`WeChatNotAcknowledged`，可重试，重试耗尽进 `failedOutbox` 并计入连续失败）。同一台机器同一天的真实流量已分别验证两侧：旧版本 `send_ack no_id` 紧跟 `output.sent`；新版本 `send_ack no_id` → `output.send_failed error_type=WeChatNotAcknowledged` ×3 → `output.failed`，条目留在 `unsent`，失败通知本身也只重试 3 次不递归。真实"能送达"仍需换 bot 或等风控窗口复测 | 行为已改并实机验证；投递未恢复 |
+| 出站投递确认 | 2026-11-06 实机正面撞上：bot 文本出站被服务端静默丢弃，`sendmessage` 一律返回 HTTP 200 + `{"ret":0}` 且无消息 id，同期 `sendtyping`、`getconfig` 全程正常，重启服务无效，手工直连 API 也全部未送达。原实现只看 HTTP 状态，`output.sent` 照记，回复离开发件箱而用户看不到任何东西。现改为"无消息 id 即未投递"（`WeChatNotAcknowledged`，可重试，重试耗尽进 `failedOutbox` 并计入连续失败）。同一台机器同一天的真实流量已分别验证两侧：旧版本 `send_ack no_id` 紧跟 `output.sent`；新版本 `send_ack no_id` → `output.send_failed error_type=WeChatNotAcknowledged` ×3 → `output.failed`，条目留在 `unsent`，失败通知本身也只重试 3 次不递归。**19:27Z 用另一个微信（小号）`rebind` 后立即恢复**：19:27:41Z 起连续 7 条全部 `acked` → `output.sent`，`unsent` 归零，代码无需改动 | 已实机验证（含恢复）；限制绑在 bot 身份上 |
 | CDN 上传重试幂等 | 只有客户端超时会在同一 `filekey` 上重试；RST 与服务端非 200 都会换 key 重传。固定 `filekey` + 固定 AES 密钥连传两次得到两个不同引用，且 bot 侧回读恒 400，故幂等未证实 | 已实测，结论为"未证实" |
 | WMI 凭据路径 | 替身进程和直接 helper 已验证；本机计划任务的 Job 允许 breakaway，`daemon start` 直连成功，真实 daemon 走 WMI 的路径不可触发 | 部分验证，条件不可复现 |
 
 ## 已知缺口
 
 - Windows 命名管道存在性、App 版本更新后的 IPC 兼容和三端并发需要在目标机器复测；
-- 本机 bot 的出站文本通道自 2026-11-06 18:53:52Z 起被服务端静默丢弃（`ret=0` 且无 id），
-  入站、typing、`getconfig` 均正常，重启服务无效；发送代码已把这种情况报成可见失败，
-  但"能送达"仍未恢复。已排除的解释：微信端插件自述"只有在你发消息后 24 小时内，ClawBot 才
-  接收 OpenClaw 的回复"，但 18:56:29 与 19:01:10 两条都在入站后 0.4–0.5 s 内发出，照样被丢弃，
-  所以既不是 24 小时窗口，也不是 context 过期或凭据失效，按"该 bot 下行被限流或封锁"处理。
-  同号 `rebind` 也不能用来刷新通道：服务端回 `binded_redirect`，登录流程只打印"本地凭据保持不变"
-  并复用旧 token，不发新 bot id；唯一的重置手段是换一个微信扫码。
-  下一步按代价排序：等限流窗口 → 单条探测 → 换号（新 bot 与新配额）→ 找平台；
-  恢复后顺带补测三端并发里微信↔CLI 与附件（图片/文件/语音）投递确认，以及
-  `ARCHITECTURE.md` 里"静默丢弃时的退避与失败通知"那三条候选改法；
+- 出站静默丢弃已于 2026-11-06 19:27Z 用**另一个微信（小号）** `rebind` 解封，同号 `rebind` 无效
+  （服务端回 `binded_redirect`，登录流程复用旧 token、不发新 bot id，已实测）；
+  旧 bot 的下行何时解封未知，也没有证据说明这是限流、内容审核还是账号级限制——微信端插件自述
+  "只有在你发消息后 24 小时内，ClawBot 才接收 OpenClaw 的回复"，但 18:56:29Z 与 19:01:10Z 两条
+  都在入站后 0.4–0.5 s 内发出、照样被丢弃，所以时效窗口已被排除；
+  待验证：附件（图片/文件/语音）在新 bot 上的投递确认、三端并发里微信↔CLI，
+  以及 `ARCHITECTURE.md` 里"静默丢弃时的退避与失败通知"那三条候选改法；
 - CDN 上传 POST 在没有服务端幂等证据前，不能把自动重试写成已验收行为；上传永不就地重试，只在下载上重试；
 - WMI 真实 daemon、计划任务上下文和带凭据系统代理三者同时成立的条件尚未完整复现；
 - 共享后台回落路径的提示和日志有离线覆盖，但真实失败条件可能需要破坏 Codex 安装才能稳定制造。
