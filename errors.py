@@ -131,7 +131,7 @@ ATTACHMENT_REASONS = (
     (("自动回传仅限",), "只能自动发送当前会话目录内的文件"),
     (("不是普通文件",), "附件不是普通文件"),
     (("网络共享", "设备路径", "驱动器相对路径", "ntfs 附加数据流"),
-     "路径格式不受支持，请只填文件路径本身"),
+     "路径不受支持"),
     (("不存在", "无法读取", "permission denied", "permissionerror",
       "找不到指定的文件", "找不到文件", "no such file", "filenotfounderror",
       "cannot find the file"),
