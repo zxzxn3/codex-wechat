@@ -1034,13 +1034,10 @@ def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bo
             print(f"2. 在当前终端运行并扫码: {target / 'codex-wechat'} start")
             print("   后台服务未注册；请保持终端运行。")
         print("3. 在微信发送 /help 或 /status，然后发送普通消息。")
-    print()
     if not update:
-        print("可选设置:")
-        print("   登录自启: /settings autostart true")
-        print("   双向收发: /settings shared true（默认 Windows 为 false、Linux 为 true）")
-    else:
-        print("双向收发: /settings shared true（默认 Windows 为 false、Linux 为 true）")
+        print()
+        print("可选功能:")
+        print("- 微信中发送 /settings autostart true 打开开机自启")
 
 
 def install(source: Path, target: Path, *, dry_run: bool = False) -> int:

@@ -1,4 +1,4 @@
-"""Every platform is told how to turn the shared daemon on or off."""
+"""Installer next-step hints."""
 import contextlib
 import io
 from pathlib import Path
@@ -18,12 +18,12 @@ class NextStepsHintTests(unittest.TestCase):
                                  service_ready=service_ready)
         return buffer.getvalue()
 
-    def test_both_platforms_name_the_persistent_switch_and_its_defaults(self):
+    def test_fresh_install_offers_autostart_without_the_shared_hint(self):
         for windows in (True, False):
-            for update in (True, False):
-                text = self.output(windows, update=update)
-                self.assertIn("/settings shared true", text)
-                self.assertIn("Windows 为 false、Linux 为 true", text)
+            text = self.output(windows)
+            self.assertIn("可选功能:", text)
+            self.assertIn("- 微信中发送 /settings autostart true 打开开机自启", text)
+            self.assertNotIn("/settings shared true", text)
 
     def test_linux_install_recommends_service_start_and_preserves_autostart(self):
         install = self.output(False)
