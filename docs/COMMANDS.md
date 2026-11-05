@@ -144,6 +144,17 @@ Linux 不受影响：`start_background_service()` 在 `service_adapter.start()` 
 `service-start` 多一次 PowerShell→Python→PowerShell 往返，而校验收敛到
 `Wait-ServiceStable` 一处即可。
 
+### 4. 未绑定时 `start` 与 `service-start` 的提示文案差一行（低，未修）
+
+两个入口都能进入扫码闸门（2026-11-05 实测），但 `start` 会多打印一行
+「尚未绑定微信，请在当前终端扫码；绑定后会继续启动。」：它走 `startup_account()`
+（`codex_wechat.py:726`），而 Windows 的 `service-start` 直接调 `login --starting`
+（`codex-wechat.ps1:282` 的 `service-start` 分支）。
+
+不影响行为，只是同一件事两套说法。若要统一，让 ps1 的 `service-start` 在没有
+`account.json` 时也走 Python 的 `service-start`（它在 `startup_account()` 之后才
+`Start-ScheduledTask`），或在 ps1 里补同一句提示。
+
 ### 2. ~~`login` 缺少 Python 层守卫~~ 已修复（2026-11-05）
 
 原先只有 `codex-wechat.ps1:216` 检查"交互终端 + 后台服务已停"，Linux 上可以：

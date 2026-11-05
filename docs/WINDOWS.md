@@ -115,11 +115,20 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   `raw.githubusercontent.com` 对私有仓库返回 404（2026-11-05 实测
   `.../zxzxn3/codex-wechat/main/installer.py` → `404`），所以这一行入口现在跑不起来；
   仓库公开后可直接执行。本地入口（`install.ps1`）不经过这一步下载，不能替代本项。
-- [ ] 先确认没有前台桥接，再分别在没有微信绑定和已有绑定时运行 `.\codex-wechat.ps1 service-start`：未绑定时
+- [x] 先确认没有前台桥接，再分别在没有微信绑定和已有绑定时运行 `.\codex-wechat.ps1 service-start`：未绑定时
   应显示二维码并等待扫码，扫码后应出现 `正在继续启动桥接`，而不是再次提示运行 `start`；
   已有绑定时应启动后台服务并输出 `后台服务已启动；终端可以关闭。` 以及
   `完整日志: ...\bridge.jsonl`。确认 `start` 与 `service-start` 的扫码准入一致，
   且 `service-start` 不会显示前台 `Ctrl+C` 停止提示。
+  2026-11-05 实测未绑定分支（把 `account.json` 移走，两边都出码后直接 Ctrl+C，不扫码）：
+  `codex-wechat start` → 「尚未绑定微信，请在当前终端扫码；绑定后会继续启动。」+ 二维码四行
+  + 二维码 + URL；`codex-wechat service-start` → **同样出码**，但**没有**那第一行。
+  仅此一行差异：`start` 经 `startup_account()`（`codex_wechat.py:726`），而 ps1 的
+  `service-start` 直接调 `login --starting`（`codex-wechat.ps1:282`）。两者都进入扫码闸门，且都**没有**出现前台的
+  「微信桥已启动；Ctrl+C 停止。」——修复前 `service-start` 在这里会直接失败退出、不出码。
+  已绑定分支（启动服务并输出「后台服务已启动；终端可以关闭。」+ 日志路径）当天多次
+  `service-start` 已确认；扫码成功后的文案来自共用代码
+  （`login(starting=True)` → 「绑定成功。正在继续启动桥接。」）。
 - [x] 在已有后台服务时运行 `.\codex-wechat.ps1 service-restart`，确认输出
   `后台服务已重启。` 和日志路径；再运行一次 `service-start`，确认它会直接提示已在运行，
   而不是争抢状态锁。人为制造一次任务启动后立即退出（例如暂时让配置无效），确认
@@ -183,16 +192,26 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 - [ ] 在真实 CDN 上传大文件并模拟一次超时，确认同一个上传 `filekey` 的重试不会
   产生重复对象；未确认幂等前，不把 POST 自动重试写成已验收行为。
 
+### 误在未绑定状态扫码后如何恢复（2026-11-05 实操）
+
+验证"未绑定时 `service-start` 是否出码"需要把 `account.json` 移走制造未绑定。如果这时真的
+扫了码，服务端会分配一个**新 bot**（bot id 变化、微信号不变），原来的 token 不必再尝试。
+
+不需要再扫第二次：按 `wechat_auth.prepare_rebind()` 的"同一用户、换 bot"分支迁移会话级状态即可
+——`cursor` 置空、删除 `context`、`wechatContextPending = true`、更新 `wechatIdentity`。
+之后在微信发一条消息，`accept_context()` 会接管新上下文、清掉标记，并把排队中的出站消息用
+新 context 重新发出。
+
+实测：恢复后启动服务，排队中的「已恢复会话」与随后 `/status` 的回复都在同一条微信消息到达后
+两次请求内成功发出（`wechat.request ok=true` ×2），`outbox` 归零，全程没有重启桥接或重扫。
+
 ### 2026-11-05 复核：状态说明与剩余依据
 
-同一台机器上的复核（行为基线以 `main` @ `45d979c` 起为准）。上面 12 项里 **7 项已确认并勾选**
+同一台机器上的复核（行为基线以 `main` @ `45d979c` 起为准）。上面 12 项里 **8 项已确认并勾选**
 （`active-release` 只读不改、同名任务不误报、真实 App 的空闲 follower、服务命令的失败可见性、
-运行时 release 不被清理、断开/重开 App 的受控失败、后台运行时 `rebind`），其余 5 项仍未验证，
-其中 1 项被私有仓库阻塞、1 项在本机无法复现。已确认项的判据写在对应条目下；未勾选的复选框
-一律代表"尚未验证"，不代表已通过。
-
-第 ② 项仍留待验证：未绑定时 `service-start` 确实会弹二维码并完成绑定（操作者已走过一遍），
-但该项还要求核对"`start` 与 `service-start` 的扫码准入一致"以及具体提示文案，需要再测一次。
+运行时 release 不被清理、断开/重开 App 的受控失败、后台运行时 `rebind`、扫码准入一致），
+其余 4 项仍未验证，其中 1 项被私有仓库阻塞、1 项在本机无法复现。已确认项的判据写在对应条目下；
+未勾选的复选框一律代表"尚未验证"，不代表已通过。
 
 
 `release.py` 的下载前提已满足：`bootstrap.ps1:49-53` 与 `bootstrap.sh:43-44` 都下载
