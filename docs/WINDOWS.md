@@ -201,6 +201,19 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   （2026-11-05：已直接运行 `windows/wmi_launch.py` 验证机制——环境文件在子进程启动前删除、
   临时目录一并清理、子进程继承 `HTTPS_PROXY`/`NO_PROXY`、`argv` 中无凭据；仍需真实 WMI
   与计划任务上下文。）
+  （2026-11-05 晚：**把条件③也凑齐后，WMI 分支根本没被走到**。退出 App、临时把
+  `sharedDaemon` 改成 `true`、给 `backends.<后端>.env` 加上带账号密码的 `HTTPS_PROXY`，
+  再用 WMI 事件订阅监听进程创建，然后经 `Start-ScheduledTask` 在计划任务上下文里重启服务：
+  日志是 `backend.writer_kept shared`（1.2 秒），**没有** `backend.detached_com_unavailable`，
+  也没有任何 `codex-wechat-wmi-*` 目录产生——`codex app-server daemon start` 在计划任务里
+  直连成功了。原因是本项目的 job 设了 `JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK`
+  （`windows_service.py:186-187`），子进程根本不进 job，CLI 的 breakaway 探测自然通过。
+  所以"真 daemon 走 WMI"在本机不可触发，⑪ 无法勾选；安全属性只能以替身进程 + 直接调用
+  helper 两重证据为准（见上两段）。
+  顺带查出并修掉一处隐患：`start_detached()` 成功分支原先直接 `return`，只有当 helper
+  自己删文件才算清理干净；helper 若在删文件前就死掉，带凭据的环境文件会永久留在 `%TEMP%`。
+  现在成功分支也排一次 5 秒后的兜底清扫（`ENV_FILE_SWEEP_SECONDS`），并有单测
+  `test_a_successful_launch_sweeps_the_env_file` 覆盖。）
 - [ ] 在真实 CDN 上传大文件并模拟一次超时，确认同一个上传 `filekey` 的重试不会
   产生重复对象；未确认幂等前，不把 POST 自动重试写成已验收行为。
 
@@ -425,8 +438,14 @@ CLI 为主保持 `true`，App 为主改为 `false`。
   `this Windows launcher prevents background processes from outliving it`（源码
   `app-server-daemon/src/backend/windows.rs::ensure_detached_launch`，官方文档也写明
   "Windows startup requires a non-elevated terminal whose host permits detached child processes"）。
-  计划任务的 job 禁止 breakaway，所以直接启动必定失败。桥接因此保留直连尝试，失败后改用 WMI
-  启动——该进程不在我们的 job 里。WMI 调用优先走管道：`pywin32` 的 COM 接口约 0.07 秒，而
+  **2026-11-05 修正**：计划任务的 job **不**禁止 breakaway。`windows_service.py:186-187`
+  建 job 时设的是 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK`，
+  后者让子进程**根本不加入**这个 job，所以 CLI 的 breakaway 探测会通过——实测在计划任务
+  上下文里 `codex app-server daemon start` **直连成功**（1.2 秒），WMI 回退用不上。只有
+  换成一个不允许 breakaway 的 job（例如去掉 `SILENT_BREAKAWAY_OK`、只留
+  `KILL_ON_JOB_CLOSE`）才会走到 WMI 那条路。桥接仍然保留"先直连、失败再用 WMI 启动"的结构，
+  因为 WMI 起的进程也不在我们的 job 里，不会被 job 关闭时带走。
+  WMI 调用优先走管道：`pywin32` 的 COM 接口约 0.07 秒，而
   `powershell -Command Invoke-CimMethod` 要约 1.9 秒（PowerShell 启动开销），后者仅作为
   pywin32 不可用时的回退。实测（2026-11-04）：停掉 daemon 后经 `Start-ScheduledTask` 重启桥接，
   `bridge.start` → `backend.connected` **约 0.9 秒**（改造前 2.07 秒），随后 `backend.writer_kept`，
@@ -434,6 +453,8 @@ CLI 为主保持 `true`，App 为主改为 `false`。
 - WMI 创建的子进程继承的是 WmiPrvSE 的环境，不是我们的；需要传递的
   `CODEX_HOME` 与 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY/OPENAI_BASE_URL`
   写入一次性私有环境文件，由 `windows/wmi_launch.py` 读取后启动目标，**不进入命令行**。
+  文件与目录由 helper 在 spawn 目标前删除；spawn 之后还有一次 5 秒兜底清扫，
+  所以 helper 半路死掉也不会把带凭据的文件留在 `%TEMP%`。
   官方文档也说明共享客户端继承的是 **daemon 启动时** 的环境。
 - 模型请求在共享模式下由 daemon 进程发出，因此 daemon 必须继承代理环境变量：要么在带代理的
   shell 里启动它，要么把 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 写进 `backends.<后端>.env`，
