@@ -162,4 +162,14 @@ if ($task) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     Write-Host "removed scheduled task: $TaskName"
 }
+$Shim = Join-Path $env:USERPROFILE '.local\bin\codex-wechat.cmd'
+if (Test-Path -LiteralPath $Shim -PathType Leaf) {
+    $shimText = Get-Content -LiteralPath $Shim -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($shimText -and $shimText.Contains('rem codex-wechat command shim')) {
+        Remove-Item -LiteralPath $Shim -Force
+        Write-Host "removed command shim: $Shim"
+    } else {
+        Write-Warning "left $Shim in place: it is not this project's command shim"
+    }
+}
 Write-Host 'project files and the virtual environment were not removed'
