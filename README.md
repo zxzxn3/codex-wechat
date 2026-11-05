@@ -6,6 +6,8 @@
 
 公开仓库地址尚未确定，下面的 `OWNER/REPO` 需要替换。同一入口首次安装，已有安装则更新；也可先下载脚本审阅。当前使用源码与独立 Python 环境。
 
+### 网络安装
+
 Linux：
 
 ```bash
@@ -18,7 +20,27 @@ Windows PowerShell：
 & ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.ps1))) -Repo https://github.com/OWNER/REPO -Ref main
 ```
 
-本地源码运行 `python3 installer.py`；Windows 可用 `py -3 installer.py`。菜单提供安装/更新、附加组件和退出。`--dry-run` 展示流程，不写文件、不联网，环境检查仍提示但不阻断演练；`--non-interactive` 采用保守默认。重复运行原安装命令即可更新，也可从已安装入口执行 `update`。
+### 本地源码包安装
+
+没有公开仓库时，可以把完整源码目录或源码压缩包交给对方，在源码目录运行本地入口。它不访问 GitHub，但仍会创建独立 Python 环境并从 `requirements.txt` 安装依赖。
+
+Linux：
+
+```bash
+cd /path/to/codex-wechat
+bash install.sh
+```
+
+Windows PowerShell：
+
+```powershell
+Set-Location C:\path\to\codex-wechat
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+`install.sh` 和 `install.ps1` 只是 `installer.py` 的平台入口；也可以直接运行 `python3 installer.py install`，Windows 使用 `py -3 installer.py install`。新版源码包重复运行同一入口即可更新已有安装；没有公开仓库时不能从已安装入口自动远程更新，需要重新取得新版源码包。
+
+分发的源码包不要包含 `.venv`、`.state`、`config.json`、`logs`、`workspace`、`releases` 等本机运行数据。网络入口和本地入口最终都调用同一个安装器：菜单提供安装/更新、附加组件和退出；`--dry-run` 展示流程，不写文件、不联网，环境检查仍提示但不阻断演练；`--non-interactive` 采用保守默认。
 
 需要 Python 3.11+。系统工具与缺失策略集中于 installer.py，Python 包在 requirements 文件中声明；缺少 Codex 不妨碍安装，但模型任务在补齐前不可用。可使用独立 CLI 或 App 内置原生 CLI。二维码优先用 qrencode，缺少时安装轻量 Python 回退。
 
