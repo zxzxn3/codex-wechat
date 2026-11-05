@@ -108,6 +108,23 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
         request.assert_awaited_once_with(["start"], timeout=20)
         wait.assert_awaited_once_with(timeout=20, settle=service_adapter.STABLE_SECONDS)
 
+    async def test_start_waits_when_the_host_reports_a_transitional_state(self):
+        for windows, state in ((True, "Queued"), (False, "activating")):
+            with self.subTest(windows=windows, state=state):
+                status = AsyncMock(return_value=service_adapter.ServiceState(
+                    True, True, state=state))
+                request = AsyncMock()
+                wait = AsyncMock(return_value=service_adapter.ServiceState(
+                    True, True, state="Running"))
+                with patch.object(service_adapter, "status", status), \
+                        patch.object(service_adapter, "IS_WINDOWS", windows), \
+                        patch.object(service_adapter, "_windows_request", request), \
+                        patch.object(service_adapter, "_wait_running_stable", wait):
+                    await service_adapter.start()
+                request.assert_not_awaited()
+                wait.assert_awaited_once_with(
+                    timeout=20, settle=service_adapter.STABLE_SECONDS)
+
     async def test_windows_restart_uses_only_primitive_host_operations(self):
         status = AsyncMock(return_value=service_adapter.ServiceState(True, True))
         request = AsyncMock()
@@ -169,6 +186,16 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
             current = await service_adapter._wait_running_stable(timeout=1, settle=0)
         self.assertEqual(current.state, "active")
         self.assertEqual(status.await_count, 2)
+
+    async def test_stable_wait_fails_fast_after_a_running_sample_drops(self):
+        status = AsyncMock(side_effect=[
+            service_adapter.ServiceState(True, True, state="Running"),
+            service_adapter.ServiceState(True, False, state="Ready", last_result=78),
+        ])
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter.asyncio, "sleep", AsyncMock()):
+            with self.assertRaisesRegex(RuntimeError, "Ready.*78"):
+                await service_adapter._wait_running_stable(timeout=5, settle=2)
 
 
 if __name__ == "__main__":

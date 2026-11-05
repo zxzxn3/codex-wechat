@@ -16,6 +16,7 @@ from subprocess_io import communicate
 # One wording for "no service registered", shared by every entry point.
 NOT_INSTALLED = "尚未注册后台服务，请重新运行安装器。"
 STABLE_SECONDS = 2.0
+STABLE_STATES = {"", "active", "Running"}
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,10 @@ class ServiceState:
     # Native host state and last exit code, when the platform exposes them.
     state: str = ""
     last_result: int | None = None
+
+    @property
+    def stable_running(self):
+        return self.running and self.state in STABLE_STATES
 
 
 async def _run(command, *, timeout):
@@ -138,9 +143,10 @@ async def start():
     current = await status()
     if not current.installed:
         raise ValueError(NOT_INSTALLED)
-    if current.running:
+    if current.stable_running:
         return current
-    await _request_start(timeout=20)
+    if not current.running:
+        await _request_start(timeout=20)
     return await _wait_running_stable(timeout=20, settle=STABLE_SECONDS)
 
 
@@ -165,7 +171,7 @@ async def _wait_running_stable(*, timeout, settle):
     running_since = None
     while True:
         current = await status()
-        stable_state = current.running and current.state in {"", "active", "Running"}
+        stable_state = current.stable_running
         if stable_state:
             if settle <= 0:
                 return current
@@ -174,10 +180,26 @@ async def _wait_running_stable(*, timeout, settle):
             elif loop.time() - running_since >= settle:
                 return current
         else:
+            if running_since is not None:
+                raise RuntimeError(_unstable_message(current))
             running_since = None
         if loop.time() >= deadline:
-            raise RuntimeError("后台服务启动请求已提交，但未能稳定运行")
+            raise RuntimeError(
+                "后台服务启动请求已提交，但未能稳定运行"
+                f"（state={current.state or 'unknown'}）；{_log_hint()}")
         await asyncio.sleep(0.25)
+
+
+def _unstable_message(current):
+    result = (f" last_result={current.last_result}"
+              if current.last_result is not None else "")
+    return (f"后台服务启动后立即退出（state={current.state or 'unknown'}{result}）；"
+            f"{_log_hint()}")
+
+
+def _log_hint():
+    return ("请运行 codex-wechat logs -Service 查看服务日志。"
+            if IS_WINDOWS else "请运行 codex-wechat logs --service 查看服务日志。")
 
 
 async def notify(title, message):

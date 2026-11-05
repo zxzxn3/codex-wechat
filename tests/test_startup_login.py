@@ -10,6 +10,7 @@ from codex_wechat import (
     startup_account,
 )
 from configuration import ConfigurationError
+from service_adapter import ServiceState
 
 
 class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
@@ -18,8 +19,7 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
         events = []
         store.close.side_effect = lambda: events.append("closed")
         with patch("codex_wechat.service_adapter.status",
-                   AsyncMock(return_value=SimpleNamespace(
-                       installed=True, running=False))), \
+                   AsyncMock(return_value=ServiceState(True, False))), \
              patch("codex_wechat.startup_store", AsyncMock(return_value=store)), \
              patch("codex_wechat.startup_account", AsyncMock()) as account, \
              patch("codex_wechat.service_adapter.start",
@@ -34,8 +34,7 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_service_start_is_a_noop_when_the_service_is_running(self):
         with patch("codex_wechat.service_adapter.status",
-                   AsyncMock(return_value=SimpleNamespace(
-                       installed=True, running=True))), \
+                   AsyncMock(return_value=ServiceState(True, True))), \
              patch("codex_wechat.startup_store", AsyncMock()) as store, \
              patch("codex_wechat.service_adapter.start", AsyncMock()) as start, \
              patch("codex_wechat.show_log_path") as log_hint:
@@ -43,6 +42,17 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
         store.assert_not_awaited()
         start.assert_not_awaited()
         log_hint.assert_called_once_with()
+
+    async def test_service_start_waits_for_a_transitional_service(self):
+        store = Mock()
+        with patch("codex_wechat.service_adapter.status",
+                   AsyncMock(return_value=ServiceState(True, True, state="Queued"))), \
+             patch("codex_wechat.startup_store", AsyncMock(return_value=store)), \
+             patch("codex_wechat.startup_account", AsyncMock()), \
+             patch("codex_wechat.service_adapter.start", AsyncMock()) as start, \
+             patch("codex_wechat.show_log_path"):
+            await start_background_service(SimpleNamespace(action="service-start"))
+        start.assert_awaited_once()
 
     async def test_restart_prints_the_log_location(self):
         with patch("codex_wechat.service_adapter.restart", AsyncMock()) as restart, \

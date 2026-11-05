@@ -708,7 +708,7 @@ async def start_background_service(args):
         raise ConfigurationError(str(error)) from None
     if not current.installed:
         raise ConfigurationError(service_adapter.NOT_INSTALLED)
-    if current.running:
+    if current.stable_running:
         print("后台服务已在运行。")
         show_log_path()
         return
