@@ -1,4 +1,4 @@
-# Source is tracked by the HOME dotfiles repository; exclude runtime data.
+# Exclude runtime data; project source is managed by this repository.
 !*
 .venv/
 .bootstrap-venv/
