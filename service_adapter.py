@@ -13,6 +13,9 @@ from platform_support import INSTALL_ROOT, IS_WINDOWS, subprocess_options
 from service_control import UNIT, systemctl
 from subprocess_io import communicate
 
+# One wording for "no service registered", shared by every entry point.
+NOT_INSTALLED = "尚未注册后台服务，请重新运行安装器。"
+
 
 @dataclass(frozen=True)
 class ServiceState:
@@ -103,7 +106,7 @@ async def stop_and_wait(timeout=20):
 async def start():
     current = await status()
     if not current.installed:
-        raise ValueError("本项目尚未注册后台服务，请重新运行安装器")
+        raise ValueError(NOT_INSTALLED)
     if current.running:
         return current
     if IS_WINDOWS:
@@ -123,7 +126,7 @@ async def start():
 async def restart():
     current = await status()
     if not current.installed:
-        raise ValueError("本项目尚未注册后台服务，请重新运行安装器")
+        raise ValueError(NOT_INSTALLED)
     if IS_WINDOWS:
         await _windows_request(["service-restart"], timeout=20)
     else:

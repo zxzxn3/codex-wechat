@@ -687,6 +687,22 @@ async def startup_store(args):
             await asyncio.sleep(0.2)
 
 
+async def require_login_allowed():
+    """Scanning a QR needs a terminal and no running service, on every platform.
+
+    The PowerShell entry enforced this on Windows only; Linux reaches the same
+    action directly, so the gate belongs here instead.
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ConfigurationError("微信登录需要交互终端，不能重定向输入或输出。")
+    try:
+        current = await service_adapter.status()
+    except ValueError as error:
+        raise ConfigurationError(str(error)) from None
+    if current.running:
+        raise ConfigurationError("微信登录前请先停止后台服务。")
+
+
 async def startup_account(store):
     """Only an unbound foreground launch may ask the user to scan a QR code."""
     account = store.load("account")
@@ -787,7 +803,11 @@ async def stop_background_service(state_dir, config_path):
 
 
 async def restart_background_service():
-    await service_adapter.restart()
+    try:
+        await service_adapter.restart()
+    except ValueError as error:
+        # Same condition and same exit code as service-start.
+        raise ConfigurationError(str(error)) from None
     print("后台服务重启已请求。")
     show_log_path()
 
@@ -796,7 +816,7 @@ async def start_background_service(args):
     """Start the installed service; bind interactively if this terminal can show QR."""
     current = await service_adapter.status()
     if not current.installed:
-        raise ConfigurationError("尚未注册后台服务，请重新运行安装器。")
+        raise ConfigurationError(service_adapter.NOT_INSTALLED)
     if current.running:
         print("后台服务已在运行。")
         show_log_path()
@@ -856,6 +876,8 @@ async def main():
             stop_active=args.stop_active,
         )
         return
+    if args.action == "login":
+        await require_login_allowed()
     store = await startup_store(args)
     if args.action == "login":
         result = await login(store, starting=args.starting)
