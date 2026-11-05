@@ -160,7 +160,7 @@ if ($task) {
             foreach ($prefix in $ExpectedActionPrefixes) {
                 if ($actionText.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
                         ($actionText.Length -eq $prefix.Length -or
-                         [char]::IsWhiteSpace($actionText[$prefix.Length])) {
+                         [char]::IsWhiteSpace($actionText[$prefix.Length]))) {
                     $owned = $true
                     break
                 }

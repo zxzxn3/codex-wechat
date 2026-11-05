@@ -39,6 +39,12 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertNotIn("Disable-ScheduledTask", self.task)
         self.assertIn("ConvertTo-Json -Compress", self.task)
 
+    def test_logon_triggers_stay_a_collection_for_single_trigger_tasks(self):
+        # PowerShell unrolls a one-element array on return, and $scalar.Count
+        # throws under Set-StrictMode, so the helper must not rely on `return @()`.
+        self.assertIn("Write-Output -NoEnumerate", self.task)
+        self.assertNotIn("return @($Task.Triggers", self.task)
+
     def test_ownership_check_has_an_exact_prefix_boundary(self):
         for text in (self.task, self.install):
             self.assertIn("[StringComparison]::OrdinalIgnoreCase", text)
@@ -76,15 +82,21 @@ class AutostartScriptContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with patch.object(autostart, "INSTALL_ROOT", root):
+                # The Scheduling COM action exposes `Path`; it has no `Execute`
+                # member, so a fake carrying one would hide a field-name bug.
                 action = SimpleNamespace(
-                    Execute=str(root / ".bootstrap-venv/Scripts/pythonw.exe"),
+                    Path=str(root / ".bootstrap-venv/Scripts/pythonw.exe"),
                     Arguments=f'"{root / "bootstrap_supervisor.py"}" supervise --state-dir "state"')
                 self.assertTrue(autostart._owned_supervisor_action(action))
                 action.Arguments = f'"{root / "other" / "bootstrap_supervisor.py"}" supervise'
                 self.assertFalse(autostart._owned_supervisor_action(action))
-                action.Arguments = f'"{root / "bootstrap_supervisor.py"}" supervise'
-                action.Execute = str(root / ".bootstrap-venv/Scripts/other.exe")
+                action.Arguments = f'"{root / "bootstrap_supervisor.py"}" supervised'
                 self.assertFalse(autostart._owned_supervisor_action(action))
+                action.Arguments = f'"{root / "bootstrap_supervisor.py"}" supervise'
+                action.Path = str(root / ".bootstrap-venv/Scripts/other.exe")
+                self.assertFalse(autostart._owned_supervisor_action(action))
+                action.Path = str(root / ".bootstrap-venv/Scripts/python.exe")
+                self.assertTrue(autostart._owned_supervisor_action(action))
 
     def test_autostart_parameters_are_rejected_by_other_commands(self):
         shell = powershell()

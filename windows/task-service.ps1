@@ -63,9 +63,12 @@ function Get-InstalledTask {
 }
 
 function Get-LogonTriggers([object]$Task) {
-    return @($Task.Triggers | Where-Object {
+    $logon = @($Task.Triggers | Where-Object {
         $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger'
     })
+    # A single-element array would be unrolled into a scalar on return, and
+    # $scalar.Count throws under Set-StrictMode. Always hand back a collection.
+    Write-Output -NoEnumerate $logon
 }
 
 function Write-TaskStatus {

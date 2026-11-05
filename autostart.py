@@ -76,8 +76,24 @@ def windows_task_flags():
         pythoncom.CoUninitialize()
 
 
+def _exec_action(action):
+    """`Actions.Item()` hands back an IAction; only IExecAction has the details.
+
+    With a generated gen_py cache present the IAction wrapper is typed and
+    `Path`/`Arguments` do not exist on it at all, so the members have to be read
+    through the IExecAction interface. Without the cache a dynamic wrapper hides
+    that difference, which is why this only ever breaks on a warm install.
+    """
+    import win32com.client
+    try:
+        return win32com.client.CastTo(action, "IExecAction")
+    except Exception:  # not a COM object (tests) or the cast was refused
+        return action
+
+
 def _owned_supervisor_action(action):
     """Match the exact stable supervisor action installed by this project."""
+    action = _exec_action(action)
     root = Path(INSTALL_ROOT)
     expected = f'"{root / SUPERVISOR_SCRIPT}" supervise'
     arguments = str(getattr(action, "Arguments", "") or "")
@@ -90,7 +106,7 @@ def _owned_supervisor_action(action):
         str(root / ".bootstrap-venv/Scripts/pythonw.exe").casefold(),
         str(root / ".bootstrap-venv/Scripts/python.exe").casefold(),
     }
-    return str(getattr(action, "Execute", "") or "").casefold() in executables
+    return str(getattr(action, "Path", "") or "").casefold() in executables
 
 
 def _read_task_flags():
