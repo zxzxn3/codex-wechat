@@ -202,16 +202,24 @@ def text_setting_value(bridge, argument, max_bytes, too_long_key):
     return value
 
 
+def current_numeric_setting(bridge, name):
+    """Read back what the reload actually applied, so a silent no-op is caught."""
+    return {
+        "connectionIdleSeconds": lambda: bridge.settings.hot.connection_idle_seconds,
+        "media.maxMiB": lambda: bridge.media.limit // (1024 * 1024),
+        "slicing.targetChars": lambda: bridge.slicing.target_chars,
+        "logs.keep": lambda: bridge.settings.hot.logs.keep,
+        "budgets": lambda: bridge.reply_budget(),
+        "sending.replyBudget": lambda: bridge.reply_budget(),
+    }[name]()
+
+
 async def set_numeric_setting(bridge, name, value):
     number = numeric_setting_value(bridge, name, value)
     await write_hot_setting(bridge, name, number)
     if name == "media.maxMiB":
         bridge.media.limit = number * 1024 * 1024
-    current = (bridge.settings.hot.connection_idle_seconds
-               if name == "connectionIdleSeconds"
-               else bridge.media.limit // (1024 * 1024) if name == "media.maxMiB"
-               else bridge.slicing.target_chars)
-    if current != number:
+    if current_numeric_setting(bridge, name) != number:
         raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
     bridge.reply(panel(f"{name}: {number}"))
 
