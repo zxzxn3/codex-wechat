@@ -216,6 +216,31 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
   `test_a_successful_launch_sweeps_the_env_file` 覆盖。）
 - [ ] 在真实 CDN 上传大文件并模拟一次超时，确认同一个上传 `filekey` 的重试不会
   产生重复对象；未确认幂等前，不把 POST 自动重试写成已验收行为。
+  （2026-11-05 实测：**没能确认幂等，而且拿到的证据对幂等不利**，所以不勾选。
+  故障注入用一个本地 CONNECT 隧道代理，只对 `novac2c.cdn.weixin.qq.com` 生效、只掐第一条隧道，
+  载荷是 15 MiB 文件。三种打断方式的结果完全不同：
+
+  | 打断方式 | 客户端看到的失败 | 之后的动作 |
+  |---|---|---|
+  | 握手阶段卡住（代理只转发 client→server） | `curl 28`，6005 ms | `media.transfer_retry attempt=1`，**同一 `filekey`** 重试成功；但正文一个字节都没发出去 |
+  | 正文到 2 MiB 后 RST | `curl 56`，2562 ms | `_classify_transfer` 只把 28 当可重试 → `MediaError` → 投递层重发整条附件，**重新 `getuploadurl` 换新 `filekey`** |
+  | 正文到 2 MiB 后只停不动、不断开 | 服务端约 10 s 后自己回非 200（`kind=http_status`，11656 ms） | 同上，也是"新 `filekey` + 重传整份" |
+
+  也就是说：**只有客户端侧超时会在原地重试**；服务端一旦回应（哪怕是拒绝），就换 key 重来。
+  而"正文传了一半但客户端超时"这个真正危险的组合，被服务端约 10 秒的拒绝时限压得很窄。
+
+  直接问幂等的探针（不做故障注入）：固定 `filekey`、**固定 AES 密钥、同一份密文**连传两次，
+  CDN 返回的 `x-encrypted-param` **两次不同**，看不到任何按 `filekey` 去重的迹象。回读验证做不到：
+  bot 侧对 `/c2c/download?encrypted_query_param=…` 恒得 400（原样与 urlencode 两种都一样），
+  上传的对象看起来只在消息送达后才对接收方授权。所以"重试会不会产生重复对象"仍然无法判定。
+
+  顺带两个观察，都值得单独决定要不要改：
+  ① `curl 28` 的就地重试用的是**同一条已经卡死的连接**（代理日志里没有新的 CONNECT），于是又白等
+  60 秒；投递层的整条重发（`attempt=2`）复用了它，最后 `curl 55` → `output.failed attempt=3`，
+  附件被彻底放弃。要修的话，重试必须强制新连接（`CurlOpt.FRESH_CONNECT`）。
+  ② `media.py:22` 的注释写着"GET 重试安全、POST 重试待验证"，但 `transfer()` 对 GET 和 POST
+  一视同仁。若坚持"未证实幂等就不在 POST 上重试"，应在 `transfer()` 里对 `data is not None` 关掉
+  就地重试——失败一律回去重新 `getuploadurl`，这本来就是其它所有失败分支的做法。）
 
 ### 误在未绑定状态扫码后如何恢复（2026-11-05 实操）
 
