@@ -295,6 +295,8 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         # The task state belongs in the status JSON, not on its own console line.
         self.assertIn("last_result = $lastResult", entry)
         self.assertNotIn('task=$($task.State) last_result', entry)
+        # The entry point forwards the task it already read; no second PowerShell.
+        self.assertIn("$env:CODEX_WECHAT_HOST_STATE = $hostState", entry)
         self.assertIn("[char]::IsWhiteSpace", install)
         self.assertIn("$trigger.Enabled = $enabled", entry)
         self.assertIn("Set-ScheduledTask -TaskName $TaskName -Trigger $triggers", entry)

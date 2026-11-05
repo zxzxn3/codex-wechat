@@ -265,6 +265,23 @@ switch ($Command) {
         exit $LASTEXITCODE
     }
     'status' {
+        # Reading the task here is cheap: this process already loads the module
+        # that the nested call would have to load again.
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($task) {
+            $hostState = [ordered]@{
+                installed = $true
+                owned = [bool](Test-OwnedTask $task)
+                running = [bool]($task.State -in @('Running', 'Queued'))
+                state = [string]$task.State
+                last_result = (Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult
+            } | ConvertTo-Json -Compress
+        } else {
+            $hostState = '{"installed":false,"owned":false,"running":false,"state":"not-installed"}'
+        }
+        # Pass through the environment: PowerShell strips the quotes out of a
+        # JSON string handed to a native command.
+        $env:CODEX_WECHAT_HOST_STATE = $hostState
         & $VenvPython -u $Agent status --state-dir $StateDir --config $ConfigPath
         exit $LASTEXITCODE
     }

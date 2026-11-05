@@ -217,8 +217,10 @@ backend / unfinished_at_last_save / queued / unsent`，加上 2026-11-05 新增�
 宿主读不出来时（例如从克隆目录跑、任务不属于本安装）不报错，只是省略 `service` 段——
 `status` 不能因为查不到宿主就整个失败。
 
-Windows 侧的取值链：`codex_wechat.status_payload_with_service()` →
-`service_adapter.status()` → ps1 的 `service-status -Json`（含 `last_result`）。
+Windows 侧的取值链：`codex-wechat.ps1 status` 在自己进程里读一次任务对象 →
+`CODEX_WECHAT_HOST_STATE`（JSON）→ `codex_wechat.status_payload_with_service()` →
+`service_adapter.parse_host_json()`（归属校验也在这里，与 `service-status -Json` 共用一份）。
+环境变量缺省时退回 `service_adapter.status()`，那是 Linux 的路径。
 
 ## 只记录、不建议现在处理
 
@@ -241,8 +243,11 @@ Windows 侧的取值链：`codex_wechat.status_payload_with_service()` →
 - ~~Windows 的 `status` 比 Linux 多打印一行 `task=…`~~ 已统一（2026-11-05）：那行散装文本删掉了，
   任务状态与上次退出码并入 `status` 的 `service` 段，两个平台同一份 JSON、同一批字段
   （Linux 侧由 `systemctl show` 的 `ActiveState` / `ExecMainStatus` 填充）。
-  代价：Windows 上 `status` 从约 1.3 秒变成约 3.3 秒——`service_adapter.status()` 在 Windows 上
-  是"再起一个 PowerShell"，而改前那两次 `Get-ScheduledTask` 是外层 ps1 在自己进程里做的。
-  有意保持现状：省下这 2 秒要把宿主状态从外层 ps1 传进来（多一个内部参数），为一个诊断命令
+  Windows 的取值方式：外层 `codex-wechat.ps1` 在自己进程里读一次任务对象，用
+  `CODEX_WECHAT_HOST_STATE` 环境变量（JSON）交给 Python，避免"ps1 里再起一个 ps1"。
+  走环境变量而不是命令行参数，是因为 PowerShell 把含双引号的字符串交给原生 exe 时会吃掉引号，
+  JSON 到 Python 那边已经坏了。
+  实测 `status`：嵌套查询 3.26 秒 → 传环境变量 1.96 秒；剩下的约 0.6 秒是 PowerShell 自动加载
+  `ScheduledTasks` 模块，再压下去要改用 COM（会把 `Test-OwnedTask` 的归属校验复制到 Python），
   不值得。微信端的 `/status` 完全不受影响，它是桥进程内的文本渲染，不查宿主。
 - `docs/WINDOWS.md` 与本文有少量重叠：前者面向 Windows 用户的操作与排障，本文只对照命令面。

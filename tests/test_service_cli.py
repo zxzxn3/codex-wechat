@@ -144,3 +144,20 @@ class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
             current = await service_adapter.status()
         self.assertEqual((current.installed, current.running), (True, False))
         self.assertEqual((current.state, current.last_result), ("Ready", 78))
+
+    async def test_the_entry_point_can_forward_the_host_state(self):
+        store = await self.store()
+        host = ('{"installed":true,"owned":true,"running":false,'
+                '"state":"Ready","last_result":78}')
+        with patch.object(codex_wechat.service_adapter, "status",
+                          AsyncMock(side_effect=AssertionError("nested query"))):
+            payload = await codex_wechat.status_payload_with_service(store, host)
+        self.assertEqual(payload["service"],
+                         {"installed": True, "running": False,
+                          "state": "Ready", "last_result": 78})
+
+    async def test_a_foreign_host_payload_is_omitted(self):
+        store = await self.store()
+        host = '{"installed":true,"owned":false,"running":false,"state":"Ready"}'
+        payload = await codex_wechat.status_payload_with_service(store, host)
+        self.assertNotIn("service", payload)

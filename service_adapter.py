@@ -52,30 +52,34 @@ async def _windows_request(command, *, timeout=20):
     ], timeout=timeout)
 
 
+def parse_host_json(text: str) -> ServiceState:
+    """Validate the host payload the Windows entry point prints or forwards."""
+    try:
+        value = json.loads(text)
+        installed = value["installed"]
+        owned = value["owned"]
+        running = value["running"]
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError("Windows 服务状态响应无效。") from None
+    if any(type(item) is not bool for item in (installed, owned, running)):
+        raise RuntimeError("Windows 服务状态响应无效。")
+    if installed and not owned:
+        raise ValueError("名为 CodexWeChat 的计划任务不属于当前安装目录。")
+    last_result = value.get("last_result")
+    if type(last_result) is not int:
+        last_result = None
+    return ServiceState(installed, running, state=str(value.get("state") or ""),
+                        last_result=last_result)
+
+
 async def status():
     if IS_WINDOWS:
-        output = await _windows_request(["service-status", "-Json"])
-        try:
-            value = json.loads(output)
-            installed = value["installed"]
-            owned = value["owned"]
-            running = value["running"]
-        except (KeyError, TypeError, ValueError):
-            raise RuntimeError("Windows 服务状态响应无效。") from None
-        if any(type(item) is not bool for item in (installed, owned, running)):
-            raise RuntimeError("Windows 服务状态响应无效。")
-        if installed and not owned:
-            raise ValueError("名为 CodexWeChat 的计划任务不属于当前安装目录。")
-        last_result = value.get("last_result")
-        if type(last_result) is not int:
-            last_result = None
-        return ServiceState(installed, running, state=str(value.get("state") or ""),
-                            last_result=last_result)
+        return parse_host_json(await _windows_request(["service-status", "-Json"]))
 
     output = await systemctl(
         "show", UNIT,
         "--property=LoadState", "--property=ActiveState", "--property=FragmentPath",
-        "--property=Result", "--property=ExecMainStatus",
+        "--property=ExecMainStatus",
     )
     fields = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
     fragment = fields.get("FragmentPath", "")

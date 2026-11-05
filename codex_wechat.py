@@ -750,6 +750,9 @@ async def startup_account(store):
     return account
 
 
+HOST_STATE_ENV = "CODEX_WECHAT_HOST_STATE"
+
+
 def status_payload(store):
     state = store.load("bridge", {})
     auth = wechat_auth.state(state)
@@ -777,11 +780,17 @@ def status_payload(store):
     return payload
 
 
-async def status_payload_with_service(store):
-    """Bridge state plus the host that runs it, when the host can be read."""
+async def status_payload_with_service(store, host_state=None):
+    """Bridge state plus the host that runs it, when the host can be read.
+
+    The Windows entry point already has the task object in hand and forwards it
+    through HOST_STATE_ENV, so this does not spawn a second PowerShell just to
+    read it again.
+    """
     payload = status_payload(store)
     try:
-        current = await service_adapter.status()
+        current = (service_adapter.parse_host_json(host_state) if host_state
+                   else await service_adapter.status())
     except (ValueError, RuntimeError, OSError):
         return payload
     service = {"installed": current.installed, "running": current.running}
@@ -929,7 +938,8 @@ async def main():
         if wechat_auth.mark_valid(state, result.account):
             store.save("bridge", state)
     elif args.action == "status":
-        payload = await status_payload_with_service(store)
+        payload = await status_payload_with_service(
+            store, os.environ.get(HOST_STATE_ENV))
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         account = await startup_account(store)
