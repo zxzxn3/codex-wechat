@@ -186,6 +186,18 @@ CPython 的 `pathlib._IGNORED_WINERRORS` 只有 `21`、`123`、`1920`，**不含
 - [ ] 使用带用户名和密码的系统代理，触发一次 WMI 启动的共享 daemon；用
   `Win32_Process.CommandLine` 或等价方式确认代理凭据没有进入命令行，并确认一次性
   环境文件在启动后已删除。
+  （2026-11-05：**安全属性已在真实 WMI 路径上验证，但被启动的是替身进程，不是 daemon**。
+  用 `backend_runtime.wmi_command_line()` + `create_process_outside_job()` 走真实
+  `Win32_Process.Create`，环境里带 `HTTPS_PROXY=http://user:<占位凭据>@127.0.0.1:7897`：
+  交给 WMI 的字符串是 `python windows/wmi_launch.py --env-file … --cwd … -- <目标>`，
+  其中不含凭据；目标进程继承了 `HTTPS_PROXY` 与 `NO_PROXY`；目标自己的 `argv` 也不含凭据；
+  一次性环境文件与其目录在启动后都已不存在。helper 只存活约 100ms，事后未能捕获它的
+  `CommandLine`，故以"交给 WMI 的那份字符串"为依据（WMI 不会把环境文件内容拼进命令行）。
+  两处仍未闭合：①启动对象是 `python child.py` 而不是 `codex app-server daemon start`
+  —— 现在 App 占着 `~/.codex` 的 daemon，`daemon start` 会报"已在运行"，不会走 WMI；
+  ②凭据来自 `backends.<后端>.env` 而不是真的系统代理（本机 Clash 无账号密码，改系统代理
+  会影响全机流量）。三者同时成立（daemon 未运行 + 计划任务上下文 + 带凭据的系统代理）时
+  才算完全闭合。）
   （2026-11-05：已直接运行 `windows/wmi_launch.py` 验证机制——环境文件在子进程启动前删除、
   临时目录一并清理、子进程继承 `HTTPS_PROXY`/`NO_PROXY`、`argv` 中无凭据；仍需真实 WMI
   与计划任务上下文。）
