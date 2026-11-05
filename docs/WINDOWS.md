@@ -20,6 +20,26 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
 | 2. App 已持有会话时从微信 `/switch` | ✅ 输入可达、桌面回复进微信（时间线见后） |
 | 3. 桥接先空闲，随后 App 接管 | ✅ 出现 `backend.app_followed`，桌面端后续回复进微信 |
 
+### 跟随失败最常见的真实原因：App 没有"持有"那个会话
+
+`thread-owner-discovery` 对每个会话单独询问，没有客户端持有时返回
+`CodexRpcError(-32600, "App IPC: no-client-found")`。2026-11-05 实测：App 重新打开但
+**没有打开任何会话**时，桥接选中的会话和另外 6 个历史会话全部返回 `no-client-found`；
+App 打开该会话后（同一天的上一轮）`backend.app_followed` 正常出现。
+
+因此"App 后启动并接管该会话"里的**接管**是硬前提：App 得真的打开那个会话，而不是仅仅
+在运行。日志侧有两个限制需要知道：
+
+- `backend.app_attach_failed` 只记 `error_type`，不记 RPC 码与文本（`error_reason()`
+  只暴露本项目自己写死的文案，第三方 RPC 消息可能带提示词或凭据）。要定位就按上面这条
+  手工问一次 `thread-owner-discovery`，或看 `code` 是否 -32600。
+- 相同失败原因只记**一次**（`attach_error` 去重），之后静默重试；所以"日志里没有新事件"
+  不等于"没有在重试"。
+
+重试节奏也要分清：空闲时每 5 秒检查一次是**管道是否出现**；一旦 attach 失败，下一次尝试要等
+`FOLLOW_RETRY_SECONDS = 60`（`input_delivery.py:23`）。前提改变（App 打开该会话）后，
+最多 60 秒内会自己跟随成功，不需要重启桥接。
+
 ### 2026-11-05 实测：`Path.exists()` 会抛异常，而不是返回 False
 
 本机（Windows 11 / Python 3.12.10 / `main` @ `45d979c`，Codex app-server daemon 0.166.0
