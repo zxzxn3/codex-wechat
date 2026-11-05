@@ -125,6 +125,25 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
                 wait.assert_awaited_once_with(
                     timeout=20, settle=service_adapter.STABLE_SECONDS)
 
+    async def test_start_restarts_after_the_service_finishes_stopping(self):
+        status = AsyncMock(return_value=service_adapter.ServiceState(
+            True, True, state="deactivating"))
+        events = []
+        stopped = AsyncMock(side_effect=lambda **_: events.append("stopped"))
+        request = AsyncMock(side_effect=lambda **_: events.append("started"))
+        wait = AsyncMock(return_value=service_adapter.ServiceState(
+            True, True, state="active"))
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter, "_wait_stopped", stopped), \
+                patch.object(service_adapter, "_request_start", request), \
+                patch.object(service_adapter, "_wait_running_stable", wait):
+            await service_adapter.start()
+        self.assertEqual(events, ["stopped", "started"])
+        stopped.assert_awaited_once_with(timeout=20)
+        request.assert_awaited_once_with(timeout=20)
+        wait.assert_awaited_once_with(
+            timeout=20, settle=service_adapter.STABLE_SECONDS)
+
     async def test_windows_restart_uses_only_primitive_host_operations(self):
         status = AsyncMock(return_value=service_adapter.ServiceState(True, True))
         request = AsyncMock()

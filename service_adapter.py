@@ -17,6 +17,7 @@ from subprocess_io import communicate
 NOT_INSTALLED = "尚未注册后台服务，请重新运行安装器。"
 STABLE_SECONDS = 2.0
 STABLE_STATES = {"", "active", "Running"}
+STOPPING_STATES = {"deactivating"}
 
 
 @dataclass(frozen=True)
@@ -145,7 +146,10 @@ async def start():
         raise ValueError(NOT_INSTALLED)
     if current.stable_running:
         return current
-    if not current.running:
+    if current.state in STOPPING_STATES:
+        await _wait_stopped(timeout=20)
+        await _request_start(timeout=20)
+    elif not current.running:
         await _request_start(timeout=20)
     return await _wait_running_stable(timeout=20, settle=STABLE_SECONDS)
 

@@ -713,8 +713,8 @@ async def start_background_service(args):
         show_log_path()
         return
     if current.running:
-        # A queued/activating service already owns (or is about to own) the
-        # state lock. Do not try the interactive binding path again.
+        # A service already in transition has its own start path; do not try
+        # the interactive binding path again.
         try:
             await service_adapter.start()
         except (OSError, RuntimeError, ValueError) as error:
