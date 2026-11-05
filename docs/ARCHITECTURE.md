@@ -7,13 +7,17 @@
 - app_ipc：App 的有界帧、持有者发现、会话快照/增量和 follower 请求适配；app_ipc_windows 只负责本机管道连接与身份核对。
 - desktop：CLI 接入和后台准备，不启动 App、不改写桌面入口；代理由调用者提供。
 - wechat / media：微信和CDN协议；wechat_auth / rebind：认证状态、身份与重绑编排。
+- ingress：微信入站过滤、去重、引用归一化和命令路由；不复制 Bridge 状态。
+- backend_session：连接建立和后台恢复循环；不承载微信或交付策略。
 - input_delivery / output_delivery：输入提交和有序输出；Bridge是组合根和持久化入口。
 - lifecycle：按操作维护会话变更、重启、输入准备和 steer 的准入条件；调用方仍持有锁及提交屏障。
 - commands / command_specs / prompts / configuration：唯一命令目录、展示快照和配置；不重复业务状态。
 - diagnostics 写入安全事件，log_viewer 读取和跟随日志；命令行入口只负责调用。
 - platform_ui / platform_support / service_adapter：二维码、通知、平台路径与原生服务操作。
 - subprocess_io / storage：有界子进程收尾、私有JSON与原生单实例锁。
-- installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。release.py 只负责 release 目录清理，active-release 标记保留正在运行的版本。Windows Mutex/Job Object 使用 pywin32 封装原生 API。
+- installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。安装器必须是单文件可运行，
+  stable payload 清单由测试校验顶层本地导入闭包。release.py 只负责 release 目录清理，
+  active-release 标记保留正在运行的版本。Windows Mutex/Job Object 使用 pywin32 封装原生 API。
   每个版本建独立虚拟环境，但依赖安装复用本机 pip 缓存（`PIP_NO_CACHE_DIR=1` 可恢复旧行为）；
   重复更新因此不再重下同版本 wheel，缓存未命中时才联网。
 
@@ -38,6 +42,11 @@ IPC steer 在发出前核对快照中的 expectedTurnId；App 内部 follower �
 切换会话时会请求旧会话的 `thread/unsubscribe`，交还 Bridge 持有的写入者；这是 app-server
 暴露的唯一释放手段（没有 `thread/unload`），失败只记日志、不阻断切换。
 后台与代理职责仍各自独立，不把微信后台是否就绪作为普通 App 启动的前置条件。
+
+错误处置使用多轴标记：`retryable`、`user_action`、`fallback`、`terminal` 可以并存，
+调用方按 fallback → retryable → user_action → terminal 选择即时策略；`retry_after`
+只作为重试提示，不与用户操作互斥。Writer conflict、共享后台回落和本地回合中止分别保留
+各自语义，不压成互斥错误类别。
 
 ## 输入与输出
 

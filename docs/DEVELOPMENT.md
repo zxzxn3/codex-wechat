@@ -108,3 +108,7 @@ $app = "$env:LOCALAPPDATA\codex-wechat\app"
 
 见 [COMPLEXITY](COMPLEXITY.md)：优先解决已观察到的边界问题，不按行数拆文件，不为跨平台
 强行统一平台适配层。
+
+安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；新增顶层本地导入
+会破坏该入口。`tests/test_release_layout.py` 会检查各平台 stable payload 的顶层本地
+导入闭包，新增 stable 模块或其依赖时必须同步清单。

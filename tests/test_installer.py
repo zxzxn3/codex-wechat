@@ -365,6 +365,31 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(installer.release_matches(self.target, self.current()))
         self.assertFalse((self.target / installer.PREVIOUS_FILE).exists())
 
+    def test_activation_is_the_single_visibility_boundary(self):
+        stages_before_activation = (
+            "install_release",
+            "prepare_bootstrap_runtime",
+            "install_bootstrap",
+            "install_command_link",
+            "activate_release",
+        )
+        stages_after_activation = (
+            "configure_platform_service",
+            "check_user_access",
+        )
+        for index, stage in enumerate(stages_before_activation + stages_after_activation):
+            with self.subTest(stage=stage):
+                target = self.base / f"phase-{index}"
+                with patch("builtins.input", return_value="y"), \
+                        patch.object(installer, stage, side_effect=OSError(stage)):
+                    with self.assertRaisesRegex(OSError, stage):
+                        installer.install(self.source, target)
+                current = installer.read_pointer(target, installer.CURRENT_FILE)
+                if stage in stages_after_activation:
+                    self.assertIsNotNone(current)
+                else:
+                    self.assertIsNone(current)
+
     def test_same_version_update_repairs_missing_stable_entry(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
