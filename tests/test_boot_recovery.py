@@ -55,6 +55,25 @@ class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.restarting)
         self.assertEqual(b.state["inbox"], [job])
 
+    async def test_undrained_outbox_does_not_block_restart(self):
+        # A paused channel never drains; the saved outbox resumes after the restart,
+        # so the handler must not turn that into a refusal.
+        b = self.bridge
+        b.state["outbox"] = [{"id": "pending", "role": "body", "user": "owner",
+                              "context": "context", "text": "待发送"}]
+        b.outbox_drained.clear()
+        with patch("codex_wechat.service_control.require_service_owner", AsyncMock()), \
+             patch("codex_wechat.service_control.restart",
+                   AsyncMock(side_effect=RuntimeError("simulated"))) as restart, \
+             patch("codex_wechat.RESTART_DRAIN_GRACE_SECONDS", 0.01), \
+             patch("codex_wechat.log_event") as log_event:
+            with self.assertRaises(RuntimeError):
+                await b.restart_service()
+        restart.assert_awaited_once()
+        self.assertIn("control.restart_undrained",
+                      [call.args[0] for call in log_event.call_args_list if call.args])
+        self.assertEqual(b.state["outbox"][0]["id"], "pending")
+
     async def test_submitted_work_still_refuses_restart(self):
         for phase in (InputPhase.DISPATCHING, InputPhase.ACCEPTED):
             self.bridge.state["currentInput"] = self.job(phase)

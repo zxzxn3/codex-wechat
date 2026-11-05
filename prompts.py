@@ -28,7 +28,6 @@ BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
 RESTART_STARTED = "正在重启微信桥..."
 RESTART_READY = "微信桥已重启。"
 SERVICE_STOPPING = "微信桥正在停止。"
-RESTART_CONFIRM_UNSENT = "确认消息未能及时发送。"
 RESTART_FAILED = "重启未完成: {reason}"
 RESTART_NOT_SERVICE = "当前微信桥不是由用户服务启动。"
 

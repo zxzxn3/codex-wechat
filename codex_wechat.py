@@ -41,6 +41,8 @@ from prompts import (render_ack, status_fields, duration_label)
 
 ROOT = Path(__file__).resolve().parent
 SERVICE_CHILD_ENV = "CODEX_WECHAT_SERVICE_CHILD"
+# Enough for a queued notice to leave; the saved outbox carries the rest across.
+RESTART_DRAIN_GRACE_SECONDS = 3.0
 __all__ = ["Bridge", "parse_control"]
 
 # The bridge assumes these keys always exist. A state file can be written before
@@ -407,10 +409,16 @@ class Bridge:
             except ValueError:
                 raise UserFacingError(self.prompt("RESTART_NOT_SERVICE")) from None
             self.reply(self.prompt("RESTART_STARTED"))
+            # Queued replies live in the saved outbox, so anything still pending is
+            # sent by the restarted bridge. Waiting for a drain only blocks restart
+            # while the channel is paused or dropping, so give the notice a short
+            # head start and go.
             try:
-                await asyncio.wait_for(self.outbox_drained.wait(), 20)
+                await asyncio.wait_for(self.outbox_drained.wait(),
+                                       RESTART_DRAIN_GRACE_SECONDS)
             except TimeoutError:
-                raise UserFacingError(self.prompt("RESTART_CONFIRM_UNSENT")) from None
+                log_event("control.restart_undrained", level="info", component="control",
+                          queued=len(self.state.get("outbox", [])))
             self.state["restartRequested"] = True
             self.save()
             await service_control.restart()
