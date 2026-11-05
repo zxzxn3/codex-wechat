@@ -646,7 +646,7 @@ class SettingsView:
     log_keep: int | None = None
 
 
-def settings_summary(view, *, text=prompt_text):
+def settings_summary(view: SettingsView, *, text=prompt_text):
     def display_template(value):
         value = str(value or VALUE_EMPTY)
         if len(value) >= 2 and value[0] == value[-1] == "`":

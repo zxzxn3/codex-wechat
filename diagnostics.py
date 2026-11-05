@@ -63,7 +63,7 @@ _TEXT_FIELDS = {
     "method": r"[A-Za-z][A-Za-z0-9/_.@-]{0,63}",
     "thread": r"[A-Za-z0-9._-]{1,64}",
     "backend_version": r"[A-Za-z0-9 ._/@()+-;:,]{1,96}",
-    "api_error_kind": r"(?:auth_expired|rate_limit_hint|prepare_failed|unknown_error|other)",
+    "api_error_kind": r"(?:auth_expired|rate_limit_hint|prepare_failed|not_acknowledged|unknown_error|other)",
     "platform": r"[a-z0-9_.-]{1,16}",
     "proxy": r"[A-Za-z0-9._:\[\]-]{1,64}",
     "version": r"[A-Za-z0-9._-]{1,32}",

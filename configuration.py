@@ -107,7 +107,7 @@ class Sending:
         value = {} if value is None else value
         if not isinstance(value, dict) or set(value) - {"replyBudget"}:
             raise ValueError("sending 仅支持 replyBudget")
-        budget = value.get("replyBudget", cls.reply_budget)
+        budget = value.get("replyBudget", DEFAULT_REPLY_BUDGET)
         if type(budget) is not int or not REPLY_BUDGET_MIN <= budget <= REPLY_BUDGET_MAX:
             raise ValueError(
                 f"sending.replyBudget 必须是 {REPLY_BUDGET_MIN}–{REPLY_BUDGET_MAX} 的整数")
@@ -123,7 +123,7 @@ class Logs:
         value = {} if value is None else value
         if not isinstance(value, dict) or set(value) - {"keep"}:
             raise ValueError("logs 仅支持 keep")
-        keep = value.get("keep", cls.keep)
+        keep = value.get("keep", DEFAULT_LOG_KEEP)
         if type(keep) is not int or not LOG_KEEP_MIN <= keep <= LOG_KEEP_MAX:
             raise ValueError(
                 f"logs.keep 必须是 {LOG_KEEP_MIN}–{LOG_KEEP_MAX} 的整数")

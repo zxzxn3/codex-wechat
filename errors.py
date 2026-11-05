@@ -86,6 +86,7 @@ class WeChatNotAcknowledged(WeChatApiError):
     error_actions = ErrorAction.RETRYABLE
 
     def __init__(self, ret=None):
+        # `code` stays the server's own ret value; the type carries the meaning.
         super().__init__("no_id" if ret is None else ret, "not_acknowledged")
 
     def __str__(self):

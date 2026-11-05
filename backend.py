@@ -154,8 +154,8 @@ class CodexBackend:
         """Log the server build once per connect; initialize has answered by now."""
         version = getattr(self.transport, "server_version", "")
         if version and version != getattr(self, "noted_server_version", None):
-                self.noted_server_version = version
-                log_event("backend.version", component="backend", backend_version=version)
+            self.noted_server_version = version
+            log_event("backend.version", component="backend", backend_version=version)
 
     async def rpc(self, method, params):
         if self.app and method != "thread/resume" and params.get("threadId") == self.app.thread_id:
