@@ -90,7 +90,9 @@ REQUIRED_FILES = {
     Path("requirements.txt"),
     Path("requirements-windows.txt"),
     Path("release.py"),
+    Path("uninstall.py"),
     Path("windows/wmi_launch.py"),
+    Path("windows/task-service.ps1"),
 }
 STABLE_LINUX_FILES = (
     Path("codex-desktop"),
@@ -108,6 +110,7 @@ STABLE_WINDOWS_FILES = (
     Path("codex-wechat.ps1"),
     Path("uninstall.ps1"),
     Path("release.py"),
+    Path("windows/task-service.ps1"),
 )
 
 
@@ -807,7 +810,13 @@ def windows_shim_text(entry: Path) -> str:
 def path_entry_matches(directory, path_value) -> bool:
     """Compare one Windows PATH entry without depending on the host OS."""
     def normalize(value):
-        return (str(value).strip().strip('"').replace("/", "\\")
+        text = str(value).strip().strip('"')
+        text = re.sub(
+            r"%([^%]+)%",
+            lambda match: os.environ.get(match.group(1), match.group(0)),
+            text,
+        )
+        return (text.replace("/", "\\")
                 .rstrip("\\").casefold())
 
     wanted = normalize(directory)
@@ -817,17 +826,28 @@ def path_entry_matches(directory, path_value) -> bool:
 def _windows_path_value() -> str:
     """The PATH a new shell will see, not the installer's own copy of it."""
     if IS_WINDOWS:
-        import winreg
+        try:
+            import winreg
+        except ImportError:
+            return os.environ.get("PATH", "")
         parts = []
-        for root, subkey in ((winreg.HKEY_CURRENT_USER, "Environment"),
-                             (winreg.HKEY_LOCAL_MACHINE,
+        hkey_current_user = getattr(winreg, "HKEY_CURRENT_USER")
+        hkey_local_machine = getattr(winreg, "HKEY_LOCAL_MACHINE")
+        open_key = getattr(winreg, "OpenKey")
+        query_value = getattr(winreg, "QueryValueEx")
+        expand = getattr(winreg, "ExpandEnvironmentStrings", None)
+        for root, subkey in ((hkey_current_user, "Environment"),
+                             (hkey_local_machine,
                               r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
             try:
-                with winreg.OpenKey(root, subkey) as key:
-                    value, _ = winreg.QueryValueEx(key, "Path")
+                with open_key(root, subkey) as key:
+                    value, _ = query_value(key, "Path")
             except OSError:
                 continue
             if isinstance(value, str):
+                if expand is not None:
+                    value = expand(value)
+                value = os.path.expandvars(value)
                 parts.append(value)
         if parts:
             return ";".join(parts)
@@ -1026,6 +1046,10 @@ def _common_install(
         preflight_command_link(target)
         current = read_pointer(target, CURRENT_FILE)
         if current == identifier and release_matches(target, identifier, files) and stable_files_match(source, target):
+            # A previous install may have skipped the Windows shim because the
+            # directory was not on PATH yet. Re-running the same version must
+            # still repair the entry point.
+            install_command_link(target)
             print(f"版本 {identifier} 已经安装，没有修改。")
             return 0
     if not introduction():
@@ -1393,9 +1417,12 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _elevated() -> bool:
-    """An elevated installer creates files and a task owned by Administrators."""
+    """An elevated installer would create files owned by the wrong account."""
     if os.name != "nt":
-        return False
+        try:
+            return os.geteuid() == 0
+        except AttributeError:
+            return False
     try:
         import ctypes
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
@@ -1406,7 +1433,7 @@ def _elevated() -> bool:
 def main(argv: list[str] | None = None) -> int:
     global NON_INTERACTIVE
     options = parser().parse_args(argv)
-    if _elevated():
+    if _elevated() and os.environ.get("CODEX_WECHAT_ALLOW_ROOT") != "1":
         raise ValueError("请以普通用户身份运行，不要使用管理员终端。")
     if options.command == "bootstrap" and not options.repo:
         raise ValueError("一行安装入口需要 --repo；不会使用旧仓库。")

@@ -229,6 +229,19 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "普通用户"):
                 installer.main(["install", "--dir", str(self.target), "--non-interactive"])
 
+    def test_root_override_allows_disposable_containers(self):
+        with patch.object(installer, "_elevated", return_value=True), \
+                patch.dict(os.environ, {"CODEX_WECHAT_ALLOW_ROOT": "1"}), \
+                patch.object(installer, "default_target", return_value=self.target), \
+                patch.object(installer, "install", return_value=0) as install, \
+                patch.object(installer, "logo_banner"), \
+                patch.object(installer, "declaration"):
+            self.assertEqual(
+                installer.main(["install", "--dir", str(self.target), "--non-interactive"]),
+                0,
+            )
+        install.assert_called_once()
+
     @requires_symlinks
     def test_target_root_symlink_is_rejected(self):
         real_target = self.base / "real-target"
@@ -355,6 +368,14 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.update(self.source, self.target), 0)
         self.assertEqual(self.current(), current)
         self.assertTrue((self.target / installer._stable_files()[0]).is_file())
+
+    def test_same_version_update_repairs_the_command_entry(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        with patch("builtins.input", return_value="y"), \
+                patch.object(installer, "install_command_link") as link:
+            self.assertEqual(installer.update(self.source, self.target), 0)
+        link.assert_called_once_with(self.target)
 
     def test_update_rejects_same_versioned_root_as_source(self):
         with patch("builtins.input", return_value="y"):

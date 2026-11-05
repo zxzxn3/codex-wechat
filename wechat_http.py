@@ -59,6 +59,7 @@ class _Pool:
         self.closed = False
         self.idle_seconds = idle_seconds
         self.idle_since = None
+        self.retiring = []
 
     def set_idle_seconds(self, seconds):
         if seconds == self.idle_seconds or self.closed:
@@ -89,10 +90,24 @@ class _Pool:
 
     def release(self):
         self.active -= 1
-        if not self.active and not self.closed:
+        if not self.active:
+            self._close_retired()
+        if not self.active and not self.closed and self.session is not None:
             self.idle_since = asyncio.get_running_loop().time()
             if self.idle_seconds:
                 self._schedule_expiry(self.idle_seconds)
+
+    def _close_retired(self):
+        if not self.retiring:
+            return
+        sessions, self.retiring = self.retiring, []
+        task = asyncio.create_task(self._close_sessions(sessions))
+        self.tasks.add(task)
+        task.add_done_callback(self._idle_done)
+
+    async def _close_sessions(self, sessions):
+        await asyncio.gather(*(session.close() for session in sessions),
+                             return_exceptions=True)
 
     def _schedule_expiry(self, delay):
         self.idle = asyncio.create_task(self._expire(delay))
@@ -114,13 +129,19 @@ class _Pool:
             await session.close()
 
     async def discard(self):
-        """Drop the session so the next request cannot reuse a dead connection."""
+        """Retire a broken session without closing requests that still use it."""
         idle, self.idle = self.idle, None
         if idle is not None:
             idle.cancel()
             await asyncio.gather(idle, return_exceptions=True)
         session, self.session = self.session, None
-        if session is not None:
+        if session is None:
+            return
+        if self.active:
+            # Other transfers may still hold this session's connections. Let
+            # them finish, but never hand it to a new request.
+            self.retiring.append(session)
+        else:
             await session.close()
 
     async def close(self):
@@ -130,6 +151,9 @@ class _Pool:
             idle.cancel()
             await asyncio.gather(idle, return_exceptions=True)
         # An expiry that detached its session may still be closing it.
+        if self.tasks:
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+        self._close_retired()
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
         session, self.session = self.session, None

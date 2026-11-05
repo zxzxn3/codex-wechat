@@ -40,6 +40,14 @@ class LoadBridgeStateTests(unittest.TestCase):
             store.save("bridge", ["not", "a", "dict"])
             self.assertEqual(load_bridge_state(store), BRIDGE_STATE_DEFAULTS)
 
+    def test_status_payload_accepts_a_non_object_bridge_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory), lock=False)
+            store.save("bridge", ["not", "a", "dict"])
+            payload = codex_wechat.status_payload(store)
+        self.assertFalse(payload["unfinished_at_last_save"])
+        self.assertEqual(payload["queued"], 0)
+
 
 class BridgeRepairTests(unittest.TestCase):
     """Regression: /sessions and the recovery loop read state['thread'] directly."""

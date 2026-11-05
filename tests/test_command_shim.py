@@ -50,6 +50,13 @@ class PathEntryTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertFalse(installer.path_entry_matches(directory, value))
 
+    def test_expands_registry_style_environment_variables(self):
+        with patch.dict("os.environ", {"USERPROFILE": r"C:\Users\demo"}):
+            self.assertTrue(installer.path_entry_matches(
+                r"C:\Users\demo\.local\bin",
+                r"%USERPROFILE%\.local\bin",
+            ))
+
 
 class WindowsCommandStateTests(unittest.TestCase):
     def _state(self, *, local_bin_exists=True, local_bin_on_path=True, shim_text=None):

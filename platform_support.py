@@ -11,6 +11,7 @@ from urllib.request import getproxies
 from native_codex import discover_codex
 
 IS_WINDOWS = os.name == "nt"
+ALLOW_ROOT_ENV = "CODEX_WECHAT_ALLOW_ROOT"
 PROJECT_ROOT = Path(__file__).resolve().parent
 INSTALL_ROOT = Path(
     os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(PROJECT_ROOT))
@@ -35,14 +36,23 @@ def subprocess_options():
 
 
 def is_elevated() -> bool:
-    """True when this process holds an administrator token (Windows only)."""
+    """True for an administrator token or a POSIX root process."""
     if not IS_WINDOWS:
-        return False
+        try:
+            return os.geteuid() == 0
+        except AttributeError:
+            return False
     try:
         import ctypes
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        windll = getattr(ctypes, "windll", None)
+        return bool(windll.shell32.IsUserAnAdmin()) if windll is not None else False
     except Exception:  # a locked-down shell may refuse the call itself
         return False
+
+
+def root_override_enabled() -> bool:
+    """The documented escape hatch for containers and disposable CI hosts."""
+    return os.environ.get(ALLOW_ROOT_ENV) == "1"
 
 
 _ACCOUNT_IDENTITY = None

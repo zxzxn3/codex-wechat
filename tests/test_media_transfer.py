@@ -1,5 +1,6 @@
 """Offline boundaries for pooled CDN transfers; never contact WeChat."""
 import asyncio
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,7 +48,10 @@ class FakeSession:
 
     async def request(self, method, url, **kwargs):
         self.calls.append((method, url, kwargs))
-        return self.handler(method, url, kwargs)
+        result = self.handler(method, url, kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
     async def close(self):
         self.closed += 1
@@ -166,6 +170,39 @@ class PooledTransferTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await transport.close()
         self.assertEqual(len(created[1].calls), 1)
+
+    async def test_discard_does_not_close_a_session_with_active_requests(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+        created = []
+
+        async def first_handler(method, url, kwargs):
+            started.set()
+            await release.wait()
+            kwargs["content_callback"](b"first")
+            return FakeResponse()
+
+        def factory(*_args, **_kwargs):
+            handler = first_handler if not created else (
+                lambda method, url, kwargs: FakeResponse())
+            session = FakeSession(handler)
+            created.append(session)
+            return session
+
+        with patch("wechat_http._session", side_effect=factory):
+            transport = PooledHTTP()
+            first = asyncio.create_task(transport.transfer(URL, None, limit=1024))
+            await started.wait()
+            await transport.discard_outgoing()
+            self.assertEqual(created[0].closed, 0)
+            second = await transport.transfer(URL, None, limit=1024)
+            self.assertEqual(len(created), 2)
+            release.set()
+            self.assertEqual((await first)[0], b"first")
+            await asyncio.sleep(0)
+            self.assertEqual(created[0].closed, 1)
+            self.assertEqual(second[0], b"")
+            await transport.close()
 
 
 class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
