@@ -45,6 +45,8 @@ Python，不再实现服务状态机。`codex-desktop.ps1` 保留给需要显式
 
 ## 平台行为
 
+完整的跨平台差异、理由和待讨论项见 [PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md)。
+
 ### 互斥
 
 `start` 在后台服务运行时直接拒绝；`service-start` 在前台桥接持有状态锁时直接拒绝。

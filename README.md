@@ -130,6 +130,9 @@ purge 只删除已知用户数据项，不会递归删除自定义数据根目�
 卸载会拒绝继续，请先按 `Ctrl+C` 退出。Windows 自定义数据目录通过
 `CODEX_WECHAT_DATA_ROOT` 或 `uninstall.ps1 -DataRoot` 传入。
 
+正常用户只使用上面的公开入口；`uninstall.py` 和 `uninstall.ps1` 是内部稳定组件，不应直接执行。
+平台差异及理由见 [PLATFORM-DIFFERENCES](docs/PLATFORM-DIFFERENCES.md)。
+
 ## CLI 与 App 共用会话
 
 本地共享连接优先复用原生 daemon，仍可显式配置独立连接。桥接退出只关闭自己的连接/代理进程，不结束共享 Codex 后台。

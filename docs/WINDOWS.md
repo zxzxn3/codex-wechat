@@ -20,6 +20,8 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
   `codex-desktop.ps1 cli` 也拒绝管理员终端。
 - [ ] `uninstall` 默认保留 `%LOCALAPPDATA%\codex-wechat`；`-PurgeData` 才停止共享后台并删除
   配置、登录、待办、工作目录和日志；`.cmd` 只删除本项目的 shim。
+- [ ] 正常卸载只走 `codex-wechat.cmd` 或完整 stable `codex-wechat.ps1`；不要直接调用
+  `uninstall.ps1`。
 - [ ] 自定义 `CODEX_WECHAT_DATA_ROOT` 或 `uninstall.ps1 -DataRoot` 下运行 `-PurgeData`：
   确认清理的是该目录，而不是 `%LOCALAPPDATA%\codex-wechat`；无关文件保留。
 - [ ] 删除或破坏 `current`（以及活动 release）后运行 `%USERPROFILE%\.local\bin\codex-wechat.cmd
