@@ -29,13 +29,16 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
 - [ ] 用一行 PowerShell 分别执行首次安装和已安装更新，确认临时目录下载了
   `installer.py` 与 `release.py`，安装结束后没有 `ModuleNotFoundError: release`。
 - [ ] 先确认没有前台桥接，再分别在没有微信绑定和已有绑定时运行 `.\codex-wechat.ps1 service-start`：未绑定时
-  应显示二维码并等待扫码，已有绑定时应启动后台服务并输出
-  `后台服务已启动；终端可以关闭。`。确认
-  `start` 与 `service-start` 的扫码准入一致，且 `service-start` 不会显示前台 `Ctrl+C`
-  停止提示。
+  应显示二维码并等待扫码，扫码后应出现 `正在继续启动桥接`，而不是再次提示运行 `start`；
+  已有绑定时应启动后台服务并输出 `后台服务已启动；终端可以关闭。` 以及
+  `完整日志: ...\bridge.jsonl`。确认 `start` 与 `service-start` 的扫码准入一致，
+  且 `service-start` 不会显示前台 `Ctrl+C` 停止提示。
 - [ ] 在已有后台服务时运行 `.\codex-wechat.ps1 service-restart`，确认输出
   `后台服务已重启。` 和日志路径；再运行一次 `service-start`，确认它会直接提示已在运行，
-  而不是争抢状态锁。
+  而不是争抢状态锁。人为制造一次任务启动后立即退出（例如暂时让配置无效），确认
+  `service-start` 在 15 秒内失败，而不是打印成功后留下未运行的服务。
+- [ ] 后台服务原本在运行时执行一次 `rebind`，确认重新绑定完成后服务能重新启动，
+  不出现状态目录锁冲突。
 - [ ] 从 release A 启动服务后，执行稳定入口的 `status` 和 `logs`；确认
   `active-release` 仍指向 A，没有被只读命令改写。
 - [ ] 保持 A 运行，连续更新到 B、C 且不重启桥接；确认 A 的 release 目录不会被
