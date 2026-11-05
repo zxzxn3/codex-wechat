@@ -1,6 +1,6 @@
 # 验证状态
 
-更新：2026-11-05。文档、源码核对和 Linux mock 不能替代真实 Windows、微信、CDN 或模型验收。
+更新：2026-11-06。文档、源码核对和 Linux mock 不能替代真实 Windows、微信、CDN 或模型验收。
 本页只记录当前状态和缺口；详细历史日志见 git 提交历史。
 
 | 范围 | 当前证据 | 状态 |
@@ -10,16 +10,17 @@
 | Windows 服务基础生命周期 | PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、通知 | 已实机验证（历史窗口） |
 | Windows App IPC | writer 冲突连接、身份核对、无 App / App 已持有 / App 后启动三种命名管道状态 | 已验证；仍受 App 版本影响 |
 | Windows 真实微信 | 文本、图片、文件、语音、引用、原生提问、审批 | 已实机验证（历史窗口） |
-| Windows 新命令入口 | `codex-wechat.cmd`、`start` / `service-start` / `status` 等完整闭环 | 仍需按当前 release 复测 |
-| Windows 卸载/重启 | 稳定入口、`-PurgeData`、服务重启、连接池退役 | 仍需按当前 release 复测 |
+| Windows 新命令入口 | 2026-11-06 实机复测 `f5088dcc…`：`.cmd` 短入口在 cmd.exe 与 PowerShell 均可用；无参数默认 `status` 且输出一份 JSON（`service` 段含 `state`/`last_result`）；`service-stop`/`service-status`/`desktop`/`autostart on`/`status -Json` 全部被拒；`start` 在服务运行时 exit 78，`service-start` 在前台持锁时 exit 78；`logs` / `logs -Service` 分别读 `bridge.jsonl` / `service.log`；版本指针拒绝大写 ID、`..`、短 ID、17 位 | 已实机验证 |
+| Windows 卸载/重启 | 2026-11-06 实机复测：`service-restart` 跨"正在停止"状态 18.6 s 后 `backend.connected`；配置无效时 32.8 s 后 exit 78 且 `last_result=78`（不假成功）；`current` 损坏时 `uninstall` 仍 exit 0；`uninstall` 保留 7418 个数据文件；`uninstall -PurgeData` 删除已知数据项且重建后需重新扫码；通过短入口卸载 exit 0、stderr 无输出、入口在数秒后消失 | 已实机验证 |
+| Windows 提权拒绝 | 提权令牌下 `status`、`logs` 放行（只读例外），`autostart`、`service-start`、`service-restart`、`update` 均 exit 78 并提示「请以普通用户身份运行，不要使用 root/sudo 或管理员终端。」。`service-start` 由操作者在管理员终端实际撞到 | 已实机验证 |
 | App / CLI / 微信三端并发 | 部分单端和多客户端测试 | 未覆盖完整三端并发 |
-| CDN 上传重试幂等 | 超时重试行为已知；服务端幂等未证实 | 仅待运行/协议验证 |
-| WMI 凭据路径 | 替身进程和直接 helper 已验证；真实 daemon + 真实系统代理组合未闭合 | 仅待实机验证 |
+| CDN 上传重试幂等 | 只有客户端超时会在同一 `filekey` 上重试；RST 与服务端非 200 都会换 key 重传。固定 `filekey` + 固定 AES 密钥连传两次得到两个不同引用，且 bot 侧回读恒 400，故幂等未证实 | 已实测，结论为"未证实" |
+| WMI 凭据路径 | 替身进程和直接 helper 已验证；本机计划任务的 Job 允许 breakaway，`daemon start` 直连成功，真实 daemon 走 WMI 的路径不可触发 | 部分验证，条件不可复现 |
 
 ## 已知缺口
 
 - Windows 命名管道存在性、App 版本更新后的 IPC 兼容和三端并发需要在目标机器复测；
-- CDN 上传 POST 在没有服务端幂等证据前，不能把自动重试写成已验收行为；
+- CDN 上传 POST 在没有服务端幂等证据前，不能把自动重试写成已验收行为；上传永不就地重试，只在下载上重试；
 - WMI 真实 daemon、计划任务上下文和带凭据系统代理三者同时成立的条件尚未完整复现；
 - 共享后台回落路径的提示和日志有离线覆盖，但真实失败条件可能需要破坏 Codex 安装才能稳定制造。
 
