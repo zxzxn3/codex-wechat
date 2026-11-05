@@ -2,6 +2,7 @@
 from datetime import datetime
 import os
 import re
+from dataclasses import dataclass
 from string import Formatter
 from types import MappingProxyType
 
@@ -625,37 +626,56 @@ def status_summary(**kwargs):
     return status_from_fields(status_fields(**kwargs))
 
 
-def settings_summary(*, notice, attachment_mib, slicing=None, notifications=None,
-                     completion_notice="", source_hint=None, autostart=None, shared=None,
-                     connection_idle_seconds=None, log_keep=None, text=prompt_text):
+@dataclass(frozen=True)
+class SettingsView:
+    """Everything the /settings panel renders, so the signature stops growing.
+
+    `notifications` and `slicing` stay duck-typed: prompts must not import
+    configuration, which already imports this module.
+    """
+
+    notice: str
+    attachment_mib: int
+    completion_notice: str = ""
+    slicing: object = None
+    notifications: object = None
+    source_hint: str | None = None
+    autostart: str | None = None
+    shared: str | None = None
+    connection_idle_seconds: int | None = None
+    log_keep: int | None = None
+
+
+def settings_summary(view, *, text=prompt_text):
     def display_template(value):
         value = str(value or VALUE_EMPTY)
         if len(value) >= 2 and value[0] == value[-1] == "`":
             return value[1:-1]
         return value
 
-    editable = [f"ack: {display_template(notice)}",
-                f"finish: {display_template(completion_notice)}"]
-    if autostart is not None:
-        editable.append(f"autostart: {autostart}")
-    if shared is not None:
-        editable.append(f"shared: {shared}")
-    if notifications is not None:
-        editable.append(f"compactionNotice: {'true' if notifications.compaction else 'false'}")
-    if connection_idle_seconds is not None:
-        editable.append(f"connectionIdleSeconds: {connection_idle_seconds}")
-    editable.append(f"media.maxMiB: {attachment_mib}")
-    if slicing is not None:
-        editable.append(f"slicing.smart: {'true' if slicing.mode == 'smart' else 'false'}")
-        editable.append(f"slicing.targetChars: {slicing.target_chars}")
-    if source_hint is not None:
-        editable.append(f"sourceHint: {source_hint or VALUE_EMPTY}")
-    if log_keep is not None:
-        editable.append(f"logs.keep: {log_keep}")
+    editable = [f"ack: {display_template(view.notice)}",
+                f"finish: {display_template(view.completion_notice)}"]
+    if view.autostart is not None:
+        editable.append(f"autostart: {view.autostart}")
+    if view.shared is not None:
+        editable.append(f"shared: {view.shared}")
+    if view.notifications is not None:
+        editable.append(
+            f"compactionNotice: {'true' if view.notifications.compaction else 'false'}")
+    if view.connection_idle_seconds is not None:
+        editable.append(f"connectionIdleSeconds: {view.connection_idle_seconds}")
+    editable.append(f"media.maxMiB: {view.attachment_mib}")
+    if view.slicing is not None:
+        editable.append(f"slicing.smart: {'true' if view.slicing.mode == 'smart' else 'false'}")
+        editable.append(f"slicing.targetChars: {view.slicing.target_chars}")
+    if view.source_hint is not None:
+        editable.append(f"sourceHint: {view.source_hint or VALUE_EMPTY}")
+    if view.log_keep is not None:
+        editable.append(f"logs.keep: {view.log_keep}")
     readonly = []
-    if notifications is not None:
+    if view.notifications is not None:
         for window in ("primary", "secondary"):
-            values = notifications.quota_thresholds.get(window, ())
+            values = view.notifications.quota_thresholds.get(window, ())
             summary = "[" + ",".join(str(value) for value in values) + "]"
             readonly.append(f"quotaWarningThresholds.{window}: {summary}")
     if readonly:

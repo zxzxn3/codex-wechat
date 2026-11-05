@@ -22,7 +22,8 @@ from prompts import (
     render_ack,
     session_summary,
     setting_summary,
-    settings_summary,
+    SettingsView,
+  settings_summary,
     status_summary,
 )
 from storage import Store
@@ -203,9 +204,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                          "强度: High")
         self.assertEqual(setting_summary(model="example", effort="high", cwd="~/project", field="cwd"),
                          "目录: ~/project")
-        self.assertEqual(settings_summary(notice=DEFAULT_ACK_TEMPLATE,
+        self.assertEqual(settings_summary(SettingsView(notice=DEFAULT_ACK_TEMPLATE,
                                           completion_notice=DEFAULT_COMPLETION_TEMPLATE,
-                                          attachment_mib=20),
+                                          attachment_mib=20)),
                          "```\nack: IN < ~{turn_total_tokens} ({ingress_ms}ms)\n"
                          "finish: OUT > {turn_output_tokens} in {elapsed}\n"
                          "media.maxMiB: 20\n```\n\n"

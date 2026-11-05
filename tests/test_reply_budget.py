@@ -41,12 +41,12 @@ class SendingConfigTests(unittest.TestCase):
             Logs.from_config({"keep": 3, "maxMiB": 5})
 
     def test_the_knob_is_settable_but_absent_from_the_panel(self):
-        from prompts import SETTINGS_HELP, settings_summary
+        from prompts import SETTINGS_HELP, SettingsView, settings_summary
         for name in ("budgets", "sending.replyBudget"):
             self.assertEqual(SETTINGS[name].maximum, 100)
             self.assertEqual(SETTINGS[name].path, ("sending", "replyBudget"))
         self.assertNotIn("budgets", SETTINGS_HELP)
-        self.assertNotIn("replyBudget", settings_summary(notice="", attachment_mib=20))
+        self.assertNotIn("replyBudget", settings_summary(SettingsView(notice="", attachment_mib=20)))
 
 
 class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):

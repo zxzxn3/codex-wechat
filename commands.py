@@ -24,6 +24,7 @@ from diagnostics import error_fields, log_event, request_context
 from prompts import (
     MAX_NOTICE_BYTES, COMMAND_FAILURE_LABELS, panel, display_path, effort_label,
     session_age, session_name, session_summary, setting_summary, settings_summary,
+    SettingsView,
     ping_channel, status_from_fields, prompt_text, VALUE_EMPTY,
 )
 from command_specs import REGISTRY, COMMANDS, help_text
@@ -334,6 +335,22 @@ async def set_shared_daemon(bridge, enabled):
     bridge.reply(text)
 
 
+def settings_view(bridge, *, autostart_text=None):
+    """Collect what the panel shows; adding a field touches only this function."""
+    return SettingsView(
+        notice=notice(bridge),
+        completion_notice=completion_template(bridge.reload_config(), bridge.state),
+        source_hint=bridge.source_hint,
+        log_keep=bridge.settings.hot.logs.keep,
+        attachment_mib=bridge.media.limit // (1024 * 1024),
+        slicing=bridge.slicing,
+        notifications=bridge.notifications,
+        autostart=autostart_text,
+        shared="true" if bridge.backend.shared else "false",
+        connection_idle_seconds=bridge.settings.hot.connection_idle_seconds,
+    )
+
+
 async def command_settings(bridge, command, argument, received=None):
     if argument:
         parts = argument.split(maxsplit=1)
@@ -376,19 +393,8 @@ async def command_settings(bridge, command, argument, received=None):
         autostart_text = "true" if await autostart.status() else "false"
     except (TimeoutError, ValueError, RuntimeError, OSError):
         autostart_text = "unknown"
-    summary = settings_summary(
-        notice=notice(bridge),
-        completion_notice=completion_template(bridge.reload_config(), bridge.state),
-        source_hint=bridge.source_hint,
-        log_keep=bridge.settings.hot.logs.keep,
-        attachment_mib=bridge.media.limit // (1024 * 1024),
-        slicing=bridge.slicing,
-        notifications=bridge.notifications,
-        autostart=autostart_text,
-        shared="true" if bridge.backend.shared else "false",
-        connection_idle_seconds=bridge.settings.hot.connection_idle_seconds,
-        text=bridge.prompt,
-    )
+    summary = settings_summary(settings_view(bridge, autostart_text=autostart_text),
+                               text=bridge.prompt)
     bridge.reply(summary)
     return
 

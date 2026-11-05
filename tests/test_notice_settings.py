@@ -87,13 +87,13 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 store.lock.close()
 
     async def test_settings_summary_shows_independent_quota_windows(self):
-        from prompts import settings_summary
-        text = settings_summary(
+        from prompts import SettingsView, settings_summary
+        text = settings_summary(SettingsView(
             notice="", attachment_mib=20,
             notifications=Notifications.from_config({"quotaWarningThresholds": {
                 "primary": [25, 10, 5],
                 "secondary": [50, 25, 10, 5, 1],
-            }}))
+            }})))
         self.assertIn("quotaWarningThresholds.primary: [25,10,5]", text)
         self.assertIn("quotaWarningThresholds.secondary: [50,25,10,5,1]", text)
 
@@ -211,11 +211,11 @@ class ConnectionIdleSettingsTests(unittest.IsolatedAsyncioTestCase):
                 store.close()
 
     async def test_settings_summary_shows_effective_value(self):
-        from prompts import settings_summary
-        text = settings_summary(notice="", attachment_mib=10, connection_idle_seconds=2)
+        from prompts import SettingsView, settings_summary
+        text = settings_summary(SettingsView(notice="", attachment_mib=10, connection_idle_seconds=2))
         self.assertIn("ack: \n", text)
         self.assertIn("connectionIdleSeconds: 2", text)
-        text = settings_summary(notice="", attachment_mib=10, connection_idle_seconds=0)
+        text = settings_summary(SettingsView(notice="", attachment_mib=10, connection_idle_seconds=0))
         self.assertIn("connectionIdleSeconds: 0", text)
 
     async def test_values_are_bounded_integers(self):
