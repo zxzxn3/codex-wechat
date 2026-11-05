@@ -227,7 +227,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(expected, status)
         for unwanted in ("审批: 0", "发送失败: 0", "Session", "·", "->", "→"):
             self.assertNotIn(unwanted, status)
-        self.assertTrue(HELP.startswith("`/status` 当前状态"))
+        self.assertTrue(HELP.startswith("`/s` `/status` 当前状态"))
         for command in ("/status", "/backend {名称}", "`/settings` 查看设置"):
             self.assertIn(command, HELP)
         for command in ("/approve", "/deny", "/answer", "/get", "/getfile",

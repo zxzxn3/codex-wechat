@@ -60,9 +60,13 @@ for spec in COMMANDS:
 
 
 def help_text(show_all=False, *, text=prompt_text):
-    return "\n".join(f"`{spec.help_usage or spec.usage}` {text('HELP_' + spec.name[1:].upper())}" +
-                     (" " + " ".join(f"`{alias}`" for alias in spec.aliases) if spec.aliases else "")
-                     for spec in COMMANDS if show_all or spec.default_help)
+    """Short aliases lead the line so the terse form is always the first one seen."""
+    def line(spec):
+        usage = f"`{spec.help_usage or spec.usage}`"
+        aliases = " ".join(f"`{alias}`" for alias in spec.aliases)
+        head = f"{aliases} {usage}" if aliases else usage
+        return f"{head} {text('HELP_' + spec.name[1:].upper())}"
+    return "\n".join(line(spec) for spec in COMMANDS if show_all or spec.default_help)
 
 
 HELP = help_text()

@@ -36,7 +36,7 @@ class PromptCatalogueTests(unittest.TestCase):
         self.assertEqual(help_text(), HELP)
         self.assertEqual(help_text(show_all=True), HELP_ALL)
         custom = help_text(text=lambda name: prompt_text(name, overrides={"HELP_STATUS": "Live status"}))
-        self.assertIn('`/status` Live status `/s`', custom)
+        self.assertIn('`/s` `/status` Live status', custom)
         self.assertIn('`/sessions [页码|搜索词]`', custom)
         for command in ("/approve", "/deny", "/answer", "/get", "/getfile",
                         "/cwd", "/switch", "/ping"):
