@@ -100,6 +100,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("token", " ".join(command).lower())
         env = windows_service.child_environment(Path("C:/data/owner.json"), "abc")
         self.assertEqual(env["AGENT_WECHAT_SERVICE_TOKEN"], "abc")
+        self.assertEqual(env["CODEX_WECHAT_SERVICE_CHILD"], "1")
         self.assertEqual(env["PYTHONUTF8"], "1")
 
     def test_owner_status_atomic_write_and_token_scoped_cleanup(self):
@@ -272,7 +273,9 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_scripts_pin_current_user_task_and_power_settings(self):
         install = (ROOT / "install.ps1").read_text(encoding="utf-8")
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
+        task = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
         service = (ROOT / "windows_service.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "service_adapter.py").read_text(encoding="utf-8")
         self.assertIn("New-ScheduledTaskTrigger -AtLogOn", install)
         self.assertIn("-LogonType Interactive", install)
         self.assertIn("-RunLevel Limited", install)
@@ -286,36 +289,28 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("$trigger.Enabled = $autostart", install)
         self.assertIn("Set-ScheduledTask", install)
         self.assertIn("-LogonType Interactive", install)
-        self.assertIn("[ValidateSet('on', 'off')]", entry)
-        self.assertIn("[switch]$Json", entry)
-        self.assertIn("only valid with the autostart command", entry)
-        self.assertIn("[char]::IsWhiteSpace", entry)
+        self.assertIn("[ValidateSet('true', 'false')]", entry)
+        self.assertIn("autostart", entry)
+        self.assertIn("windows/task-service.ps1", adapter)
+        self.assertIn("[char]::IsWhiteSpace", task)
         self.assertIn(r"^[a-f0-9]{16}$", entry)
-        self.assertIn("尚未绑定微信，请在当前终端扫码", entry)
-        # The task state belongs in the status JSON, not on its own console line.
-        self.assertIn("last_result = $lastResult", entry)
-        self.assertNotIn('task=$($task.State) last_result', entry)
-        # The entry point forwards the task it already read; no second PowerShell.
-        self.assertIn("$env:CODEX_WECHAT_HOST_STATE = $hostState", entry)
-        # -TaskOnly keeps the nested call from repeating the binding gate.
-        self.assertIn("[switch]$TaskOnly", entry)
-        self.assertIn("-not $TaskOnly -and -not (Test-Path", entry)
         self.assertIn("[char]::IsWhiteSpace", install)
-        self.assertIn("$trigger.Enabled = $enabled", entry)
-        self.assertIn("Set-ScheduledTask -TaskName $TaskName -Trigger $triggers", entry)
-        self.assertIn("Enable-ScheduledTask", entry)
-        self.assertNotIn("Disable-ScheduledTask", entry)
-        self.assertIn("service-start", entry)
-        self.assertIn("service-stop", entry)
-        self.assertIn("service-restart", entry)
-        self.assertIn("Wait-ServiceStable", entry)
-        self.assertIn("后台服务启动后立即退出", entry)
-        self.assertNotIn("Wait-TaskRunning", entry)
-        self.assertIn("后台服务已启动；终端可以关闭。", entry)
-        self.assertIn("后台服务已重启。", entry)
-        self.assertIn("--starting", entry)
-        self.assertIn("bridge.jsonl", entry)
-        self.assertIn("logs", entry)
+        self.assertIn("$trigger.Enabled = $enabled", task)
+        self.assertIn("Set-ScheduledTask -TaskName $TaskName -Trigger $allTriggers", task)
+        self.assertIn("Enable-ScheduledTask", task)
+        self.assertNotIn("Disable-ScheduledTask", task)
+        self.assertIn("'service-start'", entry)
+        self.assertIn("'service-restart'", entry)
+        self.assertNotIn("'service-stop'", entry)
+        self.assertNotIn("'service-status'", entry)
+        self.assertIn("'autostart'", entry)
+        self.assertIn("'uninstall'", entry)
+        self.assertIn("Wait-ServiceStable", task)
+        self.assertIn("exited during startup", task)
+        self.assertIn("log: $BridgeLog", task)
+        self.assertNotIn("Wait-TaskRunning", task)
+        self.assertIn("Stop-ScheduledTask", task)
+        self.assertIn("Start-ScheduledTask", task)
         # Get-Command returns every match, and Windows ships a 0-byte python.exe
         # alias under WindowsApps; taking the array produced two paths.
         self.assertIn("(Get-Item -LiteralPath $_.Source).Length -gt 0", entry)
@@ -363,11 +358,12 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(text.index("Unregister-ScheduledTask"),
                            text.index("Remove-Item -LiteralPath $DataRoot"))
 
-    def test_powershell_entry_does_not_read_undefined_last_exit_code(self):
+    def test_powershell_entry_forwards_uninstall_to_python(self):
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
-        uninstall = entry[entry.index("    'uninstall' {"):]
-        self.assertIn("exit 0", uninstall)
-        self.assertNotIn("$LASTEXITCODE", uninstall)
+        self.assertIn("'uninstall'", entry)
+        self.assertIn("--purge-data", entry)
+        self.assertIn("& $VenvPython -u @Arguments", entry)
+        self.assertIn("exit $LASTEXITCODE", entry)
 
     def test_installer_requires_native_codex_exe(self):
         discovery = (ROOT / "native_codex.py").read_text(encoding="utf-8")

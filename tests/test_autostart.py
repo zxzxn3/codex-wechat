@@ -88,8 +88,8 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(autostart.asyncio, "create_subprocess_exec", spawn):
             self.assertFalse(await autostart.set_enabled(False))
         args = spawn.call_args.args
-        self.assertEqual(args[-3:], ("autostart", "off", "-Json"))
-        self.assertIn(str(autostart.INSTALL_ROOT / "codex-wechat.ps1"), args)
+        self.assertEqual(args[-2:], ("autostart", "false"))
+        self.assertIn(str(autostart.INSTALL_ROOT / "windows/task-service.ps1"), args)
 
     async def test_windows_failure_and_malformed_response_are_not_success(self):
         for code, output in ((1, b''), (0, b'{"enabled":"true"}'), (0, b'bad')):

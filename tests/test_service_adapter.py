@@ -75,7 +75,7 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
             state = await service_adapter.status()
         self.assertTrue(state.installed)
         self.assertTrue(state.running)
-        request.assert_awaited_once_with(["service-status", "-Json"])
+        request.assert_awaited_once_with(["status"])
 
     async def test_windows_status_rejects_foreign_task(self):
         request = AsyncMock(return_value=(
@@ -104,8 +104,7 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(service_adapter, "IS_WINDOWS", True), \
                 patch.object(service_adapter, "_windows_request", request):
             await service_adapter.start()
-        # The binding gate already ran in Python; the entry point must not repeat it.
-        request.assert_awaited_once_with(["service-start", "-TaskOnly"], timeout=20)
+        request.assert_awaited_once_with(["start"], timeout=20)
 
     async def test_windows_restart_uses_the_service_entry(self):
         status = AsyncMock(return_value=service_adapter.ServiceState(True, True))
@@ -114,7 +113,7 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(service_adapter, "IS_WINDOWS", True), \
                 patch.object(service_adapter, "_windows_request", request):
             await service_adapter.restart()
-        request.assert_awaited_once_with(["service-restart"], timeout=20)
+        request.assert_awaited_once_with(["restart"], timeout=40)
 
     async def test_restart_rejects_an_unregistered_service(self):
         command = AsyncMock()

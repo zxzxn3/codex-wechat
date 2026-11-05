@@ -15,10 +15,9 @@ TASK_TRIGGER_LOGON = 9
 
 async def _windows_request(mode):
     command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-               "-File", str(INSTALL_ROOT / "codex-wechat.ps1"), "autostart"]
+               "-File", str(INSTALL_ROOT / "windows/task-service.ps1"), "autostart"]
     if mode != "status":
         command.append(mode)
-    command.append("-Json")
     process = await asyncio.create_subprocess_exec(
         *command, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL, **subprocess_options())
@@ -133,9 +132,9 @@ async def status():
 
 async def set_enabled(enabled):
     if type(enabled) is not bool:
-        raise ValueError("自启只接受 on 或 off。")
+        raise ValueError("自启只接受 true 或 false。")
     if IS_WINDOWS:
-        actual = await _windows_request("on" if enabled else "off")
+        actual = await _windows_request("true" if enabled else "false")
     else:
         installed = await _linux_status()
         if installed is None and not enabled:
@@ -159,11 +158,11 @@ async def set_enabled(enabled):
 
 
 async def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("status", "on", "off"):
-        raise ValueError("用法: autostart.py status|on|off")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("status", "true", "false"):
+        raise ValueError("用法: autostart.py status|true|false")
     mode = sys.argv[1]
-    value = await status() if mode == "status" else await set_enabled(mode == "on")
-    print("on" if value else "off")
+    value = await status() if mode == "status" else await set_enabled(mode == "true")
+    print("true" if value else "false")
 
 
 if __name__ == "__main__":

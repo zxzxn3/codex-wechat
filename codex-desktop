@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Stable version selection only. Proxy policy belongs to the caller's launcher.
 set -euo pipefail
+if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; then
+    case "${1:-}" in
+        -h|--help) ;;
+        *)
+            echo 'codex-desktop: 请以普通用户身份运行，不要使用 root/sudo。' >&2
+            exit 78
+            ;;
+    esac
+fi
 INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 PROJECT_DIR="$INSTALL_ROOT"
 if [ -L "$INSTALL_ROOT/current" ]; then

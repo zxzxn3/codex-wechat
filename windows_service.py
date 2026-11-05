@@ -277,6 +277,7 @@ def child_environment(status_path: Path, token: str) -> dict[str, str]:
     env.update({
         "AGENT_WECHAT_SERVICE_OWNER": str(status_path),
         "AGENT_WECHAT_SERVICE_TOKEN": token,
+        "CODEX_WECHAT_SERVICE_CHILD": "1",
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
     })

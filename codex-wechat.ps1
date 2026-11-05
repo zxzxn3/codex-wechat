@@ -2,22 +2,21 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('login', 'rebind', 'start', 'stop', 'status', 'service-start', 'service-stop',
-                 'service-restart', 'service-status', 'autostart', 'logs', 'uninstall', 'update', 'install', 'menu', 'components')]
+    [ValidateSet('login', 'rebind', 'start', 'stop', 'status', 'service-start',
+                 'service-restart', 'autostart', 'logs', 'uninstall',
+                 'update', 'install', 'menu', 'components')]
     [string]$Command = 'status',
     [Parameter(Position = 1)]
-    [ValidateSet('on', 'off')]
+    [ValidateSet('true', 'false')]
     [string]$Value,
     [switch]$Follow,
     [switch]$Service,
     [switch]$PurgeData,
-    [switch]$Json,
     [string]$Repo,
     [string]$Ref,
     [switch]$DryRun,
     [switch]$NonInteractive,
     [switch]$StopActive,
-    [switch]$TaskOnly,
     [string]$Component,
     [string]$SkillsDir
 )
@@ -25,17 +24,30 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$TaskName = 'CodexWeChat'
-$ScriptRoot = $PSScriptRoot
+function Test-Elevated {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+if ($Command -notin @('status', 'logs', 'uninstall') -and
+        (Test-Elevated) -and $env:CODEX_WECHAT_ALLOW_ROOT -ne '1') {
+    [Console]::Error.WriteLine('请以普通用户身份运行，不要使用管理员终端。')
+    exit 78
+}
+
 $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     [IO.Path]::GetFullPath($env:CODEX_WECHAT_INSTALL_ROOT)
-} elseif ((Split-Path -Leaf (Split-Path -Parent $ScriptRoot)) -eq 'releases') {
-    Split-Path -Parent (Split-Path -Parent $ScriptRoot)
 } else {
-    $ScriptRoot
+    $PSScriptRoot
 }
+
 if ($Command -in @('update', 'install', 'menu', 'components')) {
-    if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $Service -or $PurgeData -or $Json -or
+    if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $Service -or $PurgeData -or
             $StopActive) {
         throw 'installer commands do not accept service or chat control parameters'
     }
@@ -45,7 +57,6 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     }
     $UpdatePython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $UpdatePython -PathType Leaf)) {
-        # Get-Command returns every match; the WindowsApps alias is a 0-byte stub.
         $PythonCommand = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
             Where-Object {
                 (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
@@ -64,11 +75,26 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     & $UpdatePython @InstallerArguments
     exit $LASTEXITCODE
 }
-if ($Repo -or $Ref -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) { throw '-Repo, -Ref, -DryRun, -NonInteractive, -Component and -SkillsDir are only valid with installer commands' }
-if (($StopActive) -and $Command -ne 'rebind') {
-    throw '-StopActive are only valid with the rebind command'
+
+if ($Repo -or $Ref -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) {
+    throw '-Repo, -Ref, -DryRun, -NonInteractive, -Component and -SkillsDir are only valid with installer commands'
 }
-$Project = $ScriptRoot
+if ($PSBoundParameters.ContainsKey('Value') -and $Command -ne 'autostart') {
+    throw '-Value is only valid with the autostart command'
+}
+if ($Follow -or $Service) {
+    if ($Command -ne 'logs') {
+        throw '-Follow and -Service are only valid with the logs command'
+    }
+}
+if ($StopActive -and $Command -ne 'rebind') {
+    throw '-StopActive is only valid with the rebind command'
+}
+if ($PurgeData -and $Command -ne 'uninstall') {
+    throw '-PurgeData is only valid with the uninstall command'
+}
+
+$Project = $InstallRoot
 $CurrentFile = Join-Path $InstallRoot 'current'
 $CurrentItem = Get-Item -LiteralPath $CurrentFile -Force -ErrorAction SilentlyContinue
 if ($null -ne $CurrentItem) {
@@ -87,327 +113,30 @@ if ($null -ne $CurrentItem) {
 if (-not (Test-Path -LiteralPath (Join-Path $Project 'codex_wechat.py') -PathType Leaf)) {
     throw "codex-wechat.ps1: active project files are missing: $Project"
 }
+
 $env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot
 $DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
-$LogRoot = Join-Path $DataRoot 'logs'
-$BridgeLog = Join-Path $LogRoot 'bridge.jsonl'
 $VenvPython = Join-Path $Project '.venv\Scripts\python.exe'
 $Agent = Join-Path $Project 'codex_wechat.py'
-$StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
-$ExpectedActionPrefixes = @(
-    ('"' + $StableServiceScript + '" supervise')
-)
-$ExpectedActionExecutables = @(
-    (Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'),
-    (Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe')
-)
-
-function Fail([string]$Message) {
-    throw "codex-wechat.ps1: $Message"
+if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+    throw "Python environment not found at $VenvPython; run .\install.ps1 first"
 }
 
-if ($Command -ne 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
-    Fail '-Value is only valid with the autostart command'
+$Arguments = @($Agent, $Command, '--state-dir', $StateDir, '--config', $ConfigPath)
+if ($Command -eq 'logs') {
+    if ($Follow) { $Arguments += '--follow' }
+    if ($Service) { $Arguments += '--service' }
 }
-if ($Command -ne 'logs' -and $Service) {
-    Fail '-Service is only valid with the logs command'
+if ($Command -eq 'rebind' -and $StopActive) {
+    $Arguments += '--stop-active'
 }
-if ($Command -notin @('autostart', 'service-status') -and $Json.IsPresent) {
-    Fail '-Json is only valid with the autostart command or the service-status command'
+if ($Command -eq 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
+    $Arguments += $Value
 }
-
-function Get-InstalledTask {
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if (-not $task) {
-        Fail "scheduled task '$TaskName' is not installed; run .\install.ps1 first"
-    }
-    if (-not (Test-OwnedTask $task)) {
-        Fail "scheduled task '$TaskName' is not owned by this project"
-    }
-    return $task
+if ($Command -eq 'uninstall' -and $PurgeData) {
+    $Arguments += '--purge-data'
 }
-
-function Test-OwnedTask([object]$Task) {
-    if (-not $Task) {
-        return $false
-    }
-    $actions = @($Task.Actions)
-    if ($actions.Count -ne 1) {
-        return $false
-    }
-    if ($ExpectedActionExecutables -notcontains [string]$actions[0].Execute) {
-        return $false
-    }
-    $actionText = [string]$actions[0].Arguments
-    foreach ($prefix in $ExpectedActionPrefixes) {
-        if ($actionText.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-            if ($actionText.Length -eq $prefix.Length -or
-                    [char]::IsWhiteSpace($actionText[$prefix.Length])) {
-                return $true
-            }
-        }
-    }
-    return $false
-}
-
-function Get-LogonTriggers([object]$Task) {
-    return @($Task.Triggers | Where-Object {
-        $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger'
-    })
-}
-
-function Get-AutostartTask {
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if (-not $task) {
-        Fail "scheduled task '$TaskName' is not installed; run .\install.ps1 first"
-    }
-    if (-not (Test-OwnedTask $task)) {
-        Fail "scheduled task '$TaskName' is not owned by this project"
-    }
-    $triggers = @(Get-LogonTriggers $task)
-    if ($triggers.Count -eq 0) {
-        Fail "scheduled task '$TaskName' has no logon trigger"
-    }
-    return [pscustomobject]@{ Task = $task; LoginTriggers = $triggers }
-}
-
-function Get-AutostartEnabled([object]$Task, [object[]]$LoginTriggers) {
-    $taskEnabled = [bool]$Task.Settings.Enabled
-    $triggerEnabled = @($LoginTriggers | Where-Object { [bool]$_.Enabled }).Count -gt 0
-    return $taskEnabled -and $triggerEnabled
-}
-
-function Write-AutostartResult([bool]$Enabled) {
-    if ($Json) {
-        [ordered]@{ enabled = $Enabled } | ConvertTo-Json -Compress
-        return
-    }
-    Write-Host ("autostart: " + $(if ($Enabled) { 'on' } else { 'off' }))
-}
-
-function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if (-not $task -or $task.State -notin @('Running', 'Queued')) {
-            return
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    Fail "scheduled task '$TaskName' did not stop within $TimeoutSeconds seconds"
-}
-
-function Wait-ServiceStable([int]$TimeoutSeconds = 15, [int]$SettleMilliseconds = 2000) {
-    # The task reports Running as soon as the process is created, so a bridge
-    # that dies on startup still looks started. Require it to stay Running.
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $runningSince = $null
-    while ((Get-Date) -lt $deadline) {
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        $state = if ($task) { [string]$task.State } else { 'not-installed' }
-        if ($state -in @('Running', 'Queued')) {
-            if (-not $runningSince) {
-                $runningSince = Get-Date
-            } elseif (((Get-Date) - $runningSince).TotalMilliseconds -ge $SettleMilliseconds) {
-                return
-            }
-        } else {
-            if ($runningSince) {
-                $result = (Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult
-                Fail "后台服务启动后立即退出（state=$state last_result=$result）；日志: $BridgeLog"
-            }
-            $runningSince = $null
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    Fail "后台服务未在 $TimeoutSeconds 秒内稳定运行；日志: $BridgeLog"
-}
-
-if (-not (Test-Path $VenvPython)) {
-    Fail "Python environment not found at $VenvPython; run .\install.ps1 first"
-}
-if (-not (Test-Path $DataRoot)) {
-    New-Item -ItemType Directory -Force -Path $DataRoot, $StateDir, (Join-Path $DataRoot 'logs') | Out-Null
-}
-
-switch ($Command) {
-    'login' {
-        if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
-            Fail 'WeChat login needs an interactive terminal; do not redirect stdin or stdout'
-        }
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if ($task -and $task.State -in @('Running', 'Queued')) {
-            Fail 'stop the background service before logging in again'
-        }
-        & $VenvPython -u $Agent login --state-dir $StateDir --config $ConfigPath
-        exit $LASTEXITCODE
-    }
-    'rebind' {
-        if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
-            Fail 'WeChat rebind needs an interactive terminal; do not redirect stdin or stdout'
-        }
-        $rebindArguments = @($Agent, 'rebind', '--state-dir', $StateDir, '--config', $ConfigPath)
-        if ($StopActive) { $rebindArguments += '--stop-active' }
-        & $VenvPython -u @rebindArguments
-        exit $LASTEXITCODE
-    }
-    'start' {
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if ($task -and $task.State -in @('Running', 'Queued')) {
-            Fail 'the background service is running; stop it before starting a foreground bridge'
-        }
-        & $VenvPython -u $Agent start --state-dir $StateDir --config $ConfigPath
-        exit $LASTEXITCODE
-    }
-    'stop' {
-        & $VenvPython -u $Agent stop --state-dir $StateDir --config $ConfigPath
-        exit $LASTEXITCODE
-    }
-    'status' {
-        # Reading the task here is cheap: this process already loads the module
-        # that the nested call would have to load again.
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if ($task) {
-            $hostState = [ordered]@{
-                installed = $true
-                owned = [bool](Test-OwnedTask $task)
-                running = [bool]($task.State -in @('Running', 'Queued'))
-                state = [string]$task.State
-                last_result = (Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult
-            } | ConvertTo-Json -Compress
-        } else {
-            $hostState = '{"installed":false,"owned":false,"running":false,"state":"not-installed"}'
-        }
-        # Pass through the environment: PowerShell strips the quotes out of a
-        # JSON string handed to a native command. Restore it afterwards because
-        # this script runs in the caller's process.
-        $previousHostState = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_HOST_STATE', 'Process')
-        try {
-            $env:CODEX_WECHAT_HOST_STATE = $hostState
-            & $VenvPython -u $Agent status --state-dir $StateDir --config $ConfigPath
-            $statusExit = $LASTEXITCODE
-        } finally {
-            [Environment]::SetEnvironmentVariable('CODEX_WECHAT_HOST_STATE', $previousHostState, 'Process')
-        }
-        exit $statusExit
-    }
-    'service-start' {
-        # -TaskOnly is the internal entry point: the Python CLI has already run
-        # the binding gate and only needs the task started, so this must never
-        # open a nested login prompt or print user-facing lines.
-        $task = Get-InstalledTask
-        if ($task.State -in @('Running', 'Queued')) {
-            if (-not $TaskOnly) {
-                Write-Host '后台服务已在运行。'
-                Write-Host "完整日志: $BridgeLog"
-            }
-            exit 0
-        }
-        if (-not $TaskOnly -and -not (Test-Path (Join-Path $StateDir 'account.json'))) {
-            Write-Host '尚未绑定微信，请在当前终端扫码；绑定后会继续启动。'
-            & $VenvPython -u $Agent login --state-dir $StateDir --config $ConfigPath --starting
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        }
-        Start-ScheduledTask -TaskName $TaskName
-        Wait-ServiceStable
-        if (-not $TaskOnly) {
-            Write-Host '后台服务已启动；终端可以关闭。'
-            Write-Host "完整日志: $BridgeLog"
-        }
-    }
-    'service-stop' {
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if (-not $task) {
-            Write-Host 'service is not installed'
-            exit 0
-        }
-        if (-not (Test-OwnedTask $task)) {
-            Fail "scheduled task '$TaskName' is not owned by this project"
-        }
-        if ($task.State -notin @('Running', 'Queued')) {
-            Write-Host "service is not running (state=$($task.State))"
-            exit 0
-        }
-        Stop-ScheduledTask -TaskName $TaskName
-        Wait-TaskStopped
-        Write-Host 'service stopped'
-    }
-    'service-restart' {
-        Get-InstalledTask | Out-Null
-        $task = Get-ScheduledTask -TaskName $TaskName
-        if ($task.State -in @('Running', 'Queued')) {
-            Stop-ScheduledTask -TaskName $TaskName
-            Wait-TaskStopped
-        }
-        Start-ScheduledTask -TaskName $TaskName
-        Wait-ServiceStable
-        Write-Host '后台服务已重启。'
-        Write-Host "完整日志: $BridgeLog"
-    }
-    'service-status' {
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        $installed = $null -ne $task
-        $owned = $installed -and (Test-OwnedTask $task)
-        $running = $installed -and $task.State -in @('Running', 'Queued')
-        $taskState = if ($installed) { [string]$task.State } else { 'not-installed' }
-        if ($Json) {
-            $lastResult = $null
-            if ($installed) {
-                $lastResult = (Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult
-            }
-            [ordered]@{
-                installed = [bool]$installed
-                owned = [bool]$owned
-                running = [bool]$running
-                state = $taskState
-                last_result = $lastResult
-            } | ConvertTo-Json -Compress
-            exit 0
-        }
-        if (-not $task) {
-            Write-Host 'task=not-installed'
-            exit 1
-        }
-        $info = Get-ScheduledTaskInfo -TaskName $TaskName
-        Write-Host "task=$($task.State)"
-        Write-Host "last_run=$($info.LastRunTime)"
-        Write-Host "last_result=$($info.LastTaskResult)"
-        Write-Host "logs=$LogRoot"
-    }
-    'autostart' {
-        $info = Get-AutostartTask
-        if (-not $PSBoundParameters.ContainsKey('Value')) {
-            Write-AutostartResult (Get-AutostartEnabled $info.Task $info.LoginTriggers)
-            return
-        }
-        $enabled = $Value -eq 'on'
-        if ($enabled -and -not [bool]$info.Task.Settings.Enabled) {
-            Enable-ScheduledTask -TaskName $TaskName | Out-Null
-            $info = Get-AutostartTask
-        }
-        $triggers = @($info.Task.Triggers)
-        foreach ($trigger in $info.LoginTriggers) {
-            $trigger.Enabled = $enabled
-        }
-        Set-ScheduledTask -TaskName $TaskName -Trigger $triggers | Out-Null
-        $info = Get-AutostartTask
-        Write-AutostartResult (Get-AutostartEnabled $info.Task $info.LoginTriggers)
-    }
-    'logs' {
-        $logArguments = @($Agent, 'logs')
-        if ($Follow) {
-            $logArguments += '--follow'
-        }
-        if ($Service) {
-            $logArguments += '--service'
-        }
-        & $VenvPython -u @logArguments
-        exit $LASTEXITCODE
-    }
-    'uninstall' {
-        & (Join-Path $Project 'uninstall.ps1') -PurgeData:$PurgeData
-        exit 0
-    }
-}
+& $VenvPython -u @Arguments
+exit $LASTEXITCODE

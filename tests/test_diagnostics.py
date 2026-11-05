@@ -201,11 +201,10 @@ class DiagnosticsTests(unittest.TestCase):
 
     def test_windows_logs_command_uses_the_shared_viewer(self):
         script = (Path(__file__).parents[1] / "codex-wechat.ps1").read_text(encoding="utf-8")
-        branch = script.split("'logs' {", 1)[1].split("'uninstall' {", 1)[0]
-        self.assertIn("@($Agent, 'logs')", branch)
-        self.assertIn("--follow", branch)
-        self.assertIn("--service", branch)
-        self.assertNotIn("Get-Content", branch)
+        self.assertIn("@($Agent, $Command", script)
+        self.assertIn("--follow", script)
+        self.assertIn("--service", script)
+        self.assertNotIn("Get-Content -LiteralPath $BridgeLog", script)
 
 
 class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):

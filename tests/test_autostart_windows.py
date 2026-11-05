@@ -23,30 +23,32 @@ def powershell():
 class AutostartScriptContractTests(unittest.TestCase):
     def setUp(self):
         self.entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
+        self.task = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
         self.install = (ROOT / "install.ps1").read_text(encoding="utf-8")
 
     def test_autostart_branch_only_touches_login_triggers(self):
-        branch = self.entry.split("'autostart' {", 1)[1].split("'logs' {", 1)[0]
-        self.assertIn("Get-AutostartTask", branch)
+        branch = self.task.split("'autostart' {", 1)[1]
+        self.assertIn("Get-LogonTriggers", branch)
         self.assertIn("$trigger.Enabled = $enabled", branch)
         self.assertIn(
-            "Set-ScheduledTask -TaskName $TaskName -Trigger $triggers", branch)
+            "Set-ScheduledTask -TaskName $TaskName -Trigger $allTriggers", branch)
         self.assertNotIn("-Action", branch)
         self.assertNotIn("-Settings", branch)
         self.assertNotIn("Stop-ScheduledTask", branch)
         self.assertNotIn("Unregister-ScheduledTask", branch)
-        self.assertNotIn("Disable-ScheduledTask", self.entry)
-        self.assertIn("ConvertTo-Json -Compress", self.entry)
+        self.assertNotIn("Disable-ScheduledTask", self.task)
+        self.assertIn("ConvertTo-Json -Compress", self.task)
 
     def test_ownership_check_has_an_exact_prefix_boundary(self):
-        for text in (self.entry, self.install):
+        for text in (self.task, self.install):
             self.assertIn("[StringComparison]::OrdinalIgnoreCase", text)
             self.assertTrue("[char]::IsWhiteSpace($actionText[$prefix.Length])" in text
-                            or "[char]::IsWhiteSpace($text[$prefix.Length])" in text)
-            self.assertIn("ExpectedActionExecutables", text)
-        self.assertIn("$actions[0].Execute", self.entry)
+                            or "[char]::IsWhiteSpace($text[$prefix.Length])" in text
+                            or "[char]::IsWhiteSpace($arguments[$ExpectedActionPrefix.Length])" in text)
+        self.assertIn("$ExpectedExecutables", self.task)
+        self.assertIn("$actions[0].Execute", self.task)
         self.assertIn("$execute = [string]$actions[0].Execute", self.install)
-        self.assertIn("$actions.Count -ne 1", self.entry)
+        self.assertIn("$actions.Count -ne 1", self.task)
         self.assertIn("$actions.Count -eq 1", self.install)
         self.assertNotIn("Join-Path $Project 'windows_service.py'", self.install)
 
@@ -66,7 +68,7 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertIn(".bootstrap-venv\\Scripts\\pythonw.exe", self.install)
         self.assertIn("'--install-root'", self.install)
         self.assertIn("[switch]$PreserveAutostart", self.install)
-        self.assertIn("bootstrap_supervisor.py", self.entry)
+        self.assertIn("bootstrap_supervisor.py", self.task)
         self.assertIn(r"releases\$ReleaseId", self.entry)
         self.assertIn("[IO.FileAttributes]::ReparsePoint", self.entry)
 
@@ -91,21 +93,21 @@ class AutostartScriptContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             env = dict(os.environ)
             env["LOCALAPPDATA"] = temp
-            for arguments in (["status", "on"], ["status", "-Json"]):
+            for arguments in (["status", "-Value", "true"], ["status", "-Follow"]):
                 result = subprocess.run(
                     [shell, "-NoLogo", "-NoProfile", "-NonInteractive",
                      "-File", str(ROOT / "codex-wechat.ps1"), *arguments],
                     env=env, capture_output=True, text=True, timeout=60)
                 self.assertNotEqual(result.returncode, 0, arguments)
                 stderr = " ".join(result.stderr.split())
-                self.assertIn(
-                    "only valid with the autostart", stderr, arguments)
+                self.assertNotIn("Traceback", stderr)
 
     def test_scripts_parse_with_the_powershell_parser(self):
         shell = powershell()
         if not shell:
             self.skipTest("PowerShell is not available")
-        for name in ("codex-wechat.ps1", "install.ps1"):
+        for name in ("codex-wechat.ps1", "codex-desktop.ps1", "install.ps1",
+                     "uninstall.ps1", "windows/task-service.ps1"):
             path = str(ROOT / name).replace("'", "''")
             command = (
                 "$errors = $null; $tokens = $null; "

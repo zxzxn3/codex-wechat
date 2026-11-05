@@ -43,9 +43,9 @@ async def _run(command, *, timeout):
 
 
 async def _windows_request(command, *, timeout=20):
-    script = INSTALL_ROOT / "codex-wechat.ps1"
+    script = INSTALL_ROOT / "windows/task-service.ps1"
     if not script.is_file():
-        raise ValueError("找不到本项目的 Windows 服务入口。")
+        raise ValueError("找不到本项目的 Windows 服务组件。")
     return await _run([
         "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
         "-ExecutionPolicy", "Bypass", "-File", str(script), *command,
@@ -74,7 +74,7 @@ def parse_host_json(text: str) -> ServiceState:
 
 async def status():
     if IS_WINDOWS:
-        return parse_host_json(await _windows_request(["service-status", "-Json"]))
+        return parse_host_json(await _windows_request(["status"]))
 
     output = await systemctl(
         "show", UNIT,
@@ -105,7 +105,7 @@ async def stop_and_wait(timeout=20):
     if not current.installed or not current.running:
         return current
     if IS_WINDOWS:
-        await _windows_request(["service-stop"], timeout=timeout + 5)
+        await _windows_request(["stop"], timeout=timeout + 5)
         return await status()
 
     await systemctl("--no-block", "stop", UNIT)
@@ -126,7 +126,7 @@ async def start():
     if current.running:
         return current
     if IS_WINDOWS:
-        await _windows_request(["service-start", "-TaskOnly"], timeout=20)
+        await _windows_request(["start"], timeout=20)
     else:
         await systemctl("start", UNIT)
     loop = asyncio.get_running_loop()
@@ -144,7 +144,9 @@ async def restart():
     if not current.installed:
         raise ValueError(NOT_INSTALLED)
     if IS_WINDOWS:
-        await _windows_request(["service-restart"], timeout=20)
+        # The helper may spend 15 seconds stopping and 15 seconds waiting for
+        # a stable start; the outer request must cover both phases.
+        await _windows_request(["restart"], timeout=40)
     else:
         await systemctl("--no-block", "restart", UNIT)
 

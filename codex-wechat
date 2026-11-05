@@ -4,6 +4,15 @@ set -euo pipefail
 INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 PROJECT_DIR="$INSTALL_ROOT"
 CURRENT_FILE="$INSTALL_ROOT/current"
+if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; then
+    case "${1:-status}" in
+        status|logs|uninstall|-h|--help) ;;
+        *)
+            echo "codex-wechat: 请以普通用户身份运行，不要使用 root/sudo。" >&2
+            exit 78
+            ;;
+    esac
+fi
 case "${1:-}" in
     install|update|menu|components)
         INSTALLER="$INSTALL_ROOT/installer.py"
@@ -20,12 +29,10 @@ if [ -L "$CURRENT_FILE" ]; then
 fi
 if [ -f "$CURRENT_FILE" ]; then
     IFS= read -r RELEASE_ID < "$CURRENT_FILE" || true
-    case "$RELEASE_ID" in
-        ""|*[!A-Za-z0-9._-]*)
-            echo "codex-wechat: current 文件包含无效版本标识" >&2
-            exit 1
-            ;;
-    esac
+    if [[ ! "$RELEASE_ID" =~ ^[a-f0-9]{16}$ ]]; then
+        echo "codex-wechat: current 文件包含无效版本标识" >&2
+        exit 1
+    fi
     PROJECT_DIR="$INSTALL_ROOT/releases/$RELEASE_ID"
     if [ ! -f "$PROJECT_DIR/codex_wechat.py" ]; then
         echo "codex-wechat: 当前版本不完整: $PROJECT_DIR" >&2
@@ -39,10 +46,6 @@ case "${1:-}" in
     cli)
         ACTION="$1"; shift
         exec "$INSTALL_ROOT/codex-desktop" "$ACTION" -- "$@"
-        ;;
-    desktop)
-        shift
-        exec "$INSTALL_ROOT/codex-desktop" "$@"
         ;;
 esac
 export PATH="$HOME/.local/bin:$PATH"

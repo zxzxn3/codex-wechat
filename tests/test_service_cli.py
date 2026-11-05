@@ -1,6 +1,4 @@
 """CLI gates for login and the background service, without a real install."""
-import contextlib
-import io
 from pathlib import Path
 import sys
 import tempfile
@@ -62,14 +60,58 @@ class LoginGateTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ConfigurationError, "不属于"):
                 await codex_wechat.require_login_allowed()
 
-    async def test_main_refuses_an_elevated_terminal(self):
+    async def test_a_machine_without_systemd_still_allows_foreground_login(self):
+        input_patch, output_patch = interactive()
+        with input_patch, output_patch, \
+                patch.object(codex_wechat.service_adapter, "status",
+                             AsyncMock(side_effect=RuntimeError("no systemd"))):
+            await codex_wechat.require_login_allowed()
+
+    async def test_main_refuses_an_elevated_mutating_action(self):
         startup_store = AsyncMock()
-        with patch.object(sys, "argv", ["codex_wechat.py", "status"]), \
+        with patch.object(sys, "argv", ["codex_wechat.py", "stop"]), \
                 patch.object(codex_wechat, "is_elevated", return_value=True), \
                 patch.object(codex_wechat, "startup_store", startup_store):
             with self.assertRaisesRegex(ConfigurationError, "普通用户"):
                 await codex_wechat.main()
         startup_store.assert_not_awaited()
+
+    async def test_read_only_status_is_allowed_for_root(self):
+        startup_store = AsyncMock()
+        with patch.object(sys, "argv", ["codex_wechat.py", "status"]), \
+                patch.object(codex_wechat, "is_elevated", return_value=True), \
+                patch.object(codex_wechat, "startup_store", startup_store), \
+                patch.object(codex_wechat, "status_payload_with_service",
+                             AsyncMock(return_value={"bound": False})), \
+                patch.object(codex_wechat.os, "umask"):
+            with patch("builtins.print"):
+                await codex_wechat.main()
+        startup_store.assert_awaited_once()
+
+    async def test_root_override_allows_mutating_container_commands(self):
+        stop = AsyncMock()
+        with patch.object(sys, "argv", ["codex_wechat.py", "stop"]), \
+                patch.object(codex_wechat, "is_elevated", return_value=True), \
+                patch.dict("os.environ", {"CODEX_WECHAT_ALLOW_ROOT": "1"}), \
+                patch.object(codex_wechat.os, "umask"), \
+                patch.object(codex_wechat, "stop_background_service", stop):
+            await codex_wechat.main()
+        stop.assert_awaited_once()
+
+    async def test_service_child_start_skips_the_foreground_conflict_check(self):
+        guard = AsyncMock()
+        store = SimpleNamespace(load=lambda *_args, **_kwargs: {"token": "t", "user": "u"},
+                                close=lambda: None)
+        with patch.object(sys, "argv", ["codex_wechat.py", "start"]), \
+                patch.dict("os.environ", {codex_wechat.SERVICE_CHILD_ENV: "1"}), \
+                patch.object(codex_wechat.os, "umask"), \
+                patch.object(codex_wechat, "require_foreground_start_allowed", guard), \
+                patch.object(codex_wechat, "startup_store", AsyncMock(return_value=store)), \
+                patch.object(codex_wechat, "startup_account",
+                             AsyncMock(side_effect=ConfigurationError("stop here"))):
+            with self.assertRaisesRegex(ConfigurationError, "stop here"):
+                await codex_wechat.main()
+        guard.assert_not_awaited()
 
     async def test_main_gates_login_before_taking_the_bridge_lock(self):
         gate = AsyncMock(side_effect=ConfigurationError("blocked"))
@@ -110,6 +152,43 @@ class ServiceFailureShapeTests(unittest.IsolatedAsyncioTestCase):
                     await command()
                 self.assertEqual(str(raised.exception), service_adapter.NOT_INSTALLED)
 
+    async def test_foreground_start_is_rejected_while_the_service_runs(self):
+        with patch.object(codex_wechat.service_adapter, "status",
+                          AsyncMock(return_value=ServiceState(True, True))):
+            with self.assertRaisesRegex(ConfigurationError, "后台服务正在运行"):
+                await codex_wechat.require_foreground_start_allowed()
+
+    async def test_service_start_reports_a_foreground_state_lock(self):
+        args = SimpleNamespace(state_dir=Path("/state"), config=Path("/config"),
+                               action="service-start")
+        with patch.object(codex_wechat.service_adapter, "status",
+                          AsyncMock(return_value=ServiceState(True, False))), \
+                patch.object(codex_wechat, "startup_store",
+                             AsyncMock(side_effect=RuntimeError("state lock busy"))):
+            with self.assertRaisesRegex(ConfigurationError, "state lock busy"):
+                await codex_wechat.start_background_service(args)
+
+
+class CommandRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_autostart_value_reaches_the_shared_action(self):
+        manage = AsyncMock()
+        with patch.object(sys, "argv", ["codex_wechat.py", "autostart", "true"]), \
+                patch.object(codex_wechat.os, "umask"), \
+                patch.object(codex_wechat, "manage_autostart", manage):
+            await codex_wechat.main()
+        manage.assert_awaited_once_with("true")
+
+    async def test_uninstall_purge_is_routed_before_the_bridge_lock(self):
+        action = AsyncMock()
+        startup_store = AsyncMock()
+        with patch.object(sys, "argv", ["codex_wechat.py", "uninstall", "--purge-data"]), \
+                patch.object(codex_wechat.os, "umask"), \
+                patch.object(codex_wechat, "uninstall_command", action), \
+                patch.object(codex_wechat, "startup_store", startup_store):
+            await codex_wechat.main()
+        action.assert_awaited_once_with(purge=True)
+        startup_store.assert_not_awaited()
+
 
 class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
     """`status` reports the host that runs the bridge, not just saved state."""
@@ -146,28 +225,3 @@ class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
             current = await service_adapter.status()
         self.assertEqual((current.installed, current.running), (True, False))
         self.assertEqual((current.state, current.last_result), ("Ready", 78))
-
-    async def test_the_entry_point_can_forward_the_host_state(self):
-        store = await self.store()
-        host = ('{"installed":true,"owned":true,"running":false,'
-                '"state":"Ready","last_result":78}')
-        with patch.object(codex_wechat.service_adapter, "status",
-                          AsyncMock(side_effect=AssertionError("nested query"))):
-            payload = await codex_wechat.status_payload_with_service(store, host)
-        self.assertEqual(payload["service"],
-                         {"installed": True, "running": False,
-                          "state": "Ready", "last_result": 78})
-
-    async def test_a_foreign_host_payload_is_omitted(self):
-        store = await self.store()
-        host = '{"installed":true,"owned":false,"running":false,"state":"Ready"}'
-        payload = await codex_wechat.status_payload_with_service(store, host)
-        self.assertNotIn("service", payload)
-
-    async def test_an_unparsable_forwarded_payload_is_reported_on_stderr(self):
-        store = await self.store()
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            payload = await codex_wechat.status_payload_with_service(store, "{installed:true}")
-        self.assertNotIn("service", payload)
-        self.assertIn("服务宿主状态无法解析", stderr.getvalue())

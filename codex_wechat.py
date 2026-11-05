@@ -12,6 +12,7 @@ import sys
 import time
 import uuid
 
+import autostart
 from lifecycle import can_restart
 import service_adapter
 import service_control
@@ -46,12 +47,14 @@ from wechat_content import (
     remember_quote,
 )
 from errors import UserFacingError, BackendStartupError, WeChatAuthExpired, WeChatPollTimeout, backend_reason
-from platform_support import IS_WINDOWS, data_root, is_elevated
+from platform_support import IS_WINDOWS, data_root, is_elevated, root_override_enabled
 from diagnostics import error_fields, log_event, log_path, new_request_id
 from log_viewer import show_logs
 from prompts import (render_ack, status_fields, duration_label)
+from uninstall import uninstall as uninstall_command
 
 ROOT = Path(__file__).resolve().parent
+SERVICE_CHILD_ENV = "CODEX_WECHAT_SERVICE_CHILD"
 
 # The bridge assumes these keys always exist. A state file can be written before
 # the bridge ever runs (the login action persists auth on its own), so loading
@@ -722,6 +725,11 @@ async def require_login_allowed():
         current = await service_adapter.status()
     except ValueError as error:
         raise ConfigurationError(str(error)) from None
+    except (OSError, RuntimeError):
+        # A machine without a usable service manager still supports the
+        # foreground bridge. The later state lock prevents overwriting a live
+        # bridge if one happens to exist.
+        return
     if current.running:
         raise ConfigurationError("微信登录前请先停止后台服务。")
 
@@ -747,11 +755,8 @@ async def startup_account(store):
     return account
 
 
-HOST_STATE_ENV = "CODEX_WECHAT_HOST_STATE"
-
-
 def status_payload(store):
-    state = store.load("bridge", {})
+    state = load_bridge_state(store)
     auth = wechat_auth.state(state)
     payload = {
         "bound": bool(store.load("account")),
@@ -777,22 +782,14 @@ def status_payload(store):
     return payload
 
 
-async def status_payload_with_service(store, host_state=None):
-    """Bridge state plus the host that runs it, when the host can be read.
-
-    The Windows entry point already has the task object in hand and forwards it
-    through HOST_STATE_ENV, so this does not spawn a second PowerShell just to
-    read it again.
-    """
+async def status_payload_with_service(store):
+    """Bridge state plus service state when the host can be read."""
     payload = status_payload(store)
     try:
-        current = (service_adapter.parse_host_json(host_state) if host_state
-                   else await service_adapter.status())
+        current = await service_adapter.status()
     except (ValueError, RuntimeError, OSError) as error:
-        if host_state:
-            # A forwarded payload that does not parse is a bug in the entry point
-            # rather than a user condition, so say so - but never on stdout.
-            print(f"服务宿主状态无法解析：{error}", file=sys.stderr)
+        log_event("service.status_unavailable", level="warning",
+                  component="service", **error_fields(error))
         return payload
     service = {"installed": current.installed, "running": current.running}
     if current.state:
@@ -866,14 +863,20 @@ async def restart_background_service():
 
 async def start_background_service(args):
     """Start the installed service; bind interactively if this terminal can show QR."""
-    current = await service_adapter.status()
+    try:
+        current = await service_adapter.status()
+    except ValueError as error:
+        raise ConfigurationError(str(error)) from None
     if not current.installed:
         raise ConfigurationError(service_adapter.NOT_INSTALLED)
     if current.running:
         print("后台服务已在运行。")
         show_log_path()
         return
-    store = await startup_store(args)
+    try:
+        store = await startup_store(args)
+    except RuntimeError as error:
+        raise ConfigurationError(str(error)) from None
     try:
         # service-start is still terminal-driven; a background task cannot show
         # a QR code. Use the same binding gate as foreground start.
@@ -882,26 +885,54 @@ async def start_background_service(args):
         # The service must be able to acquire the same state lock after launch;
         # holding it here makes Windows Task Scheduler exit immediately.
         store.close()
-    await service_adapter.start()
+    try:
+        await service_adapter.start()
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ConfigurationError(str(error)) from None
     print("后台服务已启动；终端可以关闭。")
     show_log_path()
+
+
+async def require_foreground_start_allowed():
+    """A foreground bridge cannot share the state directory with the service."""
+    try:
+        current = await service_adapter.status()
+    except (OSError, RuntimeError):
+        return
+    except ValueError as error:
+        raise ConfigurationError(str(error)) from None
+    if current.running:
+        raise ConfigurationError("后台服务正在运行；请先运行 codex-wechat stop。")
+
+
+async def manage_autostart(value):
+    actual = await autostart.status() if value is None else await autostart.set_enabled(
+        value == "true")
+    print("true" if actual else "false")
+
+
+def require_regular_user(action):
+    if (is_elevated() and not root_override_enabled()
+            and action not in {"status", "logs", "uninstall"}):
+        raise ConfigurationError("请以普通用户身份运行，不要使用管理员终端。")
 
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=(
         "login", "start", "stop", "status", "rebind", "logs", "service-start",
-        "service-restart"))
+        "service-restart", "autostart", "uninstall"))
+    parser.add_argument("value", nargs="?", choices=("true", "false"))
     parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
     parser.add_argument("--config", type=Path, default=data_root() / "config.json")
     parser.add_argument("--stop-active", action="store_true")
     parser.add_argument("--follow", action="store_true")
     parser.add_argument("--service", action="store_true",
                         help="同时查看未脱敏的 supervisor/service.log")
+    parser.add_argument("--purge-data", action="store_true")
     parser.add_argument("--starting", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if is_elevated():
-        raise ConfigurationError("请以普通用户身份运行，不要使用管理员终端。")
+    require_regular_user(args.action)
     if args.action != "rebind" and args.stop_active:
         parser.error("--stop-active 只能与 rebind 一起使用")
     if args.action != "logs" and args.follow:
@@ -910,6 +941,10 @@ async def main():
         parser.error("--service 只能与 logs 一起使用")
     if args.action != "login" and args.starting:
         parser.error("--starting 只能与 login 一起使用")
+    if args.value is not None and args.action != "autostart":
+        parser.error("true|false 只能与 autostart 一起使用")
+    if args.purge_data and args.action != "uninstall":
+        parser.error("--purge-data 只能与 uninstall 一起使用")
     os.umask(0o077)
     if args.action == "logs":
         show_logs(args.follow, args.service)
@@ -923,6 +958,12 @@ async def main():
     if args.action == "service-restart":
         await restart_background_service()
         return
+    if args.action == "autostart":
+        await manage_autostart(args.value)
+        return
+    if args.action == "uninstall":
+        await uninstall_command(purge=args.purge_data)
+        return
     if args.action == "rebind":
         await run_rebind(
             args.state_dir,
@@ -932,6 +973,8 @@ async def main():
         return
     if args.action == "login":
         await require_login_allowed()
+    if args.action == "start" and os.environ.get(SERVICE_CHILD_ENV) != "1":
+        await require_foreground_start_allowed()
     store = await startup_store(args)
     if args.action == "login":
         result = await login(store, starting=args.starting)
@@ -939,8 +982,7 @@ async def main():
         if wechat_auth.mark_valid(state, result.account):
             store.save("bridge", state)
     elif args.action == "status":
-        payload = await status_payload_with_service(
-            store, os.environ.get(HOST_STATE_ENV))
+        payload = await status_payload_with_service(store)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         account = await startup_account(store)

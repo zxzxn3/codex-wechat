@@ -169,11 +169,9 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 store.lock.close()
 
-    def test_windows_entry_routes_stop(self):
+    def test_windows_entry_routes_stop_through_python(self):
         script = (Path(__file__).parents[1] / "codex-wechat.ps1").read_text(encoding="utf-8")
         self.assertIn("'stop'", script)
-        branch = script.split("'stop' {", 1)[1].split("'service-stop' {", 1)[0]
-        self.assertIn(
-            "& $VenvPython -u $Agent stop --state-dir $StateDir --config $ConfigPath",
-            branch,
-        )
+        self.assertIn("@($Agent, $Command", script)
+        self.assertIn("& $VenvPython -u @Arguments", script)
+        self.assertNotIn("'service-stop'", script)

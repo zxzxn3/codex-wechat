@@ -1,6 +1,18 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 # Stable dispatch only. Forward native CLI arguments without proxy manipulation.
 $ErrorActionPreference = 'Stop'
+if ($env:CODEX_WECHAT_ALLOW_ROOT -ne '1') {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            [Console]::Error.WriteLine('请以普通用户身份运行，不要使用管理员终端。')
+            exit 78
+        }
+    } catch {
+        # A locked-down shell refusing the token check must not block normal use.
+    }
+}
 $installRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     [IO.Path]::GetFullPath($env:CODEX_WECHAT_INSTALL_ROOT)
 } elseif ((Split-Path -Leaf (Split-Path -Parent $PSScriptRoot)) -eq 'releases') {

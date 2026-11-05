@@ -8,6 +8,7 @@ ConditionPathExists=%h/.local/share/codex-wechat/.state/account.json
 
 [Service]
 Type=exec
+Environment=CODEX_WECHAT_SERVICE_CHILD=1
 ExecStart=%h/.local/share/codex-wechat/codex-wechat start
 Restart=on-failure
 RestartSec=10
