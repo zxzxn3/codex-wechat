@@ -22,6 +22,9 @@
   "sending": {
     "replyBudget": 9
   },
+  "logs": {
+    "keep": 3
+  },
   "compactionNotice": true,
   "quotaWarningThresholds": {
     "primary": [

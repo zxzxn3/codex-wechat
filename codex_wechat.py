@@ -26,7 +26,7 @@ from wechat import WeChat, login
 from commands import dispatch, notice, parse_control
 from command_specs import CONTROL_LANES
 from configuration import (ConfigLoader, ConfigurationError, HotSettings,
-                           REPLY_BUDGET_CEILING, write_config)
+                           REPLY_BUDGET_CEILING, log_keep, write_config)
 from prompts import (prompt_text)
 from quota import quota_warnings
 from profiles import backend_label, definitions, ensure_backend_config, snapshot
@@ -36,6 +36,7 @@ from latency import Latency
 from typing_indicator import TypingIndicator
 from errors import UserFacingError, WeChatAuthExpired, WeChatPollTimeout
 from platform_support import IS_WINDOWS, data_root, is_elevated, root_override_enabled
+from diagnostics import configure as configure_diagnostics
 from diagnostics import error_fields, log_event, log_path
 from log_viewer import show_logs
 from prompts import (render_ack, status_fields, duration_label)
@@ -893,6 +894,7 @@ async def main():
                 raise ValueError("配置必须是 JSON 对象。")
             if ensure_backend_config(config):
                 write_config(args.config, config)
+            configure_diagnostics(backups=log_keep(config.get("logs")))
             bridge = Bridge(store, account, config, config_path=args.config)
         except ValueError as error:
             raise ConfigurationError(str(error)) from None

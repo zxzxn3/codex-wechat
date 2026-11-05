@@ -25,12 +25,14 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_aliases_and_protected_commands_share_one_registry(self):
         for short, full in (("/s", "/status"), ("/q", "/queue"), ("/m", "/model"),
                             ("/e", "/effort"), ("/p", "/ping"), ("/h", "/help"),
-                            ("/a", "/answer")):
+                            ("/a", "/answer"), ("/n", "/new"), ("/c", "/compact"),
+                            ("/u", "/unqueue"), ("/b", "/backend"), ("/r", "/restart"),
+                            ("/d", "/deny"), ("/g", "/get"), ("/", "/continue")):
             self.assertIs(REGISTRY[short], REGISTRY[full])
             self.assertEqual(command_lane(short, ""), command_lane(full, ""))
             self.assertIn(f"`{short}`", HELP_ALL)
-        for name in ("/settings", "/sessions", "/switch", "/new", "/stop", "/restart",
-                     "/backend", "/cwd", "/approve", "/deny", "/get", "/getfile", "/compact"):
+        for name in ("/settings", "/sessions", "/switch", "/stop", "/cwd",
+                     "/approve", "/getfile"):
             self.assertFalse(REGISTRY[name].aliases)
         self.assertNotIn("/ack", REGISTRY)
         self.assertNotIn("/finish", REGISTRY)

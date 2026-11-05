@@ -27,6 +27,8 @@ SLICING_TARGET_MIN = 80
 SLICING_TARGET_MAX = 20000
 TEXT_LIMIT_BYTES = 3000
 SOURCE_HINT_LIMIT_BYTES = 4000
+LOG_KEEP_MIN = 1
+DEFAULT_LOG_KEEP = 3
 QUOTA_WINDOWS = ("primary", "secondary")
 DEFAULT_QUOTA_THRESHOLDS = {
     "primary": (50, 25, 10, 5, 1),
@@ -155,6 +157,17 @@ def completion_template(config, state):
             text = source
             break
     return text
+
+
+def log_keep(value=None):
+    """Rotated log files to keep. Only a lower bound applies; disk is the limit."""
+    value = {} if value is None else value
+    if not isinstance(value, dict) or set(value) - {"keep"}:
+        raise ValueError("logs 仅支持 keep")
+    keep = value.get("keep", DEFAULT_LOG_KEEP)
+    if type(keep) is not int or keep < LOG_KEEP_MIN:
+        raise ValueError(f"logs.keep 必须是不小于 {LOG_KEEP_MIN} 的整数")
+    return keep
 
 
 class ConfigLoader:

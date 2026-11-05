@@ -104,10 +104,18 @@ class DiagnosticsTests(unittest.TestCase):
         diagnostics.configure(path=self.path, max_bytes=350)
         for index in range(30):
             diagnostics.log_event("test.rotation", count=index, job_id=f"job-{index}")
-        for number in range(1, diagnostics.BACKUP_COUNT + 1):
+        for number in range(1, diagnostics.backup_count() + 1):
             self.assertTrue(self.path.with_name(f"{self.path.name}.{number}").exists())
         self.assertFalse(self.path.with_name(
-            f"{self.path.name}.{diagnostics.BACKUP_COUNT + 1}").exists())
+            f"{self.path.name}.{diagnostics.backup_count() + 1}").exists())
+
+    def test_the_kept_file_count_is_configurable(self):
+        diagnostics.configure(path=self.path, max_bytes=200, backups=5)
+        for index in range(60):
+            diagnostics.log_event("test.rotation", count=index, job_id=f"job-{index}")
+        for number in range(1, 6):
+            self.assertTrue(self.path.with_name(f"{self.path.name}.{number}").exists())
+        self.assertFalse(self.path.with_name(f"{self.path.name}.6").exists())
 
     def test_log_write_failure_is_silent(self):
         with patch("diagnostics.os.open", side_effect=OSError("disk full")):

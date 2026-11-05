@@ -24,6 +24,9 @@ from version import APP_VERSION
 
 MAX_BYTES = 5 * 1024 * 1024
 BACKUP_COUNT = 3
+# Rotated files kept on disk; the active file is extra, so usage is about
+# MAX_BYTES * (keep + 1). Only a lower bound is enforced.
+KEEP_MIN = 1
 _LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
 _EVENT = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 _REQUEST_ID = contextvars.ContextVar("codex_wechat_request_id", default=None)
@@ -31,6 +34,7 @@ _lock = threading.Lock()
 _path = None
 _level = None
 _max_bytes = MAX_BYTES
+_backup_count = BACKUP_COUNT
 _ENDPOINTS = frozenset("ilink/bot/" + name for name in (
     "get_bot_qrcode", "get_qrcode_status", "getupdates", "getuploadurl",
     "sendmessage", "getconfig", "sendtyping", "msg/notifystart", "msg/notifystop",
@@ -80,23 +84,31 @@ def _configured_level():
     return value if value in _LEVELS else "info"
 
 
-def configure(*, path=None, level=None, max_bytes=None):
+def configure(*, path=None, level=None, max_bytes=None, backups=None):
     """Override the log destination for tests or embedders."""
-    global _path, _level, _max_bytes
+    global _path, _level, _max_bytes, _backup_count
     if path is not None:
         _path = Path(path)
     if level is not None:
         _level = level if level in _LEVELS else "info"
     if max_bytes is not None:
         _max_bytes = max(64, int(max_bytes))
+    if backups is not None:
+        _backup_count = max(KEEP_MIN, int(backups))
+
+
+def backup_count():
+    """Rotated files to keep; callers must read this, never a cached constant."""
+    return _backup_count
 
 
 def reset():
     """Restore production defaults; intended for test isolation."""
-    global _path, _level, _max_bytes
+    global _path, _level, _max_bytes, _backup_count
     _path = None
     _level = None
     _max_bytes = MAX_BYTES
+    _backup_count = BACKUP_COUNT
     _REQUEST_ID.set(None)
 
 
@@ -175,7 +187,7 @@ def _clean_field(name, value):
 
 def _rotate(path):
     parent = path.parent
-    for number in range(BACKUP_COUNT, 1, -1):
+    for number in range(_backup_count, 1, -1):
         source = parent / f"{path.name}.{number - 1}"
         target = parent / f"{path.name}.{number}"
         try:

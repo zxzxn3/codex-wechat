@@ -123,7 +123,8 @@ sourceHint: 附加到每条微信用户消息的来源说明；空字符串关�
 
 [无法直接修改]
 quotaWarningThresholds.primary: 5 小时限额提醒阈值；修改 config.json 后热加载。
-quotaWarningThresholds.secondary: 7 天限额提醒阈值；修改 config.json 后热加载。"""
+quotaWarningThresholds.secondary: 7 天限额提醒阈值；修改 config.json 后热加载。
+logs.keep: 保留几份轮转日志；修改 config.json 后下次启动生效，下限 1、无上限。"""
 SETTINGS_NUMBER = "{name} 必须是 {minimum}–{maximum} 的整数"
 SETTINGS_WRITE_FAILED = "未保存设置: 配置文件不可写或格式无效"
 SETTINGS_NOT_APPLIED = "设置已写入，但未生效；请检查配置文件。"

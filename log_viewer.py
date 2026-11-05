@@ -6,7 +6,7 @@ import subprocess
 import time
 import threading
 
-from diagnostics import BACKUP_COUNT, log_path
+from diagnostics import backup_count, log_path
 from platform_support import IS_WINDOWS
 from service_control import UNIT
 
@@ -71,7 +71,7 @@ def _log_files(include_service=False):
         return []
     candidates = [primary]
     candidates.extend(primary.with_name(f"{primary.name}.{number}")
-                      for number in range(1, BACKUP_COUNT + 1))
+                      for number in range(1, backup_count() + 1))
     if include_service:
         candidates.extend((primary.parent / "service.log",
                            primary.parent / "service.log.1"))
@@ -137,7 +137,7 @@ def _read_log_updates(files, positions, *, initial=False):
                     position = stream.tell() - len(decoder.getstate()[0])
                 positions.pop(identity, None)
                 positions[identity] = position
-                while len(positions) > 2 * (BACKUP_COUNT + 3):
+                while len(positions) > 2 * (backup_count() + 3):
                     positions.pop(next(iter(positions)))
         except (OSError, ValueError):
             continue
