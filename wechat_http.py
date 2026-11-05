@@ -54,6 +54,7 @@ class _Pool:
     def __init__(self, idle_seconds=DEFAULT_CONNECTION_IDLE_SECONDS):
         self.session = None
         self.active = 0
+        self.active_sessions = {}
         self.idle = None
         self.tasks = set()
         self.closed = False
@@ -86,21 +87,47 @@ class _Pool:
         if self.session is None:
             self.session = _session(self.idle_seconds)
         self.active += 1
+        entry = self.active_sessions.setdefault(id(self.session), [self.session, 0])
+        entry[1] += 1
         return self.session
 
-    def release(self):
+    def release(self, session=None):
+        if session is None:
+            # Keep the small public surface used by callers outside _exchange.
+            session = self.session
         self.active -= 1
+        if session is not None:
+            entry = self.active_sessions.get(id(session))
+            if entry is not None and entry[0] is session:
+                entry[1] -= 1
+                if entry[1] <= 0:
+                    self.active_sessions.pop(id(session), None)
+                    self._close_retired(session)
         if not self.active:
-            self._close_retired()
+            self._close_all_retired()
         if not self.active and not self.closed and self.session is not None:
             self.idle_since = asyncio.get_running_loop().time()
             if self.idle_seconds:
                 self._schedule_expiry(self.idle_seconds)
 
-    def _close_retired(self):
-        if not self.retiring:
+    def _close_retired(self, session=None):
+        if session is not None:
+            if session in self.retiring and id(session) not in self.active_sessions:
+                self.retiring.remove(session)
+                self._schedule_close([session])
             return
+        ready = [item for item in self.retiring
+                 if id(item) not in self.active_sessions]
+        self.retiring = [item for item in self.retiring if item not in ready]
+        if ready:
+            self._schedule_close(ready)
+
+    def _close_all_retired(self):
         sessions, self.retiring = self.retiring, []
+        if sessions:
+            self._schedule_close(sessions)
+
+    def _schedule_close(self, sessions):
         task = asyncio.create_task(self._close_sessions(sessions))
         self.tasks.add(task)
         task.add_done_callback(self._idle_done)
@@ -137,7 +164,8 @@ class _Pool:
         session, self.session = self.session, None
         if session is None:
             return
-        if self.active:
+        entry = self.active_sessions.get(id(session))
+        if entry is not None and entry[0] is session and entry[1] > 0:
             # Other transfers may still hold this session's connections. Let
             # them finish, but never hand it to a new request.
             self.retiring.append(session)
@@ -153,7 +181,7 @@ class _Pool:
         # An expiry that detached its session may still be closing it.
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
-        self._close_retired()
+        self._close_all_retired()
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
         session, self.session = self.session, None
@@ -224,7 +252,7 @@ class PooledHTTP:
             headers = getattr(response, "headers", {}) if response is not None else {}
             return bytes(body), status, metrics, headers
         finally:
-            pool.release()
+            pool.release(session)
 
     async def close(self):
         await asyncio.gather(self.poll.close(), self.outgoing.close())

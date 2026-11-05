@@ -187,6 +187,40 @@ class PoolTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await self.fetch()
 
+    async def test_retiring_session_closes_when_only_its_own_requests_finish(self):
+        pool = self.transport.outgoing
+        first = pool.acquire()
+        await pool.discard()
+        second = pool.acquire()
+        self.assertIn(first, pool.retiring)
+
+        pool.release(first)
+        await asyncio.gather(*pool.tasks, return_exceptions=True)
+        first.close.assert_awaited_once()
+        second.close.assert_not_awaited()
+        self.assertEqual(pool.active, 1)
+        self.assertEqual(pool.session, second)
+
+        pool.release(second)
+        await self.transport.close()
+
+    async def test_discard_does_not_accumulate_sessions_behind_a_long_request(self):
+        pool = self.transport.outgoing
+        first = pool.acquire()
+        await pool.discard()
+        for _ in range(20):
+            unused = pool.acquire()
+            pool.release(unused)
+            await pool.discard()
+            unused.close.assert_awaited_once()
+            self.assertNotIn(unused, pool.retiring)
+
+        self.assertEqual(pool.retiring, [first])
+        pool.release(first)
+        await asyncio.gather(*pool.tasks, return_exceptions=True)
+        first.close.assert_awaited_once()
+        await self.transport.close()
+
 
 class OptionsTests(unittest.TestCase):
     def test_session_has_tls_validation_no_redirects_and_native_idle_limit(self):

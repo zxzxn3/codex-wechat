@@ -94,6 +94,23 @@ if ($PurgeData -and $Command -ne 'uninstall') {
     throw '-PurgeData is only valid with the uninstall command'
 }
 
+if ($Command -eq 'uninstall') {
+    $Uninstaller = Join-Path $InstallRoot 'uninstall.ps1'
+    if (-not (Test-Path -LiteralPath $Uninstaller -PathType Leaf)) {
+        throw "stable uninstall helper is missing: $Uninstaller; run the installer from new source first"
+    }
+    $UninstallerArguments = @()
+    if ($PurgeData) { $UninstallerArguments += '-PurgeData' }
+    if ($env:CODEX_WECHAT_DATA_ROOT) {
+        $UninstallerArguments += @('-DataRoot', $env:CODEX_WECHAT_DATA_ROOT)
+    }
+    $env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot
+    $global:LASTEXITCODE = 0
+    & $Uninstaller @UninstallerArguments
+    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+    exit 0
+}
+
 $Project = $InstallRoot
 $CurrentFile = Join-Path $InstallRoot 'current'
 $CurrentItem = Get-Item -LiteralPath $CurrentFile -Force -ErrorAction SilentlyContinue
@@ -105,7 +122,7 @@ if ($null -ne $CurrentItem) {
         throw "codex-wechat.ps1: current must be a file: $CurrentFile"
     }
     $ReleaseId = (Get-Content -LiteralPath $CurrentFile -TotalCount 1).Trim()
-    if (-not $ReleaseId -or $ReleaseId -notmatch '^[a-f0-9]{16}$') {
+    if (-not $ReleaseId -or $ReleaseId -cnotmatch '^[a-f0-9]{16}$') {
         throw "codex-wechat.ps1: invalid release id in $CurrentFile"
     }
     $Project = Join-Path $InstallRoot "releases\$ReleaseId"

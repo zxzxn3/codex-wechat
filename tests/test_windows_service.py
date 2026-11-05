@@ -334,6 +334,14 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("data retained", text)
         self.assertIn("project files and the virtual environment were not removed", text)
 
+    def test_uninstall_refuses_a_live_foreground_bridge(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertIn("Assert-NoForegroundBridge", text)
+        self.assertIn("[IO.FileShare]::None", text)
+        check = text.index("Assert-NoForegroundBridge\n\n# Data removal")
+        self.assertLess(text.index("scheduled task is not installed"), check)
+        self.assertLess(check, text.index("if ($PurgeData)"))
+
     def test_uninstall_checks_exact_task_ownership_before_stopping(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("ExpectedActionExecutables", text)
@@ -348,7 +356,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(text.rindex("Stop-SharedBackends"),
                            text.index("if ($PurgeData)"))
         self.assertLess(text.rindex("Stop-SharedBackends"),
-                        text.index("Remove-Item -LiteralPath $DataRoot"))
+                        text.index("Remove-DataPath $name"))
         self.assertIn("shared-backend-process.json", text)
         self.assertIn("recorded identity no longer matches", text)
         self.assertIn("still has attached clients", text)
@@ -357,14 +365,19 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_uninstall_removes_the_task_only_after_purging_data(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertGreater(text.index("Unregister-ScheduledTask"),
-                           text.index("Remove-Item -LiteralPath $DataRoot"))
+                           text.index("Remove-DataPath"))
+        self.assertIn("$DataPaths = @('config.json', '.state', 'workspace', 'logs', 'shared')", text)
 
-    def test_powershell_entry_forwards_uninstall_to_python(self):
+    def test_powershell_entry_routes_uninstall_to_stable_helper(self):
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
-        self.assertIn("'uninstall'", entry)
+        self.assertIn("$Command -eq 'uninstall'", entry)
+        self.assertIn("uninstall.ps1", entry)
         self.assertIn("--purge-data", entry)
-        self.assertIn("& $VenvPython -u @Arguments", entry)
-        self.assertIn("exit $LASTEXITCODE", entry)
+        self.assertIn("-PurgeData", entry)
+        self.assertLess(entry.index("$Command -eq 'uninstall'"), entry.index("$CurrentFile"))
+        self.assertIn("-cnotmatch", entry)
+        desktop = (ROOT / "codex-desktop.ps1").read_text(encoding="utf-8")
+        self.assertIn("-cnotmatch", desktop)
 
     def test_installer_requires_native_codex_exe(self):
         discovery = (ROOT / "native_codex.py").read_text(encoding="utf-8")

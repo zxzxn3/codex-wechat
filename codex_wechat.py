@@ -839,7 +839,10 @@ async def send_stop_notification(state_dir, config_path):
 
 async def stop_background_service(state_dir, config_path):
     """Stop only the installed background service without taking the bridge lock."""
-    current = await service_adapter.status()
+    try:
+        current = await service_adapter.status()
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ConfigurationError(f"无法读取后台服务状态：{error}") from None
     if not current.installed:
         print("未安装后台服务。")
         return
@@ -854,7 +857,7 @@ async def stop_background_service(state_dir, config_path):
 async def restart_background_service():
     try:
         await service_adapter.restart()
-    except ValueError as error:
+    except (OSError, RuntimeError, ValueError) as error:
         # Same condition and same exit code as service-start.
         raise ConfigurationError(str(error)) from None
     print("后台服务重启已请求。")
@@ -865,7 +868,7 @@ async def start_background_service(args):
     """Start the installed service; bind interactively if this terminal can show QR."""
     try:
         current = await service_adapter.status()
-    except ValueError as error:
+    except (OSError, RuntimeError, ValueError) as error:
         raise ConfigurationError(str(error)) from None
     if not current.installed:
         raise ConfigurationError(service_adapter.NOT_INSTALLED)
@@ -906,8 +909,11 @@ async def require_foreground_start_allowed():
 
 
 async def manage_autostart(value):
-    actual = await autostart.status() if value is None else await autostart.set_enabled(
-        value == "true")
+    try:
+        actual = await autostart.status() if value is None else await autostart.set_enabled(
+            value == "true")
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ConfigurationError(f"无法管理登录自启：{error}") from None
     print("true" if actual else "false")
 
 

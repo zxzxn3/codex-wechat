@@ -168,6 +168,24 @@ class ServiceFailureShapeTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ConfigurationError, "state lock busy"):
                 await codex_wechat.start_background_service(args)
 
+    async def test_service_commands_turn_missing_managers_into_configuration_errors(self):
+        missing = FileNotFoundError("systemctl")
+        with patch.object(codex_wechat.service_adapter, "status",
+                          AsyncMock(side_effect=missing)):
+            with self.assertRaises(ConfigurationError):
+                await codex_wechat.start_background_service(
+                    SimpleNamespace(action="service-start"))
+            with self.assertRaises(ConfigurationError):
+                await codex_wechat.stop_background_service(Path("/state"), Path("/config"))
+        with patch.object(codex_wechat.service_adapter, "restart",
+                          AsyncMock(side_effect=missing)):
+            with self.assertRaises(ConfigurationError):
+                await codex_wechat.restart_background_service()
+        with patch.object(codex_wechat.autostart, "status",
+                          AsyncMock(side_effect=missing)):
+            with self.assertRaises(ConfigurationError):
+                await codex_wechat.manage_autostart(None)
+
 
 class CommandRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_autostart_value_reaches_the_shared_action(self):

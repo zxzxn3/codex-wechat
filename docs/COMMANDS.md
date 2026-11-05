@@ -33,7 +33,7 @@ Python，不再实现服务状态机。`codex-desktop.ps1` 保留给需要显式
 | `rebind [--stop-active]` | 重新绑定微信；Windows 写作 `-StopActive` |
 | `autostart` | 查询登录自启，输出 `true` / `false`；服务未安装时也是 `false` |
 | `autostart true\|false` | 开启或关闭登录自启；只改登录触发器，不启动、停止或接管当前桥接 |
-| `uninstall [-PurgeData]` | 停止并移除后台服务与命令入口；默认保留用户数据。Linux 用 `--purge-data` |
+| `uninstall [-PurgeData]` | 停止并移除后台服务与命令入口；默认保留用户数据。Linux 用 `--purge-data`；稳定入口不依赖 `current` |
 | `update` / `install` / `menu` / `components` | 转交同一个 `installer.py` |
 | `cli -- ...` | Linux 专用；连接桥接使用的共享后端，参数原样转发 |
 
@@ -58,9 +58,19 @@ Linux 以实际 `euid == 0` 判断 root，Windows 以管理员令牌判断提权
 
 ### 卸载
 
-Windows 的 `uninstall.ps1` 仍负责原生计划任务和共享后台清理；Python 只做统一路由。
+Windows 的公开入口把 `uninstall` 直接交给稳定的 `uninstall.ps1`，因此不依赖活动 release；
+原生计划任务和共享后台清理仍由该 helper 负责。
 Linux 停止并移除用户 unit、命令软链；默认保留 `config.json`、`.state`、`workspace`、
-`logs` 和 `shared`。`--purge-data` 才删除这些用户数据。
+`logs` 和 `shared`。`--purge-data` 才删除这些用户数据；不会递归删除自定义数据根目录，
+只清理上述已知项。卸载前会检查前台桥接的状态锁；仍在运行时要求先 `Ctrl+C` 退出。
+若无法读取后台服务状态，卸载会 fail-closed 而不是继续删除；没有 systemd 客户端时视为
+没有可移除的服务。
+Windows 自定义数据目录由 `CODEX_WECHAT_DATA_ROOT`（或原生 helper 的
+`-DataRoot`）传递，Python 不会忽略它。
+
+Linux 的 stable `codex-wechat` 和 Windows 的 `codex-wechat.ps1` 在读取 `current` 之前
+直接分派 `uninstall` 到稳定卸载组件。这样 `current` 缺失、损坏或活动 release 不完整时，
+仍能移除服务和命令入口，而不是先因为版本指针错误而无法卸载。
 
 服务未安装时，`autostart` 查询统一返回 `false` 并退出 0；只有同名服务/任务属于另一个
 安装目录时才报错。
@@ -69,7 +79,7 @@ Linux 停止并移除用户 unit、命令软链；默认保留 `config.json`、`
 
 Linux stable 入口、Windows `codex-wechat.ps1`、Windows `codex-desktop.ps1` 和
 `bootstrap_supervisor.py` 都只接受 16 位小写十六进制 release ID。`..`、斜杠和其它
-非规范值直接拒绝。
+非规范值直接拒绝；PowerShell 入口使用大小写敏感匹配，避免大写 ID 被发现后再变成另一路径。
 
 ## Windows 待实机验收
 

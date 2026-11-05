@@ -128,6 +128,12 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.target / "config.json").exists())
         self.assertFalse((self.target / ".state").exists())
 
+    def test_windows_bootstrap_creates_nested_stable_directories(self):
+        self.target.mkdir()
+        with patch.object(installer, "IS_WINDOWS", True):
+            installer.install_bootstrap(self.source, self.target)
+        self.assertTrue((self.target / "windows/task-service.ps1").is_file())
+
     def test_cancel_and_dry_run_do_not_create_version_state(self):
         with patch("builtins.input", return_value="n"):
             self.assertEqual(installer.install(self.source, self.target), 0)

@@ -100,7 +100,13 @@ STABLE_LINUX_FILES = (
     Path("codex-wechat"),
     Path("codex-wechat.service"),
     Path("installer.py"),
+    Path("platform_support.py"),
     Path("release.py"),
+    Path("service_adapter.py"),
+    Path("service_control.py"),
+    Path("storage.py"),
+    Path("subprocess_io.py"),
+    Path("uninstall.py"),
 )
 STABLE_WINDOWS_FILES = (
     Path("native_codex.py"),
@@ -762,7 +768,11 @@ def install_bootstrap(source: Path, target: Path) -> None:
             _atomic_write(staging / relative, source_path.read_bytes(),
                           stat.S_IMODE(source_path.stat().st_mode), root=staging)
         for relative in _stable_files():
-            os.replace(staging / relative, target / relative)
+            destination = target / relative
+            if destination.parent.is_symlink():
+                raise ValueError(f"安装入口目录不能是符号链接: {destination.parent}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(staging / relative, destination)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 

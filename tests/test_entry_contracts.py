@@ -14,6 +14,28 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn("不要使用 root/sudo", text)
         self.assertNotIn("desktop)", text)
 
+    def test_linux_uninstall_bypasses_a_broken_current_release(self):
+        text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
+        self.assertIn('if [ "${1:-}" = "uninstall" ]', text)
+        self.assertIn('"$INSTALL_ROOT/uninstall.py"', text)
+        self.assertLess(
+            text.index('if [ "${1:-}" = "uninstall" ]'),
+            text.index('[ -L "$CURRENT_FILE" ]'),
+        )
+        self.assertIn("CODEX_WECHAT_INSTALL_ROOT", text)
+
+    def test_linux_stable_uninstaller_has_its_runtime_dependencies(self):
+        import installer
+        for name in (
+            "uninstall.py",
+            "platform_support.py",
+            "service_adapter.py",
+            "service_control.py",
+            "storage.py",
+            "subprocess_io.py",
+        ):
+            self.assertIn(Path(name), installer.STABLE_LINUX_FILES)
+
     def test_desktop_entry_rejects_root(self):
         text = (ROOT / "codex-desktop").read_text(encoding="utf-8")
         self.assertIn("CODEX_WECHAT_ALLOW_ROOT", text)

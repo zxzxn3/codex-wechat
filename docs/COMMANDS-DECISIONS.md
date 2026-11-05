@@ -9,6 +9,9 @@
 - 从用户可见命令面移除 Windows 的 `service-stop`、`service-status`，底层服务控制保留为内部实现；Linux 不新增这两个重复顶层命令。
 - 补 Linux `autostart`；Windows 同步改为接受 `true|false`，不保留 `on|off` 兼容。
 - 补跨平台 `uninstall`；默认保留用户数据，显式 purge 才删除。
+- 卸载必须能从稳定入口执行，不依赖 `current` 的完整性；`current` 损坏时仍应能移除服务、命令入口和可选用户数据。
+- purge 只删除已知用户数据项，不递归删除用户提供的自定义数据根目录；前台桥接持锁时 fail-closed。
+- Windows 自定义数据目录通过 `-DataRoot`/`CODEX_WECHAT_DATA_ROOT` 传递，卸载不得静默回落到默认目录。
 - 保留 `cli`；Windows 暂不增加薄转发，继续使用 `codex-desktop.ps1 cli`。`cli` 的真实价值主要在 `websocketUrl` 模式。
 - 删除 `codex-wechat desktop` 别名；保留 `codex-desktop` 本身。
 - `start` / `service-start` 的前置互斥检查下沉到共享 Python 层。

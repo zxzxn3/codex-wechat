@@ -124,7 +124,11 @@ codex-wechat uninstall --purge-data # 同时删除本机用户数据
 
 Windows 使用 `codex-wechat uninstall`；删除数据时写作
 `codex-wechat uninstall -PurgeData`。Linux 的默认安装目录同时存放程序与数据，
-因此 purge 只删除用户数据，不删除程序 release 本身。
+因此 purge 只删除用户数据，不删除程序 release 本身。卸载入口直接使用稳定安装目录中的
+卸载组件，不依赖 `current` 指向的 release；即使版本指针损坏或 release 不完整也能卸载。
+purge 只删除已知用户数据项，不会递归删除自定义数据根目录；前台桥接仍持有状态锁时，
+卸载会拒绝继续，请先按 `Ctrl+C` 退出。Windows 自定义数据目录通过
+`CODEX_WECHAT_DATA_ROOT` 或 `uninstall.ps1 -DataRoot` 传入。
 
 ## CLI 与 App 共用会话
 

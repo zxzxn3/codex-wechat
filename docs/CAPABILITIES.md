@@ -31,7 +31,7 @@
 | 同身份重绑 | 刷新凭据，保留交付、会话和偏好，不复制/同步双系统运行状态 |
 | 重绑与部分失败 | 同微信号保留交付，bot变化重取协议状态；换微信号扫码授权后自动隔离旧交付；保留会话/偏好，未完成标记阻止身份混用 |
 | 自启与崩溃恢复 | 安装时注册服务但不启用登录自启；`autostart true\|false` 只改登录触发器，不启动或停止当前实例；按平台原生机制，有界崩溃重试与配置错误退出 |
-| 命令与卸载 | 公开入口统一转到 Python；Windows 原生任务操作只在内部 helper。`uninstall` 默认保留用户数据，显式 purge 才删除 |
+| 命令与卸载 | 公开入口统一分流；Windows 原生任务操作只在内部 helper。`uninstall` 默认保留用户数据，显式 purge 才删除；卸载从稳定入口分派，不依赖 `current`；Linux 与 Windows 的 purge 都只删已知用户数据项 |
 | 权限边界 | root/管理员拒绝写操作；只读 `status`/`logs` 和显式卸载例外，容器可用 `CODEX_WECHAT_ALLOW_ROOT=1` |
 | 日志查看 | 结构化 `bridge.jsonl` 共用；`--service` 读取平台原生控制台来源：Windows `service.log`，Linux systemd journal |
 | 安装与更新 | 同一网络入口、菜单、dry-run、非交互、旧版本按自身清单校验、激活前能力检查 |

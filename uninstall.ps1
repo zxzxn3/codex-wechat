@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [switch]$PurgeData,
-    [switch]$Force
+    [switch]$Force,
+    [string]$DataRoot
 )
 
 Set-StrictMode -Version Latest
@@ -25,7 +26,14 @@ $ExpectedActionExecutables = @(
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'),
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe')
 )
-$DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
+$DataRoot = if ($DataRoot) {
+    [IO.Path]::GetFullPath($DataRoot)
+} elseif ($env:CODEX_WECHAT_DATA_ROOT) {
+    [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
+} else {
+    Join-Path $env:LOCALAPPDATA 'codex-wechat'
+}
+$DataPaths = @('config.json', '.state', 'workspace', 'logs', 'shared')
 
 function Fail([string]$Message) {
     throw "uninstall.ps1: $Message"
@@ -41,6 +49,42 @@ function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
         Start-Sleep -Milliseconds 250
     }
     Fail "scheduled task '$TaskName' did not stop within $TimeoutSeconds seconds"
+}
+
+function Remove-DataPath([string]$Name) {
+    $path = Join-Path $DataRoot $Name
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if (-not $item) {
+        return
+    }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Remove-Item -LiteralPath $path -Force
+    } else {
+        Remove-Item -LiteralPath $path -Recurse -Force
+    }
+}
+
+function Assert-NoForegroundBridge {
+    # The bridge holds the state lock. FileShare.None fails while any bridge
+    # process still owns that lock; an unheld stale file opens normally.
+    $lock = Join-Path $DataRoot '.state\lock'
+    if (-not (Test-Path -LiteralPath $lock -PathType Leaf)) {
+        return
+    }
+    $stream = $null
+    try {
+        $stream = [IO.File]::Open(
+            $lock,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None)
+    } catch {
+        Fail 'foreground bridge is still running; stop it with Ctrl+C before uninstalling'
+    } finally {
+        if ($stream) {
+            $stream.Dispose()
+        }
+    }
 }
 
 function Stop-SharedBackends {
@@ -135,24 +179,32 @@ if ($task) {
     Write-Host "scheduled task is not installed: $TaskName"
 }
 
+Assert-NoForegroundBridge
+
 # Data removal cannot be undone, so it runs while the scheduled task is still
 # registered: a failure leaves a working installation, not a half-uninstalled
 # one. The task is unregistered only once the irreversible step has succeeded.
 if ($PurgeData) {
-    $expectedLeaf = 'codex-wechat'
-    $resolvedParent = [IO.Path]::GetFullPath((Split-Path -Parent $DataRoot))
+    $resolvedUser = [IO.Path]::GetFullPath($env:USERPROFILE)
     $resolvedLocal = [IO.Path]::GetFullPath($env:LOCALAPPDATA)
-    if (((Split-Path -Leaf $DataRoot) -ne $expectedLeaf) -or ($resolvedParent -ne $resolvedLocal)) {
-        Fail "refusing to purge unexpected data path: $DataRoot"
+    $resolvedRoot = [IO.Path]::GetFullPath($DataRoot).TrimEnd('\')
+    $driveRoot = [IO.Path]::GetPathRoot($resolvedRoot).TrimEnd('\')
+    if ($resolvedRoot -eq $driveRoot -or $resolvedRoot -eq $resolvedUser -or
+            $resolvedRoot -eq $resolvedLocal -or
+            $resolvedUser.StartsWith($resolvedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        Fail "refusing to purge an overly broad data path: $DataRoot"
     }
     if (Test-Path $DataRoot) {
         $dataItem = Get-Item -LiteralPath $DataRoot -Force
-        if ((-not $dataItem.PSIsContainer) -or ((($dataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
+        if ((-not $dataItem.PSIsContainer) -or
+                ((($dataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
             Fail "refusing to purge non-directory or reparse-point data path: $DataRoot"
         }
         Stop-SharedBackends
-        Remove-Item -LiteralPath $DataRoot -Recurse -Force
-        Write-Host "removed data: $DataRoot"
+        foreach ($name in $DataPaths) {
+            Remove-DataPath $name
+        }
+        Write-Host "removed user data under: $DataRoot"
     }
 } else {
     Write-Host "data retained: $DataRoot (use -PurgeData only when credentials and state are no longer needed)"

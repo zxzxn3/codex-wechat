@@ -24,7 +24,7 @@ if (Test-Path -LiteralPath $current) {
     $item = Get-Item -LiteralPath $current -Force
     if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid current pointer.' }
     $identifier = (Get-Content -LiteralPath $current -Raw -Encoding UTF8).Trim()
-    if ($identifier -notmatch '^[a-f0-9]{16}$') { throw 'Invalid current version.' }
+    if ($identifier -cnotmatch '^[a-f0-9]{16}$') { throw 'Invalid current version.' }
     $project = Join-Path $installRoot ('releases\' + $identifier)
 }
 $python = Join-Path $project '.venv\Scripts\python.exe'

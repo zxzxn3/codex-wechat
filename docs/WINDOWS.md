@@ -20,6 +20,12 @@ App 包版本通过 Get-AppxPackage 查询，不按文件更新时间猜路径�
   `codex-desktop.ps1 cli` 也拒绝管理员终端。
 - [ ] `uninstall` 默认保留 `%LOCALAPPDATA%\codex-wechat`；`-PurgeData` 才停止共享后台并删除
   配置、登录、待办、工作目录和日志；`.cmd` 只删除本项目的 shim。
+- [ ] 自定义 `CODEX_WECHAT_DATA_ROOT` 或 `uninstall.ps1 -DataRoot` 下运行 `-PurgeData`：
+  确认清理的是该目录，而不是 `%LOCALAPPDATA%\codex-wechat`；无关文件保留。
+- [ ] 删除或破坏 `current`（以及活动 release）后运行 `%USERPROFILE%\.local\bin\codex-wechat.cmd
+  uninstall`；确认稳定入口仍能移除计划任务和 `.cmd`，不先报 release/current 错误。
+- [ ] 构造含大写十六进制字符的伪 release ID，确认 `codex-wechat.ps1` 和
+  `codex-desktop.ps1` 都拒绝；只接受 16 位小写十六进制。
 - [ ] 新 `.cmd`/入口在含空格和非 ASCII 的用户路径下仍能正确转发参数。
 
 ## 命名管道存在性判断（2026-11-05 三种状态已实测）
@@ -391,6 +397,17 @@ Administrators"并断开继承；其下所有目录改为普通创建、继承�
 `--dry-run` 未改动 releases 与 current；无 qrencode 时二维码回退可渲染。
 仍待核对：App/CLI/微信三端并发共享会话；重绑未在本轮重做。源码审查、Linux/mock
 测试及一次成功样本不能替代这些实机证据。
+
+### 本轮稳定卸载与连接池修复的待实机项
+
+- [ ] `uninstall` 在前台桥接持有状态锁时拒绝并给出退出提示；先 `Ctrl+C` 后重试成功。
+- [ ] 让服务状态查询失败时，`uninstall` 必须在删除前报错退出，而不是继续清理。
+- [ ] 通过 Python `uninstall.py` 路由调用 Windows `uninstall.ps1` 时，启动失败或卡住最多
+      等待 60 秒并结束子进程；这是超时保护，不代表真实 PowerShell 行为已经验收。
+- [ ] 连接池失败退役测试在 Windows 实机网络下复测：长期请求不应阻止旧 session 关闭，
+      连续失败后 `retiring` 不应无界增长。
+- [ ] `.cmd` 仍以 UTF-8 无 BOM 生成；在非 ASCII 用户目录和 Windows PowerShell 5.1 下
+      待实机确认代码页/转发行为。
 
 ## 自带 Codex 后端的第三方客户端会抢走会话写者
 

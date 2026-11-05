@@ -23,6 +23,16 @@ case "${1:-}" in
         exec python3 -u "$INSTALLER" "$@"
         ;;
 esac
+if [ "${1:-}" = "uninstall" ]; then
+    UNINSTALLER="$INSTALL_ROOT/uninstall.py"
+    if [ ! -f "$UNINSTALLER" ]; then
+        echo "codex-wechat: 稳定卸载组件缺失: $UNINSTALLER" >&2
+        exit 1
+    fi
+    export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
+    shift
+    exec python3 -B -u "$UNINSTALLER" "$@"
+fi
 if [ -L "$CURRENT_FILE" ]; then
     echo "codex-wechat: current 不能是符号链接" >&2
     exit 1
