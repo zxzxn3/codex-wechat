@@ -99,10 +99,13 @@ if ($Command -eq 'uninstall') {
     if (-not (Test-Path -LiteralPath $Uninstaller -PathType Leaf)) {
         throw "stable uninstall helper is missing: $Uninstaller; run the installer from new source first"
     }
-    $UninstallerArguments = @()
-    if ($PurgeData) { $UninstallerArguments += '-PurgeData' }
+    # Bind by name: an array splat is positional and skips switches, so
+    # @('-PurgeData') would land in -DataRoot and the purge would silently
+    # do nothing while the data root became a relative path.
+    $UninstallerArguments = @{}
+    if ($PurgeData) { $UninstallerArguments.PurgeData = $true }
     if ($env:CODEX_WECHAT_DATA_ROOT) {
-        $UninstallerArguments += @('-DataRoot', $env:CODEX_WECHAT_DATA_ROOT)
+        $UninstallerArguments.DataRoot = $env:CODEX_WECHAT_DATA_ROOT
     }
     $env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot
     $global:LASTEXITCODE = 0

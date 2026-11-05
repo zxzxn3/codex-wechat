@@ -371,12 +371,26 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
         self.assertIn("$Command -eq 'uninstall'", entry)
         self.assertIn("uninstall.ps1", entry)
-        self.assertIn("-PurgeData", entry)
+        self.assertIn("$PurgeData", entry)
         self.assertNotIn("--purge-data", entry)
         self.assertLess(entry.index("$Command -eq 'uninstall'"), entry.index("$CurrentFile"))
         self.assertIn("-cnotmatch", entry)
         desktop = (ROOT / "codex-desktop.ps1").read_text(encoding="utf-8")
         self.assertIn("-cnotmatch", desktop)
+
+    def test_powershell_entry_splats_uninstall_by_name_not_position(self):
+        # An array splat binds positionally and switches are skipped, so
+        # @('-PurgeData') landed in -DataRoot: the purge silently did nothing
+        # and the data root became a relative path. Only a hashtable binds by
+        # name.
+        entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
+        block = entry[entry.index("$Command -eq 'uninstall'"):]
+        block = block[:block.index("exit 0")]
+        self.assertIn("$UninstallerArguments = @{}", block)
+        self.assertIn("$UninstallerArguments.PurgeData = $true", block)
+        self.assertIn("$UninstallerArguments.DataRoot =", block)
+        self.assertNotIn("$UninstallerArguments += '-PurgeData'", block)
+        self.assertNotIn("$UninstallerArguments += @('-DataRoot'", block)
 
     def test_installer_requires_native_codex_exe(self):
         discovery = (ROOT / "native_codex.py").read_text(encoding="utf-8")

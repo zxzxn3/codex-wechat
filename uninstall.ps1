@@ -218,7 +218,15 @@ $Shim = Join-Path $env:USERPROFILE '.local\bin\codex-wechat.cmd'
 if (Test-Path -LiteralPath $Shim -PathType Leaf) {
     $shimText = Get-Content -LiteralPath $Shim -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     if ($shimText -and $shimText.Contains('rem codex-wechat command shim')) {
-        Remove-Item -LiteralPath $Shim -Force
+        # When the public entry was used, this file is the batch script cmd.exe
+        # is still reading: deleting it now makes cmd fail with "The batch file
+        # cannot be found" and report a non-zero exit for a successful uninstall.
+        # Hand the deletion to a detached helper that waits for us to exit.
+        # -ArgumentList must be one string: an array is quoted per element, and
+        # cmd /c then swallows the whole command as a single quoted token.
+        Start-Process -FilePath $env:ComSpec `
+            -ArgumentList ('/c ping -n 3 127.0.0.1 >nul & del /f /q "' + $Shim + '"') `
+            -WindowStyle Hidden | Out-Null
         Write-Host "已移除命令入口: $Shim"
     } else {
         Write-Warning "保留 $Shim：它不是本项目的命令入口"
