@@ -135,7 +135,7 @@ endpoint、HTTP/curl状态和耗时。事件字段由固定白名单校验，正
 账号、token、context token、Authorization、请求/响应体和绝对路径不会进入结构化日志。
 异常仅保留类型与可选错误码；endpoint只接受已知微信API路径。写入与轮转使用原生进程锁，
 锁被占用或写盘失败时丢弃本条诊断，不等待、不阻断消息收发。`codex-wechat logs`
-默认展示结构化日志及轮转文件；`--service`才加入supervisor/控制台输出，后者未脱敏，
+默认展示结构化日志及轮转文件；`--service`才加入服务控制台输出，后者未脱敏，
 不是结构化日志。跟随模式按文件身份和读取位置追踪轮转，在备份保留范围内补读旧文件。
 默认保留命令处理、输出入队/开始/结果及网络计时，便于判断延迟所在阶段；poll、getconfig、
 sendtyping 成功和 typing 启停仅记 debug，故障仍可见。发送开始/完成不再重复写 stderr。

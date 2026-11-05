@@ -859,7 +859,7 @@ async def restart_background_service():
     except (OSError, RuntimeError, ValueError) as error:
         # Same condition and same exit code as service-start.
         raise ConfigurationError(str(error)) from None
-    print("后台服务重启已请求。")
+    print("后台服务已重启。")
     show_log_path()
 
 
@@ -933,7 +933,7 @@ async def main():
     parser.add_argument("--stop-active", action="store_true")
     parser.add_argument("--follow", action="store_true")
     parser.add_argument("--service", action="store_true",
-                        help="同时查看未脱敏的 supervisor/service.log")
+                        help="同时查看服务控制台日志（Linux: journalctl；Windows: service.log；未脱敏）")
     parser.add_argument("--starting", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     require_regular_user(args.action)

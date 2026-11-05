@@ -149,7 +149,7 @@ def show_logs(follow=False, include_service=False):
         label = "诊断日志" if include_service else "结构化诊断日志"
         print(f"暂无{label}；运行 start 或 service-start 后生成。")
         if not include_service:
-            print("需要 supervisor 控制台输出时使用 --service / -Service。")
+            print("需要服务控制台输出时使用 --service / -Service。")
         return
     positions = {}
     _read_log_updates(files, positions, initial=True)
@@ -158,7 +158,7 @@ def show_logs(follow=False, include_service=False):
         return
     try:
         if not files:
-            hint = "" if include_service else "；supervisor 输出请加 --service / -Service"
+            hint = "" if include_service else "；服务控制台输出请加 --service / -Service"
             print(f"等待诊断日志{hint}；按 Ctrl+C 停止。", flush=True)
         while True:
             time.sleep(0.5)

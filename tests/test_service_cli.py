@@ -188,6 +188,12 @@ class ServiceFailureShapeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CommandRoutingTests(unittest.IsolatedAsyncioTestCase):
+    def test_service_help_names_the_native_log_sources(self):
+        source = (Path(__file__).parents[1] / "codex_wechat.py").read_text(encoding="utf-8")
+        self.assertIn("Linux: journalctl", source)
+        self.assertIn("Windows: service.log", source)
+        self.assertNotIn("supervisor/service.log", source)
+
     async def test_autostart_value_reaches_the_shared_action(self):
         manage = AsyncMock()
         with patch.object(sys, "argv", ["codex_wechat.py", "autostart", "true"]), \

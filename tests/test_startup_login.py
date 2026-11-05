@@ -46,10 +46,12 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_restart_prints_the_log_location(self):
         with patch("codex_wechat.service_adapter.restart", AsyncMock()) as restart, \
-             patch("codex_wechat.show_log_path") as log_hint:
+             patch("codex_wechat.show_log_path") as log_hint, \
+             patch("builtins.print") as printed:
             await restart_background_service()
         restart.assert_awaited_once()
         log_hint.assert_called_once_with()
+        printed.assert_called_once_with("后台服务已重启。")
 
     async def test_existing_binding_never_triggers_login_even_without_terminal(self):
         account = {"token": "fixture", "user": "owner"}
