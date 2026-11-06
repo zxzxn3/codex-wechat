@@ -23,7 +23,7 @@ REPLY_BUDGET_MAX = 100
 REPLY_BUDGET_CEILING = 9
 DEFAULT_REPLY_BUDGET = 9
 DEFAULT_COMPLETION_TEMPLATE = (
-    "OUT > {visible_output_tokens}, ~{tokens_per_second} tok/s in {final_answer_duration_s}s")
+    "`OUT > {visible_output_tokens}, ~{tokens_per_second} tok/s in {final_answer_duration_s}s`")
 DEFAULT_ACK_TEMPLATE = "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`"
 SLICING_TARGET_MIN = 80
 SLICING_TARGET_MAX = 20000

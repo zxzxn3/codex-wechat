@@ -112,7 +112,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await self.bridge.deliver_answer("answer", notify_completion=True)
         texts = [entry.get("text") for entry in self.store.load("bridge")["outbox"]]
         self.assertEqual(texts[0], "answer")
-        self.assertTrue(texts[1].startswith("OUT > "))
+        self.assertTrue(texts[1].startswith("`OUT > "))
 
     async def test_output_hint_is_concise_origin_marker(self):
         self.assertEqual(OUTPUT_HINT, "\n\n[User from WeChat.]")
@@ -166,7 +166,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             "visible_output_tokens": "1.2K",
             "tokens_per_second": "38",
             "final_answer_duration_s": "32",
-        }), "OUT > 1.2K, ~38 tok/s in 32s")
+        }), "`OUT > 1.2K, ~38 tok/s in 32s`")
         self.assertEqual(render_ack(PING_REPLY, values), "微信 ─120/50ms")
         self.assertEqual(stats.values(), {"ingress_ms": "-", "egress_ms": "50"})
 
