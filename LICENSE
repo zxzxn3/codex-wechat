@@ -1,0 +1,92 @@
+codex-wechat Proprietary Beta License
+
+Copyright (c) 2026 zxzxn3. All rights reserved.
+
+This software, including its source code, binaries, documentation, update
+artifacts, and related materials (collectively, the "Software"), is proprietary
+and is not open-source software.
+
+1. Limited license
+
+Subject to this License, the copyright holder ("Licensor") grants each
+individual authorized directly by Licensor a limited, non-exclusive,
+non-transferable, non-sublicensable, revocable license to download, install,
+and use the Software on devices controlled by that individual solely for
+personal, non-commercial evaluation and testing.
+
+By downloading, installing, or using the Software, you agree to this License.
+If you do not agree, do not use the Software and delete any copy you possess.
+
+2. Prohibited uses
+
+You may not:
+
+a. sell, resell, rent, lease, license, sublicense, publish, upload, distribute,
+   disclose, or otherwise make the Software available to any third party,
+   whether modified or unmodified, in source or binary form, and whether for a
+   fee or without charge;
+
+b. use the Software in any commercial context, including use by or for an
+   employer, company, client, or other organization; use in connection with a
+   product or service; use in internal business operations; use for direct or
+   indirect commercial advantage; or use in a paid or unpaid service provided
+   to others;
+
+c. modify, adapt, translate, or create derivative works from the Software,
+   except to the extent such a restriction is prohibited by applicable law;
+
+d. reverse engineer, decompile, or disassemble the Software, except to the
+   extent such a restriction is prohibited by applicable law;
+
+e. remove, obscure, or alter any copyright, license, or proprietary notice;
+
+f. share any installation credential, access token, or other access mechanism
+   with anyone who is not an authorized recipient under this License; or
+
+g. use the Software in a service bureau, managed service, hosted service, or
+   any arrangement in which a third party obtains the benefit of the Software.
+
+No rights are granted except those expressly stated in this License. All other
+rights are reserved by Licensor.
+
+3. Ownership
+
+Licensor retains all right, title, and interest in and to the Software,
+including all intellectual property rights. This License does not transfer
+ownership of the Software or grant any rights in Licensor's names, logos, or
+trademarks.
+
+4. Third-party components
+
+Third-party libraries and components remain subject to their own licenses.
+This License does not alter or replace those licenses.
+
+5. Termination
+
+This License terminates automatically if you breach any of its terms.
+Licensor may also suspend or revoke the license at any time. On termination,
+you must stop using the Software, delete all copies in your possession or
+control, and stop using any related access credentials. This does not require
+you to delete your own data or files that are not copies of the Software.
+
+6. No warranty
+
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR
+A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. LICENSOR DOES NOT WARRANT
+THAT THE SOFTWARE WILL BE ERROR-FREE, SECURE, OR UNINTERRUPTED.
+
+7. Limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, LICENSOR WILL NOT BE LIABLE
+FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR
+FOR ANY LOSS OF DATA, PROFITS, REVENUE, OR BUSINESS OPPORTUNITY, ARISING FROM
+OR RELATED TO THE SOFTWARE OR THIS LICENSE, EVEN IF ADVISED OF THE POSSIBILITY
+OF SUCH DAMAGES. LICENSOR'S TOTAL AGGREGATE LIABILITY WILL NOT EXCEED THE
+AMOUNT, IF ANY, PAID BY YOU FOR THE SOFTWARE.
+
+8. Severability
+
+If any provision of this License is held unenforceable, that provision will be
+enforced to the maximum extent permitted by law, and the remaining provisions
+will remain in effect.
