@@ -72,6 +72,150 @@ class DiscardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([entry["text"] for entry in bridge.state["outbox"]],
                          ["1 条消息被清空。"])
 
+    @staticmethod
+    def _text_message(message_id, text):
+        return {
+            "message_id": message_id,
+            "from_user_id": "owner",
+            "message_type": 1,
+            "context_token": "context",
+            "item_list": [{"type": 1, "text_item": {"text": text}}],
+        }
+
+    @staticmethod
+    def _capture_sends(bridge):
+        sent = []
+
+        async def send(entry):
+            sent.append(entry["text"])
+            return {"message_id": len(sent)}
+
+        bridge.channel.send = send
+        return sent
+
+    async def test_discard_gate_survives_a_later_message_in_the_same_batch(self):
+        bridge = self.bridge
+        bridge.output.paused = True
+        bridge.reply("old finish")
+        sent = self._capture_sends(bridge)
+        sender = asyncio.create_task(bridge.sender())
+        worker = None
+        try:
+            with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
+                await asyncio.sleep(0.01)
+                self.assertEqual(sent, [])
+
+                await bridge.receive({"msgs": [
+                    self._text_message("discard", "/d"),
+                    self._text_message("later", "later message"),
+                ]})
+                await asyncio.sleep(0.01)
+                self.assertEqual(sent, [])
+
+                worker = asyncio.create_task(bridge.control_worker("local"))
+                for _ in range(200):
+                    if sent:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(sent, ["1 条消息被清空。"])
+        finally:
+            if worker is not None:
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+
+    async def test_discard_gate_waits_for_a_busy_local_lane(self):
+        bridge = self.bridge
+        bridge.reply("old finish")
+        blocking = {
+            "id": "blocking",
+            "text": "/help",
+            "received": {"controlId": "blocking", "request_id": "blocking"},
+            "state": "queued",
+            "lane": "local",
+        }
+        bridge.state["pendingControls"] = [blocking]
+        self.assertTrue(bridge.enqueue_control(blocking))
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        original_control = bridge.control
+
+        async def control(text, *, received=None):
+            if text.startswith("/help"):
+                entered.set()
+                await release.wait()
+                return
+            await original_control(text, received=received)
+
+        bridge.control = control
+        worker = asyncio.create_task(bridge.control_worker("local"))
+        sender = None
+        try:
+            await entered.wait()
+            await bridge.receive({"msgs": [self._text_message("discard", "/d")]})
+            sent = self._capture_sends(bridge)
+            with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
+                sender = asyncio.create_task(bridge.sender())
+                await asyncio.sleep(0.01)
+                self.assertEqual(sent, [])
+
+                release.set()
+                for _ in range(200):
+                    if sent:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(sent, ["1 条消息被清空。"])
+        finally:
+            release.set()
+            if sender is not None:
+                sender.cancel()
+                await asyncio.gather(sender, return_exceptions=True)
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    async def test_restored_discard_keeps_the_sender_gated(self):
+        temp = tempfile.TemporaryDirectory()
+        store = Store(Path(temp.name) / "state")
+        bridge = Bridge(store, {"user": "owner"}, {})
+        bridge.state["context"] = "context"
+        bridge.reply("old finish")
+        bridge.state["pendingControls"] = [{
+            "id": "discard",
+            "text": "/d",
+            "received": {"controlId": "discard", "request_id": "discard"},
+            "state": "queued",
+            "lane": "local",
+        }]
+        bridge.save()
+        store.lock.close()
+
+        store = Store(Path(temp.name) / "state")
+        restarted = Bridge(store, {"user": "owner"}, {})
+        restarted.restore_controls()
+        sent = self._capture_sends(restarted)
+        sender = asyncio.create_task(restarted.sender())
+        worker = None
+        try:
+            with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
+                await asyncio.sleep(0.01)
+                self.assertEqual(sent, [])
+
+                worker = asyncio.create_task(restarted.control_worker("local"))
+                for _ in range(200):
+                    if sent:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(sent, ["1 条消息被清空。"])
+        finally:
+            if worker is not None:
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+            store.lock.close()
+            temp.cleanup()
+
     async def _assert_command_clears_backlog_before_sender(self, command):
         temp = tempfile.TemporaryDirectory()
         store = Store(Path(temp.name) / "state")

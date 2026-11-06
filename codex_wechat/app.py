@@ -25,7 +25,7 @@ from .backend_session import BackendSession
 from .storage import Store
 from .wechat import WeChat, login
 from .commands import dispatch, notice, parse_control
-from .command_specs import CONTROL_LANES, PENDING_CONTROL_LIMIT
+from .command_specs import CONTROL_LANES, PENDING_CONTROL_LIMIT, REGISTRY
 from .configuration import (ConfigLoader, ConfigurationError, HotSettings, Logs,
                            REPLY_BUDGET_CEILING, write_config)
 from .prompts import (prompt_text)
@@ -169,7 +169,6 @@ class Bridge:
         self.model_choices = []
         self.session_catalog = None
         self.restarting = False
-        self.deferred_resume = False
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:
             self.outbox_drained.set()
@@ -240,13 +239,21 @@ class Bridge:
         self.state.pop("budgetPromptSent", None)
         if resume:
             self.resume_delivery()
-        else:
-            self.deferred_resume = True
+
+    @property
+    def deferred_resume(self):
+        """True while an unfinished control must clear the outbox before sending."""
+        for control in self.state.get("pendingControls", []):
+            if not isinstance(control, dict):
+                continue
+            command, _ = parse_control(control.get("text", ""))
+            spec = REGISTRY.get(command)
+            if spec and spec.defers_resume:
+                return True
+        return False
 
     def resume_deferred_delivery(self):
         """Resume after a command that had to clear the queue before waking sender."""
-        if not self.deferred_resume:
-            return
         self.resume_delivery()
 
     def reload_config(self):
@@ -465,7 +472,6 @@ class Bridge:
         return self.output.paused
 
     def resume_delivery(self):
-        self.deferred_resume = False
         return self.output.resume_delivery()
 
     def discard_outbox(self, **kwargs):
@@ -556,6 +562,7 @@ class Bridge:
         if len(kept) != len(pending):
             self.state["pendingControls"] = kept
             self.save()
+            self.send_wake.set()
 
     def restore_controls(self):
         pending = self.state.setdefault("pendingControls", [])
