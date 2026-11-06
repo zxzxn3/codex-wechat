@@ -1294,6 +1294,7 @@ def _common_install(
     release = None
     created = False
     service_ready = False
+    marker_ready = False
     try:
         from platform_support import make_private
         make_private(target)
@@ -1316,6 +1317,7 @@ def _common_install(
             # a failed update must not move an existing installation to a new
             # data root while its old release and service are still active.
             _publish_data_root(target)
+            marker_ready = True
             service_ready = configure_platform_service(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier)
@@ -1331,9 +1333,9 @@ def _common_install(
         if created and release is not None and read_pointer(target, CURRENT_FILE) != identifier:
             shutil.rmtree(release)
         # A target created by this attempt is disposable until current is
-        # activated. Remove it as a whole so a failed first install does not
-        # leave a non-empty directory that blocks a retry.
-        if created_target and read_pointer(target, CURRENT_FILE) is None:
+        # activated with its data-root contract. Remove it as a whole so a
+        # failed first install cannot leave a current without a marker.
+        if created_target and not marker_ready:
             shutil.rmtree(target, ignore_errors=True)
         elif not created_target:
             # Preserve a pre-existing directory, but remove an empty release

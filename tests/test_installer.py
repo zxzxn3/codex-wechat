@@ -328,6 +328,18 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.install(self.source, self.target), 0)
         self.assertIsNotNone(self.current())
 
+    def test_failed_first_activation_without_marker_removes_the_target(self):
+        with patch("builtins.input", return_value="y"), \
+                patch.object(installer, "_publish_data_root",
+                             side_effect=OSError("marker failed")):
+            with self.assertRaisesRegex(OSError, "marker failed"):
+                installer.install(self.source, self.target)
+        self.assertFalse(self.target.exists())
+        with patch("builtins.input", return_value="y"):
+            self.assertEqual(installer.install(self.source, self.target), 0)
+        self.assertIsNotNone(self.current())
+        self.assertTrue((self.target / installer.DATA_ROOT_FILE).is_file())
+
     def test_source_change_after_confirmation_is_rejected(self):
         def change_source(_):
             (self.source / "extra.py").write_text("CHANGED = True\n", encoding="utf-8")
