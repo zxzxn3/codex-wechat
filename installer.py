@@ -82,6 +82,7 @@ PRIVATE_NAMES = {
     UPDATE_SOURCE_FILE,
     ACTIVE_FILE,
 }
+LEGACY_DATA_NAMES = ("config.json", ".state", "workspace", "logs", "shared")
 REQUIRED_FILES = {
     Path(".gitignore"),
     Path("LICENSE"),
@@ -274,6 +275,10 @@ def _default_data_root() -> Path:
     return (Path.home() / ".local" / "share" / "codex-wechat").resolve()
 
 
+def _has_legacy_data(target: Path) -> bool:
+    return any((Path(target) / name).exists() for name in LEGACY_DATA_NAMES)
+
+
 def configured_data_root(target: Path) -> Path:
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     if override:
@@ -281,6 +286,10 @@ def configured_data_root(target: Path) -> Path:
     saved = saved_data_root(target)
     if saved is not None:
         return saved
+    # Pre-platformdirs custom installs kept data next to the installation.
+    # Preserve that root before the first marker is written.
+    if _has_legacy_data(target):
+        return Path(target).resolve()
     return _default_data_root()
 
 

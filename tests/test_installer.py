@@ -831,6 +831,18 @@ class DataRootMarkerTests(unittest.TestCase):
                 self.assertEqual(installer._default_data_root(),
                                  (data_home / "codex-wechat").resolve())
 
+    def test_legacy_custom_install_keeps_its_data_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "legacy"
+            target.mkdir()
+            (target / ".state").mkdir()
+            data_home = Path(directory) / "xdg"
+            with patch.dict(os.environ, {
+                    "CODEX_WECHAT_DATA_ROOT": "",
+                    "XDG_DATA_HOME": str(data_home),
+            }, clear=False):
+                self.assertEqual(installer.configured_data_root(target), target.resolve())
+
     def test_default_root_is_also_persisted_in_the_marker(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "install"
