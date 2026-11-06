@@ -391,6 +391,21 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["delivery_unknown"], 25)
         self.assertEqual(payload["delivery_unknown_retained"], 20)
 
+    def test_startup_persists_unknown_total_baseline(self):
+        from codex_wechat import status_payload
+        self.store.save("bridge", {
+            "failedOutbox": [{"status": "delivery_unknown"}] * 20,
+        })
+        Bridge(self.store, {"user": "owner"}, {"backends": {
+            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
+        saved = self.store.load("bridge")
+        self.assertEqual(saved["deliveryUnknownTotal"], 20)
+        saved["failedOutbox"] = saved["failedOutbox"][-19:]
+        self.store.save("bridge", saved)
+        payload = status_payload(self.store)
+        self.assertEqual(payload["delivery_unknown"], 20)
+        self.assertEqual(payload["delivery_unknown_retained"], 19)
+
     async def test_failure_count_is_not_capped_or_reset_by_session_or_restart(self):
         bridge = self.bridge
         for index in range(25):

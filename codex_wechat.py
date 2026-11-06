@@ -60,6 +60,7 @@ BRIDGE_STATE_DEFAULTS = {
     "running": False,
     "inboundSeq": 0,
     "replyBudget": {},
+    "deliveryUnknownTotal": 0,
 }
 
 
@@ -69,6 +70,17 @@ def load_bridge_state(store):
     if not isinstance(saved, dict):
         saved = {}
     return {**deepcopy(BRIDGE_STATE_DEFAULTS), **saved}
+
+
+def migrate_delivery_unknown_total(state):
+    """Persist a lower bound for unknown deliveries after upgrading old state."""
+    retained = sum(1 for entry in state.get("failedOutbox", [])
+                   if isinstance(entry, dict) and entry.get("status") == "delivery_unknown")
+    total = state.get("deliveryUnknownTotal")
+    if type(total) is not int or total < retained:
+        state["deliveryUnknownTotal"] = retained
+        return True
+    return False
 
 
 def mark_active_release():
@@ -120,6 +132,7 @@ class Bridge:
         ensure_backend_config(self.config)
         self.settings = ConfigLoader(config, config_path)
         self.state = load_bridge_state(store)
+        unknown_migrated = migrate_delivery_unknown_total(self.state)
         self.state.setdefault("consecutiveSendFailures", 0)
         self.state.setdefault("quoteCache", {})
         self.wechat_paused = wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED
@@ -173,6 +186,8 @@ class Bridge:
         self.note_reply_budget()
         self._applied_log_keep = None
         self.apply_log_keep()
+        if unknown_migrated:
+            self.save()
 
     @property
     def slicing(self):

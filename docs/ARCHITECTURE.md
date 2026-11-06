@@ -213,7 +213,8 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
 - 可观测性：存在未知条目或连续发送失败达到 `DELIVERY_DEGRADED_THRESHOLD`（3）时，
   `status` 的 `delivery` 从 `ok` 变为 `unconfirmed`；`delivery_unknown` 是单调累计数，
   `delivery_unknown_retained` 是有界失败历史中的保留数。成功一次只清连续失败计数，
-  不抹掉历史未知条目。
+  不抹掉历史未知条目。升级旧状态时以当前 retained 数为下界补种累计数；旧版本已经淘汰的
+  历史无法还原，因此升级后的累计数表示“至少”而非完整历史。
 
 发送间隔、传输失败退避和 no-id 暂停三项互不排斥；入站消息继续轮询，只有出站等待下一条
 入站唤醒。
