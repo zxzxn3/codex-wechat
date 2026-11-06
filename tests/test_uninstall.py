@@ -15,11 +15,14 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(uninstall, "IS_WINDOWS", False), \
                 patch.object(uninstall, "_linux_service_removal", service), \
                 patch.object(uninstall, "_linux_command_removal", command), \
+                patch.object(uninstall, "_require_no_bridge", Mock()), \
+                patch.object(uninstall, "_remove_data_root_marker", Mock()) as marker, \
                 patch.object(uninstall, "data_root",
                              return_value=Path("/data/codex-wechat")):
             await uninstall.uninstall()
         service.assert_awaited_once_with()
         command.assert_called_once_with()
+        marker.assert_called_once_with()
 
     async def test_data_root_is_validated_before_service_removal(self):
         events = []
