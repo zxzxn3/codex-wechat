@@ -1319,8 +1319,8 @@ def _common_install(
         if created_target and not marker_ready:
             shutil.rmtree(target, ignore_errors=True)
         elif not created_target:
-            # Preserve a pre-existing directory, but remove an empty release
-            # directory left by a failed first attempt.
+            # Never remove a directory the user already owned; only clear what a
+            # failed attempt can leave behind, and only while it is still empty.
             try:
                 (target / LOCK_FILE).unlink(missing_ok=True)
                 (target / RELEASES_DIR).rmdir()

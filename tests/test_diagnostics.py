@@ -23,6 +23,19 @@ class CodedError(RuntimeError):
     code = -32603
 
 
+class IsolationTests(unittest.TestCase):
+    def test_reset_does_not_restore_the_real_data_root_log(self):
+        # A module-level reset() must not send the next fixture's events into the
+        # developer's own bridge.jsonl, which is read as incident evidence.
+        try:
+            from test_support import isolate_diagnostics
+        except ImportError:  # package-style run: python -m unittest tests.test_x
+            from tests.test_support import isolate_diagnostics
+        diagnostics.reset()
+        self.assertEqual(Path(diagnostics.log_path()).resolve(),
+                         Path(isolate_diagnostics()).resolve())
+
+
 class DiagnosticsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

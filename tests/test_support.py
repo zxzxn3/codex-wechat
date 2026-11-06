@@ -1,14 +1,44 @@
-"""Capability guards for offline platform fixtures."""
+"""Capability guards and process-wide isolation for offline fixtures."""
 from functools import wraps
+import atexit
 import os
 from pathlib import Path
+import shutil
 import tempfile
+
+import diagnostics
 
 
 def xdg_user_data_dir(name, appauthor=False):
     """Stand in for platformdirs' Linux branch so Linux cases run on any host."""
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return str(Path(base) / name)
+
+
+def isolate_diagnostics():
+    """Keep fixture events out of the developer's real data-root log.
+
+    `diagnostics` is a process global, and most fixtures drive real code paths
+    that log. Without this the suite appends synthetic `wechat.auth_required`
+    and turn events to the log an operator later reads as evidence - and a
+    module-level `reset()` would send the next module back to that file.
+    """
+    existing = getattr(diagnostics, "_test_log_sink", None)
+    if existing is not None:
+        return existing
+    directory = tempfile.mkdtemp(prefix="codex-wechat-tests-")
+    atexit.register(shutil.rmtree, directory, ignore_errors=True)
+    sink = Path(directory) / "bridge.jsonl"
+    reset = diagnostics.reset
+
+    def isolated_reset(*args, **kwargs):
+        reset(*args, **kwargs)
+        diagnostics.configure(path=sink)
+
+    diagnostics.configure(path=sink)
+    diagnostics.reset = isolated_reset
+    diagnostics._test_log_sink = sink
+    return sink
 
 
 def requires_symlinks(method):
@@ -25,3 +55,8 @@ def requires_symlinks(method):
                 raise
         return method(self, *args, **kwargs)
     return checked
+
+
+# Imported by the earliest offline fixtures during discovery, so a full run is
+# already isolated before the first test executes.
+isolate_diagnostics()
