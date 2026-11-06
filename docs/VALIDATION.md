@@ -5,7 +5,7 @@
 
 | 范围 | 当前证据 | 状态 |
 |---|---|---|
-| Linux 离线单测 | `python -m unittest discover -s tests`：873 项，853 通过、20 跳过、0 失败（2026-11-06 当前树）；新增安装后 stable payload/import 烟测、数据根冲突和服务状态矩阵；历史 Windows 复测数字仅保留作记录，不能替代当前树验收 | 已验证 |
+| Linux 离线单测 | `python -m unittest discover -s tests`：880 项，860 通过、20 跳过、0 失败（2026-11-06 当前树）；新增安装后 stable payload/import 烟测、数据根冲突和服务状态矩阵；历史 Windows 复测数字仅保留作记录，不能替代当前树验收 | 已验证 |
 | 静态检查 | ruff、shellcheck、`py_compile`、pyright（0 errors、5 个环境导入 warning） | 已验证 |
 | Windows 服务基础生命周期 | PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、通知 | 已实机验证（历史窗口） |
 | Windows App IPC | writer 冲突连接、身份核对、无 App / App 已持有 / App 后启动三种命名管道状态 | 已验证；仍受 App 版本影响 |
@@ -26,7 +26,8 @@
 - Linux systemd 自定义数据根现在通过安装根 `.data-root` 解析，服务不再保存第二份路径；
   仍需在真实 systemd 用户管理器下验证 service-start 和 marker 更新后的服务启动。
 - 出站静默丢弃在本机已发生两次，序列是：更早的开发期用**小号**时被封 → 换**大号**继续开发 →
-  2026-11-06 18:53Z 大号被封 → 19:27Z 换回**小号**，此时小号已自愈可用。可见这不是永久的账号标记：
+  2026-11-06 18:53Z 大号被封 → 19:27Z 换回**小号**，此时小号已自愈可用；
+  2026-11-06 11:49 CST 大号也已解封，`/s` 等消息可正常收发。可见这不是永久的账号标记：
   同一账号隔一段时间会恢复，社区报告的恢复时长从 2 小时 50 分到约 4 天不等（见
   [SOURCES](SOURCES.md) 的"微信下行投递"一节）。同号 `rebind` 对恢复无效（服务端回
   `binded_redirect`，登录流程复用旧 token、不发新 bot id，已实测）；
