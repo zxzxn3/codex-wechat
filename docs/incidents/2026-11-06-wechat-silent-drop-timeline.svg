@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title desc">
+<title id="title">WeChat send attempts on 2026-11-06</title>
+<desc id="desc">A single horizontal timeline. Green points are confirmed sends; red points are failed send attempts. First no-id attempt at 11:57:00 CST.</desc>
+<rect width="100%" height="100%" fill="#10151c"/>
+<text x="90" y="42" fill="#f3f6fa" font-family="sans-serif" font-size="24" font-weight="700">微信出站发送尝试 · 2026-11-06 CST</text>
+<text x="90" y="70" fill="#9aa8b6" font-family="sans-serif" font-size="14">每个点 = 一次可观测发送结果；失败重试单独计点</text>
+<text x="1130" y="42" fill="#9aa8b6" font-family="sans-serif" font-size="14" text-anchor="end">23 成功 · 10 失败尝试</text>
+<line x1="90.0" y1="125" x2="90.0" y2="255" stroke="#263240" stroke-width="1"/>
+<text x="90.0" y="282" fill="#9aa8b6" font-family="sans-serif" font-size="13" text-anchor="middle">11:50</text>
+<line x1="263.3" y1="125" x2="263.3" y2="255" stroke="#263240" stroke-width="1"/>
+<text x="263.3" y="282" fill="#9aa8b6" font-family="sans-serif" font-size="13" text-anchor="middle">11:52</text>
+<line x1="436.7" y1="125" x2="436.7" y2="255" stroke="#263240" stroke-width="1"/>
+<text x="436.7" y="282" fill="#9aa8b6" font-family="sans-serif" font-size="13" text-anchor="middle">11:54</text>
+<line x1="610.0" y1="125" x2="610.0" y2="255" stroke="#263240" stroke-width="1"/>
+<text x="610.0" y="282" fill="#9aa8b6" font-family="sans-serif" font-size="13" text-anchor="middle">11:56</text>
+<line x1="783.3" y1="125" x2="783.3" y2="255" stroke="#263240" stroke-width="1"/>
+<text x="783.3" y="282" fill="#9aa8b6" font-family="sans-serif" font-size="13" text-anchor="middle">11:58</text>
+<line x1="956.7" y1="125" x2="956.7" y2="255" stroke="#263240" stroke-width="1"/>
+<text x="956.7" y="282" fill="#9aa8b6" font-family="sans-serif" font-size="13" text-anchor="middle">12:00</text>
+<line x1="1130.0" y1="125" x2="1130.0" y2="255" stroke="#263240" stroke-width="1"/>
+<text x="1130.0" y="282" fill="#9aa8b6" font-family="sans-serif" font-size="13" text-anchor="middle">12:02</text>
+<line x1="90" y1="190" x2="1130" y2="190" stroke="#dbe7f3" stroke-width="2"/>
+<line x1="697.6" y1="105" x2="697.6" y2="260" stroke="#ff7b72" stroke-width="1.5" stroke-dasharray="5 5"/>
+<text x="697.6" y="98" fill="#ff9b93" font-family="sans-serif" font-size="13" text-anchor="middle">11:57:00 首次 no-id</text>
+<circle cx="118.1" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:50:19.428Z body sent</title></circle>
+<circle cx="122.1" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:50:22.252Z body sent</title></circle>
+<circle cx="126.2" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:50:25.072Z body sent</title></circle>
+<circle cx="151.9" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:50:42.830Z body sent</title></circle>
+<circle cx="247.3" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:51:48.874Z body sent</title></circle>
+<circle cx="267.0" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:52:02.526Z body sent</title></circle>
+<circle cx="280.5" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:52:11.881Z body sent</title></circle>
+<circle cx="290.0" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:52:18.431Z body sent</title></circle>
+<circle cx="345.7" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:52:57.001Z body sent</title></circle>
+<circle cx="356.6" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:53:04.574Z body sent</title></circle>
+<circle cx="360.7" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:53:07.374Z completion sent</title></circle>
+<circle cx="468.1" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:54:21.779Z body sent</title></circle>
+<circle cx="506.5" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:54:48.350Z body sent</title></circle>
+<circle cx="527.1" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:55:02.615Z body sent</title></circle>
+<circle cx="542.5" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:55:13.290Z body sent</title></circle>
+<circle cx="549.0" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:55:17.792Z body sent</title></circle>
+<circle cx="553.1" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:55:20.604Z completion sent</title></circle>
+<circle cx="557.2" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:55:23.416Z body sent</title></circle>
+<circle cx="561.2" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:55:26.228Z body sent</title></circle>
+<circle cx="577.4" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:55:37.424Z body sent</title></circle>
+<circle cx="581.5" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:55:40.248Z completion sent</title></circle>
+<circle cx="676.7" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:56:46.185Z body sent</title></circle>
+<circle cx="693.5" cy="190" r="5" fill="#56d364" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:56:57.839Z body sent</title></circle>
+<circle cx="697.6" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:57:00.619Z completion failed attempt</title></circle>
+<circle cx="699.3" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:57:01.851Z completion failed attempt</title></circle>
+<circle cx="790.9" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:58:05.267Z body failed attempt</title></circle>
+<circle cx="792.8" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:58:06.539Z body failed attempt</title></circle>
+<circle cx="884.5" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:59:10.056Z body failed attempt</title></circle>
+<circle cx="885.4" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T03:59:10.668Z body failed attempt</title></circle>
+<circle cx="977.0" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T04:00:14.066Z body failed attempt</title></circle>
+<circle cx="978.7" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T04:00:15.285Z body failed attempt</title></circle>
+<circle cx="1070.5" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T04:01:18.775Z body failed attempt</title></circle>
+<circle cx="1072.2" cy="190" r="5.5" fill="#ff7b72" stroke="#10151c" stroke-width="1.5"><title>2026-11-06T04:01:20.002Z body failed attempt</title></circle>
+<circle cx="90" cy="330" r="5" fill="#56d364"/><text x="106" y="335" fill="#c9d6e2" font-family="sans-serif" font-size="14">确认送达</text>
+<circle cx="240" cy="330" r="5.5" fill="#ff7b72"/><text x="256" y="335" fill="#c9d6e2" font-family="sans-serif" font-size="14">发送尝试未确认</text>
+<text x="1130" y="335" fill="#71818f" font-family="sans-serif" font-size="13" text-anchor="end">数据：bridge.jsonl · 03:50–04:02Z</text>
+</svg>
