@@ -346,6 +346,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("$SavedDataRoot = Read-SavedDataRoot $InstallRoot", text)
         self.assertIn("拒绝卸载", text)
+        self.assertIn("没有显式数据根时清理数据", text)
         self.assertLess(text.index("拒绝卸载"), text.index("$task = Get-ScheduledTask"))
         self.assertIn("[IO.FileShare]::None", text)
         check = text.index("Assert-NoForegroundBridge\n\n# Data removal")

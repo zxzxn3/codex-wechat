@@ -82,6 +82,11 @@ if ($SavedDataRoot) {
         throw 'CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；请清除环境变量，或重新运行安装器更新数据根'
     }
 }
+$InstalledCurrent = Join-Path $InstallRoot 'current'
+if (-not $SavedDataRoot -and -not $InstallerCommand -and $Command -ne 'uninstall' -and
+        (Test-Path -LiteralPath $InstalledCurrent)) {
+    throw '已安装布局缺少数据根标记；请重新运行安装器。'
+}
 
 if ($Command -in @('update', 'install', 'menu', 'components')) {
     if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $Service -or $PurgeData -or

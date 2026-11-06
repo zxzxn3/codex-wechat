@@ -55,6 +55,38 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((custom / "config.json").exists())
             self.assertTrue((install / "config.json").exists())
 
+    async def test_purge_without_a_marker_or_explicit_root_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            install.mkdir()
+            with patch.object(uninstall, "IS_WINDOWS", False), \
+                    patch.object(uninstall, "INSTALL_ROOT", install), \
+                    patch.dict(uninstall.os.environ,
+                               {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "缺少数据根标记"):
+                    await uninstall.uninstall(purge=True)
+
+    async def test_failed_purge_keeps_the_marker_for_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            custom = Path(directory) / "custom"
+            install.mkdir()
+            custom.mkdir()
+            (install / ".data-root").write_text(str(custom) + "\n", encoding="utf-8")
+            with patch.object(uninstall, "IS_WINDOWS", False), \
+                    patch.object(uninstall, "INSTALL_ROOT", install), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
+                    patch.object(uninstall, "_require_no_bridge", Mock()), \
+                    patch.object(uninstall, "_linux_command_removal", Mock()), \
+                    patch.object(uninstall, "_purge_linux_data",
+                                 side_effect=RuntimeError("purge failed")), \
+                    patch.dict(uninstall.os.environ,
+                               {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "purge failed"):
+                    await uninstall.uninstall(purge=True)
+            self.assertTrue((install / ".data-root").exists())
+
     def test_purge_removes_only_user_data_when_data_is_the_install_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

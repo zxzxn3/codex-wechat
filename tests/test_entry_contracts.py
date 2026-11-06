@@ -32,6 +32,7 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn(".data-root", text)
         self.assertIn("不一致", text)
         self.assertLess(text.index("不一致"), text.index('if [ "$ACTION" = "uninstall" ]'))
+        self.assertIn("已安装布局缺少数据根标记", text)
 
     def test_linux_stable_uninstaller_has_its_runtime_dependencies(self):
         import installer
@@ -66,6 +67,7 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn("'uninstall'", text)
         self.assertIn("windows/task-service.ps1", (ROOT / "service_adapter.py").read_text(
             encoding="utf-8"))
+        self.assertIn("已安装布局缺少数据根标记", text)
 
     def test_task_helper_is_internal_and_owns_native_operations(self):
         text = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")

@@ -98,6 +98,8 @@ Windows 自定义数据目录由 `CODEX_WECHAT_DATA_ROOT`（或原生 helper 的
 Linux 后台服务的数据根由安装根 `.data-root` 提供（包括默认根），systemd unit 不再保存第二份数据根；
 安装后修改环境变量必须通过安装器更新标记。公开入口、服务 supervisor 和卸载器在环境变量
 与标记不一致时 fail closed，而不是静默回退默认目录。
+安装后的 `current/release` 布局若缺少 marker，公开命令会 fail closed；`uninstall --purge-data`
+在既没有 marker 也没有显式数据根时拒绝清理。
 
 Linux 的 stable `codex-wechat` 和 Windows 的 `codex-wechat.ps1` 在读取 `current` 之前
 直接分派 `uninstall` 到稳定卸载组件。这样 `current` 缺失、损坏或活动 release 不完整时，

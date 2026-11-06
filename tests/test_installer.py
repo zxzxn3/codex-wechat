@@ -699,6 +699,16 @@ class LinuxServiceRegistrationTests(unittest.TestCase):
 
 
 class RuntimeRepairTests(unittest.TestCase):
+    def test_marker_is_published_before_stable_entry_and_current_activation(self):
+        text = (Path(__file__).resolve().parents[1] / "installer.py").read_text(
+            encoding="utf-8")
+        section = text[text.index('phase("准备程序与依赖...")'):
+                       text.index("service_ready = configure_platform_service")]
+        self.assertLess(section.index("_publish_data_root(target)"),
+                        section.index("install_bootstrap(source, target)"))
+        self.assertLess(section.index("_publish_data_root(target)"),
+                        section.index("activate_release(target, identifier)"))
+
     def test_runtime_version_contracts_match_requirements(self):
         requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(
             encoding="utf-8")

@@ -152,6 +152,11 @@ class AutostartScriptContractTests(unittest.TestCase):
                 capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_chinese_powershell_scripts_keep_the_utf8_bom(self):
+        for name in ("codex-wechat.ps1", "codex-desktop.ps1", "install.ps1",
+                     "uninstall.ps1"):
+            self.assertTrue((ROOT / name).read_bytes().startswith(b"\xef\xbb\xbf"), name)
+
 
 if __name__ == "__main__":
     unittest.main()

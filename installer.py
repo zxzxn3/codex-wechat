@@ -1293,11 +1293,14 @@ def _common_install(
             release, created = install_release(target, identifier, files)
             prepare_bootstrap_runtime(target, requirements=release / "requirements-windows.txt")
             # Everything requiring downloads/builds/user input finishes above.
+            # Publish the data-root marker before replacing the stable entry or
+            # the current pointer so a crash cannot expose an installed layout
+            # without its data-root contract.
+            _publish_data_root(target)
             phase("更新入口与当前版本...")
             install_bootstrap(source, target)
             install_command_link(target)
             activate_release(target, identifier)
-            _publish_data_root(target)
             service_ready = configure_platform_service(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier)

@@ -155,14 +155,18 @@ async def uninstall(*, purge: bool = False) -> None:
     # Validate the data-root contract before removing the service or touching
     # any user data. The stable entry checks this too, but a direct helper
     # invocation must not be able to skip the check.
+    marker = INSTALL_ROOT / DATA_ROOT_FILE
+    if (purge and not marker.exists() and not marker.is_symlink()
+            and not os.environ.get("CODEX_WECHAT_DATA_ROOT")):
+        raise RuntimeError("缺少数据根标记；拒绝在没有显式数据根时清理数据")
     root = data_root()
     await _linux_service_removal()
     _require_no_bridge(root)
     _linux_command_removal()
-    _remove_data_root_marker()
     if purge:
         _purge_linux_data(root)
-    else:
+    _remove_data_root_marker()
+    if not purge:
         print(f"用户数据已保留: {root}")
         print("如需同时删除配置、登录和待办，请使用 --purge-data。")
 

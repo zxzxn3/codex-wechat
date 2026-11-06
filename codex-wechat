@@ -34,6 +34,12 @@ if { [ -e "$DATA_ROOT_FILE" ] || [ -L "$DATA_ROOT_FILE" ]; } &&
         export CODEX_WECHAT_DATA_ROOT="$saved_data_root"
     fi
 fi
+if [ "$INSTALLER_ACTION" -eq 0 ] && [ "$ACTION" != "uninstall" ] &&
+        [ ! -e "$DATA_ROOT_FILE" ] && [ ! -L "$DATA_ROOT_FILE" ] &&
+        [ -f "$CURRENT_FILE" ]; then
+    echo "codex-wechat: 已安装布局缺少数据根标记: $DATA_ROOT_FILE；请重新运行安装器" >&2
+    exit 1
+fi
 if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; then
     case "$ACTION" in
         status|logs|uninstall|-h|--help) ;;

@@ -40,6 +40,11 @@ function Read-SavedDataRoot([string]$Root) {
     return [IO.Path]::GetFullPath($Value)
 }
 $SavedDataRoot = Read-SavedDataRoot $InstallRoot
+$HasExplicitDataRoot = $PSBoundParameters.ContainsKey('DataRoot') -or
+    -not [string]::IsNullOrWhiteSpace($env:CODEX_WECHAT_DATA_ROOT)
+if ($PurgeData -and -not $SavedDataRoot -and -not $HasExplicitDataRoot) {
+    throw 'uninstall.ps1: 缺少数据根标记；拒绝在没有显式数据根时清理数据'
+}
 $StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $ExpectedActionPrefixes = @(
     ('"' + $StableServiceScript + '" supervise')
