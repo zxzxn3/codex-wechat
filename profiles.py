@@ -92,7 +92,6 @@ def restore(state, saved):
 
 
 def backend_label(name, backends=None):
-    """Display name for a backend, shown verbatim; built-in labels are lowercase."""
     settings = (backends or {}).get(name, {})
     label = settings.get("label") if isinstance(settings, dict) else None
     return str(label).strip() if isinstance(label, str) and label.strip() else str(name)
