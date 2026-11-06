@@ -202,6 +202,20 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(complete[0]["params"]["completedAtMs"], 2500)
         self.assertEqual(self.events[-1]["method"], "turn/completed")
 
+    async def test_turn_error_is_kept_on_the_completion_event(self):
+        await self.session.attach()
+        self.session.activate()
+        self.state["turns"].append({"turnId": "failed", "status": "failed", "items": [],
+            "error": {"message": "quota", "codexErrorInfo": "usageLimitExceeded"}})
+        await self.session.broadcast({"type": "broadcast", "version": 11,
+            "sourceClientId": "owner", "method": "thread-stream-state-changed", "params": {
+                "hostId": "local", "conversationId": "thread", "change": {
+                    "type": "snapshot", "revision": 2,
+                    "conversationState": copy.deepcopy(self.state)}}})
+        complete = [e for e in self.events if e["method"] == "turn/completed"][-1]
+        self.assertEqual(complete["params"]["turn"]["error"],
+                         {"message": "quota", "codexErrorInfo": "usageLimitExceeded"})
+
     async def test_nested_response_wrapper_remains_supported(self):
         self.nested_response = True
         await self.session.attach()

@@ -52,6 +52,22 @@ WRITER_FOLLOWED = "followed"    # the App holds it and its event stream feeds us
 WRITER_RELEASED = "released"    # handed back after a turn; take it back next turn
 WRITER_BUSY = "busy"            # the desktop holds it and we could not follow
 
+TURN_ERROR_PROMPTS = {
+    "usageLimitExceeded": "TURN_FAILED_USAGE_LIMIT",
+    "sessionBudgetExceeded": "TURN_FAILED_SESSION_BUDGET",
+    "contextWindowExceeded": "TURN_FAILED_CONTEXT",
+    "rateLimitExceeded": "TURN_FAILED_RATE_LIMIT",
+    "unauthorized": "TURN_FAILED_UNAUTHORIZED",
+    "modelNotFound": "TURN_FAILED_MODEL_NOT_FOUND",
+    "flexUnavailable": "TURN_FAILED_SERVICE_UNAVAILABLE",
+    "serverOverloaded": "TURN_FAILED_SERVICE_UNAVAILABLE",
+    "policyCapacityUnavailable": "TURN_FAILED_SERVICE_UNAVAILABLE",
+    "cyberPolicy": "TURN_FAILED_POLICY",
+    "misalignmentPolicyViolation": "TURN_FAILED_POLICY",
+    "tooManyDenials": "TURN_FAILED_TOO_MANY_DENIALS",
+    "sandboxError": "TURN_FAILED_SANDBOX",
+}
+
 
 class DeferTurn(RuntimeError):
     """The desktop owns an active turn that did not accept this input."""
@@ -77,6 +93,7 @@ class CodexBackend:
         self.usage_by_thread = {}
         self.usage_by_turn = {}
         self.live_usage_threads = set()
+        self.turn_error_codes = {}
         self.stored_usage = UsageCache()
         self.compactions = {}
         self.manual_compactions = set()
@@ -110,6 +127,7 @@ class CodexBackend:
         self.usage_by_thread.clear()
         self.usage_by_turn.clear()
         self.live_usage_threads.clear()
+        self.turn_error_codes.clear()
         self.stored_usage.clear()
         self.compactions.clear()
         self.manual_compactions.clear()
@@ -393,6 +411,9 @@ class CodexBackend:
         if method == "thread/tokenUsage/updated":
             self._update_token_usage(params)
             return
+        if method == "error":
+            self._record_turn_error(params)
+            return
         if params.get("threadId") != self.selected_thread:
             return
         item = params.get("item", {})
@@ -509,6 +530,22 @@ class CodexBackend:
                 while len(self.usage_by_turn) > 20:
                     self.usage_by_turn.pop(next(iter(self.usage_by_turn)))
 
+    def _record_turn_error(self, params):
+        thread_id, turn_id = params.get("threadId"), params.get("turnId")
+        code = self._turn_error_code(params.get("error"))
+        if isinstance(thread_id, str) and isinstance(turn_id, str) and code:
+            self.turn_error_codes.pop((thread_id, turn_id), None)
+            self.turn_error_codes[(thread_id, turn_id)] = code
+            while len(self.turn_error_codes) > 20:
+                self.turn_error_codes.pop(next(iter(self.turn_error_codes)))
+
+    @staticmethod
+    def _turn_error_code(error):
+        if not isinstance(error, dict):
+            return None
+        code = error.get("codexErrorInfo")
+        return code if isinstance(code, str) else None
+
     def _update_thread_settings(self, params):
         # Native settings are authoritative; no replay of previously observed defaults.
         self.runtime_generation += 1
@@ -589,8 +626,12 @@ class CodexBackend:
                                  for m in messages)
         status = turn["status"]
         if status != "completed":
+            error_code = self._turn_error_code(turn.get("error"))
+            if error_code is None and current["turn"]:
+                error_code = self.turn_error_codes.pop(
+                    (current["thread"], current["turn"]), None)
             status_text = {
-                "failed": self.prompt("TURN_FAILED"),
+                "failed": self.prompt(TURN_ERROR_PROMPTS.get(error_code, "TURN_FAILED")),
                 "interrupted": self.prompt("TURN_INTERRUPTED"),
             }.get(status, self.prompt("TURN_ENDED_UNEXPECTEDLY"))
             text = (text + "\n\n" if text else "") + status_text

@@ -381,6 +381,8 @@ class AppSession:
                 for name in ("startedAt", "completedAt", "durationMs"):
                     if turn.get(name) is not None:
                         turn_event[name] = turn[name]
+                if turn.get("error") is not None:
+                    turn_event["error"] = turn["error"]
                 self.emit("turn/completed", turn=turn_event)
         requests = {r["id"]: r for r in s.get("requests", []) if "id" in r}
         for rid in self.pending.keys() - requests.keys():

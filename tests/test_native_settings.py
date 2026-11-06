@@ -11,6 +11,7 @@ from backend import CodexBackend, WRITER_BUSY, WRITER_NATIVE, WRITER_RELEASED
 from codex_transport import CodexRpcError
 from commands import activate
 from input_delivery import InputDelivery
+from prompts import prompt_text
 from storage import Store
 
 
@@ -136,3 +137,69 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
             return {}
         backend.rpc = rpc
         await asyncio.wait_for(backend.run("t", "input", client_id="client"), 1)
+
+    async def test_failed_turn_reports_an_exhausted_usage_limit(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.selected_thread = "t"
+        backend.active = backend.new_turn("t", "turn", owned=True)
+        backend.event({"method": "turn/completed", "params": {
+            "threadId": "t", "turn": {
+                "id": "turn", "status": "failed",
+                "error": {"message": "quota", "codexErrorInfo": "usageLimitExceeded"},
+            }}})
+        result = await backend.active["done"]
+        self.assertEqual(result.text, prompt_text("TURN_FAILED_USAGE_LIMIT"))
+
+    async def test_usage_limit_error_notification_reaches_completion(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.selected_thread = "t"
+        backend.active = backend.new_turn("t", "turn", owned=True)
+        backend.event({"method": "error", "params": {
+            "threadId": "t", "turnId": "turn", "willRetry": False,
+            "error": {"message": "quota", "codexErrorInfo": "usageLimitExceeded"},
+        }})
+        backend.event({"method": "turn/completed", "params": {
+            "threadId": "t", "turn": {"id": "turn", "status": "failed"},
+        }})
+        result = await backend.active["done"]
+        self.assertEqual(result.text, prompt_text("TURN_FAILED_USAGE_LIMIT"))
+
+    async def test_other_failed_turn_stays_generic(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.selected_thread = "t"
+        backend.active = backend.new_turn("t", "turn", owned=True)
+        backend.event({"method": "turn/completed", "params": {
+            "threadId": "t", "turn": {
+                "id": "turn", "status": "failed",
+                "error": {"message": "other", "codexErrorInfo": "other"},
+            }}})
+        result = await backend.active["done"]
+        self.assertEqual(result.text, prompt_text("TURN_FAILED"))
+
+    async def test_known_turn_error_codes_map_to_specific_prompts(self):
+        cases = {
+            "sessionBudgetExceeded": "TURN_FAILED_SESSION_BUDGET",
+            "contextWindowExceeded": "TURN_FAILED_CONTEXT",
+            "rateLimitExceeded": "TURN_FAILED_RATE_LIMIT",
+            "unauthorized": "TURN_FAILED_UNAUTHORIZED",
+            "modelNotFound": "TURN_FAILED_MODEL_NOT_FOUND",
+            "flexUnavailable": "TURN_FAILED_SERVICE_UNAVAILABLE",
+            "serverOverloaded": "TURN_FAILED_SERVICE_UNAVAILABLE",
+            "policyCapacityUnavailable": "TURN_FAILED_SERVICE_UNAVAILABLE",
+            "cyberPolicy": "TURN_FAILED_POLICY",
+            "misalignmentPolicyViolation": "TURN_FAILED_POLICY",
+            "tooManyDenials": "TURN_FAILED_TOO_MANY_DENIALS",
+            "sandboxError": "TURN_FAILED_SANDBOX",
+        }
+        for code, prompt_name in cases.items():
+            with self.subTest(code=code):
+                backend = CodexBackend({}, "/tmp", lambda _: None)
+                backend.selected_thread = "t"
+                backend.active = backend.new_turn("t", "turn", owned=True)
+                backend.event({"method": "turn/completed", "params": {
+                    "threadId": "t", "turn": {
+                        "id": "turn", "status": "failed",
+                        "error": {"message": "failure", "codexErrorInfo": code},
+                    }}})
+                result = await backend.active["done"]
+                self.assertEqual(result.text, prompt_text(prompt_name))

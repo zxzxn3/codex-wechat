@@ -1,12 +1,12 @@
 # 验证状态
 
-更新：2026-11-06。文档、源码核对和 Linux mock 不能替代真实 Windows、微信、CDN 或模型验收。
+更新：2026-11-07。文档、源码核对和 Linux mock 不能替代真实 Windows、微信、CDN 或模型验收。
 Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据；否则只算历史/Windows 侧报告。
 本页只记录当前状态和缺口；详细历史日志见 git 提交历史。
 
 | 范围 | 当前证据 | 状态 |
 |---|---|---|
-| 离线单测 | `python -m unittest discover -s tests`：Linux 911 项、891 通过、20 跳过、0 失败（2026-11-06 当前树）；Windows 侧曾有 894 项、875 通过、19 跳过、0 失败的报告，但未记录可核对的提交号，不能作为当前 HEAD 的独立证据；新增安装后 stable payload/import 烟测、数据根冲突、平台用户目录回退和服务状态矩阵；套件把诊断写入临时 sink，不污染数据根下的 `logs/bridge.jsonl` | 已验证 |
+| 离线单测 | `python -m unittest discover -s tests`：Linux 917 项、896 通过、21 跳过、0 失败（2026-11-07 当前树）；Windows 侧曾有 894 项、875 通过、19 跳过、0 失败的报告，但未记录可核对的提交号，不能作为当前 HEAD 的独立证据；新增安装后 stable payload/import 烟测、数据根冲突、平台用户目录回退和服务状态矩阵；套件把诊断写入临时 sink，不污染数据根下的 `logs/bridge.jsonl` | 已验证 |
 | 静态检查 | ruff、shellcheck、`py_compile`、pyright（0 errors、5 个环境导入 warning） | 已验证 |
 | Windows 服务基础生命周期 | PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、通知 | 历史证据，无当前提交号；不作为当前 HEAD 证据 |
 | Windows App IPC | writer 冲突连接、身份核对、无 App / App 已持有 / App 后启动三种命名管道状态 | 历史证据，无当前提交号；仍受 App 版本影响 |
