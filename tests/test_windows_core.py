@@ -54,6 +54,19 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(set(definitions({"backends": {"deepseek": {
                 "command": ["custom.exe", "app-server"]}}})), {"deepseek"})
 
+    def test_saved_data_root_marker_is_used_without_an_environment_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            install.mkdir()
+            data = Path(directory) / "custom data"
+            data.mkdir()
+            (install / platform_support.DATA_ROOT_FILE).write_text(
+                str(data) + "\n", encoding="utf-8")
+            with patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": ""},
+                               clear=False):
+                self.assertEqual(platform_support.data_root(), data.resolve())
+
     def test_windows_refuses_implicit_shell(self):
         with patch.object(platform_support, "IS_WINDOWS", True), \
                 patch("platform_support.shutil.which", return_value="/tmp/codex.cmd"):

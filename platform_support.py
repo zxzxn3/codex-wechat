@@ -16,18 +16,40 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 INSTALL_ROOT = Path(
     os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(PROJECT_ROOT))
 ).expanduser().resolve()
+DATA_ROOT_FILE = ".data-root"
+
+
+def saved_data_root() -> Path | None:
+    path = INSTALL_ROOT / DATA_ROOT_FILE
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"数据根标记不是普通文件: {path}")
+    try:
+        text = path.read_text(encoding="utf-8").rstrip("\r\n")
+    except OSError as error:
+        raise ValueError(f"无法读取数据根标记: {path}") from error
+    if not text or "\n" in text or "\r" in text or "\x00" in text:
+        raise ValueError(f"数据根标记内容无效: {path}")
+    root = Path(text).expanduser()
+    if not root.is_absolute():
+        raise ValueError(f"数据根标记必须是绝对路径: {path}")
+    return root.resolve()
 
 
 def data_root():
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     if override:
         return Path(override).expanduser().resolve()
+    saved = saved_data_root()
+    if saved is not None:
+        return saved
     if IS_WINDOWS:
         local = os.environ.get("LOCALAPPDATA")
         if not local:
             raise RuntimeError("Windows 缺少 LOCALAPPDATA，无法定位当前用户数据目录")
         return Path(local) / "codex-wechat"
-    return PROJECT_ROOT
+    return INSTALL_ROOT
 
 
 def subprocess_options():

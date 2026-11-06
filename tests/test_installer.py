@@ -448,6 +448,8 @@ class InstallerTests(unittest.TestCase):
             import_command = run.call_args_list[1].args[0][2]
             for module in installer.RUNTIME_IMPORTS:
                 self.assertIn(module, import_command)
+            for distribution in installer.RUNTIME_VERSION_REQUIREMENTS:
+                self.assertIn(distribution, import_command)
 
     def test_update_rejects_same_versioned_root_as_source(self):
         with patch("builtins.input", return_value="y"):
@@ -698,6 +700,12 @@ class LinuxServiceRegistrationTests(unittest.TestCase):
 
 
 class RuntimeRepairTests(unittest.TestCase):
+    def test_runtime_version_contracts_match_requirements(self):
+        requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(
+            encoding="utf-8")
+        for distribution, constraint in installer.RUNTIME_VERSION_REQUIREMENTS.items():
+            self.assertIn(distribution + constraint, requirements)
+
     def test_prepare_runtime_rebuilds_a_broken_venv(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -717,6 +725,29 @@ class RuntimeRepairTests(unittest.TestCase):
                     patch.object(installer, "project_files", return_value={}):
                 installer.prepare_runtime(root)
             self.assertEqual(calls[0][1:3], ["-m", "venv"])
+
+
+class DataRootMarkerTests(unittest.TestCase):
+    def test_marker_is_persisted_and_used_without_the_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "install"
+            target.mkdir()
+            data = Path(directory) / "data root"
+            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": str(data)}, clear=False):
+                installer._write_data_root_marker(target)
+            self.assertEqual(installer.saved_data_root(target), data.resolve())
+            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                self.assertEqual(installer.configured_data_root(target), data.resolve())
+
+    def test_invalid_marker_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "install"
+            target.mkdir()
+            (target / installer.DATA_ROOT_FILE).write_text(
+                "relative/path\n", encoding="utf-8")
+            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                with self.assertRaisesRegex(ValueError, "绝对路径"):
+                    installer.configured_data_root(target)
 
 
 if __name__ == "__main__":

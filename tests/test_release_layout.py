@@ -68,6 +68,7 @@ class ReleaseLayoutTests(unittest.TestCase):
                         self.assertIn(Path(module + ".py"), declared)
 
     def test_required_files_are_read_from_the_actual_payload(self):
+        self.assertIn(Path("LICENSE"), installer.REQUIRED_FILES)
         missing = sorted(str(path) for path in installer.REQUIRED_FILES
                          if not (ROOT / path).is_file())
         self.assertEqual(missing, [])

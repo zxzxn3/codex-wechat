@@ -25,6 +25,7 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
         self.task = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
         self.install = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        self.uninstall = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
 
     def test_autostart_branch_only_touches_login_triggers(self):
         branch = self.task.split("'autostart' {", 1)[1]
@@ -79,6 +80,9 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertIn("[IO.FileAttributes]::ReparsePoint", self.entry)
 
     def test_entry_and_task_honor_the_custom_data_root(self):
+        for text in (self.entry, self.install, self.uninstall):
+            self.assertIn("Read-SavedDataRoot", text)
+            self.assertIn(".data-root", text)
         for text in (self.entry, self.install):
             self.assertIn("$DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT)", text)
             self.assertIn("[IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)", text)

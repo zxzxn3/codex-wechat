@@ -46,6 +46,33 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     $PSScriptRoot
 }
 
+function Read-SavedDataRoot([string]$Root) {
+    $Marker = Join-Path $Root '.data-root'
+    $Item = Get-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue
+    if (-not $Item) { return $null }
+    if ($Item.PSIsContainer -or
+            (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "数据根标记不是普通文件: $Marker"
+    }
+    try {
+        $Value = Get-Content -LiteralPath $Marker -Raw -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        throw "无法读取数据根标记: $Marker"
+    }
+    $Value = ([string]$Value).TrimEnd([char[]]"`r`n")
+    if ([string]::IsNullOrWhiteSpace($Value) -or
+            $Value.Contains("`n") -or $Value.Contains("`r") -or
+            -not [IO.Path]::IsPathRooted($Value)) {
+        throw "数据根标记内容无效: $Marker"
+    }
+    return [IO.Path]::GetFullPath($Value)
+}
+
+if (-not $env:CODEX_WECHAT_DATA_ROOT) {
+    $SavedDataRoot = Read-SavedDataRoot $InstallRoot
+    if ($SavedDataRoot) { $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot }
+}
+
 if ($Command -in @('update', 'install', 'menu', 'components')) {
     if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $Service -or $PurgeData -or
             $StopActive) {

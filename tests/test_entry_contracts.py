@@ -28,6 +28,8 @@ class EntryContractTests(unittest.TestCase):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
         self.assertIn('export CODEX_WECHAT_DATA_ROOT="${CODEX_WECHAT_DATA_ROOT:-$INSTALL_ROOT}"', text)
         self.assertNotIn('export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"', text)
+        self.assertIn("DATA_ROOT_FILE", text)
+        self.assertIn(".data-root", text)
 
     def test_linux_stable_uninstaller_has_its_runtime_dependencies(self):
         import installer

@@ -90,6 +90,14 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 uninstall._remove_unit_dropin()
             self.assertFalse(dropin.exists())
 
+    def test_data_root_marker_is_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory)
+            (install / ".data-root").write_text("/custom\n", encoding="utf-8")
+            with patch.object(uninstall, "INSTALL_ROOT", install):
+                uninstall._remove_data_root_marker()
+            self.assertFalse((install / ".data-root").exists())
+
     def test_purge_refuses_a_data_root_that_contains_the_home_directory(self):
         with patch.object(uninstall, "INSTALL_ROOT", Path("/tmp/install")), \
                 patch.object(uninstall, "data_root", return_value=Path.home()):

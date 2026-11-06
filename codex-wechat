@@ -4,6 +4,21 @@ set -euo pipefail
 INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 PROJECT_DIR="$INSTALL_ROOT"
 CURRENT_FILE="$INSTALL_ROOT/current"
+DATA_ROOT_FILE="$INSTALL_ROOT/.data-root"
+export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
+if [ -z "${CODEX_WECHAT_DATA_ROOT:-}" ] && { [ -e "$DATA_ROOT_FILE" ] || [ -L "$DATA_ROOT_FILE" ]; }; then
+    if [ -L "$DATA_ROOT_FILE" ] || [ ! -f "$DATA_ROOT_FILE" ]; then
+        echo "codex-wechat: 数据根标记不是普通文件: $DATA_ROOT_FILE" >&2
+        exit 1
+    fi
+    saved_data_root=$(<"$DATA_ROOT_FILE")
+    if [[ -z "$saved_data_root" || "$saved_data_root" != /* ||
+          "$saved_data_root" == *$'\n'* || "$saved_data_root" == *$'\r'* ]]; then
+        echo "codex-wechat: 数据根标记内容无效: $DATA_ROOT_FILE" >&2
+        exit 1
+    fi
+    export CODEX_WECHAT_DATA_ROOT="$saved_data_root"
+fi
 if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; then
     case "${1:-status}" in
         status|logs|uninstall|-h|--help) ;;
@@ -57,7 +72,6 @@ if [ -f "$CURRENT_FILE" ]; then
         echo "请从新源码重新运行 update。" >&2
         exit 1
     fi
-    export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
     export CODEX_WECHAT_DATA_ROOT="${CODEX_WECHAT_DATA_ROOT:-$INSTALL_ROOT}"
 fi
 export PATH="$HOME/.local/bin:$PATH"

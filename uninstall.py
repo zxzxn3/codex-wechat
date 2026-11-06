@@ -6,7 +6,7 @@ import shutil
 import sys
 
 import service_adapter
-from platform_support import INSTALL_ROOT, IS_WINDOWS, data_root
+from platform_support import DATA_ROOT_FILE, INSTALL_ROOT, IS_WINDOWS, data_root
 from service_control import UNIT, systemctl
 from storage import Store
 
@@ -41,6 +41,13 @@ def _remove_unit_dropin() -> None:
         path.unlink()
         path.parent.rmdir()
     except OSError:
+        pass
+
+
+def _remove_data_root_marker() -> None:
+    try:
+        (INSTALL_ROOT / DATA_ROOT_FILE).unlink()
+    except FileNotFoundError:
         pass
 
 
@@ -147,6 +154,7 @@ async def uninstall(*, purge: bool = False) -> None:
     await _linux_service_removal()
     _require_no_bridge()
     _linux_command_removal()
+    _remove_data_root_marker()
     if purge:
         _purge_linux_data()
     else:
