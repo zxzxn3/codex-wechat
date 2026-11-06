@@ -39,9 +39,17 @@ def saved_data_root() -> Path | None:
 
 def data_root():
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
+    saved = saved_data_root()
+    if override and saved is not None:
+        requested = Path(override).expanduser().resolve()
+        if requested != saved:
+            raise ValueError(
+                "CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；"
+                "请清除环境变量，或重新运行安装器更新数据根"
+            )
+        return requested
     if override:
         return Path(override).expanduser().resolve()
-    saved = saved_data_root()
     if saved is not None:
         return saved
     if IS_WINDOWS:

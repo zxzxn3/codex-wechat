@@ -1,8 +1,8 @@
 # 开发与检查
 
 本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，能力边界见
-[CAPABILITIES](CAPABILITIES.md)，命令词表与平台差异见 [COMMANDS](COMMANDS.md)，外部依据见
-[SOURCES](SOURCES.md)。
+[CAPABILITIES](CAPABILITIES.md)，支持面见 [SUPPORT-MATRIX](SUPPORT-MATRIX.md)，命令词表与
+平台差异见 [COMMANDS](COMMANDS.md)，外部依据见 [SOURCES](SOURCES.md)。
 
 ## 兼容策略
 
@@ -114,3 +114,13 @@ $app = "$env:LOCALAPPDATA\codex-wechat\app"
 安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；新增顶层本地导入
 会破坏该入口。`tests/test_release_layout.py` 会检查各平台 stable payload 的顶层本地
 导入闭包，新增 stable 模块或其依赖时必须同步清单。
+
+## 审查与发布退出标准
+
+- P0/P1 必须修复；P2/P3 只有在支持矩阵内的主路径、数据损坏或安全边界上才阻断发布，
+  其余进入有记录的 backlog，不追求“审查到零 findings”。
+- 支持矩阵内的安装、更新、服务启动和卸载必须有安装后烟测或明确实机证据；源码树测试、
+  mock 和 Linux 上的 PowerShell 静态检查不能替代平台验收。
+- 未在真实平台验证的能力只能标为“待验证/实验性”，不能写成已验收；无法保证的配置在安装
+  或启动时 fail closed。
+- 文档、命令表和 VALIDATION 必须与当前树同步；完成以上条件后停止继续穷举边缘分支。

@@ -183,6 +183,7 @@ codex-wechat logs [--follow] [--service]
 
 - [安装、更新与卸载](docs/INSTALL.md)
 - [命令面](docs/COMMANDS.md)
+- [支持矩阵](docs/SUPPORT-MATRIX.md)
 - [平台差异](docs/PLATFORM-DIFFERENCES.md)
 - [架构与恢复边界](docs/ARCHITECTURE.md)
 - [Windows 操作与故障排查](docs/WINDOWS.md)

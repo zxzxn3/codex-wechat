@@ -16,8 +16,10 @@ from subprocess_io import communicate
 # One wording for "no service registered", shared by every entry point.
 NOT_INSTALLED = "尚未注册后台服务，请重新运行安装器。"
 STABLE_SECONDS = 2.0
-STABLE_STATES = {"", "active", "Running"}
+STABLE_STATES = {"", "active", "running"}
+STARTING_STATES = {"activating", "queued", "reloading"}
 STOPPING_STATES = {"deactivating"}
+FAILED_STATES = {"failed"}
 
 
 @dataclass(frozen=True)
@@ -31,7 +33,23 @@ class ServiceState:
 
     @property
     def stable_running(self):
-        return self.running and self.state in STABLE_STATES
+        return self.running and self.state.casefold() in STABLE_STATES
+
+    @property
+    def phase(self):
+        """Stable lifecycle phases shared by start/restart decision points."""
+        if not self.installed:
+            return "not-installed"
+        current = self.state.casefold()
+        if current in STOPPING_STATES:
+            return "stopping"
+        if self.stable_running:
+            return "running"
+        if self.running or current in STARTING_STATES:
+            return "starting"
+        if current in FAILED_STATES:
+            return "failed"
+        return "stopped"
 
 
 async def _run(command, *, timeout):
@@ -144,12 +162,12 @@ async def start():
     current = await status()
     if not current.installed:
         raise ValueError(NOT_INSTALLED)
-    if current.stable_running:
+    if current.phase == "running":
         return current
-    if current.state in STOPPING_STATES:
+    if current.phase == "stopping":
         await _wait_stopped(timeout=20)
         await _request_start(timeout=20)
-    elif not current.running:
+    elif current.phase in {"stopped", "failed"}:
         await _request_start(timeout=20)
     return await _wait_running_stable(timeout=20, settle=STABLE_SECONDS)
 

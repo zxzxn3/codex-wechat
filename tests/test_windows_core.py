@@ -67,6 +67,26 @@ class PlatformTests(unittest.TestCase):
                                clear=False):
                 self.assertEqual(platform_support.data_root(), data.resolve())
 
+    def test_environment_and_saved_data_root_must_agree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            install.mkdir()
+            saved = Path(directory) / "saved"
+            other = Path(directory) / "other"
+            saved.mkdir()
+            other.mkdir()
+            (install / platform_support.DATA_ROOT_FILE).write_text(
+                str(saved) + "\n", encoding="utf-8")
+            with patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": str(saved)},
+                               clear=False):
+                self.assertEqual(platform_support.data_root(), saved.resolve())
+            with patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": str(other)},
+                               clear=False):
+                with self.assertRaisesRegex(ValueError, "不一致"):
+                    platform_support.data_root()
+
     def test_windows_refuses_implicit_shell(self):
         with patch.object(platform_support, "IS_WINDOWS", True), \
                 patch("platform_support.shutil.which", return_value="/tmp/codex.cmd"):

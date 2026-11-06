@@ -8,6 +8,35 @@ import service_adapter
 
 
 class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
+    def test_service_phase_matrix(self):
+        cases = (
+            (service_adapter.ServiceState(False, False), "not-installed"),
+            (service_adapter.ServiceState(True, True, state="Queued"), "starting"),
+            (service_adapter.ServiceState(True, True, state="activating"), "starting"),
+            (service_adapter.ServiceState(True, True, state="Running"), "running"),
+            (service_adapter.ServiceState(True, True, state="active"), "running"),
+            (service_adapter.ServiceState(True, True, state="deactivating"), "stopping"),
+            (service_adapter.ServiceState(True, False, state="failed"), "failed"),
+            (service_adapter.ServiceState(True, False, state="inactive"), "stopped"),
+        )
+        for state, expected in cases:
+            with self.subTest(state=state):
+                self.assertEqual(state.phase, expected)
+
+    async def test_start_requests_a_failed_service(self):
+        status = AsyncMock(return_value=service_adapter.ServiceState(
+            True, False, state="failed"))
+        request = AsyncMock()
+        wait = AsyncMock(return_value=service_adapter.ServiceState(
+            True, True, state="active"))
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter, "_request_start", request), \
+                patch.object(service_adapter, "_wait_running_stable", wait):
+            await service_adapter.start()
+        request.assert_awaited_once_with(timeout=20)
+        wait.assert_awaited_once_with(
+            timeout=20, settle=service_adapter.STABLE_SECONDS)
+
     async def test_linux_status_accepts_only_this_installations_unit(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
