@@ -111,8 +111,8 @@ def _linux_command_removal() -> None:
         print(f"保留不是本安装创建的命令入口: {link}")
 
 
-def _purge_linux_data() -> None:
-    root = data_root()
+def _purge_linux_data(root: Path | None = None) -> None:
+    root = data_root() if root is None else Path(root)
     install = INSTALL_ROOT.resolve()
     if root == install:
         for name in LINUX_DATA_PATHS:
@@ -134,8 +134,9 @@ def _purge_linux_data() -> None:
     print(f"已删除数据目录中的用户数据: {root}")
 
 
-def _require_no_bridge() -> None:
-    state_dir = data_root() / ".state"
+def _require_no_bridge(root: Path | None = None) -> None:
+    root = data_root() if root is None else Path(root)
+    state_dir = root / ".state"
     if not state_dir.exists():
         return
     try:
@@ -156,11 +157,11 @@ async def uninstall(*, purge: bool = False) -> None:
     # invocation must not be able to skip the check.
     root = data_root()
     await _linux_service_removal()
-    _require_no_bridge()
+    _require_no_bridge(root)
     _linux_command_removal()
     _remove_data_root_marker()
     if purge:
-        _purge_linux_data()
+        _purge_linux_data(root)
     else:
         print(f"用户数据已保留: {root}")
         print("如需同时删除配置、登录和待办，请使用 --purge-data。")

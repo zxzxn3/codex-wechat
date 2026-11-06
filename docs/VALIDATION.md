@@ -5,7 +5,7 @@
 
 | 范围 | 当前证据 | 状态 |
 |---|---|---|
-| Linux 离线单测 | `python -m unittest discover -s tests`：868 项，848 通过、20 跳过、0 失败（2026-11-06 当前树）；新增安装后 stable payload/import 烟测、数据根冲突和服务状态矩阵；历史 Windows 复测数字仅保留作记录，不能替代当前树验收 | 已验证 |
+| Linux 离线单测 | `python -m unittest discover -s tests`：869 项，849 通过、20 跳过、0 失败（2026-11-06 当前树）；新增安装后 stable payload/import 烟测、数据根冲突和服务状态矩阵；历史 Windows 复测数字仅保留作记录，不能替代当前树验收 | 已验证 |
 | 静态检查 | ruff、shellcheck、`py_compile`、pyright（0 errors、5 个环境导入 warning） | 已验证 |
 | Windows 服务基础生命周期 | PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、通知 | 已实机验证（历史窗口） |
 | Windows App IPC | writer 冲突连接、身份核对、无 App / App 已持有 / App 后启动三种命名管道状态 | 已验证；仍受 App 版本影响 |

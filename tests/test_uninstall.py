@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
+import platform_support
 import uninstall
 
 
@@ -32,6 +33,27 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(uninstall, "_remove_data_root_marker", Mock()):
             await uninstall.uninstall()
         self.assertEqual(events, ["data-root", "service"])
+
+    async def test_purge_uses_the_validated_root_after_marker_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            custom = Path(directory) / "custom"
+            install.mkdir()
+            custom.mkdir()
+            (install / ".data-root").write_text(str(custom) + "\n", encoding="utf-8")
+            (custom / "config.json").write_text("{}", encoding="utf-8")
+            (install / "config.json").write_text("{}", encoding="utf-8")
+            with patch.object(uninstall, "IS_WINDOWS", False), \
+                    patch.object(uninstall, "INSTALL_ROOT", install), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
+                    patch.object(uninstall, "_require_no_bridge", Mock()), \
+                    patch.object(uninstall, "_linux_command_removal", Mock()), \
+                    patch.dict(uninstall.os.environ,
+                               {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                await uninstall.uninstall(purge=True)
+            self.assertFalse((custom / "config.json").exists())
+            self.assertTrue((install / "config.json").exists())
 
     def test_purge_removes_only_user_data_when_data_is_the_install_root(self):
         with tempfile.TemporaryDirectory() as directory:

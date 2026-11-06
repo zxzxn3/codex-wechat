@@ -32,12 +32,19 @@ PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests
 并设置 `CODEX_WECHAT_INSTALL_ROOT` 指向该副本：
 
 ```powershell
+$repo = (Get-Location).Path
 $src = Join-Path $env:TEMP ("cw-tests-" + [guid]::NewGuid().ToString("N"))
+$archive = Join-Path $env:TEMP ("cw-src-" + [guid]::NewGuid().ToString("N") + ".tar")
 New-Item -ItemType Directory -Path $src | Out-Null
-git archive HEAD | tar -x -f - -C $src
+git archive --format=tar --output="$archive" HEAD
+tar -xf $archive -C $src
+Set-Location $src
 $env:CODEX_WECHAT_INSTALL_ROOT = $src
 $env:CODEX_WECHAT_DATA_ROOT = Join-Path $env:TEMP ("cw-tests-" + [guid]::NewGuid())
+$env:PYTHONDONTWRITEBYTECODE = "1"
 py -3 -m unittest discover -s tests -v
+Set-Location $repo
+Remove-Item -LiteralPath $archive, $src -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
 Windows、真实微信/CDN、App/daemon 联调不属于离线测试；mock 通过不能写成真实平台或端到端通过。
