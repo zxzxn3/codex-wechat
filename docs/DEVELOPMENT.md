@@ -2,7 +2,8 @@
 
 本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，能力边界见
 [CAPABILITIES](CAPABILITIES.md)，支持面见 [SUPPORT-MATRIX](SUPPORT-MATRIX.md)，命令词表与
-平台差异见 [COMMANDS](COMMANDS.md)，外部依据见 [SOURCES](SOURCES.md)。
+平台差异见 [COMMANDS](COMMANDS.md)，外部依据见 [SOURCES](SOURCES.md)。跨平台协作约定与
+已踩过的坑（Windows 编码、`.ps1` BOM、提交姿势、测试隔离）见仓库根的 [AGENTS](../AGENTS.md)。
 
 ## 兼容策略
 
@@ -25,11 +26,11 @@ CODEX_WECHAT_INSTALL_ROOT="$src" CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" \
 PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests -v
 ```
 
-诊断日志默认写在 `data_root()/logs/bridge.jsonl`，不隔离会把测试事件混进已安装实例
-正在使用的日志，真实问题的排查会被测试噪音污染。`CODEX_WECHAT_DATA_ROOT` 指向临时
-目录即可，测试本身不依赖该目录内容。这里同时把源码导出到没有 `.data-root` 的临时根，
-避免源码树本身是安装根时与新的 fail-closed 冲突。Windows PowerShell 同样应使用源码副本，
-并设置 `CODEX_WECHAT_INSTALL_ROOT` 指向该副本：
+诊断日志默认写在 `data_root()/logs/bridge.jsonl`。`tests/test_support.py` 在导入时把
+`diagnostics` 指向临时 sink，并在每次 `reset()` 后重新套用，所以直接跑测试不会把夹具事件
+写进已安装实例正在使用的日志；上面的隔离目录仍然推荐，因为它同时挡住其它副作用。这里把源码
+导出到没有 `.data-root` 的临时根，避免源码树本身是安装根时与新的 fail-closed 冲突。
+Windows PowerShell 同样应使用源码副本，并设置 `CODEX_WECHAT_INSTALL_ROOT` 指向该副本：
 
 ```powershell
 $repo = (Get-Location).Path
