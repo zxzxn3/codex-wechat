@@ -17,18 +17,18 @@
 
 仓库保持私有。fine-grained PAT 只选择 `zxzxn3/codex-wechat`，Repository permissions
 仅授予 `Contents: Read-only`；`Metadata: Read-only` 由 GitHub 保留。PAT 直接写在命令中，
-会进入 shell 历史；以下示例使用 `127.0.0.1:7897` 代理，代理地址不同时请自行替换。
+会进入 shell 历史。
 
 Linux：
 
 ```bash
-env CODEX_WECHAT_TOKEN='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' HTTPS_PROXY='http://127.0.0.1:7897' HTTP_PROXY='http://127.0.0.1:7897' bash -o pipefail -c 'curl -fsSL -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
+env CODEX_WECHAT_TOKEN='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' bash -o pipefail -c 'if [[ -z ${HTTPS_PROXY:-} && -z ${https_proxy:-} ]] && command -v gsettings >/dev/null; then mode=$(gsettings get org.gnome.system.proxy mode 2>/dev/null || true); mode=${mode#?}; mode=${mode%?}; if [[ $mode == manual ]]; then host=$(gsettings get org.gnome.system.proxy.http host 2>/dev/null || true); host=${host#?}; host=${host%?}; port=$(gsettings get org.gnome.system.proxy.http port 2>/dev/null || true); if [[ -n $host && $port =~ ^[0-9]+$ && $port -gt 0 ]]; then export HTTPS_PROXY="http://$host:$port" HTTP_PROXY="http://$host:$port"; fi; fi; fi; curl -fsSL -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:CODEX_WECHAT_TOKEN='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'; $env:HTTPS_PROXY='http://127.0.0.1:7897'; $env:HTTP_PROXY='http://127.0.0.1:7897'; Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Proxy 'http://127.0.0.1:7897' -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content)
+$env:CODEX_WECHAT_TOKEN='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'; Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content)
 ```
 
 入口先从 GitHub Contents API 取得同仓库中的 bootstrap。bootstrap 使用 PAT 认证 clone

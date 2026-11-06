@@ -4,28 +4,28 @@
 后台服务分别使用 systemd 用户服务与 Windows Scheduled Task。普通 Codex、App 内置 CLI 和
 自定义启动入口使用相同的 App Server 接口；DeepSeek 是可选后端，不是安装前提。
 
+本项目为第三方独立开发，与 OpenAI、腾讯公司（微信）及其关联方没有隶属、合作或背书关系，
+也未获其授权；相关名称与商标归各自权利人所有。
+
 <p align="center">
   <img src="assets/branding/codex-wechat-pixel-mascots.png" alt="codex-wechat pixel mascots" width="320">
 </p>
 
 ## 快速开始
 
-仓库保持私有。创建一个只能读取 `zxzxn3/codex-wechat` 的 fine-grained PAT，Repository
-permissions 仅授予 `Contents: Read-only`，然后运行下面的命令。PAT 直接写在命令中，
-会进入 shell 历史。
+目前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 者内测试用。该 PAT 仅对该仓库只读且限时吊销。
 入口通过 GitHub Contents API 取得 bootstrap，再由 bootstrap 认证克隆到临时目录并安装。
-下面的示例使用 `127.0.0.1:7897` 代理，代理地址不同时请自行替换。
 
 Linux：
 
 ```bash
-env CODEX_WECHAT_TOKEN='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' HTTPS_PROXY='http://127.0.0.1:7897' HTTP_PROXY='http://127.0.0.1:7897' bash -o pipefail -c 'curl -fsSL -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
+env CODEX_WECHAT_TOKEN='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' bash -o pipefail -c 'if [[ -z ${HTTPS_PROXY:-} && -z ${https_proxy:-} ]] && command -v gsettings >/dev/null; then mode=$(gsettings get org.gnome.system.proxy mode 2>/dev/null || true); mode=${mode#?}; mode=${mode%?}; if [[ $mode == manual ]]; then host=$(gsettings get org.gnome.system.proxy.http host 2>/dev/null || true); host=${host#?}; host=${host%?}; port=$(gsettings get org.gnome.system.proxy.http port 2>/dev/null || true); if [[ -n $host && $port =~ ^[0-9]+$ && $port -gt 0 ]]; then export HTTPS_PROXY="http://$host:$port" HTTP_PROXY="http://$host:$port"; fi; fi; fi; curl -fsSL -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:CODEX_WECHAT_TOKEN='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'; $env:HTTPS_PROXY='http://127.0.0.1:7897'; $env:HTTP_PROXY='http://127.0.0.1:7897'; Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Proxy 'http://127.0.0.1:7897' -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content)
+$env:CODEX_WECHAT_TOKEN='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'; Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content)
 ```
 
 安装需要 Python 3.11+、Git、Codex 和 `curl`。PAT 可以共享给多名测试者，也可以每人一个；
