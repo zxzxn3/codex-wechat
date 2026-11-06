@@ -4,6 +4,10 @@
 后台服务分别使用 systemd 用户服务与 Windows Scheduled Task。普通 Codex、App 内置 CLI 和
 自定义启动入口使用相同的 App Server 接口；DeepSeek 是可选后端，不是安装前提。
 
+<p align="center">
+  <img src="assets/branding/codex-wechat-pixel-mascots.png" alt="codex-wechat pixel mascots" width="320">
+</p>
+
 ## 快速开始
 
 仓库保持私有。创建一个只能读取 `zxzxn3/codex-wechat` 的 fine-grained PAT，Repository
