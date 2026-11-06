@@ -338,6 +338,11 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("用户数据已保留", text)
         self.assertIn("项目文件和虚拟环境未删除", text)
 
+    def test_supervisor_resolves_the_configured_data_root(self):
+        # The marker, not the platform default, decides where state and logs live.
+        with patch("platform_support.data_root", return_value=Path("/custom root")):
+            self.assertEqual(windows_service.data_root(), Path("/custom root"))
+
     def test_uninstall_refuses_a_live_foreground_bridge(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("Assert-NoForegroundBridge", text)

@@ -34,13 +34,14 @@ OUTPUT_DRAIN_TIMEOUT_SECONDS = 5.0
 
 
 def data_root() -> Path:
+    """Resolve the configured data root; the marker is the only source of truth."""
     try:
-        from platform_support import default_data_root
+        from platform_support import data_root as resolve_data_root
     except ImportError:
-        default_data_root = None
-    if default_data_root is not None:
+        pass
+    else:
         try:
-            return default_data_root()
+            return resolve_data_root()
         except RuntimeError:
             pass
     local = os.environ.get("LOCALAPPDATA")

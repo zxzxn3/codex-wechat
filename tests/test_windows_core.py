@@ -1,5 +1,6 @@
 """Portable core contracts; simulated Windows branches never run system tools."""
 import asyncio
+import os
 from pathlib import Path
 import tempfile
 import time
@@ -21,6 +22,12 @@ from websockets.http11 import Request
 from websockets.frames import Frame, Opcode
 
 
+def xdg_user_data_dir(name, appauthor=False):
+    """Stand in for platformdirs' Linux branch so Linux cases run on any host."""
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return str(Path(base) / name)
+
+
 class PlatformTests(unittest.TestCase):
     def test_existing_directory_is_tightened(self):
         import platform_support
@@ -40,6 +47,26 @@ class PlatformTests(unittest.TestCase):
                              [explicit, "app-server"])
         which.assert_called_once_with(explicit, path=None)
 
+    def test_native_tool_output_is_decoded_without_raising(self):
+        # icacls prints in the console code page; PYTHONUTF8=1 makes a strict
+        # UTF-8 decode fail on a Chinese Windows host.
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(platform_support, "IS_WINDOWS", True), \
+                    patch("platform_support.account_identity", return_value="*S-1-5-21"), \
+                    patch("platform_support.subprocess.run") as run:
+                run.return_value.returncode = 0
+                platform_support.make_private(Path(directory))
+        options = run.call_args.kwargs
+        self.assertEqual(options["encoding"], "utf-8")
+        self.assertEqual(options["errors"], "replace")
+
+    def test_identity_probe_falls_back_when_the_tool_output_is_undecodable(self):
+        undecodable = UnicodeDecodeError("utf-8", b"\xd2\xd1", 0, 1, "invalid start byte")
+        with patch.object(platform_support, "_ACCOUNT_IDENTITY", None), \
+                patch.object(platform_support.subprocess, "run", side_effect=undecodable), \
+                patch.dict("os.environ", {"USERDOMAIN": "HOST", "USERNAME": "tester"}):
+            self.assertEqual(platform_support.account_identity(), "HOST\\tester")
+
     def test_windows_paths_and_optional_launcher(self):
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(platform_support, "IS_WINDOWS", True), \
@@ -49,7 +76,8 @@ class PlatformTests(unittest.TestCase):
              patch.dict("os.environ", {"LOCALAPPDATA": "/tmp/local",
                                        "CODEX_WECHAT_DATA_ROOT": ""}):
             # An ambient override (a test-isolated run sets one) must not leak in.
-            self.assertEqual(platform_support.data_root(), Path("/tmp/local/codex-wechat"))
+            self.assertEqual(platform_support.data_root(),
+                             (Path("/tmp/local/codex-wechat")).resolve())
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(platform_support, "IS_WINDOWS", False), \
                 patch.object(platform_support, "INSTALL_ROOT", Path(directory)), \
@@ -67,6 +95,7 @@ class PlatformTests(unittest.TestCase):
             data_home = Path(directory) / "xdg"
             with patch.object(platform_support, "IS_WINDOWS", False), \
                     patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.object(platform_support, "_platform_user_data_dir", xdg_user_data_dir), \
                     patch.dict("os.environ", {
                         "CODEX_WECHAT_DATA_ROOT": "",
                         "XDG_DATA_HOME": str(data_home),

@@ -135,9 +135,13 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "data"
             root.mkdir()
+            install = Path(directory) / "install"
+            install.mkdir()
+            (install / uninstall.DATA_ROOT_FILE).write_text(f"{root}\n", encoding="utf-8")
             store = uninstall.Store(root / ".state")
             try:
                 with patch.object(uninstall, "IS_WINDOWS", False), \
+                        patch.object(uninstall, "INSTALL_ROOT", install), \
                         patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
                         patch.object(uninstall, "data_root", return_value=root):
                     with self.assertRaisesRegex(RuntimeError, "前台桥接仍在运行"):
@@ -147,9 +151,10 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 store.close()
 
     def test_unit_link_uses_xdg_config_home(self):
-        with patch.dict(uninstall.os.environ, {"XDG_CONFIG_HOME": "/tmp/xdg"}):
-            self.assertEqual(uninstall._unit_link(),
-                             Path("/tmp/xdg/systemd/user/codex-wechat.service"))
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(uninstall.os.environ, {"XDG_CONFIG_HOME": directory}):
+                self.assertEqual(uninstall._unit_link(),
+                                 (Path(directory).resolve() / "systemd/user" / uninstall.UNIT))
 
     def test_managed_systemd_data_root_dropin_is_removed(self):
         with tempfile.TemporaryDirectory() as directory:

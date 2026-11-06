@@ -755,7 +755,7 @@ def _runtime_python_works(root: Path) -> bool:
     try:
         result = subprocess.run(
             [str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"],
-            cwd=root, capture_output=True, text=True,
+            cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=RUNTIME_CHECK_TIMEOUT_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -770,7 +770,7 @@ def release_runtime_ready(root: Path) -> bool:
     try:
         result = subprocess.run(
             [str(python), "-c", _runtime_check_code()],
-            cwd=root, capture_output=True, text=True,
+            cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=RUNTIME_CHECK_TIMEOUT_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -1119,6 +1119,8 @@ def _linux_service_state(systemctl: str, unit: Path) -> str:
             cwd=unit.parent,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -1539,7 +1541,8 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
         ready = bool(executable)
         if ready and executable is not None and minimum and not dry_run:
             try:
-                result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=5)
+                result = subprocess.run([executable, "--version"], capture_output=True, text=True,
+                                        encoding="utf-8", errors="replace", timeout=5)
                 version = re.search(r"\b(\d+)(?:\.(\d+))?", result.stdout)
                 actual = tuple(int(value or 0) for value in version.groups()) if version else ()
                 ready = result.returncode == 0 and actual[:len(minimum)] >= minimum

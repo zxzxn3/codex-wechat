@@ -112,14 +112,16 @@ def account_identity() -> str:
     try:
         result = subprocess.run(
             ["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True,
-            text=True, timeout=10, **subprocess_options())
+            text=True, encoding="utf-8", errors="replace", timeout=10,
+            **subprocess_options())
         fields = [value.strip().strip('"') for value in result.stdout.strip().split('","')]
         if result.returncode == 0 and fields:
             sid = fields[-1].strip('"')
             if sid.startswith("S-1-"):
                 identity = "*" + sid
-    except (OSError, subprocess.SubprocessError):
-        pass
+    except (OSError, subprocess.SubprocessError, ValueError):
+        # Native tools print in the OEM code page, which need not be UTF-8.
+        identity = None
     if identity is None:
         domain = os.environ.get("USERDOMAIN") or ""
         identity = (domain + "\\" if domain else "") + (os.environ.get("USERNAME") or "")
@@ -131,7 +133,8 @@ def _gsettings(schema, key):
     """Read one GVariant value without passing it through a shell."""
     result = subprocess.run(
         ["gsettings", "get", schema, key],
-        capture_output=True, text=True, timeout=2, **subprocess_options())
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=2, **subprocess_options())
     if result.returncode:
         raise ValueError("gsettings failed")
     text = result.stdout.strip()
@@ -314,7 +317,8 @@ def make_private(directory) -> None:
         ["icacls", str(directory), "/inheritance:r", "/grant:r",
          account_identity() + ":(OI)(CI)F",
          "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"],
-        capture_output=True, text=True, **subprocess_options())
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        **subprocess_options())
     if result.returncode:
         raise ValueError(f"无法设置目录权限，请用普通终端重试: {directory}")
 

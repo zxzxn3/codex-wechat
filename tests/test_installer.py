@@ -1,5 +1,5 @@
 """Offline contracts for immutable release installation without rollback."""
-from test_support import requires_symlinks
+from test_support import requires_symlinks, xdg_user_data_dir
 import contextlib
 import io
 import os
@@ -808,7 +808,8 @@ class DataRootMarkerTests(unittest.TestCase):
             with patch.dict(os.environ, {
                     "CODEX_WECHAT_DATA_ROOT": "",
                     "XDG_DATA_HOME": str(data_home),
-            }, clear=False):
+            }, clear=False), \
+                    patch("platform_support._platform_user_data_dir", xdg_user_data_dir):
                 self.assertEqual(installer._default_data_root(),
                                  (data_home / "codex-wechat").resolve())
 
