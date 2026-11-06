@@ -7,27 +7,25 @@
 ## 快速开始
 
 仓库保持私有。创建一个只能读取 `zxzxn3/codex-wechat` 的 fine-grained PAT，Repository
-permissions 仅授予 `Contents: Read-only`，然后运行下面的命令；PAT 从终端交互输入。
+permissions 仅授予 `Contents: Read-only`，然后运行下面的命令。PAT 直接写在命令中，
+会进入 shell 历史。
 入口通过 GitHub Contents API 取得 bootstrap，再由 bootstrap 认证克隆到临时目录并安装。
-Linux 会优先使用已有代理环境变量，否则读取 GNOME 手动代理；Windows 使用系统代理。
+下面的示例使用 `127.0.0.1:7897` 代理，代理地址不同时请自行替换。
 
 Linux：
 
 ```bash
-bash -o pipefail -c 'read -rsp "GitHub PAT: " CODEX_WECHAT_TOKEN; echo; export CODEX_WECHAT_TOKEN; proxy_set=0; if [[ -z ${HTTPS_PROXY:-} && -z ${https_proxy:-} ]] && command -v gsettings >/dev/null; then mode=$(gsettings get org.gnome.system.proxy mode 2>/dev/null || true); mode=${mode#?}; mode=${mode%?}; if [[ $mode == manual ]]; then host=$(gsettings get org.gnome.system.proxy.http host 2>/dev/null || true); host=${host#?}; host=${host%?}; port=$(gsettings get org.gnome.system.proxy.http port 2>/dev/null || true); if [[ -n $host && $port =~ ^[0-9]+$ && $port -gt 0 ]]; then export HTTPS_PROXY="http://$host:$port" HTTP_PROXY="http://$host:$port"; proxy_set=1; fi; fi; fi; curl -fsSL --proto "=https" --tlsv1.2 --config <(printf "header = \"Authorization: Bearer %s\"\n" "$CODEX_WECHAT_TOKEN") -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash; status=$?; unset CODEX_WECHAT_TOKEN; ((proxy_set)) && unset HTTPS_PROXY HTTP_PROXY; exit $status'
+env CODEX_WECHAT_TOKEN='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' HTTPS_PROXY='http://127.0.0.1:7897' HTTP_PROXY='http://127.0.0.1:7897' bash -o pipefail -c 'curl -fsSL -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
 ```
 
 Windows PowerShell：
 
 ```powershell
-$secure = Read-Host 'GitHub PAT' -AsSecureString
-$env:CODEX_WECHAT_TOKEN = [Net.NetworkCredential]::new('', $secure).Password
-try { Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content) } finally { Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue }
+$env:CODEX_WECHAT_TOKEN='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'; $env:HTTPS_PROXY='http://127.0.0.1:7897'; $env:HTTP_PROXY='http://127.0.0.1:7897'; Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Proxy 'http://127.0.0.1:7897' -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content)
 ```
 
 安装需要 Python 3.11+、Git、Codex 和 `curl`。PAT 可以共享给多名测试者，也可以每人一个；
-撤销后新的安装和更新立即失效。上面的入口用交互输入或内存中的认证头，不会把 PAT
-写入 shell 历史、仓库配置或安装状态。
+撤销后新的安装和更新立即失效。PAT 只用于本次 API 请求和私有源码下载，不写入仓库配置或安装状态。
 详细前提、更新和卸载见 [安装、更新与卸载](docs/INSTALL.md)。
 
 ## 第一次使用
