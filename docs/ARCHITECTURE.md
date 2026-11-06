@@ -176,12 +176,13 @@ typing 的认证失效进入同一暂停与重绑通知流程，但发现失效�
 业务错误额外记录固定 api_error_kind（auth_expired、prepare_failed、unknown_error、
 rate_limit_hint、other），仅按明确提示归类，不保存 errmsg，也不将 -2 自动认定为限流。
 发送是否成功以服务端返回的有效消息 id 为准：HTTP 200 且 ret=0、但响应不含非空的
-msgid/msg_id/message_id/messageId/msgId 时判定为未投递（WeChatNotAcknowledged），按可重试处理，
-重试耗尽后进入 failedOutbox 并计入连续发送失败，不再记 output.sent。这是**经验判据而非契约**：
+msgid/msg_id/message_id/messageId/msgId 时判定为**投递未知**（WeChatNotAcknowledged），
+不自动重试。首次出现即隔离当前条目并暂停整个出站队列；条目进入 failedOutbox，标记
+`status=delivery_unknown`，计入连续发送失败，重启后不会被当作普通 outbox 重放。这是**经验判据而非契约**：
 协议文档的成功响应示例就是 `{"ret":0,"errmsg":""}`，字段表没有消息 id，官方维护者也说明
 "ret=0 只代表 API 层接受、不保证投递"，契约本身无法区分投递与静默过滤（出处见
 [SOURCES](SOURCES.md) 的"微信下行投递"一节）。该错误属于响应内容
-而非请求本身，日志里体现为 output.send_failed / output.failed 的
+而非请求本身，日志里体现为 output.delivery_unknown / output.failed 的
 error_type=WeChatNotAcknowledged 与 error_code=服务端 ret，不计入 api_error_kind。
 实测依据：某 bot 出站文本被服务端静默丢弃期间，sendtyping 和 getconfig 全程正常，
 sendmessage 一律返回 {"ret":0} 且无 id；若把这种响应当成功，条目会离开发件箱而用户
@@ -202,11 +203,16 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
 
 - 段间间隔：连续入队条目之间至少 `SEND_SPACING_SECONDS`（2.5s），切片后的长回答不再一次性
   突发；单个条目发送时不受影响。
-- 失败退避：第 n 次失败后等待 `SEND_RETRY_SECONDS × 3^(n-1)`（1s、3s），不是固定 1s 连试。
-- 未确认投递的特殊处置：`not_acknowledged` 重试耗尽后**不发失败通知**，并暂停出站
-  `DELIVERY_PAUSE_SECONDS`（60s），以 `output.send_paused` 记录；暂停时间只存内存。
-- 可观测性：连续发送失败达到 `DELIVERY_DEGRADED_THRESHOLD`（3）时，`status` 的 `delivery`
-  从 `ok` 变为 `unconfirmed`，成功一次即恢复。
+- 传输失败退避：只有普通传输错误（`WeChatTransportError`、超时、连接失败和 `OSError`）
+  按 `SEND_RETRY_SECONDS × 3^(n-1)`（1s、3s）重试；明确 API 拒绝和未知本地异常直接失败，
+  不再重试。
+- 未确认投递的特殊处置：`not_acknowledged` **首次出现即**暂停出站
+  `DELIVERY_PAUSE_SECONDS`（60s），当前条目立即隔离为 `delivery_unknown`，不发失败通知，
+  不自动重放；以 `output.delivery_unknown` 与带 `reason=not_acknowledged` 的
+  `output.send_paused` 记录。暂停时间只存内存，未知条目本身持久化在 `failedOutbox`。
+- 可观测性：存在 `delivery_unknown` 条目或连续发送失败达到 `DELIVERY_DEGRADED_THRESHOLD`
+  （3）时，`status` 的 `delivery` 从 `ok` 变为 `unconfirmed`；存在未知条目时额外输出
+  `delivery_unknown` 计数。成功一次只清连续失败计数，不抹掉历史未知条目。
 
 仍然待定的是**唤醒条件**：暂停目前是固定 60s，不看新入站消息；是否改成"等新入站再醒"
 还没有决定。发送间隔、失败退避和暂停三项互不排斥；入站回复额度已在下节实现。

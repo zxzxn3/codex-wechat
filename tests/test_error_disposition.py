@@ -4,8 +4,9 @@ import unittest
 from backend import DeferTurn, TurnStalled
 from codex_transport import CodexRpcError, SharedDaemonUnavailable
 from errors import (BackendStartupError, ErrorAction, UserFacingError,
-                    WeChatApiError, WeChatAuthExpired, WeChatPollTimeout,
-                    disposition, writer_conflict)
+                    WeChatApiError, WeChatAuthExpired, WeChatNotAcknowledged,
+                    WeChatPollTimeout, WeChatTransportError, disposition,
+                    writer_conflict)
 
 
 class ErrorDispositionTests(unittest.TestCase):
@@ -43,6 +44,8 @@ class ErrorDispositionTests(unittest.TestCase):
             primary=ErrorAction.USER_ACTION,
         )
         self.assertDisposition(WeChatPollTimeout(), ErrorAction.RETRYABLE)
+        self.assertDisposition(WeChatTransportError(), ErrorAction.RETRYABLE)
+        self.assertDisposition(WeChatNotAcknowledged(0), ErrorAction.USER_ACTION)
         self.assertDisposition(WeChatApiError(-1, "other"), ErrorAction.TERMINAL)
         self.assertDisposition(DeferTurn("wait"), ErrorAction.RETRYABLE)
         self.assertDisposition(TurnStalled("stalled"), ErrorAction.TERMINAL)

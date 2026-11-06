@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 from codex_wechat import Bridge
 from errors import WeChatApiError, WeChatNotAcknowledged
-from output_delivery import SEND_ATTEMPTS
 from profiles import restore
 from storage import Store
 
@@ -106,9 +105,9 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
-    async def test_an_unacknowledged_send_is_retried_then_reported_as_a_failure(self):
-        # A 200 with no message id means nothing was delivered. Retrying keeps the
-        # reply in the outbox instead of dropping the only copy we have.
+    async def test_an_unacknowledged_send_is_quarantined_without_retry(self):
+        # A no-id response means delivery is unknown, not that a retry is safe:
+        # the first call may already have been delivered. Quarantine it once.
         bridge = self.bridge
         bridge.reply("answer")
         calls = 0
@@ -119,32 +118,34 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             raise WeChatNotAcknowledged(0)
 
         bridge.channel.send = send
-        with (patch("output_delivery.log_event") as log_event,
-              patch("output_delivery.SEND_RETRY_SECONDS", 0)):
+        with patch("output_delivery.log_event") as log_event:
             task = asyncio.create_task(bridge.sender())
             try:
                 for _ in range(50):
                     if bridge.state.get("failedOutbox"):
                         break
                     await asyncio.sleep(0.02)
-                self.assertGreater(calls, 1)  # retried, unlike a prepare_failed rejection
+                self.assertEqual(calls, 1)  # no automatic resend of an uncertain delivery
                 self.assertFalse(bridge.state.get("wechatContextPending"))
-                self.assertGreaterEqual(bridge.prompt_fields()["send_failures"], 1)
-                self.assertGreaterEqual(len(bridge.state["failedOutbox"]), 1)
-                self.assertEqual(bridge.state["failedOutbox"][0]["attempts"], SEND_ATTEMPTS)
+                self.assertEqual(len(bridge.state["failedOutbox"]), 1)
+                self.assertEqual(bridge.state["failedOutbox"][0]["status"], "delivery_unknown")
+                self.assertEqual(bridge.state["failedOutbox"][0]["attempts"], 1)
                 events = [call.args[0] for call in log_event.call_args_list if call.args]
                 self.assertNotIn("output.sent", events)
+                self.assertNotIn("output.send_failed", events)
+                self.assertIn("output.delivery_unknown", events)
                 self.assertIn("output.failed", events)
                 self.assertIn("output.send_paused", events)
-                failed = next(call for call in log_event.call_args_list
-                              if call.args and call.args[0] == "output.send_failed")
-                self.assertEqual(failed.kwargs["error_type"], "WeChatNotAcknowledged")
+                paused = next(call for call in log_event.call_args_list
+                              if call.args and call.args[0] == "output.send_paused")
+                self.assertEqual(paused.kwargs["reason"], "not_acknowledged")
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
-    async def test_a_dropped_reply_does_not_spend_requests_on_a_failure_notice(self):
-        # The channel drops instead of rejecting, so the notice would be dropped too.
+    async def test_a_dropped_reply_is_quarantined_without_a_failure_notice(self):
+        # The channel may be dropping instead of rejecting, so a failure notice
+        # would be another uncertain outbound request.
         bridge = self.bridge
         bridge.reply("answer")
         calls = 0
@@ -155,19 +156,121 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             raise WeChatNotAcknowledged(0)
 
         bridge.channel.send = send
-        with (patch("output_delivery.log_event"),
-              patch("output_delivery.SEND_RETRY_SECONDS", 0)):
+        with patch("output_delivery.log_event"):
             task = asyncio.create_task(bridge.sender())
             try:
                 for _ in range(50):
                     if bridge.state.get("failedOutbox"):
                         break
                     await asyncio.sleep(0.02)
-                self.assertEqual(calls, SEND_ATTEMPTS)
+                self.assertEqual(calls, 1)
                 self.assertEqual(len(bridge.state["outbox"]), 0)  # no notice queued
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+
+    async def test_no_id_pauses_the_rest_of_the_queue(self):
+        bridge = self.bridge
+        bridge.reply("one")
+        bridge.reply("two")
+        attempts = []
+
+        async def send(entry):
+            attempts.append(entry)
+            if not entry.get("failureNotice"):
+                raise WeChatNotAcknowledged(0)
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event"):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("failedOutbox"):
+                        break
+                    await asyncio.sleep(0.02)
+                await asyncio.sleep(0.1)
+                self.assertEqual(sum(1 for entry in attempts
+                                     if not entry.get("failureNotice")), 1)
+                self.assertEqual(len(bridge.state["outbox"]), 1)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_api_rejection_kinds_are_not_retried(self):
+        bridge = self.bridge
+        bridge.reply("answer")
+        attempts = []
+
+        async def send(entry):
+            attempts.append(entry)
+            raise WeChatApiError(-2, "rate_limit_hint")
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event") as log_event:
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("failedOutbox"):
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertEqual(sum(1 for entry in attempts
+                                     if not entry.get("failureNotice")), 1)
+                self.assertFalse(bridge.state.get("wechatContextPending"))
+                self.assertIn("output.send_rejected",
+                              [call.args[0] for call in log_event.call_args_list
+                               if call.args])
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_unclassified_errors_are_not_retried(self):
+        bridge = self.bridge
+        bridge.reply("answer")
+        attempts = []
+
+        async def send(entry):
+            attempts.append(entry)
+            raise RuntimeError("unexpected local failure")
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event"):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("failedOutbox"):
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertEqual(sum(1 for entry in attempts
+                                     if not entry.get("failureNotice")), 1)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_delivery_unknown_is_not_replayed_after_restart(self):
+        bridge = self.bridge
+        bridge.reply("answer")
+
+        async def send(_):
+            raise WeChatNotAcknowledged(0)
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event"):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("failedOutbox"):
+                        break
+                    await asyncio.sleep(0.02)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertEqual(bridge.state["outbox"], [])
+        self.assertEqual(bridge.state["failedOutbox"][0]["status"], "delivery_unknown")
+
+        restarted = Bridge(self.store, {"user": "owner"}, {"backends": {
+            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
+        self.assertEqual(restarted.state["outbox"], [])
+        self.assertEqual(restarted.state["failedOutbox"][0]["status"], "delivery_unknown")
 
     async def test_retry_waits_grow_instead_of_hammering_the_channel(self):
         bridge = self.bridge
@@ -223,6 +326,10 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         for failures, expected in ((0, "ok"), (2, "ok"), (3, "unconfirmed")):
             self.store.save("bridge", {"consecutiveSendFailures": failures})
             self.assertEqual(status_payload(self.store)["delivery"], expected)
+        self.store.save("bridge", {"failedOutbox": [{"status": "delivery_unknown"}]})
+        payload = status_payload(self.store)
+        self.assertEqual(payload["delivery"], "unconfirmed")
+        self.assertEqual(payload["delivery_unknown"], 1)
 
     async def test_failure_count_is_not_capped_or_reset_by_session_or_restart(self):
         bridge = self.bridge

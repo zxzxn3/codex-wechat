@@ -64,6 +64,11 @@ class WeChatPollTimeout(RuntimeError):
     error_actions = ErrorAction.RETRYABLE
 
 
+class WeChatTransportError(RuntimeError):
+    """Network or response-transport failure; the request may be retried."""
+    error_actions = ErrorAction.RETRYABLE
+
+
 class WeChatApiError(RuntimeError):
     """The API rejected the request itself: retrying cannot change the outcome."""
     error_actions = ErrorAction.TERMINAL
@@ -75,15 +80,17 @@ class WeChatApiError(RuntimeError):
 
 
 class WeChatNotAcknowledged(WeChatApiError):
-    """The call succeeded but no message id came back, so nothing was delivered.
+    """The call completed but no message id came back, so delivery is unknown.
 
     The server answers 200 with `{"ret": 0}` while dropping the message (observed
     while a bot's outbound text channel was blocked: `sendtyping` still worked).
     Treating that as success removed the entry from the outbox, so the user saw
-    nothing and only the log knew.
+    nothing and only the log knew. Never retry this automatically: the first
+    response may already have been delivered, and an automatic resend can create
+    a duplicate. The entry is quarantined for manual confirmation instead.
     """
 
-    error_actions = ErrorAction.RETRYABLE
+    error_actions = ErrorAction.USER_ACTION
 
     def __init__(self, ret=None):
         # `code` stays the server's own ret value; the type carries the meaning.

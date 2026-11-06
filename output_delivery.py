@@ -14,8 +14,8 @@ from slicing import split_text
 from wechat import acknowledged_message_id
 from media import MediaError, MAX_ATTACHMENTS, split_answer
 from wechat_content import entry_summary, remember_quote
-from errors import (WeChatApiError, WeChatAuthExpired, WeChatNotAcknowledged,
-                    attachment_reason)
+from errors import (ErrorAction, WeChatApiError, WeChatAuthExpired,
+                    WeChatNotAcknowledged, attachment_reason, disposition)
 from diagnostics import current_request_id, error_fields, log_event
 from prompts import render_ack
 
@@ -27,8 +27,8 @@ SEND_SPACING_SECONDS = 2.5
 # After a silently dropped send the channel itself looks blocked, so stop firing.
 DELIVERY_PAUSE_SECONDS = 60
 DELIVERY_DEGRADED_THRESHOLD = 3
-# Rejections of the message itself; retrying cannot change the outcome.
-NON_RETRYABLE_SEND_KINDS = frozenset({"prepare_failed"})
+# A stale context token is repaired by the next inbound message, not by a retry.
+CONTEXT_REJECTION_KINDS = frozenset({"prepare_failed"})
 
 class OutputDelivery:
     def __init__(self, bridge):
@@ -191,7 +191,7 @@ class OutputDelivery:
             finally:
                 bridge.external_results.task_done()
 
-    def fail_output(self, entry, *, notify=True):
+    def fail_output(self, entry, *, notify=True, status="partial"):
         """Freeze a partial group; never present a suffix as a complete answer."""
         bridge = self.bridge
         bridge.state["outbox"].pop(0)
@@ -208,14 +208,14 @@ class OutputDelivery:
             bridge.state["outbox"] = kept
         for removed in (entry, *skipped):
             self._queued_at.pop(removed.get("id"), None)
-        failed = {**entry, "status": "partial", "skipped": skipped}
+        failed = {**entry, "status": status, "skipped": skipped}
         bridge.state["failedOutbox"] = (bridge.state.get("failedOutbox", []) + [failed])[-20:]
         bridge.state["consecutiveSendFailures"] += 1
         log_event("output.failed", level="warning", component="output",
                   send_failures=bridge.state["consecutiveSendFailures"],
                   role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
                   parts=entry.get("parts"), part=entry.get("part"),
-                  count=len(skipped), job_id=entry.get("group"),
+                  count=len(skipped), status=status, job_id=entry.get("group"),
                   request_id=entry.get("requestId"))
         # Never recursively report a failed failure notice, and never spend a
         # request on one when the channel itself is dropping messages. A budget
@@ -327,43 +327,48 @@ class OutputDelivery:
                 continue
             except WeChatApiError as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1
-                if error.kind in NON_RETRYABLE_SEND_KINDS:
-                    # The server rejected the message itself, so a retry only adds
-                    # traffic. A stale conversation token is the usual cause: hold
-                    # the rest of the outbox until a fresh inbound message arrives.
-                    log_event("output.send_rejected", level="warning", component="output",
-                              role=entry.get("role", "body"), attempt=entry["attempts"],
-                              error_code=error.code, api_error_kind=error.kind,
-                              queued=len(bridge.state["outbox"]),
+                if isinstance(error, WeChatNotAcknowledged):
+                    # A no-id response is not a retryable failure: the first call
+                    # may already have been delivered, so resending can duplicate
+                    # it. Quarantine once and stop the whole outbound queue.
+                    self._paused_until = time.monotonic() + DELIVERY_PAUSE_SECONDS
+                    log_event("output.delivery_unknown", level="warning",
+                              component="output", role=entry.get("role", "body"),
+                              attempt=entry["attempts"], error_type=type(error).__name__,
+                              error_code=error.code, queued=len(bridge.state["outbox"]),
                               job_id=entry.get("group"), request_id=entry.get("requestId"))
+                    bridge.fail_output(entry, notify=False, status="delivery_unknown")
+                    log_event("output.send_paused", level="warning", component="output",
+                              retry_in_ms=DELIVERY_PAUSE_SECONDS * 1000,
+                              reason="not_acknowledged",
+                              send_failures=bridge.state["consecutiveSendFailures"],
+                              queued=len(bridge.state["outbox"]))
+                    continue
+                # Any explicit API rejection is terminal for this payload. A
+                # prepare_failed response usually means the context token is stale;
+                # hold the queue until a fresh inbound message arrives.
+                log_event("output.send_rejected", level="warning", component="output",
+                          role=entry.get("role", "body"), attempt=entry["attempts"],
+                          error_code=error.code, api_error_kind=error.kind,
+                          queued=len(bridge.state["outbox"]),
+                          job_id=entry.get("group"), request_id=entry.get("requestId"))
+                if error.kind in CONTEXT_REJECTION_KINDS:
                     log_event("output.waiting_context", level="warning", component="output",
                               status="pending", queued=len(bridge.state["outbox"]))
                     bridge.state["wechatContextPending"] = True
-                    bridge.fail_output(entry)
-                    continue
-                if entry["attempts"] >= SEND_ATTEMPTS:
-                    unconfirmed = isinstance(error, WeChatNotAcknowledged)
-                    if unconfirmed:
-                        # The channel is dropping instead of rejecting, so the next
-                        # entry would be dropped too and each attempt only adds load.
-                        self._paused_until = time.monotonic() + DELIVERY_PAUSE_SECONDS
-                        log_event("output.send_paused", level="warning", component="output",
-                                  retry_in_ms=DELIVERY_PAUSE_SECONDS * 1000,
-                                  send_failures=bridge.state["consecutiveSendFailures"] + 1,
-                                  queued=len(bridge.state["outbox"]))
-                    bridge.fail_output(entry, notify=not unconfirmed)
-                    continue
-                bridge.save()
-                delay = SEND_RETRY_SECONDS * 3 ** (entry["attempts"] - 1)
-                log_event("output.send_failed", level="warning", component="output",
-                          role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
-                          retry_in_ms=int(delay * 1000), job_id=entry.get("group"),
-                          request_id=entry.get("requestId"), **error_fields(error))
-                print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
-                await asyncio.sleep(delay)
+                bridge.fail_output(entry)
                 continue
             except Exception as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1
+                if disposition(error).primary is not ErrorAction.RETRYABLE:
+                    # Only ordinary transport failures are retryable. An unknown
+                    # programming/protocol failure must not be amplified.
+                    log_event("output.send_rejected", level="warning", component="output",
+                              role=entry.get("role", "body"), attempt=entry["attempts"],
+                              error_type=type(error).__name__, queued=len(bridge.state["outbox"]),
+                              job_id=entry.get("group"), request_id=entry.get("requestId"))
+                    bridge.fail_output(entry)
+                    continue
                 if entry["attempts"] >= SEND_ATTEMPTS:
                     bridge.fail_output(entry)
                     continue

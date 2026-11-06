@@ -561,8 +561,8 @@ class Bridge:
     async def external_result_worker(self):
         return await self.output.external_result_worker()
 
-    def fail_output(self, entry, *, notify=True):
-        return self.output.fail_output(entry, notify=notify)
+    def fail_output(self, entry, *, notify=True, status="partial"):
+        return self.output.fail_output(entry, notify=notify, status=status)
 
     async def sender(self):
         return await self.output.sender()
@@ -693,6 +693,8 @@ async def startup_account(store):
 def status_payload(store):
     state = load_bridge_state(store)
     auth = wechat_auth.state(state)
+    unknown = sum(1 for entry in state.get("failedOutbox", [])
+                  if isinstance(entry, dict) and entry.get("status") == "delivery_unknown")
     payload = {
         "bound": bool(store.load("account")),
         "auth": auth,
@@ -708,9 +710,12 @@ def status_payload(store):
         "queued": len(state.get("inbox", [])),
         "unsent": len(state.get("outbox", [])),
         "delivery": ("unconfirmed"
-                     if state.get("consecutiveSendFailures", 0) >= DELIVERY_DEGRADED_THRESHOLD
+                     if unknown
+                     or state.get("consecutiveSendFailures", 0) >= DELIVERY_DEGRADED_THRESHOLD
                      else "ok"),
     }
+    if unknown:
+        payload["delivery_unknown"] = unknown
     auth_details = state.get("wechatAuth")
     if isinstance(auth_details, dict):
         if "detectedAt" in auth_details:

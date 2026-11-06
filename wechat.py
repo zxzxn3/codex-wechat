@@ -9,7 +9,7 @@ import urllib.parse
 from dataclasses import dataclass
 
 from errors import (WeChatApiError, WeChatAuthExpired, WeChatNotAcknowledged,
-                    WeChatPollTimeout)
+                    WeChatPollTimeout, WeChatTransportError)
 from diagnostics import error_fields, log_event
 from latency import timeout_stage
 from wechat_http import PooledHTTP
@@ -122,21 +122,22 @@ class WeChat:
                         and metadata.get("first_byte_ms") == 0
                         and output in (b"\n0", b"\n000")):
                     raise WeChatPollTimeout("微信长轮询等待到期")
-                raise RuntimeError(f"微信网络请求失败（curl {metadata['curl_code']}）")
+                raise WeChatTransportError(
+                    f"微信网络请求失败（curl {metadata['curl_code']}）")
             try:
                 raw, status = output.rsplit(b"\n", 1)
                 status = int(status)
             except (ValueError, TypeError):
-                raise RuntimeError("微信响应无法解析") from None
+                raise WeChatTransportError("微信响应无法解析") from None
             metadata["http_status"] = status
             if not 200 <= status < 300:
-                raise RuntimeError(f"微信 HTTP {status}")
+                raise WeChatTransportError(f"微信 HTTP {status}")
             try:
                 result = json.loads(raw)
                 if not isinstance(result, dict):
                     raise ValueError()
             except (ValueError, TypeError):
-                raise RuntimeError("微信响应无法解析") from None
+                raise WeChatTransportError("微信响应无法解析") from None
             if result.get("ret", 0) != 0 or result.get("errcode", 0) != 0:
                 code = result.get("errcode") or result.get("ret")
                 kind = api_error_kind(code, result.get("errmsg") or result.get("msg"))
@@ -201,7 +202,8 @@ class WeChat:
         if not acknowledged:
             # Returning normally here made the caller record output.sent and drop
             # the entry, so a dropped message looked delivered to everyone but the
-            # log. Raising lets the outbox retry and, at the limit, report failure.
+            # log. Raise instead: the outbox quarantines this as delivery_unknown
+            # and never retries it automatically.
             raise WeChatNotAcknowledged(keys.get("ret"))
         return result
 

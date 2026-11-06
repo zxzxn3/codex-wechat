@@ -123,7 +123,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
-    async def test_a_dropped_reply_costs_the_budget_once_per_attempt(self):
+    async def test_a_dropped_reply_costs_the_budget_once_and_is_not_retried(self):
         bridge = self.bridge
         bridge.reply("dropped")
         calls = 0
@@ -135,14 +135,14 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
 
         bridge.channel.send = send
         with patch.object(Bridge, "reply_budget", lambda self: 9), \
-                patch("output_delivery.log_event"), \
-                patch("output_delivery.SEND_RETRY_SECONDS", 0):
+                patch("output_delivery.log_event"):
             task = asyncio.create_task(bridge.sender())
             try:
                 self.assertTrue(await self.wait_for(lambda: not bridge.state["outbox"]))
-                self.assertEqual(calls, 3)
-                # Every attempt got an answer, so every attempt is charged.
-                self.assertEqual(bridge.budget_state()["used"], 3)
+                self.assertEqual(calls, 1)
+                # The server answered once; uncertain delivery still spends one
+                # request and is not resent automatically.
+                self.assertEqual(bridge.budget_state()["used"], 1)
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
