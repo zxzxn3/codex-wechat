@@ -10,6 +10,11 @@ from urllib.parse import urlsplit
 from urllib.request import getproxies
 from native_codex import discover_codex
 
+try:
+    from platformdirs import user_data_dir as _platform_user_data_dir
+except ImportError:  # Stable entry runs before the release environment exists.
+    _platform_user_data_dir = None
+
 IS_WINDOWS = os.name == "nt"
 ALLOW_ROOT_ENV = "CODEX_WECHAT_ALLOW_ROOT"
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -37,6 +42,21 @@ def saved_data_root(install_root: Path | None = None) -> Path | None:
     return root.resolve()
 
 
+def default_data_root() -> Path:
+    """Return the platform user-data directory, with a pre-venv fallback."""
+    if _platform_user_data_dir is not None:
+        return Path(_platform_user_data_dir("codex-wechat", appauthor=False)).expanduser().resolve()
+    if IS_WINDOWS:
+        local = os.environ.get("LOCALAPPDATA")
+        if not local:
+            raise RuntimeError("Windows 缺少 LOCALAPPDATA，无法定位当前用户数据目录")
+        return (Path(local) / "codex-wechat").expanduser().resolve()
+    data_home = os.environ.get("XDG_DATA_HOME")
+    if data_home and Path(data_home).is_absolute():
+        return (Path(data_home).expanduser() / "codex-wechat").resolve()
+    return (Path.home() / ".local" / "share" / "codex-wechat").resolve()
+
+
 def data_root(install_root: Path | None = None):
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     saved = saved_data_root(install_root)
@@ -52,12 +72,7 @@ def data_root(install_root: Path | None = None):
         return Path(override).expanduser().resolve()
     if saved is not None:
         return saved
-    if IS_WINDOWS:
-        local = os.environ.get("LOCALAPPDATA")
-        if not local:
-            raise RuntimeError("Windows 缺少 LOCALAPPDATA，无法定位当前用户数据目录")
-        return Path(local) / "codex-wechat"
-    return Path(install_root) if install_root is not None else INSTALL_ROOT
+    return default_data_root()
 
 
 def subprocess_options():

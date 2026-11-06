@@ -782,6 +782,7 @@ class RuntimeRepairTests(unittest.TestCase):
             "websockets": "17.4",
             "curl-cffi": "0.17.0",
             "packaging": "26.3",
+            "platformdirs": "4.14.3",
         }
         with patch("importlib.metadata.version", side_effect=versions.get):
             exec(compile(code, "<runtime-check>", "exec"), {})
@@ -820,14 +821,25 @@ class RuntimeRepairTests(unittest.TestCase):
 
 
 class DataRootMarkerTests(unittest.TestCase):
+    def test_default_root_uses_the_platform_data_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_home = Path(directory) / "xdg"
+            with patch.dict(os.environ, {
+                    "CODEX_WECHAT_DATA_ROOT": "",
+                    "XDG_DATA_HOME": str(data_home),
+            }, clear=False):
+                self.assertEqual(installer._default_data_root(),
+                                 (data_home / "codex-wechat").resolve())
+
     def test_default_root_is_also_persisted_in_the_marker(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "install"
             target.mkdir()
+            expected = installer._default_data_root()
             with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
                 installer._write_data_root_marker(target)
             self.assertTrue((target / installer.DATA_ROOT_FILE).is_file())
-            self.assertEqual(installer.saved_data_root(target), target.resolve())
+            self.assertEqual(installer.saved_data_root(target), expected.resolve())
 
     def test_marker_is_persisted_and_used_without_the_environment(self):
         with tempfile.TemporaryDirectory() as directory:

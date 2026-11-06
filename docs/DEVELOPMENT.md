@@ -96,7 +96,8 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 `pywin32` 尚未在 Windows 实机复核，暂不收紧版本。开发工具在 `requirements-dev.txt` 中固定
 版本，避免不同机器上的 coverage/pip-audit 结果漂移。安装器在 release 环境内用
 `packaging` 的 PEP 440 `Version` / `SpecifierSet` 校验直接依赖；预发布、post 和本地版本
-仍视为不稳定，不允许通过。
+仍视为不稳定，不允许通过。默认用户数据目录由 `platformdirs.user_data_dir` 计算；stable
+入口在 release 环境建立前缺少该包时，使用等价的 XDG / `LOCALAPPDATA` fallback。
 
 更新运行时依赖使用 `.venv/bin/python -m pip install -r requirements.txt`；更新后需要重启
 服务才会让新依赖生效，运行中的进程不会自动换包。

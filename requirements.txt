@@ -5,5 +5,7 @@ websockets>=15,<18
 curl-cffi>=0.17,<0.18
 # PEP 440 version and requirement checks in the installer runtime probe.
 packaging>=24
+# Platform-native user data directory defaults.
+platformdirs>=4
 # Shared by the release and its stable Windows service entry.
 -r requirements-windows.txt

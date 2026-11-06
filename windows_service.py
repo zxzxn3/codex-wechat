@@ -34,6 +34,15 @@ OUTPUT_DRAIN_TIMEOUT_SECONDS = 5.0
 
 
 def data_root() -> Path:
+    try:
+        from platform_support import default_data_root
+    except ImportError:
+        default_data_root = None
+    if default_data_root is not None:
+        try:
+            return default_data_root()
+        except RuntimeError:
+            pass
     local = os.environ.get("LOCALAPPDATA")
     if local:
         return Path(local) / "codex-wechat"

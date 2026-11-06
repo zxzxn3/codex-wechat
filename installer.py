@@ -252,13 +252,26 @@ def saved_data_root(target: Path) -> Path | None:
     return root.resolve()
 
 
-def _default_data_root(target: Path) -> Path:
+def _default_data_root() -> Path:
+    try:
+        from platform_support import default_data_root
+    except ImportError:
+        default_data_root = None
+    if default_data_root is not None:
+        try:
+            return Path(default_data_root()).resolve()
+        except RuntimeError as error:
+            raise ValueError(str(error)) from error
+    # Standalone installer fallback for a source tree without platform_support.
     if IS_WINDOWS:
         local = os.environ.get("LOCALAPPDATA")
         if not local:
             raise ValueError("Windows 缺少 LOCALAPPDATA，无法确定数据目录")
         return (Path(local) / "codex-wechat").resolve()
-    return Path(target).resolve()
+    data_home = os.environ.get("XDG_DATA_HOME")
+    if data_home and Path(data_home).is_absolute():
+        return (Path(data_home).expanduser() / "codex-wechat").resolve()
+    return (Path.home() / ".local" / "share" / "codex-wechat").resolve()
 
 
 def configured_data_root(target: Path) -> Path:
@@ -268,7 +281,7 @@ def configured_data_root(target: Path) -> Path:
     saved = saved_data_root(target)
     if saved is not None:
         return saved
-    return _default_data_root(target)
+    return _default_data_root()
 
 
 def _write_data_root_marker(target: Path) -> None:
@@ -710,6 +723,7 @@ RUNTIME_IMPORTS = (
     "codex_wechat",
     "desktop",
     "packaging",
+    "platformdirs",
     "curl_cffi",
     "curl_cffi.requests",
     "websockets",
@@ -724,6 +738,7 @@ RUNTIME_VERSION_REQUIREMENTS = {
     "websockets": ">=15,<18",
     "curl-cffi": ">=0.17,<0.18",
     "packaging": ">=24",
+    "platformdirs": ">=4",
 }
 
 
