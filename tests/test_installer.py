@@ -301,6 +301,33 @@ class InstallerTests(unittest.TestCase):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), first)
 
+    def test_failed_update_before_activation_keeps_the_old_data_root(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        first = self.current()
+        old_root = (self.base / "data").resolve()
+        new_root = self.base / "new-data"
+        self.make_project(self.source, version="two")
+        with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": str(new_root)}), \
+                patch("builtins.input", return_value="y"), \
+                patch.object(installer, "install_bootstrap",
+                             side_effect=OSError("entry failed")):
+            with self.assertRaisesRegex(OSError, "entry failed"):
+                installer.update(self.source, self.target)
+        self.assertEqual(self.current(), first)
+        self.assertEqual(installer.saved_data_root(self.target), old_root)
+
+    def test_failed_first_install_removes_the_disposable_target(self):
+        with patch("builtins.input", return_value="y"), \
+                patch.object(installer, "install_bootstrap",
+                             side_effect=OSError("entry failed")):
+            with self.assertRaisesRegex(OSError, "entry failed"):
+                installer.install(self.source, self.target)
+        self.assertFalse(self.target.exists())
+        with patch("builtins.input", return_value="y"):
+            self.assertEqual(installer.install(self.source, self.target), 0)
+        self.assertIsNotNone(self.current())
+
     def test_source_change_after_confirmation_is_rejected(self):
         def change_source(_):
             (self.source / "extra.py").write_text("CHANGED = True\n", encoding="utf-8")
@@ -423,6 +450,20 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(target, self.target)
         self.assertEqual(release, self.target / "releases" / current)
         self.assertEqual(configure.call_args.kwargs, {"update": True})
+
+    def test_same_version_service_failure_restores_the_old_data_root(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        current = self.current()
+        old_root = (self.base / "data").resolve()
+        with patch.dict(os.environ, {
+                "CODEX_WECHAT_DATA_ROOT": str(self.base / "new-data")}), \
+                patch.object(installer, "configure_platform_service",
+                             side_effect=OSError("service failed")):
+            with self.assertRaisesRegex(OSError, "service failed"):
+                installer.update(self.source, self.target)
+        self.assertEqual(self.current(), current)
+        self.assertEqual(installer.saved_data_root(self.target), old_root)
 
     def test_same_version_update_repairs_a_missing_release_runtime(self):
         with patch("builtins.input", return_value="y"):
@@ -699,15 +740,15 @@ class LinuxServiceRegistrationTests(unittest.TestCase):
 
 
 class RuntimeRepairTests(unittest.TestCase):
-    def test_marker_is_published_before_stable_entry_and_current_activation(self):
+    def test_marker_follows_current_activation_and_precedes_service_configuration(self):
         text = (Path(__file__).resolve().parents[1] / "installer.py").read_text(
             encoding="utf-8")
-        section = text[text.index('phase("准备程序与依赖...")'):
-                       text.index("service_ready = configure_platform_service")]
-        self.assertLess(section.index("_publish_data_root(target)"),
-                        section.index("install_bootstrap(source, target)"))
-        self.assertLess(section.index("_publish_data_root(target)"),
-                        section.index("activate_release(target, identifier)"))
+        start = text.index('phase("准备程序与依赖...")')
+        activation = text.index("activate_release(target, identifier)", start)
+        publication = text.index("_publish_data_root(target)", activation)
+        configuration = text.index("service_ready = configure_platform_service", publication)
+        self.assertLess(activation, publication)
+        self.assertLess(publication, configuration)
 
     def test_runtime_version_contracts_match_requirements(self):
         requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(

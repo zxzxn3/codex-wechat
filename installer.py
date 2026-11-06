@@ -1254,9 +1254,24 @@ def _common_install(
             # start anything. Both platform steps are idempotent.
             with InstallLock(target):
                 ensure_release_runtime(target / RELEASES_DIR / identifier)
-            _publish_data_root(target)
-            configure_platform_service(target / "releases" / identifier, target,
-                                       update=update)
+            marker = target / DATA_ROOT_FILE
+            previous_marker = (marker.read_bytes()
+                               if marker.is_file() and not marker.is_symlink() else None)
+            published = False
+            try:
+                _publish_data_root(target)
+                published = True
+                configure_platform_service(target / "releases" / identifier, target,
+                                           update=update)
+            except BaseException:
+                # This path does not activate a new release. Keep the old
+                # data-root contract if service integration fails.
+                if published:
+                    if previous_marker is None:
+                        marker.unlink(missing_ok=True)
+                    else:
+                        _atomic_write(marker, previous_marker, 0o600, root=target)
+                raise
             print(f"版本 {identifier} 已经安装，没有修改。")
             return 0
     if not introduction():
@@ -1293,14 +1308,14 @@ def _common_install(
             release, created = install_release(target, identifier, files)
             prepare_bootstrap_runtime(target, requirements=release / "requirements-windows.txt")
             # Everything requiring downloads/builds/user input finishes above.
-            # Publish the data-root marker before replacing the stable entry or
-            # the current pointer so a crash cannot expose an installed layout
-            # without its data-root contract.
-            _publish_data_root(target)
             phase("更新入口与当前版本...")
             install_bootstrap(source, target)
             install_command_link(target)
             activate_release(target, identifier)
+            # Publish the marker only after the current pointer is committed:
+            # a failed update must not move an existing installation to a new
+            # data root while its old release and service are still active.
+            _publish_data_root(target)
             service_ready = configure_platform_service(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier)
@@ -1315,15 +1330,20 @@ def _common_install(
         # Only delete a release we created and never activated; no restoration.
         if created and release is not None and read_pointer(target, CURRENT_FILE) != identifier:
             shutil.rmtree(release)
-        if created_target:
-            # Remove an empty failed installation, but preserve partial commits.
-            for path in (target / RELEASES_DIR, target):
-                try:
-                    if path == target:
-                        (target / LOCK_FILE).unlink(missing_ok=True)
-                    path.rmdir()
-                except OSError:
-                    pass
+        # A target created by this attempt is disposable until current is
+        # activated. Remove it as a whole so a failed first install does not
+        # leave a non-empty directory that blocks a retry.
+        if created_target and read_pointer(target, CURRENT_FILE) is None:
+            shutil.rmtree(target, ignore_errors=True)
+        elif not created_target:
+            # Preserve a pre-existing directory, but remove an empty release
+            # directory left by a failed first attempt.
+            try:
+                (target / LOCK_FILE).unlink(missing_ok=True)
+                (target / RELEASES_DIR).rmdir()
+                target.rmdir()
+            except OSError:
+                pass
         raise
     print(styled("==> 更新完成。" if update else "==> 安装完成。", "1;32"))
     declaration(source, "complete")
