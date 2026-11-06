@@ -40,7 +40,7 @@ from diagnostics import configure as configure_diagnostics
 from diagnostics import error_fields, log_event, log_path
 from log_rotation import prune_rotations
 from log_viewer import show_logs
-from prompts import (render_ack, status_fields, duration_label)
+from prompts import (final_answer_fields, render_ack, status_fields, duration_label)
 
 ROOT = Path(__file__).resolve().parent
 SERVICE_CHILD_ENV = "CODEX_WECHAT_SERVICE_CHILD"
@@ -143,6 +143,7 @@ class Bridge:
         self.backend_recovering = False
         self.latency = Latency()
         self.last_turn_seconds = None
+        self.last_final_answer_fields = final_answer_fields()
         last_send = self.state.get("lastSendMs")
         if type(last_send) in (int, float) and last_send >= 0:
             self.latency.sends.append(float(last_send))
@@ -377,6 +378,13 @@ class Bridge:
             self.reply(render_ack(template, self.prompt_fields(job.get("ingress_ms"))),
                        request_id=job.get("requestId"))
 
+    def remember_turn_result(self, result):
+        self.last_final_answer_fields = final_answer_fields(
+            started_at_ms=result.final_answer_started_at_ms,
+            completed_at_ms=result.final_answer_completed_at_ms,
+            usage=result.usage,
+        )
+
     def prompt_fields(self, ingress_ms=None, *, finishing=False):
         if self.backend.blocked:
             status = "等待处理"
@@ -410,6 +418,7 @@ class Bridge:
             connection="本地后台" if self.backend.shared else "独立进程",
             shared_fallback=self.backend.shared_fallback,
         )
+        values.update(self.last_final_answer_fields)
         values.update(self.latency.values(ingress_ms))
         values["elapsed"] = duration_label(self.last_turn_seconds)
         sample = self.latency.provider_sample

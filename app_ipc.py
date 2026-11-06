@@ -370,10 +370,18 @@ class AppSession:
                 if (item.get("id") and key not in self.seen_items and self.item_complete(turn, item)
                         and item.get("type") in ("agentMessage", "userMessage", "contextCompaction")):
                     self.seen_items.add(key)
-                    self.emit("item/completed", turnId=tid, item=item)
+                    event = {"turnId": tid, "item": item}
+                    for name in ("startedAtMs", "completedAtMs"):
+                        if item.get(name) is not None:
+                            event[name] = item[name]
+                    self.emit("item/completed", **event)
             if turn.get("status") in ("completed", "failed", "interrupted"):
                 self.seen_turns.add(tid)
-                self.emit("turn/completed", turn={"id": tid, "status": turn["status"]})
+                turn_event = {"id": tid, "status": turn["status"]}
+                for name in ("startedAt", "completedAt", "durationMs"):
+                    if turn.get(name) is not None:
+                        turn_event[name] = turn[name]
+                self.emit("turn/completed", turn=turn_event)
         requests = {r["id"]: r for r in s.get("requests", []) if "id" in r}
         for rid in self.pending.keys() - requests.keys():
             self.emit("serverRequest/resolved", requestId=rid)

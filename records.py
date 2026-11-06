@@ -39,6 +39,9 @@ class TurnResult:
     cwd: str
     status: str
     request_ids: tuple[str, ...] = ()
+    final_answer_started_at_ms: int | None = None
+    final_answer_completed_at_ms: int | None = None
+    usage: dict | None = None
 
     @property
     def completed(self):

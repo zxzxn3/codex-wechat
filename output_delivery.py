@@ -126,7 +126,9 @@ class OutputDelivery:
         bridge = self.bridge
         bridge.reload_config()
         request_ids = ()
+        turn_result = None
         if isinstance(answer, TurnResult):
+            turn_result = answer
             request_ids = answer.request_ids
             source, cwd, notify_completion = answer.source, answer.cwd, answer.completed
             answer = answer.text
@@ -155,6 +157,8 @@ class OutputDelivery:
         # Snapshot work may await disk I/O across a session/backend switch.
         if require_current and not bridge.current_source(source):
             return
+        if turn_result is not None and turn_result.completed:
+            bridge.remember_turn_result(turn_result)
         entries = bridge.text_entries(text, group=group, context=context, semantic=True,
                                       source=source, request_id=request_id)
         if errors:

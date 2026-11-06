@@ -437,6 +437,36 @@ def token_count(value):
     return text.replace(".0M", "M").replace(".0K", "K")
 
 
+def final_answer_fields(*, started_at_ms=None, completed_at_ms=None, usage=None):
+    """Metrics for the most recently completed final answer."""
+    def number(value):
+        if type(value) in (int, float) and value >= 0:
+            return int(value)
+        return None
+
+    started = number(started_at_ms)
+    completed = number(completed_at_ms)
+    duration = completed - started if (
+        started is not None and completed is not None and completed >= started) else None
+    last = (usage or {}).get("last") if isinstance(usage, dict) else None
+    last = last if isinstance(last, dict) else {}
+    output_tokens = number(last.get("outputTokens"))
+    reasoning_tokens = number(last.get("reasoningOutputTokens"))
+    visible_tokens = None
+    if output_tokens is not None:
+        visible_tokens = max(0, output_tokens - (reasoning_tokens or 0))
+    speed = None
+    if visible_tokens is not None and duration:
+        speed = f"{visible_tokens * 1000 / duration:.1f}".rstrip("0").rstrip(".")
+    return {
+        "final_answer_started_at_ms": str(started) if started is not None else VALUE_UNAVAILABLE,
+        "final_answer_completed_at_ms": str(completed) if completed is not None else VALUE_UNAVAILABLE,
+        "final_answer_duration_ms": str(duration) if duration is not None else VALUE_UNAVAILABLE,
+        "visible_output_tokens": token_count(visible_tokens),
+        "tokens_per_second": speed or VALUE_UNAVAILABLE,
+    }
+
+
 def context_usage(value):
     last = value.get("last", {}) if isinstance(value, dict) else {}
     used = last.get("totalTokens")

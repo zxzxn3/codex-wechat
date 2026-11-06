@@ -190,13 +190,16 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         result = await self.session.rpc("turn/start", {"threadId": "thread", "input": []})
         self.assertEqual(result["turn"]["id"], "new")
         self.state["turns"].append({"turnId": "new", "status": "completed", "items": [
-            {"type": "agentMessage", "id": "new-item", "phase": "final_answer", "text": "回复"}]})
+            {"type": "agentMessage", "id": "new-item", "phase": "final_answer", "text": "回复",
+             "startedAtMs": 1000, "completedAtMs": 2500}]})
         await self.session.broadcast({"type": "broadcast", "version": 11,
             "sourceClientId": "owner", "method": "thread-stream-state-changed", "params": {
                 "hostId": "local", "conversationId": "thread", "change": {
                     "type": "snapshot", "revision": 2, "conversationState": copy.deepcopy(self.state)}}})
         complete = [e for e in self.events if e["method"] == "item/completed"]
         self.assertEqual([e["params"]["item"]["text"] for e in complete], ["回复"])
+        self.assertEqual(complete[0]["params"]["startedAtMs"], 1000)
+        self.assertEqual(complete[0]["params"]["completedAtMs"], 2500)
         self.assertEqual(self.events[-1]["method"], "turn/completed")
 
     async def test_nested_response_wrapper_remains_supported(self):

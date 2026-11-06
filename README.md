@@ -151,8 +151,9 @@ Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本�
 /help settings
 ```
 
-`/settings ack fields` 和 `/settings finish fields` 列出模板字段。更多提示、切片、限额和
-代理配置见 [ARCHITECTURE](docs/ARCHITECTURE.md#配置与资源)。
+`/settings ack fields` 和 `/settings finish fields` 列出同一组模板字段。最终回答相关字段
+表示最近一次完成轮次的数据；没有时间戳或该轮 token 用量时显示 `N/A`。更多提示、切片、
+限额和代理配置见 [ARCHITECTURE](docs/ARCHITECTURE.md#配置与资源)。
 
 ## 绑定失效与日志
 

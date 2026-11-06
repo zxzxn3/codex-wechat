@@ -75,6 +75,7 @@ class CodexBackend:
         self.stop_requested = False
         self.info = {}
         self.usage_by_thread = {}
+        self.usage_by_turn = {}
         self.live_usage_threads = set()
         self.stored_usage = UsageCache()
         self.compactions = {}
@@ -107,6 +108,7 @@ class CodexBackend:
     def reset_connection(self):
         self.connection_id = uuid.uuid4().hex
         self.usage_by_thread.clear()
+        self.usage_by_turn.clear()
         self.live_usage_threads.clear()
         self.stored_usage.clear()
         self.compactions.clear()
@@ -424,7 +426,7 @@ class CodexBackend:
                 and self.active.get("starting")):
             # The start response identifies OUR turn. Do not bind a concurrent desktop
             # notification to it merely because that notification arrived first.
-            if method in ("turn/started", "item/completed", "turn/completed"):
+            if method in ("turn/started", "item/started", "item/completed", "turn/completed"):
                 self.active["earlyEvents"].append(msg)
             return
         if method == "turn/started":
@@ -469,8 +471,10 @@ class CodexBackend:
                             else self.prompt("COMPACT_UNCONFIRMED"))
 
     def _consume_turn_event(self, current, method, params, item):
-        if method == "item/completed":
-            self._record_agent_message(current, item)
+        if method == "item/started":
+            self._record_item_started(current, params, item)
+        elif method == "item/completed":
+            self._record_agent_message(current, params, item)
         elif method == "turn/completed" and not current["done"].done():
             self._complete_turn(current, params["turn"])
 
@@ -486,7 +490,8 @@ class CodexBackend:
             self.on_limits(current)
 
     def _update_token_usage(self, params):
-        thread_id, usage = params.get("threadId"), params.get("tokenUsage")
+        thread_id, turn_id = params.get("threadId"), params.get("turnId")
+        usage = params.get("tokenUsage")
         if isinstance(thread_id, str) and isinstance(usage, dict):
             # Resume can publish usage before its response selects the thread.
             # Cache counters by thread rather than discarding that early event.
@@ -497,6 +502,16 @@ class CodexBackend:
                 self.usage_by_thread.pop(next(iter(self.usage_by_thread)))
             if thread_id == self.selected_thread:
                 self.info["usage"] = usage
+            if isinstance(turn_id, str):
+                key = (thread_id, turn_id)
+                self.usage_by_turn.pop(key, None)
+                self.usage_by_turn[key] = usage
+                while len(self.usage_by_turn) > 20:
+                    self.usage_by_turn.pop(next(iter(self.usage_by_turn)))
+            if self.active and thread_id == self.active.get("thread"):
+                active_turn = self.active.get("turn")
+                if turn_id is None or (active_turn is not None and turn_id == active_turn):
+                    self.active["usage"] = usage
 
     def _update_thread_settings(self, params):
         # Native settings are authoritative; no replay of previously observed defaults.
@@ -510,13 +525,37 @@ class CodexBackend:
                 self.info[target] = settings[source]
         self.on_activity()
 
-    def _record_agent_message(self, current, item):
+    @staticmethod
+    def _event_timestamp(params, item, name):
+        value = params.get(name, item.get(name))
+        if type(value) in (int, float) and value >= 0:
+            return int(value)
+        return None
+
+    def _record_item_started(self, current, params, item):
+        if item.get("type") != "agentMessage":
+            return
+        identity = item.get("id")
+        started_at_ms = self._event_timestamp(params, item, "startedAtMs")
+        if identity and started_at_ms is not None:
+            current["itemStartedAtMs"][identity] = started_at_ms
+
+    def _record_agent_message(self, current, params, item):
         if item.get("type") == "agentMessage":
             identity = item.get("id")
             if identity and any(message.get("id") == identity for message in current["messages"]):
                 return
-            current["messages"].append(item)
-            questions = async_questions(item)
+            message = dict(item)
+            started_at_ms = self._event_timestamp(params, item, "startedAtMs")
+            if started_at_ms is None and identity:
+                started_at_ms = current["itemStartedAtMs"].pop(identity, None)
+            if started_at_ms is not None:
+                message["startedAtMs"] = started_at_ms
+            completed_at_ms = self._event_timestamp(params, item, "completedAtMs")
+            if completed_at_ms is not None:
+                message["completedAtMs"] = completed_at_ms
+            current["messages"].append(message)
+            questions = async_questions(message)
             if questions is not None:
                 token = self._new_token()
                 self.pending[token] = {
@@ -533,20 +572,22 @@ class CodexBackend:
                 }
                 self.notify(question_prompt(questions[0], token, 0, len(questions),
                                             text=self.prompt))
-            elif item.get("phase") in ("commentary", "partial_answer") and item.get("text"):
+            elif message.get("phase") in ("commentary", "partial_answer") and message.get("text"):
                 self.on_message(AgentMessage(current["source"], current["turn"],
-                    identity, item["text"], current["cwd"], item["phase"],
+                    identity, message["text"], current["cwd"], message["phase"],
                     tuple(current.get("requestIds", ()))))
 
     def _complete_turn(self, current, turn):
         if current["turn"] and turn["id"] != current["turn"]:
             return
         messages = current["messages"]
-        finals = [m["text"] for m in messages
+        finals = [m for m in messages
                   if async_questions(m) is None and m.get("phase") == "final_answer"]
-        legacy = [m["text"] for m in messages
+        legacy = [m for m in messages
                   if async_questions(m) is None and not m.get("phase")]
-        text = "\n\n".join(finals or legacy)
+        answer_items = finals or legacy
+        text = "\n\n".join(m["text"] for m in answer_items)
+        answer_item = answer_items[-1] if answer_items else {}
         has_partial_answer = any(async_questions(m) is None
                                  and m.get("phase") == "partial_answer" and m.get("text")
                                  for m in messages)
@@ -557,9 +598,16 @@ class CodexBackend:
                 "interrupted": self.prompt("TURN_INTERRUPTED"),
             }.get(status, self.prompt("TURN_ENDED_UNEXPECTEDLY"))
             text = (text + "\n\n" if text else "") + status_text
+        usage = None
+        if current["turn"]:
+            usage = self.usage_by_turn.get((current["thread"], current["turn"]))
+        usage = usage or current.get("usage") or self.info.get("usage")
         result = TurnResult(current["source"], current["turn"],
                             text if text or has_partial_answer else self.prompt("TURN_COMPLETED_EMPTY"),
-                            current["cwd"], status, tuple(current.get("requestIds", ())))
+                            current["cwd"], status, tuple(current.get("requestIds", ())),
+                            final_answer_started_at_ms=answer_item.get("startedAtMs"),
+                            final_answer_completed_at_ms=answer_item.get("completedAtMs"),
+                            usage=usage)
         current["done"].set_result(result)
         self.pending.clear()
         compact_turn = any(key[:3] == (self.selection_epoch, self.selected_thread, turn["id"])
@@ -576,6 +624,7 @@ class CodexBackend:
         return {"thread": thread_id, "turn": turn_id, "messages": [], "owned": owned,
                 "starting": False,
                 "earlyEvents": [],
+                "itemStartedAtMs": {},
                 "last_progress_at": time.monotonic(),
                 "source": self.source(thread_id),
                 "cwd": self.info.get("cwd") or self.cwd,

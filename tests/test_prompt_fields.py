@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 from codex_wechat import Bridge
 from commands import handle
-from prompts import (VALUE_UNAVAILABLE, context_usage, duration_label, prompt_text,
-                     rate_limit_label, render_ack, status_fields, status_from_fields,
-                     token_count)
+from prompts import (VALUE_UNAVAILABLE, context_usage, duration_label, final_answer_fields,
+                     prompt_text, rate_limit_label, render_ack, status_fields,
+                     status_from_fields, token_count)
 from storage import Store
 
 
@@ -46,6 +46,20 @@ class PromptFieldsTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 store.close()
 
+    def test_final_answer_metrics(self):
+        values = final_answer_fields(
+            started_at_ms=1_000,
+            completed_at_ms=3_500,
+            usage={"last": {"outputTokens": 500, "reasoningOutputTokens": 100}},
+        )
+        self.assertEqual(values["final_answer_started_at_ms"], "1000")
+        self.assertEqual(values["final_answer_completed_at_ms"], "3500")
+        self.assertEqual(values["final_answer_duration_ms"], "2500")
+        self.assertEqual(values["visible_output_tokens"], "400")
+        self.assertEqual(values["tokens_per_second"], "160")
+        unavailable = final_answer_fields()
+        self.assertTrue(all(value == VALUE_UNAVAILABLE for value in unavailable.values()))
+
     async def test_shared_snapshot_and_no_recursive_expansion(self):
         with tempfile.TemporaryDirectory() as root:
             store = Store(root)
@@ -72,6 +86,10 @@ class PromptFieldsTests(unittest.IsolatedAsyncioTestCase):
                 await handle(bridge, "/settings", "ack fields")
                 self.assertIn("{context_remaining}", bridge.state["outbox"][-1]["text"])
                 self.assertNotIn("{上下文剩余}", bridge.state["outbox"][-1]["text"])
+                ack_fields = bridge.state["outbox"][-1]["text"]
+                await handle(bridge, "/settings", "finish fields")
+                self.assertEqual(bridge.state["outbox"][-1]["text"], ack_fields)
+                self.assertIn("{tokens_per_second}", ack_fields)
                 bridge.backend.rpc.assert_not_awaited()
             finally:
                 store.lock.close()

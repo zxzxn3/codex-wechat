@@ -1,4 +1,5 @@
 """Visible interim replies use complete native items, never model/tool calls."""
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
@@ -61,6 +62,46 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         await self.bridge.deliver_answer(result)
         self.assertEqual(self.texts(), ["正在检查日志。", "已定位到配置。", "已完成修复。", "结束"])
         self.assertNotIn("currentInput", self.bridge.state)
+
+    async def test_final_answer_timing_and_usage_are_available_to_templates(self):
+        current = self.backend.active
+        self.backend.info["usage"] = {
+            "last": {"outputTokens": 999, "reasoningOutputTokens": 0},
+        }
+        self.backend.event({"method": "item/started", "params": {
+            "threadId": "thread", "turnId": "turn", "startedAtMs": 1_000,
+            "item": {"id": "final", "type": "agentMessage",
+                     "phase": "final_answer", "text": ""},
+        }})
+        self.backend.event({"method": "thread/tokenUsage/updated", "params": {
+            "threadId": "thread", "turnId": "turn",
+            "tokenUsage": {"last": {"outputTokens": 500, "reasoningOutputTokens": 100}},
+        }})
+        self.backend.event({"method": "item/completed", "params": {
+            "threadId": "thread", "turnId": "turn", "completedAtMs": 3_500,
+            "item": {"id": "final", "type": "agentMessage",
+                     "phase": "final_answer", "text": "完成"},
+        }})
+        self.finish()
+        result = await current["done"]
+        self.assertEqual(result.final_answer_started_at_ms, 1_000)
+        self.assertEqual(result.final_answer_completed_at_ms, 3_500)
+        self.assertEqual(result.usage["last"]["outputTokens"], 500)
+        self.bridge.state["completionNotice"] = (
+            "{tokens_per_second}|{visible_output_tokens}|{final_answer_duration_ms}|"
+            "{final_answer_started_at_ms}|{final_answer_completed_at_ms}")
+        await self.bridge.deliver_answer(result)
+        self.assertEqual(self.texts()[-1], "160|400|2500|1000|3500")
+        await self.bridge.deliver_answer(replace(
+            result,
+            status="interrupted",
+            final_answer_started_at_ms=4_000,
+            final_answer_completed_at_ms=5_000,
+            usage={"last": {"outputTokens": 999, "reasoningOutputTokens": 0}},
+        ))
+        self.bridge.state["processingNotice"] = "{visible_output_tokens}"
+        self.bridge.acknowledge({})
+        self.assertEqual(self.texts()[-1], "400")
 
     async def test_duplicate_late_wrong_turn_and_wrong_thread_items_are_ignored(self):
         event = self.item()
