@@ -29,6 +29,7 @@ BACKUP_COUNT = DEFAULT_KEEP
 _LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
 _EVENT = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 _PATH_LIKE = re.compile(r"""(?:^|[\s(='"])(?:[A-Za-z]:[\\/]|\\\\|~/|/)""")
+REDACTED_REASON = "redacted for security and path privacy"
 _REQUEST_ID = contextvars.ContextVar("codex_wechat_request_id", default=None)
 _lock = threading.Lock()
 _path = None
@@ -207,8 +208,11 @@ def _clean_field(name, value):
         return None
     if name == "backend_version" and _PATH_LIKE.search(value):
         return None
+    # Fail closed on any path separator so local paths never reach the log.
+    # This also hides safe slash-bearing values such as "HTTP/2"; reason is
+    # optional diagnostics, while accidental paths expose usernames and files.
     if name == "reason" and re.search(r"[/\\]", value):
-        return None
+        return REDACTED_REASON
     value = _clean_text(value)
     return value if re.fullmatch(_TEXT_FIELDS[name], value) else None
 
