@@ -78,6 +78,11 @@ class PromptFieldsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(render_ack(canonical_template, fields),
                                  '{模型} example (High) 120/80ms N/A {unknown}')
                 self.assertIn("模型: example (High)", status_from_fields(fields))
+                # Healthy runs keep the panel unchanged; a quarantined backlog
+                # shows up as one extra count with a Chinese label.
+                self.assertNotIn("隔离积压", status_from_fields(fields))
+                bridge.state["deliveryStaleTotal"] = 4
+                self.assertIn("隔离积压: 4", status_from_fields(bridge.prompt_fields()))
                 bridge.state["processingNotice"] = "{model} {provider_latency_ms}ms"
                 bridge.latency.provider_sample = (bridge.backend.connection_id, "185ms")
                 bridge.acknowledge({})

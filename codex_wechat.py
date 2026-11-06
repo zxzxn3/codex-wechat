@@ -421,6 +421,9 @@ class Bridge:
             rate_limits=rate_limits,
             connection="本地后台" if self.backend.shared else "独立进程",
             shared_fallback=self.backend.shared_fallback,
+            # Cumulative: how many queued replies were quarantined when a
+            # no-id pause was lifted. Shown only while non-zero.
+            delivery_stale=self.state.get("deliveryStaleTotal", 0),
         )
         values.update(self.last_final_answer_fields)
         values.update(self.latency.values(ingress_ms))

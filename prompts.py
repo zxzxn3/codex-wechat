@@ -192,6 +192,7 @@ LABEL_LIMITS = "限额"
 LABEL_QUEUED = "待办"
 LABEL_APPROVALS = "审批"
 LABEL_SEND_FAILURES = "发送失败"
+LABEL_DELIVERY_STALE = "隔离积压"
 LABEL_SHARED = "共享后台"
 LABEL_ACK = "接收提示"
 LABEL_FINISH = "结束提示"
@@ -304,6 +305,7 @@ _FIELD_LABELS = {
     "connection": "LABEL_SERVICE", "token_usage": "LABEL_TOKENS", "context_usage": "LABEL_CONTEXT",
     "rate_limits": "LABEL_LIMITS", "queue_depth": "LABEL_QUEUED", "pending_requests": "LABEL_APPROVALS",
     "send_failures": "LABEL_SEND_FAILURES",
+    "delivery_stale": "LABEL_DELIVERY_STALE",
     "shared_fallback": "LABEL_SHARED",
 }
 
@@ -611,7 +613,7 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
                    cwd, connection, provider=None, approval=None,
                    sandbox=None, reviewer=None, collaboration=None,
                    profile=None, usage=None, rate_limits=None, backend=None,
-                   shared_fallback=None, session_id=None):
+                   shared_fallback=None, session_id=None, delivery_stale=None):
     total = (usage or {}).get("total") or {}
     last = (usage or {}).get("last") or {}
     context = context_usage(usage)
@@ -625,6 +627,7 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
         "collaboration": collaboration_label(collaboration), "connection": connection,
         "shared_fallback": shared_fallback,
         "queue_depth": queued, "pending_requests": pending, "send_failures": failed,
+        "delivery_stale": delivery_stale,
         "context_usage": context, "context_remaining": remaining[1] if remaining else VALUE_UNAVAILABLE,
         "total_tokens": token_count(total.get("totalTokens")),
         "input_tokens": token_count(total.get("inputTokens")),
@@ -639,9 +642,9 @@ def status_fields(*, status, queued, pending, failed, name, model, effort,
 def status_from_fields(values, *, text=prompt_text):
     def label(key):
         return text(_FIELD_LABELS[key])
-    counts = "  ".join(f"{label(key)}: {values[key]}" for key in
-                       ("queue_depth", "pending_requests", "send_failures")
-                       if values[key])
+    counts = "  ".join(f"{label(key)}: {values.get(key)}" for key in
+                       ("queue_depth", "pending_requests", "send_failures", "delivery_stale")
+                       if values.get(key))
     lines = [f"{label('status')}: {values['status']}", counts or None]
     if values["backend"]:
         lines.append(f"{label('backend')}: {values['backend']}")

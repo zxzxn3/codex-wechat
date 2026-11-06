@@ -47,6 +47,33 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 await uninstall.uninstall(purge=True)
                 self.assertFalse(marker.exists())
 
+    async def test_a_purge_says_where_the_remaining_program_files_are(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            custom = Path(directory) / "custom"
+            install.mkdir()
+            custom.mkdir()
+            (install / uninstall.DATA_ROOT_FILE).write_text(str(custom) + "\n", encoding="utf-8")
+            out = io.StringIO()
+            with patch.object(uninstall, "IS_WINDOWS", False), \
+                    patch.object(uninstall, "INSTALL_ROOT", install), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
+                    patch.object(uninstall, "_require_no_bridge", Mock()), \
+                    patch.object(uninstall, "_linux_command_removal", Mock()), \
+                    patch.dict(uninstall.os.environ,
+                               {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                with contextlib.redirect_stdout(out):
+                    await uninstall.uninstall(purge=True)
+            printed = out.getvalue()
+            self.assertIn(f"程序文件仍在: {install}", printed)
+            self.assertIn("手动删除该目录", printed)
+            # A purge forgets the marker but the tree is still named, so the user
+            # can finish the removal themselves.
+            self.assertFalse((install / uninstall.DATA_ROOT_FILE).exists())
+
     async def test_data_root_is_validated_before_service_removal(self):
         events = []
         with patch.object(uninstall, "IS_WINDOWS", False), \

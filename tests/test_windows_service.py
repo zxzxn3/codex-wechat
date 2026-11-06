@@ -336,7 +336,10 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("if ($PurgeData)", text)
         self.assertIn("用户数据已保留", text)
-        self.assertIn("项目文件和虚拟环境未删除", text)
+        # The uninstaller runs out of the tree, so it cannot remove it: name it
+        # and leave the decision to the user.
+        self.assertIn("程序文件仍在: $InstallRoot", text)
+        self.assertIn("手动删除该目录", text)
 
     def test_supervisor_resolves_the_configured_data_root(self):
         # The marker, not the platform default, decides where state and logs live.

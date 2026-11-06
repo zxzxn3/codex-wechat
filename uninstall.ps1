@@ -271,4 +271,5 @@ if (Test-Path -LiteralPath $Shim -PathType Leaf) {
         Write-Warning "保留 $Shim：它不是本项目的命令入口"
     }
 }
-Write-Host '项目文件和虚拟环境未删除'
+Write-Host "程序文件仍在: $InstallRoot（含 releases 与 Python 环境，不含用户数据）"
+Write-Host '如不再需要，可在本命令结束后手动删除该目录。'
