@@ -100,6 +100,9 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(f"数据文件仍在: {custom}", printed)
             self.assertIn("手动删除上述目录", printed)
             self.assertTrue((install / uninstall.DATA_ROOT_FILE).exists())
+            # Same order as the Windows helper: program files, data, decision.
+            self.assertLess(printed.index("程序文件仍在"), printed.index("数据文件仍在"))
+            self.assertLess(printed.index("数据文件仍在"), printed.index("手动删除上述目录"))
 
     async def test_data_root_is_validated_before_service_removal(self):
         events = []

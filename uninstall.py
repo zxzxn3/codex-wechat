@@ -131,7 +131,7 @@ def _purge_linux_data(root: Path | None = None) -> None:
         raise ValueError(f"数据目录不是目录: {root}")
     for name in LINUX_DATA_PATHS:
         _remove_path(root / name)
-    print(f"已删除数据目录中的用户数据: {root}")
+    print("已删除数据目录中的用户数据。")
 
 
 def _require_no_bridge(root: Path | None = None) -> None:
@@ -163,14 +163,17 @@ async def uninstall(*, purge: bool = False) -> None:
     await _linux_service_removal()
     _require_no_bridge(root)
     _linux_command_removal()
-    # Name both leftovers in one place: the uninstaller runs out of the install
-    # tree, so removing the last parts is a decision the user makes.
-    print(f"程序文件仍在: {INSTALL_ROOT}（含 releases 与 Python 环境，不含用户数据）")
     if purge:
         _purge_linux_data(root)
         # Only a purge forgets the root: the marker is the single pointer back to
         # data that a data-preserving uninstall deliberately keeps.
         _remove_data_root_marker()
+    # Actions report above; this summary names what is left, in one order shared
+    # with the Windows helper: program files, data, how to keep using it, then the
+    # decision about removing the rest. The uninstaller runs out of the install
+    # tree, so it cannot delete it itself.
+    print(f"程序文件仍在: {INSTALL_ROOT}（含 releases 与 Python 环境，不含用户数据）")
+    if purge:
         print(f"数据文件已删除: {root}")
     else:
         print(f"数据文件仍在: {root}")

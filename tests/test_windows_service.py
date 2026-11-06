@@ -339,7 +339,13 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         # it, and the data it deliberately keeps.
         self.assertIn("程序文件仍在: $InstallRoot", text)
         self.assertIn("数据文件仍在: $DataRoot", text)
+        self.assertIn("数据文件已删除: $DataRoot", text)
         self.assertIn("手动删除上述目录", text)
+        # Same order as the Linux helper: program files, data, then the decision.
+        self.assertLess(text.index("程序文件仍在: $InstallRoot"),
+                        text.index("数据文件已删除: $DataRoot"))
+        self.assertLess(text.index("数据文件仍在: $DataRoot"),
+                        text.index("手动删除上述目录"))
 
     def test_supervisor_resolves_the_configured_data_root(self):
         # The marker, not the platform default, decides where state and logs live.

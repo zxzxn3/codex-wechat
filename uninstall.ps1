@@ -237,11 +237,9 @@ if ($PurgeData) {
         foreach ($name in $DataPaths) {
             Remove-DataPath $name
         }
-        Write-Host "已删除数据目录中的用户数据: $DataRoot"
+        Write-Host '已删除数据目录中的用户数据。'
     }
 } else {
-    Write-Host "数据文件仍在: $DataRoot"
-    Write-Host '重新运行安装器会继续使用这个数据根；如需同时删除配置、登录和待办，请使用 -PurgeData。'
     Write-Host '数据目录下的共享 Codex 后台仍在运行'
 }
 if ($task) {
@@ -272,5 +270,13 @@ if (Test-Path -LiteralPath $Shim -PathType Leaf) {
         Write-Warning "保留 $Shim：它不是本项目的命令入口"
     }
 }
+# Same summary order as Linux: program files, data, how to keep using it, then
+# the decision about removing what is left.
 Write-Host "程序文件仍在: $InstallRoot（含 releases 与 Python 环境，不含用户数据）"
+if ($PurgeData) {
+    Write-Host "数据文件已删除: $DataRoot"
+} else {
+    Write-Host "数据文件仍在: $DataRoot"
+    Write-Host '重新运行安装器会继续使用这个数据根；如需同时删除配置、登录和待办，请使用 -PurgeData。'
+}
 Write-Host '如不再需要，可在本命令结束后手动删除上述目录。'
