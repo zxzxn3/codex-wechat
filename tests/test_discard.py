@@ -1,7 +1,9 @@
 """The user-controlled outbox discard command."""
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.commands import dispatch, handle
@@ -60,6 +62,50 @@ class DiscardTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(bridge.deferred_resume)
         self.assertEqual([entry["text"] for entry in bridge.state["outbox"]],
                          ["2 条消息被清空。"])
+
+    async def test_discard_clears_backlog_before_the_sender_can_wake(self):
+        bridge = self.bridge
+        bridge.reply("old finish")
+        for _ in range(bridge.reply_budget()):
+            bridge.spend_reply_budget()
+        bridge.state["budgetPromptSent"] = True
+        sent = []
+
+        async def send(entry):
+            sent.append(entry["text"])
+            return {"message_id": len(sent)}
+
+        bridge.channel.send = send
+        message = {
+            "message_id": "discard",
+            "from_user_id": "owner",
+            "message_type": 1,
+            "context_token": "context",
+            "item_list": [{"type": 1, "text_item": {"text": "/discard"}}],
+        }
+        with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
+            sender = asyncio.create_task(bridge.sender())
+            worker = None
+            try:
+                await asyncio.sleep(0.01)
+                self.assertEqual(sent, [])
+
+                await bridge.receive({"msgs": [message]})
+                await asyncio.sleep(0.01)
+                self.assertEqual(sent, [])
+
+                worker = asyncio.create_task(bridge.control_worker("local"))
+                for _ in range(200):
+                    if sent:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(sent, ["1 条消息被清空。"])
+            finally:
+                if worker is not None:
+                    worker.cancel()
+                    await asyncio.gather(worker, return_exceptions=True)
+                sender.cancel()
+                await asyncio.gather(sender, return_exceptions=True)
 
 
 if __name__ == "__main__":

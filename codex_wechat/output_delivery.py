@@ -322,7 +322,7 @@ class OutputDelivery:
         bridge = self.bridge
         while True:
             if (bridge.wechat_paused or bridge.state.get("wechatContextPending")
-                    or self.paused):
+                    or self.paused or bridge.deferred_resume):
                 self._in_flight_id = None
                 bridge.send_wake.clear()
                 await bridge.send_wake.wait()
