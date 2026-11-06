@@ -63,11 +63,30 @@ for spec in COMMANDS:
 def help_text(show_all=False, *, text=prompt_text):
     """Short aliases lead the line so the terse form is always the first one seen."""
     def line(spec):
-        usage = f"`{spec.help_usage or spec.usage}`"
-        aliases = " ".join(f"`{alias}`" for alias in spec.aliases)
-        head = f"{aliases} {usage}" if aliases else usage
+        head = command_usage(spec.name, help_form=True)
         return f"{head} {text('HELP_' + spec.name[1:].upper())}"
     return "\n".join(line(spec) for spec in COMMANDS if show_all or spec.default_help)
+
+
+def _command_reference(spec, value):
+    references = [f"`{alias}`" for alias in spec.aliases]
+    references.append(f"`{value}`")
+    return " ".join(references)
+
+
+def command_name(name):
+    """Canonical command reference with aliases first, without arguments."""
+    spec = REGISTRY.get(name)
+    return _command_reference(spec, spec.name) if spec else f"`{name}`"
+
+
+def command_usage(name, *, help_form=False):
+    """Usage reference with aliases first; help_form uses the short help entry."""
+    spec = REGISTRY.get(name)
+    if spec is None:
+        return f"`{name}`"
+    value = (spec.help_usage or spec.usage) if help_form else spec.usage
+    return _command_reference(spec, value)
 
 
 HELP = help_text()

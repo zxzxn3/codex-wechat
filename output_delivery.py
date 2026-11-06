@@ -18,6 +18,7 @@ from errors import (ErrorAction, WeChatApiError, WeChatAuthExpired,
                     WeChatNotAcknowledged, attachment_reason, disposition)
 from diagnostics import current_request_id, error_fields, log_event
 from prompts import render_ack
+from command_specs import command_usage
 
 SEND_ATTEMPTS = 3
 SEND_RETRY_SECONDS = 1
@@ -151,7 +152,8 @@ class OutputDelivery:
                 reason = attachment_reason(error)
                 errors.append(bridge.prompt("AUTO_ATTACHMENT_FAILED", {
                     "reason": reason,
-                    "hint": (bridge.prompt("AUTO_ATTACHMENT_PATH_HINT")
+                    "hint": (bridge.prompt("AUTO_ATTACHMENT_PATH_HINT", {
+                                 "get": command_usage("/get")})
                              if reason == "只能自动发送当前会话目录内的文件" else ""),
                 }))
         # Snapshot work may await disk I/O across a session/backend switch.
@@ -222,7 +224,11 @@ class OutputDelivery:
         # notice gets the same treatment: its replacement would be a notice about
         # a notice, and the queue is already waiting for the user.
         if notify and not entry.get("failureNotice") and not entry.get("budgetNotice"):
-            text = (bridge.prompt("ATTACHMENT_SEND_FAILED", {"name": entry["asset"]["name"], "attempts": SEND_ATTEMPTS})
+            text = (bridge.prompt("ATTACHMENT_SEND_FAILED", {
+                        "name": entry["asset"]["name"],
+                        "attempts": SEND_ATTEMPTS,
+                        "get": command_usage("/get"),
+                    })
                     if "asset" in entry else bridge.prompt("REPLY_SEND_FAILED"))
             notes = bridge.text_entries(text, group=str(uuid.uuid4()), context=entry["context"],
                                         request_id=entry.get("requestId"))

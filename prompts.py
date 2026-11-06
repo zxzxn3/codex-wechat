@@ -14,14 +14,14 @@ COMPACT_FINISHED = "上下文压缩已结束。"
 COMPACT_INTERRUPTED = "上下文压缩已中断。"
 COMPACT_UNCONFIRMED = "上下文压缩结果未确认。"
 
-BACKEND_SUMMARY = "```\n后端: {current}\n可用: {available}\n```\n`/backend {{名称}}`"
-EFFORT_SUMMARY = "```\n强度: {current}\n可选: {choices}\n```\n`/effort {{档位}}`"
+BACKEND_SUMMARY = "```\n后端: {current}\n可用: {available}\n```\n{hint}"
+EFFORT_SUMMARY = "```\n强度: {current}\n可选: {choices}\n```\n{hint}"
 ACK_VIEW = ("```\nack: {template}\n```\n"
             "`/settings ack {{模板}}`\n`/settings ack \"\"` 关闭\n"
             "`/settings ack fields` 可用字段")
 ACK_TOO_LONG = "未更新 ack: 最多 {max_bytes} 字节"
 WORKING_DIRECTORY = "目录: {cwd}"
-MEDIA_USAGE = "`/get {路径}`\n`/getfile {路径}`"
+MEDIA_USAGE = "{get}\n{getfile}"
 
 BLOCKED_NOTE = "等待桌面处理"
 
@@ -56,10 +56,10 @@ UNQUEUE_EMPTY = "没有可撤回的排队消息。"
 PING_REPLY = "微信 ─{ingress_ms}/{egress_ms}ms"
 PING_PARTIAL = "微信 ─{latency}"
 PING_ROUTE = "桥接 ─{provider_latency}─ 提供方"
-PING_USAGE = "用法: `/ping`"
-UNKNOWN_COMMAND = "未知指令，查看 `/help`"
+PING_USAGE = "用法: {usage}"
+UNKNOWN_COMMAND = "未知指令，查看 {help}"
 TOO_MANY_ATTACHMENTS = "消息未接收: 附件超过 {count} 个。\n请分开发送。"
-QUEUE_FULL = "拒绝接收: 排队消息已达 {count} 条。\n请等待完成或用 `/unqueue` 撤回最后一条。"
+QUEUE_FULL = "拒绝接收: 排队消息已达 {count} 条。\n请等待完成或用 {unqueue} 撤回最后一条。"
 CONFIG_RELOAD_FAILED = "热配置未生效，保留原设置。请检查配置文件。"
 UNSUPPORTED_MESSAGE = (
     "消息未接收: 仅支持文字、语音转写、图片、视频和文件。\n"
@@ -74,11 +74,11 @@ ATTACHMENT_INCOMING_FAILED = (
 ATTACHMENT_QUEUED = "附件已排队"
 ATTACHMENT_SEND_FAILED = (
     "附件未发出: {name}\n"
-    "重试 {attempts} 次仍失败，请稍后用 `/get` 重试。"
+    "重试 {attempts} 次仍失败，请稍后用 {get} 重试。"
 )
 AUTO_ATTACHMENT_LIMIT = "附件未发送: 自动回传最多 {count} 个，超出的已跳过。"
 AUTO_ATTACHMENT_FAILED = "附件未发送: {reason}{hint}"
-AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 `/get {路径}`。"
+AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 {get}。"
 
 APPROVAL_ACCEPTED = "已同意"
 APPROVAL_DECLINED = "已拒绝"
@@ -164,14 +164,14 @@ SESSION_WRITER_QUEUED = (
     "在 App 或 CLI 中关闭该会话后会自动发送；最多等待 10 分钟。"
 )
 SESSION_INDEX_INVALID = "未切换会话: 编号无效\n请先发送 `/sessions`。"
-SESSION_USAGE = "用法: `/switch {{编号、ID前缀或搜索词}}`"
-NEW_USAGE = "用法: `/new`"
-MODEL_INVALID = "未切换模型: 名称无效\n请使用 `/model` 查看可用模型。"
+SESSION_USAGE = "用法: {usage}"
+NEW_USAGE = "用法: {usage}"
+MODEL_INVALID = "未切换模型: 名称无效\n请使用 {command} 查看可用模型。"
 MODEL_NOT_IN_CATALOG = "无法读取强度: 当前模型不在模型列表中，请重新选择模型。"
 EFFORT_INVALID = "未切换强度: 可选 {choices}"
 DIRECTORY_INVALID = "未切换目录: 目录不存在或无法访问\n请检查路径后重试。"
 DIRECTORY_NOT_FOLDER = "未切换目录: 路径不是文件夹\n请选择文件夹。"
-RESTART_USAGE = "用法: `/restart`"
+RESTART_USAGE = "用法: {usage}"
 
 # All uppercase string constants in this module are overrideable presentation text.
 # Protocol identifiers, command routing and user/model content do not belong here.
@@ -242,7 +242,7 @@ CONTROL_FAILED = "指令未完成，请查看 `/status` 后重试。"
 CONTROL_INTERRUPTED = "重启时有 {count} 条控制指令可能未完成，请重试。"
 GENERIC_FAILURE = "操作失败"
 COMMAND_USAGE = "用法: `{usage}`"
-HELP_USAGE = "用法: `/help`、`/help all` 或 `/help settings`"
+HELP_USAGE = "用法: {usage}"
 INPUT_SUBMISSION_UNCERTAIN = "消息提交结果未确认，未自动重发。"
 BACKEND_UNREADY = "后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。"
 RESULT_PREPARE_FAILED = "结果准备失败，请在桌面查看该轮回答。"

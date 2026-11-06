@@ -5,7 +5,7 @@ import json
 import uuid
 
 import wechat_auth
-from command_specs import PENDING_CONTROL_LIMIT, REGISTRY, command_lane
+from command_specs import PENDING_CONTROL_LIMIT, REGISTRY, command_lane, command_usage
 from commands import parse_control
 from diagnostics import log_event, new_request_id
 from latency import message_timestamps
@@ -93,7 +93,8 @@ class Ingress:
                       command=spec.name if spec and kind in ("command", "queued") else None)
             if queued and not text and not attachments:
                 bridge.reject_input(request_id, kind, "missing_argument")
-                bridge.reply(bridge.prompt("COMMAND_USAGE", {"usage": REGISTRY['/queue'].usage}),
+                bridge.reply(bridge.prompt("COMMAND_USAGE", {
+                    "usage": command_usage("/queue")}),
                              request_id=request_id)
             elif len(attachments) > MAX_ATTACHMENTS:
                 bridge.reject_input(request_id, kind, "too_many_attachments")
@@ -123,7 +124,10 @@ class Ingress:
             elif (text or attachments) and len(text) <= 20000:
                 if len(bridge.state["inbox"]) >= 20:
                     bridge.reject_input(request_id, kind, "queue_full")
-                    bridge.reply(bridge.prompt("QUEUE_FULL", {"count": 20}), request_id=request_id)
+                    bridge.reply(bridge.prompt("QUEUE_FULL", {
+                        "count": 20,
+                        "unqueue": command_usage("/unqueue"),
+                    }), request_id=request_id)
                 else:
                     bridge.state["inbox"].append({"id": identity, "text": text,
                                                   "attachments": attachments,

@@ -27,7 +27,7 @@ from prompts import (
     SettingsView,
     ping_channel, status_from_fields, prompt_text, VALUE_EMPTY,
 )
-from command_specs import REGISTRY, COMMANDS, help_text
+from command_specs import REGISTRY, COMMANDS, command_name, command_usage, help_text
 from configuration import (
     CONNECTION_IDLE_MAX, CONNECTION_IDLE_MIN, HotSettings,
     LOG_KEEP_MAX, LOG_KEEP_MIN,
@@ -406,6 +406,7 @@ async def command_backend_view(bridge, command, argument, received=None):
     bridge.reply(bridge.prompt("BACKEND_SUMMARY", {
         "current": current,
         "available": available,
+        "hint": command_usage("/backend"),
     }))
     return
 
@@ -552,7 +553,8 @@ async def _search_session_target(bridge, argument):
 
 async def command_sessions(bridge, command, argument, received=None):
     if argument == "next":
-        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"usage": REGISTRY['/sessions'].usage}))
+        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {
+            "usage": command_usage("/sessions")}))
     page = int(argument) if argument.isdecimal() else 1
     search = bridge.state.get("sessionSearch") if argument.isdecimal() else argument or None
     if page < 1:
@@ -574,8 +576,8 @@ async def command_sessions(bridge, command, argument, received=None):
     bridge.state["sessionSearch"] = search
     bridge.save()
     lines = _session_lines(bridge, threads)
-    hints = [f"`{REGISTRY['/switch'].usage}`",
-             f"`{REGISTRY['/sessions'].usage}` " +
+    hints = [command_usage("/switch"),
+             command_usage("/sessions") + " " +
              bridge.prompt("SESSION_PAGE", {"page": page, "total_pages": total})]
     bridge.reply(panel(*lines) + "\n" + "\n".join(hints))
     return
@@ -590,7 +592,7 @@ async def command_model_view(bridge, command, argument, received=None):
         lines.append(f"{index}. {model_name}")
     if not models:
         lines.append(bridge.prompt("NO_MODELS"))
-    bridge.reply(panel(*lines) + f"\n`{REGISTRY['/model'].usage}`")
+    bridge.reply(panel(*lines) + "\n" + command_usage("/model"))
     return
 
 
@@ -605,11 +607,14 @@ def session_control(handler):
     @wraps(handler)
     async def guarded(bridge, command, argument, received=None):
         if command == "/compact" and argument:
-            raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"usage": REGISTRY['/compact'].usage}))
+            raise UserFacingError(bridge.prompt("COMMAND_USAGE", {
+                "usage": command_usage("/compact")}))
         if command == "/new" and argument:
-            raise UserFacingError(bridge.prompt("NEW_USAGE"))
+            raise UserFacingError(bridge.prompt("NEW_USAGE", {
+                "usage": command_usage("/new")}))
         if command == "/switch" and not argument:
-            raise UserFacingError(bridge.prompt("SESSION_USAGE"))
+            raise UserFacingError(bridge.prompt("SESSION_USAGE", {
+                "usage": command_usage("/switch")}))
         if not can_change_session(bridge):
             raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
         async with bridge.session_lock:
@@ -698,7 +703,8 @@ async def _change_model(bridge, command, argument, received=None):
     else:
         selected = next((m for m in models if m["model"] == argument), None)
     if selected is None:
-        raise UserFacingError(bridge.prompt("MODEL_INVALID"))
+        raise UserFacingError(bridge.prompt("MODEL_INVALID", {
+            "command": command_name("/model")}))
     overrides["model"] = selected["model"]
     # Model-specific defaults prevent carrying an unsupported effort to another model.
     overrides["effort"] = selected.get("defaultReasoningEffort")
@@ -720,6 +726,7 @@ async def command_effort_view(bridge, command, argument, received=None):
     bridge.reply(bridge.prompt("EFFORT_SUMMARY", {
         "current": effort_label(bridge.backend.info.get("effort")),
         "choices": " | ".join(effort_label(value) for value in choices) or "无",
+        "hint": command_usage("/effort"),
     }))
 
 
@@ -796,7 +803,8 @@ async def command_cwd(bridge, command, argument, received=None):
 
 async def command_help(bridge, command, argument, received=None):
     if argument not in ("", "all", "settings"):
-        bridge.reply(bridge.prompt("HELP_USAGE"))
+        bridge.reply(bridge.prompt("HELP_USAGE", {
+            "usage": command_usage("/help")}))
         return
     if argument == "settings":
         bridge.reply(bridge.prompt("SETTINGS_HELP"))
@@ -806,7 +814,8 @@ async def command_help(bridge, command, argument, received=None):
 
 async def command_ping(bridge, command, argument, received=None):
     if argument:
-        bridge.reply(bridge.prompt("PING_USAGE"))
+        bridge.reply(bridge.prompt("PING_USAGE", {
+            "usage": command_usage("/ping")}))
     else:
         ingress = received.get("ingress_ms") if received else None
         channel = ping_channel(bridge.latency.values(ingress), text=bridge.prompt)
@@ -824,7 +833,10 @@ async def command_ping(bridge, command, argument, received=None):
 async def command_get(bridge, command, argument, received=None):
     try:
         if not argument:
-            bridge.reply(bridge.prompt("MEDIA_USAGE"))
+            bridge.reply(bridge.prompt("MEDIA_USAGE", {
+                "get": command_usage("/get"),
+                "getfile": command_usage("/getfile"),
+            }))
             return
         if len(argument) >= 2 and argument[0] == argument[-1] and argument[0] in ("'", '"'):
             argument = argument[1:-1]
@@ -852,7 +864,8 @@ async def command_continue(bridge, command, argument, received=None):
 
 async def command_restart(bridge, command, argument, received=None):
     if argument:
-        bridge.reply(bridge.prompt("RESTART_USAGE"))
+        bridge.reply(bridge.prompt("RESTART_USAGE", {
+            "usage": command_usage("/restart")}))
         return
     try:
         bridge.mark_control_restarting((received or {}).get("controlId"))
@@ -920,7 +933,8 @@ async def command_approval(bridge, command, argument, received=None):
 async def command_answer(bridge, command, argument, received=None):
     parts = argument.split(maxsplit=1)
     if len(parts) != 2:
-        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {"usage": REGISTRY[command].usage}))
+        raise UserFacingError(bridge.prompt("COMMAND_USAGE", {
+            "usage": command_usage(command)}))
     try:
         ok = await bridge.backend.answer_question(*parts)
         bridge.reply(bridge.prompt("ANSWER_ACCEPTED") if ok else bridge.prompt("ANSWER_EXPIRED"))
@@ -965,10 +979,12 @@ def parse_control(text):
 
 def validate(spec, argument, *, text=prompt_text):
     if (spec.usage == spec.name and argument) or (spec.required and not argument):
-        raise UserFacingError(text("COMMAND_USAGE", {"usage": spec.usage}))
+        raise UserFacingError(text("COMMAND_USAGE", {
+            "usage": command_usage(spec.name)}))
     if spec.name == "/sessions":
         if argument == "next":
-            raise UserFacingError(text("COMMAND_USAGE", {"usage": spec.usage}))
+            raise UserFacingError(text("COMMAND_USAGE", {
+                "usage": command_usage(spec.name)}))
         if argument.isdecimal() and int(argument) < 1:
             raise UserFacingError(text("PAGE_INVALID"))
 
@@ -977,7 +993,8 @@ async def handle(bridge, command, argument, received=None):
     """Invoke a registered handler; also usable with injected backends in offline tests."""
     spec = REGISTRY.get(command)
     if spec is None or spec.route == "input":
-        bridge.reply(bridge.prompt("UNKNOWN_COMMAND"))
+        bridge.reply(bridge.prompt("UNKNOWN_COMMAND", {
+            "help": command_name("/help")}))
         return
     validate(spec, argument, text=bridge.prompt)
     await HANDLERS[spec.name](bridge, spec.name, argument, received)
@@ -997,7 +1014,8 @@ async def dispatch(bridge, text, *, received=None):
             if spec is None or spec.route == "input":
                 log_event("control.rejected", component="input", kind="command",
                           status="unknown", duration_ms=(time.perf_counter() - started) * 1000, **fields)
-                bridge.reply(bridge.prompt("UNKNOWN_COMMAND"))
+                bridge.reply(bridge.prompt("UNKNOWN_COMMAND", {
+                    "help": command_name("/help")}))
                 return
             validate(spec, argument, text=bridge.prompt)  # Reject syntax before opening a backend connection.
             if spec.needs_backend and not (spec.query_local and not argument):

@@ -345,7 +345,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2. deepseek-v4-pro", text)
         self.assertNotIn("Low", text)
         self.assertNotIn("High", text)
-        self.assertIn("```\n`/model {编号或名称}`", text)
+        self.assertIn("```\n`/m` `/model {编号或名称}`", text)
         self.assertNotIn("| 编号", text)
 
     async def test_sessions_numeric_pages_and_total_footer(self):
@@ -515,7 +515,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         # above a lowercase "codex | deepseek".
         self.assertIn("后端: codex", text)
         self.assertIn("可用: codex | deepseek", text)
-        self.assertIn("```\n`/backend {名称}`", text)
+        self.assertIn("```\n`/b` `/backend {名称}`", text)
         self.assertNotIn("后端: Codex", text)
 
     async def test_backend_query_reloads_persisted_definitions(self):

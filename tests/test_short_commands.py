@@ -55,9 +55,31 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         await dispatch(self.bridge, "/h all")
         self.assertEqual(self.bridge.state["outbox"][-1]["text"], HELP_ALL)
         await dispatch(self.bridge, "/help invalid")
-        self.assertIn("`/help`、`/help all` 或 `/help settings`",
+        self.assertIn("`/h` `/help [all|settings]`",
                       self.bridge.state["outbox"][-1]["text"])
         self.bridge.ensure_backend.assert_not_called()
+
+    async def test_alias_leads_command_view_and_usage_hints(self):
+        self.bridge.ensure_backend = AsyncMock()
+        self.bridge.loaded = True
+        self.bridge.backend.info = {"model": "fixture", "effort": "high"}
+        self.bridge.backend.models = AsyncMock(return_value=[{
+            "model": "fixture",
+            "supportedReasoningEfforts": [
+                {"reasoningEffort": "low"}, {"reasoningEffort": "high"}],
+        }])
+
+        await dispatch(self.bridge, "/e")
+        self.assertIn("`/e` `/effort {档位}`", self.bridge.state["outbox"][-1]["text"])
+
+        await dispatch(self.bridge, "/get")
+        self.assertEqual(
+            self.bridge.state["outbox"][-1]["text"],
+            "`/g` `/get {路径}`\n`/getfile {路径}`",
+        )
+
+        await dispatch(self.bridge, "/s invalid")
+        self.assertIn("`/s` `/status`", self.bridge.state["outbox"][-1]["text"])
 
     async def test_help_settings_explains_settings(self):
         await dispatch(self.bridge, "/help settings")
