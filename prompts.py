@@ -44,7 +44,7 @@ TURN_STALLED = (
     "本轮已中止: 长时间没有收到任何进展。\n"
     "会话可能仍在桌面端运行；可用 `/status` 查看，再发消息会重新连接。"
 )
-TURN_FAILED = "任务未完成: Agent 执行失败。"
+TURN_FAILED = "任务未完成: Agent 未能完成处理，可能是网络连接、服务异常或其它原因。"
 TURN_FAILED_USAGE_LIMIT = "任务未完成: 模型额度或 API 余额已用完。"
 TURN_FAILED_SESSION_BUDGET = "任务未完成: 本次会话预算已用完。"
 TURN_FAILED_CONTEXT = "任务未完成: 上下文已满，请 `/compact` 或 `/new` 后重试。"
