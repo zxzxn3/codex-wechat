@@ -82,39 +82,15 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
             (release / ".venv" / "Scripts").mkdir(parents=True)
             (release / ".venv" / "Scripts" / "python.exe").write_text("", encoding="utf-8")
             (release / "windows_service.py").write_text("", encoding="utf-8")
+        root.mkdir(exist_ok=True)
+        (root / bootstrap_supervisor.DATA_ROOT_FILE).write_text(
+            str(root) + "\n", encoding="utf-8")
         return root
 
     def _argv(self, directory, root):
-        return ["supervise", "--install-root", str(root),
-                "--state-dir", str(Path(directory) / ".state"),
-                "--config", str(Path(directory) / "config.json"),
-                "--log", str(Path(directory) / "service.log")]
+        return ["supervise", "--install-root", str(root)]
 
-    def test_data_root_argument_reaches_the_active_supervisor(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = self._root(directory, FIRST_RELEASE)
-            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
-            custom_root = Path(directory) / "custom-data"
-            seen = []
-
-            class Module:
-                RELEASE_SWITCH_EXIT_CODE = 76
-
-                async def supervise(self, project, *_args, **_kwargs):
-                    seen.append(os.environ.get("CODEX_WECHAT_DATA_ROOT"))
-                    return 0
-
-            argv = self._argv(directory, root) + ["--data-root", str(custom_root)]
-            with patch.dict(os.environ, {}, clear=False), \
-                    patch.object(bootstrap_supervisor, "load_supervisor",
-                                 lambda release: Module()):
-                os.environ.pop("CODEX_WECHAT_DATA_ROOT", None)
-                code = bootstrap_supervisor.main(argv)
-
-            self.assertEqual(code, 0)
-            self.assertEqual(seen, [str(custom_root.resolve())])
-
-    def test_marker_overrides_stale_data_root_arguments(self):
+    def test_marker_selects_data_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(directory, FIRST_RELEASE)
             (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
@@ -131,8 +107,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                     seen.append((state_dir, config, log_path))
                     return 0
 
-            argv = self._argv(directory, root) + [
-                "--data-root", str(Path(directory) / "stale-data")]
+            argv = self._argv(directory, root)
             with patch.dict(os.environ, {}, clear=False), \
                     patch.object(bootstrap_supervisor, "data_root",
                                  return_value=marker_root), \
@@ -148,7 +123,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 marker_root / "logs" / "service.log",
             )])
 
-    def test_default_root_marker_also_overrides_stale_task_arguments(self):
+    def test_default_root_marker_resolves_under_install_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(directory, FIRST_RELEASE)
             (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
@@ -163,8 +138,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                     seen.append((state_dir, config, log_path))
                     return 0
 
-            argv = self._argv(directory, root) + [
-                "--data-root", str(Path(directory) / "stale-data")]
+            argv = self._argv(directory, root)
             with patch.dict(os.environ, {}, clear=False), \
                     patch.object(bootstrap_supervisor, "data_root", return_value=root), \
                     patch.object(bootstrap_supervisor, "load_supervisor",
@@ -178,6 +152,14 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 root / "config.json",
                 root / "logs" / "service.log",
             )])
+
+    def test_missing_marker_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(directory, FIRST_RELEASE)
+            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
+            (root / bootstrap_supervisor.DATA_ROOT_FILE).unlink()
+            with self.assertRaisesRegex(ValueError, "缺少数据根标记"):
+                bootstrap_supervisor.main(self._argv(directory, root))
 
     def test_switch_code_reloads_the_release_selected_by_the_pointer(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -200,14 +182,14 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 loaded.append(release.name)
                 return Module()
 
-            with patch.dict(os.environ, {}), \
+            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}), \
                  patch.object(bootstrap_supervisor.time, "sleep"), \
                  patch.object(bootstrap_supervisor, "load_supervisor", load):
                 code = bootstrap_supervisor.main(self._argv(directory, root))
 
             self.assertEqual(code, 0)
             self.assertEqual(loaded, [FIRST_RELEASE, SECOND_RELEASE])
-            log = (Path(directory) / "service.log").read_text(encoding="utf-8")
+            log = (root / "logs" / "service.log").read_text(encoding="utf-8")
             self.assertIn(f"版本指针已变化，正在加载 {SECOND_RELEASE}", log)
 
     def test_broken_pointer_keeps_the_running_release(self):
@@ -227,7 +209,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                         return 76
                     return 0
 
-            with patch.dict(os.environ, {}), \
+            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}), \
                  patch.object(bootstrap_supervisor.time, "sleep"), \
                  patch.object(bootstrap_supervisor, "load_supervisor",
                               lambda release: Module()):
@@ -235,7 +217,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(runs, [FIRST_RELEASE, FIRST_RELEASE])
-            log = (Path(directory) / "service.log").read_text(encoding="utf-8")
+            log = (root / "logs" / "service.log").read_text(encoding="utf-8")
             # The same broken pointer is reported once, not on every restart.
             self.assertEqual(log.count("release switch:"), 1)
 

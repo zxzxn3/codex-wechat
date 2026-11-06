@@ -19,8 +19,8 @@ INSTALL_ROOT = Path(
 DATA_ROOT_FILE = ".data-root"
 
 
-def saved_data_root() -> Path | None:
-    path = INSTALL_ROOT / DATA_ROOT_FILE
+def saved_data_root(install_root: Path | None = None) -> Path | None:
+    path = (INSTALL_ROOT if install_root is None else Path(install_root)) / DATA_ROOT_FILE
     if not path.exists() and not path.is_symlink():
         return None
     if path.is_symlink() or not path.is_file():
@@ -37,9 +37,9 @@ def saved_data_root() -> Path | None:
     return root.resolve()
 
 
-def data_root():
+def data_root(install_root: Path | None = None):
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
-    saved = saved_data_root()
+    saved = saved_data_root(install_root)
     if override and saved is not None:
         requested = Path(override).expanduser().resolve()
         if requested != saved:
@@ -57,7 +57,7 @@ def data_root():
         if not local:
             raise RuntimeError("Windows 缺少 LOCALAPPDATA，无法定位当前用户数据目录")
         return Path(local) / "codex-wechat"
-    return INSTALL_ROOT
+    return Path(install_root) if install_root is not None else INSTALL_ROOT
 
 
 def subprocess_options():

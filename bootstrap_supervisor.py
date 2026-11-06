@@ -73,10 +73,6 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="action", required=True)
     run = sub.add_parser("supervise", help="run the active release supervisor")
     run.add_argument("--install-root", type=Path, required=True)
-    run.add_argument("--data-root", type=Path)
-    run.add_argument("--state-dir", type=Path)
-    run.add_argument("--config", type=Path)
-    run.add_argument("--log", type=Path)
     return result
 
 
@@ -103,19 +99,12 @@ def main(argv=None) -> int:
     install_root = args.install_root.expanduser().resolve()
     os.environ["CODEX_WECHAT_INSTALL_ROOT"] = str(install_root)
     marker = install_root / DATA_ROOT_FILE
-    if marker.exists() or marker.is_symlink():
-        # The marker is authoritative. Ignore explicit roots left in an older
-        # task action so a marker update cannot create a false conflict.
-        args.data_root = None
-        args.state_dir = None
-        args.config = None
-        args.log = None
-    if args.data_root:
-        os.environ["CODEX_WECHAT_DATA_ROOT"] = str(args.data_root.expanduser().resolve())
-    root = data_root()
-    state_dir = args.state_dir or root / ".state"
-    config = args.config or root / "config.json"
-    log_path = args.log or root / "logs" / "service.log"
+    if marker.is_symlink() or not marker.is_file():
+        raise ValueError(f"安装根缺少数据根标记: {marker}")
+    root = data_root(install_root)
+    state_dir = root / ".state"
+    config = root / "config.json"
+    log_path = root / "logs" / "service.log"
 
     def log_keep():
         return keep_from_config(config)

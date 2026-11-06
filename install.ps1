@@ -59,14 +59,17 @@ function Read-SavedDataRoot([string]$Root) {
     }
     return [IO.Path]::GetFullPath($Value)
 }
+$SavedDataRoot = Read-SavedDataRoot $InstallRoot
+if (-not $SavedDataRoot) {
+    throw '数据根标记缺失；请重新运行安装器。'
+}
 if (-not $env:CODEX_WECHAT_DATA_ROOT) {
-    $SavedDataRoot = Read-SavedDataRoot $InstallRoot
-    if ($SavedDataRoot) { $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot }
+    $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot
 }
 $DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT) {
     [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
 } else {
-    Join-Path $env:LOCALAPPDATA 'codex-wechat'
+    $SavedDataRoot
 }
 $ServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $Python = Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'
