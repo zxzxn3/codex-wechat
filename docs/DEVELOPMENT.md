@@ -19,7 +19,7 @@
 repo=$(pwd)
 src=$(mktemp -d)
 trap 'rm -rf "$src"' EXIT
-git archive HEAD | tar -x -C "$src"
+git archive HEAD | tar -x -f - -C "$src"
 cd "$src"
 CODEX_WECHAT_INSTALL_ROOT="$src" CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" \
 PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests -v
@@ -32,6 +32,10 @@ PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests
 并设置 `CODEX_WECHAT_INSTALL_ROOT` 指向该副本：
 
 ```powershell
+$src = Join-Path $env:TEMP ("cw-tests-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $src | Out-Null
+git archive HEAD | tar -x -f - -C $src
+$env:CODEX_WECHAT_INSTALL_ROOT = $src
 $env:CODEX_WECHAT_DATA_ROOT = Join-Path $env:TEMP ("cw-tests-" + [guid]::NewGuid())
 py -3 -m unittest discover -s tests -v
 ```

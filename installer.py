@@ -271,19 +271,11 @@ def configured_data_root(target: Path) -> Path:
     return _default_data_root(target)
 
 
-def _remove_data_root_marker(target: Path) -> None:
-    marker = Path(target) / DATA_ROOT_FILE
-    try:
-        marker.unlink()
-    except FileNotFoundError:
-        pass
-
-
 def _write_data_root_marker(target: Path) -> None:
     root = configured_data_root(target)
-    if root == _default_data_root(target):
-        _remove_data_root_marker(target)
-        return
+    # Keep the marker even for the default root. "No marker" is not allowed to
+    # mean "default" because an old task action could otherwise resurrect a
+    # previously configured custom root.
     _atomic_write(
         Path(target) / DATA_ROOT_FILE,
         (str(root) + "\n").encode("utf-8"),

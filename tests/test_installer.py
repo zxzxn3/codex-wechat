@@ -733,6 +733,15 @@ class RuntimeRepairTests(unittest.TestCase):
 
 
 class DataRootMarkerTests(unittest.TestCase):
+    def test_default_root_is_also_persisted_in_the_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "install"
+            target.mkdir()
+            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                installer._write_data_root_marker(target)
+            self.assertTrue((target / installer.DATA_ROOT_FILE).is_file())
+            self.assertEqual(installer.saved_data_root(target), target.resolve())
+
     def test_marker_is_persisted_and_used_without_the_environment(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "install"

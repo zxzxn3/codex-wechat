@@ -95,7 +95,7 @@ Linux 停止并移除用户 unit、命令软链；默认保留 `config.json`、`
 Windows 自定义数据目录由 `CODEX_WECHAT_DATA_ROOT`（或原生 helper 的
 `-DataRoot`）传递；公开入口和 Python 命令使用同一个数据根，计划任务通过 stable supervisor
 读取安装根 `.data-root`。Python 不会忽略它。
-Linux 后台服务的数据根由安装根 `.data-root` 提供，systemd unit 不再保存第二份数据根；
+Linux 后台服务的数据根由安装根 `.data-root` 提供（包括默认根），systemd unit 不再保存第二份数据根；
 安装后修改环境变量必须通过安装器更新标记。公开入口、服务 supervisor 和卸载器在环境变量
 与标记不一致时 fail closed，而不是静默回退默认目录。
 

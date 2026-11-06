@@ -148,6 +148,37 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 marker_root / "logs" / "service.log",
             )])
 
+    def test_default_root_marker_also_overrides_stale_task_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(directory, FIRST_RELEASE)
+            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
+            (root / bootstrap_supervisor.DATA_ROOT_FILE).write_text(
+                str(root) + "\n", encoding="utf-8")
+            seen = []
+
+            class Module:
+                RELEASE_SWITCH_EXIT_CODE = 76
+
+                async def supervise(self, project, state_dir, config, log_path, **_kwargs):
+                    seen.append((state_dir, config, log_path))
+                    return 0
+
+            argv = self._argv(directory, root) + [
+                "--data-root", str(Path(directory) / "stale-data")]
+            with patch.dict(os.environ, {}, clear=False), \
+                    patch.object(bootstrap_supervisor, "data_root", return_value=root), \
+                    patch.object(bootstrap_supervisor, "load_supervisor",
+                                 lambda release: Module()):
+                os.environ.pop("CODEX_WECHAT_DATA_ROOT", None)
+                code = bootstrap_supervisor.main(argv)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(seen, [(
+                root / ".state",
+                root / "config.json",
+                root / "logs" / "service.log",
+            )])
+
     def test_switch_code_reloads_the_release_selected_by_the_pointer(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(directory, FIRST_RELEASE, SECOND_RELEASE)
