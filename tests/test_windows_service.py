@@ -353,6 +353,13 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(text.index("未安装计划任务"), check)
         self.assertLess(check, text.index("if ($PurgeData)"))
 
+    def test_uninstall_treats_an_empty_data_root_as_missing(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertIn(
+            "$HasExplicitDataRoot = -not [string]::IsNullOrWhiteSpace($DataRoot)", text)
+        self.assertIn(
+            "$RequestedDataRoot = if (-not [string]::IsNullOrWhiteSpace($DataRoot))", text)
+
     def test_uninstall_checks_exact_task_ownership_before_stopping(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("ExpectedActionExecutables", text)

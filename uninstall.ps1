@@ -40,7 +40,7 @@ function Read-SavedDataRoot([string]$Root) {
     return [IO.Path]::GetFullPath($Value)
 }
 $SavedDataRoot = Read-SavedDataRoot $InstallRoot
-$HasExplicitDataRoot = $PSBoundParameters.ContainsKey('DataRoot') -or
+$HasExplicitDataRoot = -not [string]::IsNullOrWhiteSpace($DataRoot) -or
     -not [string]::IsNullOrWhiteSpace($env:CODEX_WECHAT_DATA_ROOT)
 if ($PurgeData -and -not $SavedDataRoot -and -not $HasExplicitDataRoot) {
     throw 'uninstall.ps1: 缺少数据根标记；拒绝在没有显式数据根时清理数据'
@@ -53,9 +53,9 @@ $ExpectedActionExecutables = @(
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'),
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe')
 )
-$RequestedDataRoot = if ($DataRoot) {
+$RequestedDataRoot = if (-not [string]::IsNullOrWhiteSpace($DataRoot)) {
     [IO.Path]::GetFullPath($DataRoot)
-} elseif ($env:CODEX_WECHAT_DATA_ROOT) {
+} elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_WECHAT_DATA_ROOT)) {
     [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
 } elseif ($SavedDataRoot) {
     $SavedDataRoot
