@@ -78,7 +78,7 @@ ATTACHMENT_SEND_FAILED = (
 )
 AUTO_ATTACHMENT_LIMIT = "附件未发送: 自动回传最多 {count} 个，超出的已跳过。"
 AUTO_ATTACHMENT_FAILED = "附件未发送: {reason}{hint}"
-AUTO_ATTACHMENT_PATH_HINT = "\n其他位置请使用 {get}。"
+AUTO_ATTACHMENT_PATH_HINT = "\n请先切换工作目录（`/cwd`）后再发送。"
 
 APPROVAL_ACCEPTED = "已同意"
 APPROVAL_DECLINED = "已拒绝"

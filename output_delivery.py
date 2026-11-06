@@ -145,16 +145,15 @@ class OutputDelivery:
             try:
                 asset = await asyncio.to_thread(bridge.media.snapshot, spec["path"],
                     cwd or bridge.backend.info.get("cwd") or bridge.backend.cwd,
-                    spec.get("kind", "auto"), automatic=True)
+                    spec.get("kind", "auto"))
                 assets.append(bridge.asset_entry(asset, group=group, context=context,
                                                  source=source, request_id=request_id))
             except (MediaError, ValueError, OSError) as error:
                 reason = attachment_reason(error)
                 errors.append(bridge.prompt("AUTO_ATTACHMENT_FAILED", {
                     "reason": reason,
-                    "hint": (bridge.prompt("AUTO_ATTACHMENT_PATH_HINT", {
-                                 "get": command_usage("/get")})
-                             if reason == "只能自动发送当前会话目录内的文件" else ""),
+                    "hint": (bridge.prompt("AUTO_ATTACHMENT_PATH_HINT")
+                             if reason == "只能发送当前会话目录内的文件" else ""),
                 }))
         # Snapshot work may await disk I/O across a session/backend switch.
         if require_current and not bridge.current_source(source):

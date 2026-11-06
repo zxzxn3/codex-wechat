@@ -47,7 +47,7 @@ Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据
   [事件档案](incidents/2026-11-06-wechat-silent-drop.md)；
   另需注意：附件回传依赖 `installer.py components --component wechat-attachments` 装上的 skill，
   没装时模型只能猜格式（本机实测猜成裸路径 `WECHAT_MEDIA: C:\...` 而被当普通文本）；
-  自动回传只接受当前工作目录或桥私有 media 目录内的非隐藏文件，目录外的文件必须用 `/get 路径`；
+  自动回传和 `/get` 都只接受当前会话 cwd 内的普通文件；目录外的文件需要先切换 cwd；
 - CDN 上传 POST 在没有服务端幂等证据前，不能把自动重试写成已验收行为；上传永不就地重试，只在下载上重试；
 - WMI 真实 daemon、计划任务上下文和带凭据系统代理三者同时成立的条件尚未完整复现；
 - 共享后台回落路径的提示和日志有离线覆盖，但真实失败条件可能需要破坏 Codex 安装才能稳定制造。

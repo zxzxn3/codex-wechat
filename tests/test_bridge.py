@@ -700,14 +700,19 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(backend.active, current)
         self.assertFalse(current["done"].done())
 
-    async def test_automatic_media_cannot_read_outside_workspace(self):
-        workspace = Path(self.temp.name) / "workspace"
-        workspace.mkdir()
-        with tempfile.TemporaryDirectory() as sibling:
-            outside = Path(sibling) / "private.txt"
-            outside.write_text("private")
+    async def test_media_reads_only_the_current_workspace(self):
+        with tempfile.TemporaryDirectory() as workspace_dir:
+            workspace = Path(workspace_dir)
+            hidden = workspace / ".env"
+            hidden.write_text("hidden-but-in-scope")
+            asset = self.bridge.media.snapshot(str(hidden), workspace)
+            self.assertEqual(Path(asset["path"]).read_text(), "hidden-but-in-scope")
+            with tempfile.TemporaryDirectory() as sibling:
+                outside = Path(sibling) / "private.txt"
+                outside.write_text("private")
+                with self.assertRaises(MediaError):
+                    self.bridge.media.snapshot(str(outside), workspace)
+            state_file = self.bridge.store.root / "bridge.json"
+            state_file.write_text("private")
             with self.assertRaises(MediaError):
-                self.bridge.media.snapshot(str(outside), workspace, automatic=True)
-            # An explicit user /get remains a separate, intentional operation.
-            asset = self.bridge.media.snapshot(str(outside), workspace)
-            self.assertEqual(Path(asset["path"]).read_text(), "private")
+                self.bridge.media.snapshot(str(state_file), workspace)
