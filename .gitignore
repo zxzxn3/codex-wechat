@@ -8,6 +8,7 @@ releases/
 current
 previous
 .install-lock
+.data-root
 .update-source.json
 active-release
 workspace/
