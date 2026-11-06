@@ -458,10 +458,13 @@ def final_answer_fields(*, started_at_ms=None, completed_at_ms=None, usage=None)
     speed = None
     if visible_tokens is not None and duration:
         speed = f"{visible_tokens * 1000 / duration:.1f}".rstrip("0").rstrip(".")
+    duration_seconds = (f"{duration / 1000:.1f}".rstrip("0").rstrip(".")
+                        if duration is not None else VALUE_UNAVAILABLE)
     return {
         "final_answer_started_at_ms": str(started) if started is not None else VALUE_UNAVAILABLE,
         "final_answer_completed_at_ms": str(completed) if completed is not None else VALUE_UNAVAILABLE,
         "final_answer_duration_ms": str(duration) if duration is not None else VALUE_UNAVAILABLE,
+        "final_answer_duration_s": duration_seconds,
         "visible_output_tokens": token_count(visible_tokens),
         "tokens_per_second": speed or VALUE_UNAVAILABLE,
     }

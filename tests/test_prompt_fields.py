@@ -55,6 +55,7 @@ class PromptFieldsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values["final_answer_started_at_ms"], "1000")
         self.assertEqual(values["final_answer_completed_at_ms"], "3500")
         self.assertEqual(values["final_answer_duration_ms"], "2500")
+        self.assertEqual(values["final_answer_duration_s"], "2.5")
         self.assertEqual(values["visible_output_tokens"], "400")
         self.assertEqual(values["tokens_per_second"], "160")
         unavailable = final_answer_fields()

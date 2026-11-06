@@ -22,7 +22,8 @@ REPLY_BUDGET_MAX = 100
 # Past this observed value the bridge warns once, so a shared log shows the cause.
 REPLY_BUDGET_CEILING = 9
 DEFAULT_REPLY_BUDGET = 9
-DEFAULT_COMPLETION_TEMPLATE = "`OUT > {turn_output_tokens} in {elapsed}`"
+DEFAULT_COMPLETION_TEMPLATE = (
+    "OUT > {visible_output_tokens}, ~{tokens_per_second} tok/s in {final_answer_duration_s}s")
 DEFAULT_ACK_TEMPLATE = "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`"
 SLICING_TARGET_MIN = 80
 SLICING_TARGET_MAX = 20000
