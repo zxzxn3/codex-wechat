@@ -709,6 +709,7 @@ RUNTIME_CHECK_TIMEOUT_SECONDS = 30
 RUNTIME_IMPORTS = (
     "codex_wechat",
     "desktop",
+    "packaging",
     "curl_cffi",
     "curl_cffi.requests",
     "websockets",
@@ -722,6 +723,7 @@ RUNTIME_VERSION_REQUIREMENTS = {
     "cryptography": ">=38",
     "websockets": ">=15,<18",
     "curl-cffi": ">=0.17,<0.18",
+    "packaging": ">=24",
 }
 
 
@@ -739,30 +741,21 @@ def _runtime_check_code() -> str:
     checks = repr(RUNTIME_VERSION_REQUIREMENTS)
     return (
         "import importlib.metadata as metadata\n"
+        "from importlib.metadata import PackageNotFoundError\n"
+        "from packaging.requirements import InvalidRequirement, Requirement\n"
+        "from packaging.version import InvalidVersion, Version\n"
         "import " + ", ".join(_runtime_imports()) + "\n"
-        "import re\n"
         f"checks = {checks}\n"
-        "stable = re.compile(r'^\\d+(?:\\.\\d+)*$')\n"
-        "def key(value):\n"
-        "    if not stable.fullmatch(value):\n"
-        "        raise ValueError('runtime dependency version must be a stable release')\n"
-        "    return tuple(int(item) for item in value.split('.'))\n"
         "for distribution, constraints in checks.items():\n"
         "    try:\n"
-        "        actual = key(metadata.version(distribution))\n"
-        "    except ValueError:\n"
+        "        requirement = Requirement(distribution + constraints)\n"
+        "        installed = Version(metadata.version(distribution))\n"
+        "    except (InvalidRequirement, InvalidVersion, PackageNotFoundError):\n"
         "        raise SystemExit(1) from None\n"
-        "    for constraint in constraints.split(','):\n"
-        "        operator = '>=' if constraint.startswith('>=') else '<'\n"
-        "        offset = 2 if operator == '>=' else 1\n"
-        "        expected_text = constraint[offset:]\n"
-        "        try:\n"
-        "            expected = key(expected_text)\n"
-        "        except ValueError:\n"
-        "            raise SystemExit(1) from None\n"
-        "        if (operator == '>=' and actual < expected) or "
-        "(operator == '<' and actual >= expected):\n"
-        "            raise SystemExit(1)\n"
+        "    if installed != Version(installed.base_version):\n"
+        "        raise SystemExit(1)\n"
+        "    if not requirement.specifier.contains(installed, prereleases=False):\n"
+        "        raise SystemExit(1)\n"
     )
 
 

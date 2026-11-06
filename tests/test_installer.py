@@ -771,8 +771,32 @@ class RuntimeRepairTests(unittest.TestCase):
     def test_runtime_version_check_requires_stable_versions(self):
         code = installer._runtime_check_code()
         compile(code, "<runtime-check>", "exec")
-        self.assertIn("stable.fullmatch", code)
-        self.assertIn("stable release", code)
+        self.assertIn("Requirement(distribution + constraints)", code)
+        self.assertIn("prereleases=False", code)
+        self.assertIn("installed.base_version", code)
+
+    def test_runtime_version_check_uses_pep440_versions(self):
+        code = installer._runtime_check_code()
+        versions = {
+            "cryptography": "50.0.2",
+            "websockets": "17.4",
+            "curl-cffi": "0.17.0",
+            "packaging": "26.3",
+        }
+        with patch("importlib.metadata.version", side_effect=versions.get):
+            exec(compile(code, "<runtime-check>", "exec"), {})
+
+        versions["websockets"] = "15.0a1"
+        with patch("importlib.metadata.version", side_effect=versions.get), \
+                self.assertRaises(SystemExit) as raised:
+            exec(compile(code, "<runtime-check>", "exec"), {})
+        self.assertEqual(raised.exception.code, 1)
+
+        versions["websockets"] = "15.0.post1"
+        with patch("importlib.metadata.version", side_effect=versions.get), \
+                self.assertRaises(SystemExit) as raised:
+            exec(compile(code, "<runtime-check>", "exec"), {})
+        self.assertEqual(raised.exception.code, 1)
 
     def test_prepare_runtime_rebuilds_a_broken_venv(self):
         with tempfile.TemporaryDirectory() as directory:

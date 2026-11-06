@@ -94,7 +94,9 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 运行时依赖在 `requirements.txt` 中用兼容范围声明，安装器不锁死到单一版本；升级依赖后必须
 跑完整离线测试。`curl-cffi` 当前要求 `>=0.17,<0.18`，0.17.0 已通过完整测试并包含安全修复。
 `pywin32` 尚未在 Windows 实机复核，暂不收紧版本。开发工具在 `requirements-dev.txt` 中固定
-版本，避免不同机器上的 coverage/pip-audit 结果漂移。
+版本，避免不同机器上的 coverage/pip-audit 结果漂移。安装器在 release 环境内用
+`packaging` 的 PEP 440 `Version` / `SpecifierSet` 校验直接依赖；预发布、post 和本地版本
+仍视为不稳定，不允许通过。
 
 更新运行时依赖使用 `.venv/bin/python -m pip install -r requirements.txt`；更新后需要重启
 服务才会让新依赖生效，运行中的进程不会自动换包。
