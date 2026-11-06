@@ -92,20 +92,14 @@ def restore(state, saved):
 
 
 def backend_label(name, backends=None):
-    """Display name for a backend; always lowercase so it matches `/backend` names.
-
-    A backend is addressed by a lowercase identifier, so its display name follows
-    the same rule: `label` is an alias for that identifier (e.g. `deepseek` for a
-    `deepseek-chat` command), not free-form prose.
-    """
+    """Display name for a backend, shown verbatim; built-in labels are lowercase."""
     settings = (backends or {}).get(name, {})
     label = settings.get("label") if isinstance(settings, dict) else None
-    return (str(label).strip() if isinstance(label, str) and label.strip()
-            else str(name)).casefold()
+    return str(label).strip() if isinstance(label, str) and label.strip() else str(name)
 
 
 def backend_argument(name):
-    return str(name).casefold()
+    return str(name).lower()
 
 
 async def resume_or_adopt(candidate, thread_id, adopt_busy, *, wait=5.0):

@@ -5,7 +5,7 @@
   "processingNotice": "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`",
   "backends": {
     "codex": {
-      "label": "Codex",
+      "label": "codex",
       "command": [
         "codex",
         "app-server"

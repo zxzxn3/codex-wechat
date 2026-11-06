@@ -492,17 +492,17 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("仅显示前 10 条", text.split("```")[-1])
         self.assertIn("`/sessions 微信`", text.split("```")[-1])
 
-    async def test_backend_arguments_and_labels_share_one_lowercase_form(self):
+    async def test_backend_arguments_and_built_in_labels_share_one_lowercase_form(self):
         self.bridge.state["context"] = "context"
         await handle(self.bridge, "/backend", "")
         text = self.store.load("bridge")["outbox"][-1]["text"]
-        # The current backend and the selectable names must read the same; the
-        # panel used to show "Codex" above a lowercase "codex | deepseek".
+        # config.default.json seeds lowercase labels, so the current backend and
+        # the selectable names read the same. The panel used to show "Codex"
+        # above a lowercase "codex | deepseek".
         self.assertIn("后端: codex", text)
         self.assertIn("可用: codex | deepseek", text)
         self.assertIn("```\n`/backend {名称}`", text)
         self.assertNotIn("后端: Codex", text)
-        self.assertNotIn("codex | DeepSeek", text)
 
     async def test_backend_query_reloads_persisted_definitions(self):
         path = Path(self.temp.name) / "config.json"
@@ -531,16 +531,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await handle(self.bridge, "/backend", "codex")
         switch.assert_awaited_once_with(self.bridge, "codex", force=True)
 
-    async def test_custom_backend_is_data_driven_and_display_label_is_lowercase(self):
+    async def test_custom_backend_is_data_driven_and_display_label_is_optional(self):
         config = {"backends": {"kimi": {"label": "Kimi", "command": ["fake-kimi", "app-server"]}}}
         bridge = Bridge(self.store, {"user": "owner"}, config)
         self.assertEqual(bridge.backend_name, "kimi")
-        # A label aliases the lowercase identifier; it must not reintroduce caps
-        # the way "Codex" used to disagree with the `可用codex` line.
-        self.assertEqual(bridge.prompt_fields()["backend"], "kimi")
-        self.assertEqual(backend_label("kimi", config["backends"]), "kimi")
+        # A label is shown verbatim; the built-in ones are lowercase so the panel
+        # agrees with the names `/backend` accepts.
+        self.assertEqual(bridge.prompt_fields()["backend"], "Kimi")
+        self.assertEqual(backend_label("kimi", config["backends"]), "Kimi")
         self.assertEqual(backend_label("kimi", {"kimi": {}}), "kimi")
-        self.assertEqual(backend_label("DeepSeek", {"DeepSeek": {}}), "deepseek")
 
     async def test_custom_backend_requires_an_explicit_command(self):
         with self.assertRaisesRegex(ValueError, "command 必须配置"):
