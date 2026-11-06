@@ -27,7 +27,7 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
                             ("/e", "/effort"), ("/p", "/ping"), ("/h", "/help"),
                             ("/a", "/answer"), ("/n", "/new"), ("/c", "/compact"),
                             ("/u", "/unqueue"), ("/b", "/backend"), ("/r", "/restart"),
-                            ("/d", "/deny"), ("/g", "/get"), ("/", "/continue")):
+                            ("/d", "/discard"), ("/g", "/get"), ("/", "/continue")):
             self.assertIs(REGISTRY[short], REGISTRY[full])
             self.assertEqual(command_lane(short, ""), command_lane(full, ""))
             self.assertIn(f"`{short}`", HELP_ALL)
@@ -38,7 +38,10 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("/finish", REGISTRY)
         self.assertIn("`/settings` 查看设置", HELP)
         self.assertIn("`/help settings` 查看设置说明", HELP)
+        self.assertIn("`/d` `/discard` 清空待发送消息", HELP)
         self.assertNotIn("`/help [all]`", HELP)
+        self.assertIn("`/deny {编号}` 拒绝审批", HELP_ALL)
+        self.assertNotIn("`/d` `/deny`", HELP_ALL)
 
     async def test_status_alias_is_local_and_rejects_extra_args(self):
         self.bridge.ensure_backend = AsyncMock()

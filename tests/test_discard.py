@@ -63,6 +63,15 @@ class DiscardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([entry["text"] for entry in bridge.state["outbox"]],
                          ["2 条消息被清空。"])
 
+    async def test_d_short_alias_dispatches_discard(self):
+        bridge = self.bridge
+        bridge.reply("one")
+
+        await dispatch(bridge, "/d")
+
+        self.assertEqual([entry["text"] for entry in bridge.state["outbox"]],
+                         ["1 条消息被清空。"])
+
     async def test_discard_clears_backlog_before_the_sender_can_wake(self):
         bridge = self.bridge
         bridge.reply("old finish")

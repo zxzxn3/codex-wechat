@@ -52,7 +52,7 @@ Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应
 | `/m` | `/model` |
 | `/e` | `/effort` |
 | `/a` | `/approve` |
-| `/d` | `/deny` |
+| `/d` | `/discard` |
 | `/g` | `/get` |
 | `/r` | `/restart` |
 | `/` | `/continue` |
