@@ -86,7 +86,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(await self.wait_for(lambda: len(sent) >= 3))
                 self.assertEqual([entry["text"] for entry in sent[:2]], ["one", "two"])
                 self.assertTrue(sent[2].get("budgetNotice"))
-                self.assertIn("回复 `/` 继续", sent[2]["text"])
+                self.assertEqual(sent[2]["text"], "还有 2 段待发，回复 `/` 继续。")
                 # The notice is spent on top of the budget, so it does not count.
                 self.assertEqual(bridge.budget_state()["used"], 2)
                 await asyncio.sleep(0.05)
