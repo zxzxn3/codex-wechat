@@ -554,13 +554,16 @@ class Bridge:
                 kept.append(control)
             else:
                 interrupted += 1
-        if kept != pending:
+        changed = kept != pending
+        if changed:
             self.state["pendingControls"] = kept
-            self.save()
         if interrupted:
-            self.reply(self.prompt("CONTROL_INTERRUPTED", {"count": interrupted}))
+            self.reply(self.prompt("CONTROL_INTERRUPTED", {"count": interrupted}),
+                       persist=False)
             log_event("control.interrupted", level="warning", component="input",
                       count=interrupted)
+        if changed or interrupted:
+            self.save()
 
     def confirm_restart(self):
         if not self.state.pop("restartRequested", False):

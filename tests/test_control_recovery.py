@@ -72,6 +72,9 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(bridge.controls["urgent"].empty())
         self.assertIn("可能未完成", bridge.state["outbox"][-1]["text"])
         self.assertEqual(bridge.state["pendingControls"], [])
+        saved = store.load("bridge")
+        self.assertIn("可能未完成", saved["outbox"][-1]["text"])
+        self.assertEqual(saved["pendingControls"], [])
         store.close()
 
     async def test_a_completed_control_is_removed_from_the_pending_state(self):
@@ -184,4 +187,40 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         bridge.restore_controls()
         self.assertTrue(bridge.controls["local"].empty())
         self.assertIn("可能未完成", bridge.state["outbox"][-1]["text"])
+        store.close()
+
+    async def test_interrupted_notice_and_cleanup_share_one_save(self):
+        store = Store(self.root / "state")
+        store.save("bridge", {
+            "context": "ctx",
+            "pendingControls": [
+                {
+                    "id": "queued-control",
+                    "text": "/help",
+                    "received": {"controlId": "queued-control"},
+                    "state": "queued",
+                    "lane": "local",
+                },
+                {
+                    "id": "running-control",
+                    "text": "/answer 1 yes",
+                    "received": {"controlId": "running-control"},
+                    "state": "running",
+                    "lane": "urgent",
+                },
+            ],
+        })
+        bridge = Bridge(store, self.account, self.config)
+        with patch.object(bridge, "reply", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                bridge.restore_controls()
+        store.close()
+
+        store = Store(self.root / "state")
+        saved = store.load("bridge")
+        self.assertEqual(
+            [control["state"] for control in saved["pendingControls"]],
+            ["queued", "running"],
+        )
+        self.assertEqual(saved.get("outbox", []), [])
         store.close()
