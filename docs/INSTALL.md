@@ -17,18 +17,13 @@
 
 仓库保持私有。fine-grained PAT 只选择 `zxzxn3/codex-wechat`，Repository permissions
 仅授予 `Contents: Read-only`；`Metadata: Read-only` 由 GitHub 保留。运行对应平台命令后，
-按提示在终端输入 PAT。
+按提示在终端输入 PAT。Linux 会优先使用已有代理环境变量，否则读取 GNOME 手动代理；
+Windows 使用系统代理。
 
 Linux：
 
 ```bash
-read -rsp 'GitHub PAT: ' CODEX_WECHAT_TOKEN; echo
-export CODEX_WECHAT_TOKEN
-curl -fsSL --proto "=https" --tlsv1.2 \
-  --config <(printf 'header = "Authorization: Bearer %s"\n' "$CODEX_WECHAT_TOKEN") \
-  -H "Accept: application/vnd.github.raw+json" \
-  "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash
-unset CODEX_WECHAT_TOKEN
+bash -o pipefail -c 'read -rsp "GitHub PAT: " CODEX_WECHAT_TOKEN; echo; export CODEX_WECHAT_TOKEN; proxy_set=0; if [[ -z ${HTTPS_PROXY:-} && -z ${https_proxy:-} ]] && command -v gsettings >/dev/null; then mode=$(gsettings get org.gnome.system.proxy mode 2>/dev/null || true); mode=${mode#?}; mode=${mode%?}; if [[ $mode == manual ]]; then host=$(gsettings get org.gnome.system.proxy.http host 2>/dev/null || true); host=${host#?}; host=${host%?}; port=$(gsettings get org.gnome.system.proxy.http port 2>/dev/null || true); if [[ -n $host && $port =~ ^[0-9]+$ && $port -gt 0 ]]; then export HTTPS_PROXY="http://$host:$port" HTTP_PROXY="http://$host:$port"; proxy_set=1; fi; fi; fi; curl -fsSL --proto "=https" --tlsv1.2 --config <(printf "header = \"Authorization: Bearer %s\"\n" "$CODEX_WECHAT_TOKEN") -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash; status=$?; unset CODEX_WECHAT_TOKEN; ((proxy_set)) && unset HTTPS_PROXY HTTP_PROXY; exit $status'
 ```
 
 Windows PowerShell：

@@ -189,6 +189,7 @@ class BootstrapEntryTests(unittest.TestCase):
         self.assertIn("unset auth CODEX_WECHAT_TOKEN", shell)
         self.assertIn("include.path", powershell)
         self.assertIn("extraHeader = Authorization: Basic", powershell)
+        self.assertIn("[System.Net.WebRequest]::GetSystemWebProxy()", powershell)
         self.assertIn("Remove-Item Env:CODEX_WECHAT_TOKEN", powershell)
         self.assertIn("Remove-Item -LiteralPath $GitConfig", powershell)
         self.assertNotIn("$CODEX_WECHAT_TOKEN@github.com", shell)
@@ -203,4 +204,5 @@ class BootstrapEntryTests(unittest.TestCase):
             self.assertIn("application/vnd.github.raw+json", text)
             self.assertIn("read -rsp", text)
             self.assertIn("Read-Host 'GitHub PAT' -AsSecureString", text)
+            self.assertIn("org.gnome.system.proxy.http", text)
             self.assertNotIn("CODEX_WECHAT_TOKEN='github_pat_REPLACE_ME'", text)

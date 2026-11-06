@@ -65,8 +65,21 @@ try {
             "[http]`n`textraHeader = Authorization: Basic $Auth`n",
             [Text.UTF8Encoding]::new($false))
         $PreviousGitPrompt = $env:GIT_TERMINAL_PROMPT
+        $PreviousHttpsProxy = $env:HTTPS_PROXY
+        $PreviousHttpProxy = $env:HTTP_PROXY
         try {
             $env:GIT_TERMINAL_PROMPT = '0'
+            if ([string]::IsNullOrWhiteSpace($env:HTTPS_PROXY)) {
+                $SystemProxy = [System.Net.WebRequest]::GetSystemWebProxy().GetProxy(
+                    [Uri]'https://github.com/')
+                if ($SystemProxy.Scheme -in @('http', 'https') -and
+                        $SystemProxy.Host -ne 'github.com') {
+                    $env:HTTPS_PROXY = $SystemProxy.AbsoluteUri
+                    if ([string]::IsNullOrWhiteSpace($env:HTTP_PROXY)) {
+                        $env:HTTP_PROXY = $SystemProxy.AbsoluteUri
+                    }
+                }
+            }
             & git.exe -c credential.helper= -c "include.path=$GitConfig" `
                 clone --depth 1 --single-branch --branch $Ref -- $Repo $Source
             if ($LASTEXITCODE -ne 0) {
@@ -77,6 +90,16 @@ try {
                 Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
             } else {
                 $env:GIT_TERMINAL_PROMPT = $PreviousGitPrompt
+            }
+            if ($null -eq $PreviousHttpsProxy) {
+                Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+            } else {
+                $env:HTTPS_PROXY = $PreviousHttpsProxy
+            }
+            if ($null -eq $PreviousHttpProxy) {
+                Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
+            } else {
+                $env:HTTP_PROXY = $PreviousHttpProxy
             }
             Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $GitConfig -Force -ErrorAction SilentlyContinue
