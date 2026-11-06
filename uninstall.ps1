@@ -240,7 +240,8 @@ if ($PurgeData) {
         Write-Host "已删除数据目录中的用户数据: $DataRoot"
     }
 } else {
-    Write-Host "用户数据已保留: $DataRoot（仅在不再需要凭据和状态时使用 -PurgeData）"
+    Write-Host "数据文件仍在: $DataRoot"
+    Write-Host '重新运行安装器会继续使用这个数据根；如需同时删除配置、登录和待办，请使用 -PurgeData。'
     Write-Host '数据目录下的共享 Codex 后台仍在运行'
 }
 if ($task) {
@@ -272,4 +273,4 @@ if (Test-Path -LiteralPath $Shim -PathType Leaf) {
     }
 }
 Write-Host "程序文件仍在: $InstallRoot（含 releases 与 Python 环境，不含用户数据）"
-Write-Host '如不再需要，可在本命令结束后手动删除该目录。'
+Write-Host '如不再需要，可在本命令结束后手动删除上述目录。'

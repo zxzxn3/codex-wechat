@@ -163,19 +163,20 @@ async def uninstall(*, purge: bool = False) -> None:
     await _linux_service_removal()
     _require_no_bridge(root)
     _linux_command_removal()
+    # Name both leftovers in one place: the uninstaller runs out of the install
+    # tree, so removing the last parts is a decision the user makes.
+    print(f"程序文件仍在: {INSTALL_ROOT}（含 releases 与 Python 环境，不含用户数据）")
     if purge:
         _purge_linux_data(root)
         # Only a purge forgets the root: the marker is the single pointer back to
         # data that a data-preserving uninstall deliberately keeps.
         _remove_data_root_marker()
+        print(f"数据文件已删除: {root}")
     else:
-        print(f"用户数据已保留: {root}")
+        print(f"数据文件仍在: {root}")
         print("重新运行安装器会继续使用这个数据根；如需同时删除配置、登录和待办，"
               "请使用 --purge-data。")
-    # The uninstaller runs out of the install tree, so it cannot remove it. Say
-    # where it is and leave the decision to the user.
-    print(f"程序文件仍在: {INSTALL_ROOT}（含 releases 与 Python 环境，不含用户数据）")
-    print("如不再需要，可在本命令结束后手动删除该目录。")
+    print("如不再需要，可在本命令结束后手动删除上述目录。")
 
 
 def main(argv=None) -> int:
