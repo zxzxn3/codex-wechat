@@ -678,25 +678,24 @@ class LinuxServiceRegistrationTests(unittest.TestCase):
                 self.assertFalse(installer.configure_linux_service(target))
             run.assert_not_called()
 
-    def test_custom_data_root_is_persisted_in_a_systemd_dropin(self):
+    def test_custom_data_root_removes_a_legacy_systemd_dropin(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "install"
             target.mkdir()
             (target / "codex-wechat.service").write_text("[Unit]\n", encoding="utf-8")
             data = Path(directory) / "data root"
+            dropin = Path(directory) / "systemd/user/codex-wechat.service.d/data-root.conf"
+            dropin.parent.mkdir(parents=True)
+            dropin.write_text(installer.SERVICE_DROPIN_MARKER + "\n", encoding="utf-8")
             with patch.dict(os.environ, {
-                    "CODEX_WECHAT_DATA_ROOT": str(data)}, clear=False), \
+                    "CODEX_WECHAT_DATA_ROOT": str(data),
+                    "XDG_CONFIG_HOME": directory}, clear=False), \
                     patch.object(installer, "IS_WINDOWS", False), \
                     patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"), \
                     patch.object(installer, "_linux_service_state", return_value="owned"), \
                     patch.object(installer, "_run"):
                 self.assertTrue(installer.configure_linux_service(target))
-            text = installer.linux_service_dropin().read_text(encoding="utf-8")
-            self.assertIn("ConditionPathExists=\n", text)
-            self.assertIn(
-                f"ConditionPathExists={data / '.state/account.json'}", text)
-            self.assertIn(
-                f'Environment="CODEX_WECHAT_DATA_ROOT={data}"', text)
+            self.assertFalse(dropin.exists())
 
 
 class RuntimeRepairTests(unittest.TestCase):
@@ -705,6 +704,12 @@ class RuntimeRepairTests(unittest.TestCase):
             encoding="utf-8")
         for distribution, constraint in installer.RUNTIME_VERSION_REQUIREMENTS.items():
             self.assertIn(distribution + constraint, requirements)
+
+    def test_runtime_version_check_requires_stable_versions(self):
+        code = installer._runtime_check_code()
+        compile(code, "<runtime-check>", "exec")
+        self.assertIn("stable.fullmatch", code)
+        self.assertIn("stable release", code)
 
     def test_prepare_runtime_rebuilds_a_broken_venv(self):
         with tempfile.TemporaryDirectory() as directory:

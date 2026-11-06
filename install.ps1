@@ -68,9 +68,6 @@ $DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT) {
 } else {
     Join-Path $env:LOCALAPPDATA 'codex-wechat'
 }
-$StateDir = Join-Path $DataRoot '.state'
-$ConfigPath = Join-Path $DataRoot 'config.json'
-$LogPath = Join-Path $DataRoot 'logs\service.log'
 $ServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $Python = Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
@@ -117,9 +114,8 @@ if ($existing) {
     $autostart = [bool]$existing.Settings.Enabled -and @($triggers | Where-Object { $_.Enabled }).Count -gt 0
 }
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$arguments = @((Quote-Arg $ServiceScript), 'supervise', '--install-root', (Quote-Arg $InstallRoot),
-    '--data-root', (Quote-Arg $DataRoot), '--state-dir', (Quote-Arg $StateDir),
-    '--config', (Quote-Arg $ConfigPath), '--log', (Quote-Arg $LogPath)) -join ' '
+$arguments = @((Quote-Arg $ServiceScript), 'supervise',
+    '--install-root', (Quote-Arg $InstallRoot)) -join ' '
 $action = New-ScheduledTaskAction -Execute $Python -Argument $arguments -WorkingDirectory $InstallRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
 $trigger.Enabled = $autostart

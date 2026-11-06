@@ -341,6 +341,12 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_uninstall_refuses_a_live_foreground_bridge(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("Assert-NoForegroundBridge", text)
+
+    def test_uninstall_validates_the_saved_data_root_before_task_changes(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertIn("$SavedDataRoot = Read-SavedDataRoot $InstallRoot", text)
+        self.assertIn("拒绝卸载", text)
+        self.assertLess(text.index("拒绝卸载"), text.index("$task = Get-ScheduledTask"))
         self.assertIn("[IO.FileShare]::None", text)
         check = text.index("Assert-NoForegroundBridge\n\n# Data removal")
         self.assertLess(text.index("未安装计划任务"), check)

@@ -16,14 +16,20 @@
 ## 离线测试
 
 ```bash
-cd ~/.local/share/codex-wechat
-CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" PYTHONDONTWRITEBYTECODE=1 \
-    .venv/bin/python -m unittest discover -s tests -v
+repo=$(pwd)
+src=$(mktemp -d)
+trap 'rm -rf "$src"' EXIT
+git archive HEAD | tar -x -C "$src"
+cd "$src"
+CODEX_WECHAT_INSTALL_ROOT="$src" CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" \
+PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests -v
 ```
 
 诊断日志默认写在 `data_root()/logs/bridge.jsonl`，不隔离会把测试事件混进已安装实例
 正在使用的日志，真实问题的排查会被测试噪音污染。`CODEX_WECHAT_DATA_ROOT` 指向临时
-目录即可，测试本身不依赖该目录内容。Windows PowerShell：
+目录即可，测试本身不依赖该目录内容。这里同时把源码导出到没有 `.data-root` 的临时根，
+避免源码树本身是安装根时与新的 fail-closed 冲突。Windows PowerShell 同样应使用源码副本，
+并设置 `CODEX_WECHAT_INSTALL_ROOT` 指向该副本：
 
 ```powershell
 $env:CODEX_WECHAT_DATA_ROOT = Join-Path $env:TEMP ("cw-tests-" + [guid]::NewGuid())
@@ -119,7 +125,8 @@ $app = "$env:LOCALAPPDATA\codex-wechat\app"
 
 - P0/P1 必须修复；P2/P3 只有在支持矩阵内的主路径、数据损坏或安全边界上才阻断发布，
   其余进入有记录的 backlog，不追求“审查到零 findings”。
-- 支持矩阵内的安装、更新、服务启动和卸载必须有安装后烟测或明确实机证据；源码树测试、
+- 支持矩阵内的安装、更新、服务启动和卸载必须有对应层级的安装后烟测或明确实机证据；
+  stable payload/import 烟测只覆盖布局与导入，不等于完整安装或服务验收；源码树测试、
   mock 和 Linux 上的 PowerShell 静态检查不能替代平台验收。
 - 未在真实平台验证的能力只能标为“待验证/实验性”，不能写成已验收；无法保证的配置在安装
   或启动时 fail closed。

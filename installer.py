@@ -292,21 +292,17 @@ def _write_data_root_marker(target: Path) -> None:
     )
 
 
+def _publish_data_root(target: Path) -> None:
+    """Make marker the only source before the platform service is reconfigured."""
+    if not IS_WINDOWS:
+        _remove_linux_data_root_dropin()
+    _write_data_root_marker(target)
+
+
 def linux_service_dropin() -> Path:
     config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     return (config.expanduser().resolve() / "systemd/user"
             / f"{SERVICE_UNIT}.d" / SERVICE_DROPIN_NAME)
-
-
-def _systemd_quote(value: str) -> str:
-    value = str(value).replace("%", "%%").replace("\\", "\\\\")
-    value = value.replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
-    return f'"{value}"'
-
-
-def _systemd_path(value: str) -> str:
-    # ConditionPathExists= takes a raw path, not a quoted Environment value.
-    return str(value).replace("%", "%%").replace("\n", "\\n").replace("\r", "\\r")
 
 
 def _remove_linux_data_root_dropin() -> None:
@@ -324,25 +320,6 @@ def _remove_linux_data_root_dropin() -> None:
         path.parent.rmdir()
     except OSError:
         pass
-
-
-def _write_linux_data_root_dropin(target: Path) -> None:
-    root = configured_data_root(target)
-    if root == _default_data_root(target):
-        _remove_linux_data_root_dropin()
-        return
-    dropin = linux_service_dropin()
-    condition = root / ".state" / "account.json"
-    content = (
-        f"{SERVICE_DROPIN_MARKER}; remove to use the default data root.\n"
-        "[Unit]\n"
-        "ConditionPathExists=\n"
-        f"ConditionPathExists={_systemd_path(str(condition))}\n"
-        "\n"
-        "[Service]\n"
-        f"Environment={_systemd_quote('CODEX_WECHAT_DATA_ROOT=' + str(root))}\n"
-    )
-    _atomic_write(dropin, content.encode("utf-8"), 0o600, root=dropin.parent)
 
 
 def _private(relative: Path) -> bool:
@@ -771,21 +748,26 @@ def _runtime_check_code() -> str:
     return (
         "import importlib.metadata as metadata\n"
         "import " + ", ".join(_runtime_imports()) + "\n"
+        "import re\n"
         f"checks = {checks}\n"
+        "stable = re.compile(r'^\\d+(?:\\.\\d+)*$')\n"
         "def key(value):\n"
-        "    parts = []\n"
-        "    for item in value.split('.'):\n"
-        "        digits = ''.join(char for char in item if char.isdigit())\n"
-        "        if not digits:\n"
-        "            break\n"
-        "        parts.append(int(digits))\n"
-        "    return tuple(parts)\n"
+        "    if not stable.fullmatch(value):\n"
+        "        raise ValueError('runtime dependency version must be a stable release')\n"
+        "    return tuple(int(item) for item in value.split('.'))\n"
         "for distribution, constraints in checks.items():\n"
-        "    actual = key(metadata.version(distribution))\n"
+        "    try:\n"
+        "        actual = key(metadata.version(distribution))\n"
+        "    except ValueError:\n"
+        "        raise SystemExit(1) from None\n"
         "    for constraint in constraints.split(','):\n"
         "        operator = '>=' if constraint.startswith('>=') else '<'\n"
         "        offset = 2 if operator == '>=' else 1\n"
-        "        expected = key(constraint[offset:])\n"
+        "        expected_text = constraint[offset:]\n"
+        "        try:\n"
+        "            expected = key(expected_text)\n"
+        "        except ValueError:\n"
+        "            raise SystemExit(1) from None\n"
         "        if (operator == '>=' and actual < expected) or "
         "(operator == '<' and actual >= expected):\n"
         "            raise SystemExit(1)\n"
@@ -1202,7 +1184,9 @@ def configure_linux_service(target: Path) -> bool:
         return False
     if state == "foreign":
         raise ValueError("当前用户已有不属于本安装目录的 codex-wechat.service，未修改。")
-    _write_linux_data_root_dropin(target)
+    # Older installs encoded the custom root into this drop-in. The stable
+    # entry now reads .data-root itself, so remove the stale copy on update.
+    _remove_linux_data_root_dropin()
     if state == "missing":
         _run([systemctl, "--user", "link", str(unit.resolve())], cwd=target)
     _run([systemctl, "--user", "daemon-reload"], cwd=target)
@@ -1278,7 +1262,7 @@ def _common_install(
             # start anything. Both platform steps are idempotent.
             with InstallLock(target):
                 ensure_release_runtime(target / RELEASES_DIR / identifier)
-            _write_data_root_marker(target)
+            _publish_data_root(target)
             configure_platform_service(target / "releases" / identifier, target,
                                        update=update)
             print(f"版本 {identifier} 已经安装，没有修改。")
@@ -1321,7 +1305,7 @@ def _common_install(
             install_bootstrap(source, target)
             install_command_link(target)
             activate_release(target, identifier)
-            _write_data_root_marker(target)
+            _publish_data_root(target)
             service_ready = configure_platform_service(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier)

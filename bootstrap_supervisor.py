@@ -17,7 +17,7 @@ import time
 
 from log_rotation import (DEFAULT_KEEP, KeepSource, append as append_log,
                           keep_from_config)
-from platform_support import data_root
+from platform_support import DATA_ROOT_FILE, data_root
 
 # Let the previous child finish closing before the next supervisor starts.
 RESTART_SETTLE_SECONDS = 0.2
@@ -102,6 +102,14 @@ def main(argv=None) -> int:
     args = parser().parse_args(argv)
     install_root = args.install_root.expanduser().resolve()
     os.environ["CODEX_WECHAT_INSTALL_ROOT"] = str(install_root)
+    marker = install_root / DATA_ROOT_FILE
+    if marker.exists() or marker.is_symlink():
+        # The marker is authoritative. Ignore explicit roots left in an older
+        # task action so a marker update cannot create a false conflict.
+        args.data_root = None
+        args.state_dir = None
+        args.config = None
+        args.log = None
     if args.data_root:
         os.environ["CODEX_WECHAT_DATA_ROOT"] = str(args.data_root.expanduser().resolve())
     root = data_root()

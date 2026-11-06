@@ -39,10 +39,7 @@ function Read-SavedDataRoot([string]$Root) {
     }
     return [IO.Path]::GetFullPath($Value)
 }
-if (-not $DataRoot -and -not $env:CODEX_WECHAT_DATA_ROOT) {
-    $SavedDataRoot = Read-SavedDataRoot $InstallRoot
-    if ($SavedDataRoot) { $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot }
-}
+$SavedDataRoot = Read-SavedDataRoot $InstallRoot
 $StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $ExpectedActionPrefixes = @(
     ('"' + $StableServiceScript + '" supervise')
@@ -51,13 +48,19 @@ $ExpectedActionExecutables = @(
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'),
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe')
 )
-$DataRoot = if ($DataRoot) {
+$RequestedDataRoot = if ($DataRoot) {
     [IO.Path]::GetFullPath($DataRoot)
 } elseif ($env:CODEX_WECHAT_DATA_ROOT) {
     [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
+} elseif ($SavedDataRoot) {
+    $SavedDataRoot
 } else {
     Join-Path $env:LOCALAPPDATA 'codex-wechat'
 }
+if ($SavedDataRoot -and $RequestedDataRoot -ne $SavedDataRoot) {
+    throw 'uninstall.ps1: CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；拒绝卸载'
+}
+$DataRoot = $RequestedDataRoot
 $DataPaths = @('config.json', '.state', 'workspace', 'logs', 'shared')
 
 function Fail([string]$Message) {

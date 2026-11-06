@@ -3,17 +3,17 @@
 本文定义当前产品支持面；[VALIDATION](VALIDATION.md) 记录证据和缺口。未列为“支持”的
 组合不是承诺行为，应在安装或启动时 fail closed，而不是静默回退。
 
-| 范围 | Linux | Windows | 说明 |
+| 范围 | Linux | Windows | 当前证据/边界 |
 |---|---|---|---|
-| 首次安装、版本更新、卸载 | 支持 | 支持 | 使用稳定入口或网络入口；内部 helper 不是公开命令 |
-| 前台 `start` | 支持 | 支持 | 持有状态目录锁，`Ctrl+C` 结束 |
-| 后台服务 | 支持（systemd 用户服务） | 支持（Scheduled Task + PowerShell 5.1） | 未注册时 `service-start` 应明确失败 |
-| `autostart` | 支持 | 支持 | 只切换登录触发器，不负责前台转后台 |
-| 自定义数据根 | 支持 | 支持 | 安装器写入 `.data-root`；环境变量与标记不一致时 fail closed |
-| 短命令入口 | `~/.local/bin/codex-wechat` | `.cmd`；仅当目标目录存在且在 PATH | 否则使用稳定 `.ps1` 入口 |
-| 共享 daemon | 支持，默认开启 | 支持，默认关闭 | Windows 以 App 为主时保持关闭 |
+| 首次安装、版本更新、卸载 | 支持（离线） | 支持（历史实机，待复测） | Linux 当前树有安装/入口/卸载离线测试；Windows 当前提交仍需复测 |
+| 前台 `start` | 支持（离线） | 支持（历史实机，待复测） | 状态目录锁、前台日志和退出路径有离线测试；Windows 当前提交待复测 |
+| 后台服务 | 支持（systemd 用户服务，离线契约） | 支持（Scheduled Task + PowerShell 5.1，历史实机） | 服务状态矩阵有离线测试；真实 systemd/任务时序仍需实机验证 |
+| `autostart` | 支持（离线） | 支持（历史实机，待复测） | 只切换登录触发器；Windows 当前任务 action 已改为只传安装根 |
+| 自定义数据根 | 支持（marker，待实机） | 支持（marker，待实机） | 新增 fail-closed 冲突测试；Linux systemd 和 Windows 服务的端到端行为待实机复测 |
+| 短命令入口 | 支持（离线） | 支持（待非 ASCII 复测） | Windows `.cmd` 在非 ASCII 用户目录下仍待实机验证 |
+| 共享 daemon | 支持（部分实测，默认开启） | 支持（部分实测，默认关闭） | 状态/回落逻辑有离线测试；Windows App 并发仍待复测 |
 | App IPC follower | 部分支持 | 部分支持 | 依赖 App 版本；Windows 命名管道和三端并发仍待实机复测 |
-| 私人仓库安装 | 支持 | 支持 | fine-grained PAT，仅需 `Contents: Read-only` |
+| 私人仓库安装 | 实验性/待验证 | 实验性/待验证 | 网络入口和认证路径有离线契约测试；真实 PAT 安装未在独立审查中复现 |
 
 ## 明确不支持或仅实验性
 
@@ -29,6 +29,11 @@
 ## 数据根与服务的硬约束
 
 - `CODEX_WECHAT_DATA_ROOT` 与安装根 `.data-root` 必须一致；安装器是更新标记的唯一入口。
-- 服务状态按 `queued/activating → running → deactivating` 处理；只有稳定运行才算启动成功。
+- 服务状态按 `queued/activating → running → deactivating` 处理；过渡态必须经过稳定窗口，
+  已处于 `running/active` 的服务可以直接复用。
 - 版本化稳定入口只执行 `current` 指向的完整 release；损坏的指针必须给出修复指引，不能猜测
   其他版本。
+
+版本基线：Python 3.11+；Windows PowerShell 5.1+；当前验证的 Codex 版本以
+[SOURCES](SOURCES.md) 和 [VALIDATION](VALIDATION.md) 为准。未列出的 Codex/App 版本按
+“待验证”处理，不应从旧版本的实机结果推断兼容。

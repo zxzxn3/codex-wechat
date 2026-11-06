@@ -95,10 +95,13 @@ class ReleaseLayoutTests(unittest.TestCase):
                          "log_rotation", "native_codex", "bootstrap_supervisor")),
         )
         probe = (
-            "import importlib, sys\n"
-            "sys.path.insert(0, sys.argv[1])\n"
+            "import importlib, pathlib, sys\n"
+            "root = pathlib.Path(sys.argv[1]).resolve()\n"
+            "sys.path.insert(0, str(root))\n"
             "for name in sys.argv[2:]:\n"
-            "    importlib.import_module(name)\n"
+            "    module = importlib.import_module(name)\n"
+            "    if module.__file__ is None or not pathlib.Path(module.__file__).resolve().is_relative_to(root):\n"
+            "        raise SystemExit(f'{name} loaded outside the stable payload: {module.__file__}')\n"
         )
         for platform_name, modules in cases:
             with self.subTest(platform=platform_name), \
@@ -111,7 +114,7 @@ class ReleaseLayoutTests(unittest.TestCase):
                 env["CODEX_WECHAT_INSTALL_ROOT"] = str(target)
                 env["PYTHONDONTWRITEBYTECODE"] = "1"
                 result = subprocess.run(
-                    [sys.executable, "-I", "-c", probe, str(target), *modules],
+                    [sys.executable, "-I", "-S", "-c", probe, str(target), *modules],
                     cwd=target,
                     env=env,
                     capture_output=True,

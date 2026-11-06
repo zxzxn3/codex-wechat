@@ -151,6 +151,10 @@ def _require_no_bridge() -> None:
 async def uninstall(*, purge: bool = False) -> None:
     if IS_WINDOWS:
         raise RuntimeError("Windows 卸载请使用 stable uninstall.ps1；uninstall.py 仅用于 Linux。")
+    # Validate the data-root contract before removing the service or touching
+    # any user data. The stable entry checks this too, but a direct helper
+    # invocation must not be able to skip the check.
+    root = data_root()
     await _linux_service_removal()
     _require_no_bridge()
     _linux_command_removal()
@@ -158,7 +162,7 @@ async def uninstall(*, purge: bool = False) -> None:
     if purge:
         _purge_linux_data()
     else:
-        print(f"用户数据已保留: {data_root()}")
+        print(f"用户数据已保留: {root}")
         print("如需同时删除配置、登录和待办，请使用 --purge-data。")
 
 

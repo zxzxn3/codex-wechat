@@ -20,6 +20,19 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
         service.assert_awaited_once_with()
         command.assert_called_once_with()
 
+    async def test_data_root_is_validated_before_service_removal(self):
+        events = []
+        with patch.object(uninstall, "IS_WINDOWS", False), \
+                patch.object(uninstall, "data_root",
+                             side_effect=lambda: events.append("data-root") or Path("/data")), \
+                patch.object(uninstall, "_linux_service_removal",
+                             AsyncMock(side_effect=lambda: events.append("service"))), \
+                patch.object(uninstall, "_require_no_bridge", Mock()), \
+                patch.object(uninstall, "_linux_command_removal", Mock()), \
+                patch.object(uninstall, "_remove_data_root_marker", Mock()):
+            await uninstall.uninstall()
+        self.assertEqual(events, ["data-root", "service"])
+
     def test_purge_removes_only_user_data_when_data_is_the_install_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

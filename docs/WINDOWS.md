@@ -53,8 +53,8 @@ PATH。未创建时使用完整 `codex-wechat.ps1` 路径，行为相同。`.ps1
 - 安装根目录：`%LOCALAPPDATA%\codex-wechat\app`，保存 stable 入口和不可变 release。
 - 数据根目录：默认 `%LOCALAPPDATA%\codex-wechat`，可用 `CODEX_WECHAT_DATA_ROOT` 覆盖；
   保存 `config.json`、`.state`、`workspace`、
-  `logs`、`shared` 和 `active-release`；自定义值同时记录在安装根的 `.data-root`，
-  公开入口在新终端没有环境变量时读取它。
+  `logs`、`shared` 和 `active-release`；自定义值记录在安装根的 `.data-root`，
+  计划任务只传安装根，公开入口和服务 supervisor 都读取该标记。
 - 计划任务负责原生启动、停止和查询；`service_adapter.py` 负责 restart 编排、停止等待和
   稳定运行判断。`windows/task-service.ps1` 不实现 restart 状态机。
 - 首次自启关闭；`autostart true|false` 只切换登录触发器，不启动、停止或接管当前实例。

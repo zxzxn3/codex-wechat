@@ -68,9 +68,19 @@ function Read-SavedDataRoot([string]$Root) {
     return [IO.Path]::GetFullPath($Value)
 }
 
-if (-not $env:CODEX_WECHAT_DATA_ROOT) {
-    $SavedDataRoot = Read-SavedDataRoot $InstallRoot
-    if ($SavedDataRoot) { $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot }
+$InstallerCommand = $Command -in @('update', 'install', 'menu', 'components')
+$SavedDataRoot = if ($InstallerCommand -and $env:CODEX_WECHAT_DATA_ROOT) {
+    $null
+} else {
+    Read-SavedDataRoot $InstallRoot
+}
+if ($SavedDataRoot) {
+    if (-not $env:CODEX_WECHAT_DATA_ROOT) {
+        $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot
+    } elseif (-not $InstallerCommand -and
+            [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT) -ne $SavedDataRoot) {
+        throw 'CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；请清除环境变量，或重新运行安装器更新数据根'
+    }
 }
 
 if ($Command -in @('update', 'install', 'menu', 'components')) {

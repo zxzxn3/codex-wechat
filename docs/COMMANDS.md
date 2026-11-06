@@ -93,11 +93,11 @@ Linux 停止并移除用户 unit、命令软链；默认保留 `config.json`、`
 若无法读取后台服务状态，卸载会 fail-closed 而不是继续删除；没有 systemd 客户端时视为
 没有可移除的服务。
 Windows 自定义数据目录由 `CODEX_WECHAT_DATA_ROOT`（或原生 helper 的
-`-DataRoot`）传递；公开入口、Python 命令和计划任务都使用同一个数据根。Python 不会忽略它。
-Linux 后台服务的数据根在安装/更新时由 `CODEX_WECHAT_DATA_ROOT` 写入 systemd drop-in；
-安装后修改该环境变量需重新运行安装器，否则正在注册的服务仍使用旧根。
-自定义根同时写入安装根目录的 `.data-root`；公开入口在没有环境变量时读取该标记。若标记
-内容无效，入口会拒绝继续，而不是静默回退默认目录。
+`-DataRoot`）传递；公开入口和 Python 命令使用同一个数据根，计划任务通过 stable supervisor
+读取安装根 `.data-root`。Python 不会忽略它。
+Linux 后台服务的数据根由安装根 `.data-root` 提供，systemd unit 不再保存第二份数据根；
+安装后修改环境变量必须通过安装器更新标记。公开入口、服务 supervisor 和卸载器在环境变量
+与标记不一致时 fail closed，而不是静默回退默认目录。
 
 Linux 的 stable `codex-wechat` 和 Windows 的 `codex-wechat.ps1` 在读取 `current` 之前
 直接分派 `uninstall` 到稳定卸载组件。这样 `current` 缺失、损坏或活动 release 不完整时，

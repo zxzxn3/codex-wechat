@@ -16,10 +16,10 @@ class EntryContractTests(unittest.TestCase):
 
     def test_linux_uninstall_bypasses_a_broken_current_release(self):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
-        self.assertIn('if [ "${1:-}" = "uninstall" ]', text)
+        self.assertIn('if [ "$ACTION" = "uninstall" ]', text)
         self.assertIn('"$INSTALL_ROOT/uninstall.py"', text)
         self.assertLess(
-            text.index('if [ "${1:-}" = "uninstall" ]'),
+            text.index('if [ "$ACTION" = "uninstall" ]'),
             text.index('[ -L "$CURRENT_FILE" ]'),
         )
         self.assertIn("CODEX_WECHAT_INSTALL_ROOT", text)
@@ -30,6 +30,8 @@ class EntryContractTests(unittest.TestCase):
         self.assertNotIn('export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"', text)
         self.assertIn("DATA_ROOT_FILE", text)
         self.assertIn(".data-root", text)
+        self.assertIn("不一致", text)
+        self.assertLess(text.index("不一致"), text.index('if [ "$ACTION" = "uninstall" ]'))
 
     def test_linux_stable_uninstaller_has_its_runtime_dependencies(self):
         import installer
@@ -84,3 +86,4 @@ class EntryContractTests(unittest.TestCase):
     def test_linux_service_marks_its_bridge_child(self):
         unit = (ROOT / "codex-wechat.service").read_text(encoding="utf-8")
         self.assertIn("Environment=CODEX_WECHAT_SERVICE_CHILD=1", unit)
+        self.assertNotIn("ConditionPathExists", unit)

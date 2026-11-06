@@ -4,7 +4,6 @@ After=graphical-session.target
 PartOf=graphical-session.target
 StartLimitIntervalSec=300
 StartLimitBurst=5
-ConditionPathExists=%h/.local/share/codex-wechat/.state/account.json
 
 [Service]
 Type=exec

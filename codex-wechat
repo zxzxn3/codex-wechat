@@ -6,7 +6,13 @@ PROJECT_DIR="$INSTALL_ROOT"
 CURRENT_FILE="$INSTALL_ROOT/current"
 DATA_ROOT_FILE="$INSTALL_ROOT/.data-root"
 export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
-if [ -z "${CODEX_WECHAT_DATA_ROOT:-}" ] && { [ -e "$DATA_ROOT_FILE" ] || [ -L "$DATA_ROOT_FILE" ]; }; then
+ACTION="${1:-status}"
+case "$ACTION" in
+    install|update|menu|components) INSTALLER_ACTION=1 ;;
+    *) INSTALLER_ACTION=0 ;;
+esac
+if { [ -e "$DATA_ROOT_FILE" ] || [ -L "$DATA_ROOT_FILE" ]; } &&
+        { [ "$INSTALLER_ACTION" -eq 0 ] || [ -z "${CODEX_WECHAT_DATA_ROOT:-}" ]; }; then
     if [ -L "$DATA_ROOT_FILE" ] || [ ! -f "$DATA_ROOT_FILE" ]; then
         echo "codex-wechat: 数据根标记不是普通文件: $DATA_ROOT_FILE" >&2
         exit 1
@@ -17,10 +23,19 @@ if [ -z "${CODEX_WECHAT_DATA_ROOT:-}" ] && { [ -e "$DATA_ROOT_FILE" ] || [ -L "$
         echo "codex-wechat: 数据根标记内容无效: $DATA_ROOT_FILE" >&2
         exit 1
     fi
-    export CODEX_WECHAT_DATA_ROOT="$saved_data_root"
+    if [ -n "${CODEX_WECHAT_DATA_ROOT:-}" ]; then
+        requested_data_root=$(realpath -m -- "$CODEX_WECHAT_DATA_ROOT")
+        saved_data_root=$(realpath -m -- "$saved_data_root")
+        if [ "$requested_data_root" != "$saved_data_root" ]; then
+            echo "codex-wechat: CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；请清除环境变量，或重新运行安装器更新数据根" >&2
+            exit 78
+        fi
+    else
+        export CODEX_WECHAT_DATA_ROOT="$saved_data_root"
+    fi
 fi
 if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; then
-    case "${1:-status}" in
+    case "$ACTION" in
         status|logs|uninstall|-h|--help) ;;
         *)
             echo "codex-wechat: 请以普通用户身份运行，不要使用 root/sudo 或管理员终端。" >&2
@@ -38,7 +53,7 @@ case "${1:-}" in
         exec python3 -u "$INSTALLER" "$@"
         ;;
 esac
-if [ "${1:-}" = "uninstall" ]; then
+if [ "$ACTION" = "uninstall" ]; then
     UNINSTALLER="$INSTALL_ROOT/uninstall.py"
     if [ ! -f "$UNINSTALLER" ]; then
         echo "codex-wechat: 稳定卸载组件缺失: $UNINSTALLER" >&2

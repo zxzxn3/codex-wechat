@@ -114,6 +114,40 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(seen, [str(custom_root.resolve())])
 
+    def test_marker_overrides_stale_data_root_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._root(directory, FIRST_RELEASE)
+            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
+            marker_root = Path(directory) / "marker-data"
+            marker_root.mkdir()
+            (root / bootstrap_supervisor.DATA_ROOT_FILE).write_text(
+                str(marker_root) + "\n", encoding="utf-8")
+            seen = []
+
+            class Module:
+                RELEASE_SWITCH_EXIT_CODE = 76
+
+                async def supervise(self, project, state_dir, config, log_path, **_kwargs):
+                    seen.append((state_dir, config, log_path))
+                    return 0
+
+            argv = self._argv(directory, root) + [
+                "--data-root", str(Path(directory) / "stale-data")]
+            with patch.dict(os.environ, {}, clear=False), \
+                    patch.object(bootstrap_supervisor, "data_root",
+                                 return_value=marker_root), \
+                    patch.object(bootstrap_supervisor, "load_supervisor",
+                                 lambda release: Module()):
+                os.environ.pop("CODEX_WECHAT_DATA_ROOT", None)
+                code = bootstrap_supervisor.main(argv)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(seen, [(
+                marker_root / ".state",
+                marker_root / "config.json",
+                marker_root / "logs" / "service.log",
+            )])
+
     def test_switch_code_reloads_the_release_selected_by_the_pointer(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(directory, FIRST_RELEASE, SECOND_RELEASE)

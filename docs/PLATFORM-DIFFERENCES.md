@@ -14,7 +14,7 @@
 | 安装入口 | `install.sh` | `install.ps1` | 只做平台 shell 适配，最终都调用同一个 `installer.py` |
 | 参数拼写 | `--follow`、`--service`、`--stop-active`、`--purge-data` | `-Follow`、`-Service`、`-StopActive`、`-PurgeData` | POSIX shell 与 PowerShell 的参数习惯不同，语义相同 |
 | 命令入口安装 | 创建 `~/.local/bin/codex-wechat` 链接 | 仅当 `%USERPROFILE%\.local\bin` 已存在且在 PATH 中时创建 `.cmd` | 安装器不修改 PATH；Windows 不主动创建未受管理的 PATH 目录，否则提示使用完整入口路径 |
-| 程序与数据目录 | 默认安装根目录同时保存程序、配置和状态 | 程序在 `%LOCALAPPDATA%\codex-wechat\app`，数据根默认 `%LOCALAPPDATA%\codex-wechat` | 遵循平台目录约定；Windows 将不可变程序与用户数据分开。两边都可用 `CODEX_WECHAT_DATA_ROOT` 覆盖数据根，安装器把非默认值写入安装根的 `.data-root`，公开入口无环境变量时读取该标记；Linux 后台服务另由 systemd drop-in 记录该值 |
+| 程序与数据目录 | 默认安装根目录同时保存程序、配置和状态 | 程序在 `%LOCALAPPDATA%\codex-wechat\app`，数据根默认 `%LOCALAPPDATA%\codex-wechat` | 遵循平台目录约定；Windows 将不可变程序与用户数据分开。两边都可用 `CODEX_WECHAT_DATA_ROOT` 覆盖数据根，安装器把非默认值写入安装根的 `.data-root`，公开入口、systemd 服务和 Windows supervisor 都从该标记解析 |
 | 后台服务 | systemd 用户 unit | Windows Scheduled Task | 使用各平台原生服务生命周期；不强行抽象成统一的跨平台服务 API |
 | 服务归属验证 | unit `FragmentPath` 与 systemd `MainPID` | 计划任务 action、venv 可执行文件、进程父子链、所有者 token | 防止误停其它安装或外部进程。Windows 没有与 systemd `MainPID` 等价的单一校验点 |
 | 服务重启 | `systemctl restart`（阻塞）后由 Python 等待稳定 | Python 先执行原生 stop、等待停止，再 start 并等待稳定 | Windows 子进程直接重启计划任务会死锁或被忽略，因此由 supervisor 负责服务内重启；CLI 的重启编排和稳定等待统一在 `service_adapter.py`，PowerShell helper 只发原生命令 |

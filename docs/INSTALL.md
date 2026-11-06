@@ -133,10 +133,9 @@ Linux stable `uninstall.py` 与 Windows stable `uninstall.ps1` 是内部实现�
 Linux 默认安装根目录同时保存程序、配置和状态；Windows 程序位于
 `%LOCALAPPDATA%\codex-wechat\app`，用户数据根为 `%LOCALAPPDATA%\codex-wechat`。可用
 `CODEX_WECHAT_DATA_ROOT` 和 `CODEX_WECHAT_INSTALL_ROOT` 明确分离位置。
-Linux 后台服务使用安装时的 `CODEX_WECHAT_DATA_ROOT` 生成 systemd drop-in；修改数据根后
-需要重新运行安装器以更新服务配置。
-安装器还会把自定义数据根写入安装根目录的 `.data-root`；公开入口在没有环境变量时读取该
-标记，以便 service-start、status、logs 和 update 与服务使用同一目录。
+安装器把自定义数据根写入安装根目录的 `.data-root`；公开入口、Linux systemd 服务和
+Windows supervisor 都从同一个标记解析数据根，不把数据根复制进 unit/task action。因此
+修改数据根只需通过安装器更新标记，不需要额外改服务配置。
 
 `current`、`active-release`、`releases/`、`.state/`、`logs/`、`workspace/`、`shared/` 和
 `config.json` 各有独立职责，不复制供应商凭据或会话历史。配置与提示的细节见
