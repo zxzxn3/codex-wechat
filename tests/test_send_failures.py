@@ -127,6 +127,8 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0.02)
                 self.assertEqual(calls, 1)  # no automatic resend of an uncertain delivery
                 self.assertFalse(bridge.state.get("wechatContextPending"))
+                self.assertTrue(bridge.state.get("deliveryPaused"))
+                self.assertEqual(bridge.state.get("deliveryUnknownTotal"), 1)
                 self.assertEqual(len(bridge.state["failedOutbox"]), 1)
                 self.assertEqual(bridge.state["failedOutbox"][0]["status"], "delivery_unknown")
                 self.assertEqual(bridge.state["failedOutbox"][0]["attempts"], 1)
@@ -139,6 +141,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 paused = next(call for call in log_event.call_args_list
                               if call.args and call.args[0] == "output.send_paused")
                 self.assertEqual(paused.kwargs["reason"], "not_acknowledged")
+                self.assertEqual(paused.kwargs["release"], "next_inbound")
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -192,6 +195,40 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sum(1 for entry in attempts
                                      if not entry.get("failureNotice")), 1)
                 self.assertEqual(len(bridge.state["outbox"]), 1)
+                self.assertTrue(bridge.state.get("deliveryPaused"))
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_a_new_inbound_releases_delivery_pause(self):
+        bridge = self.bridge
+        bridge.reply("one")
+        bridge.reply("two")
+        attempts = []
+
+        async def send(entry):
+            attempts.append(entry)
+            if len([item for item in attempts if not item.get("failureNotice")]) == 1:
+                raise WeChatNotAcknowledged(0)
+            return {"message_id": len(attempts)}
+
+        bridge.channel.send = send
+        with patch("output_delivery.log_event"):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                for _ in range(50):
+                    if bridge.state.get("failedOutbox"):
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertTrue(bridge.state.get("deliveryPaused"))
+                bridge.refresh_reply_budget()
+                for _ in range(50):
+                    if not bridge.state["outbox"]:
+                        break
+                    await asyncio.sleep(0.02)
+                self.assertFalse(bridge.state.get("deliveryPaused"))
+                self.assertEqual(sum(1 for entry in attempts
+                                     if not entry.get("failureNotice")), 2)
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -249,6 +286,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
     async def test_delivery_unknown_is_not_replayed_after_restart(self):
         bridge = self.bridge
         bridge.reply("answer")
+        bridge.reply("second")
 
         async def send(_):
             raise WeChatNotAcknowledged(0)
@@ -264,13 +302,27 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-        self.assertEqual(bridge.state["outbox"], [])
+        self.assertEqual(len(bridge.state["outbox"]), 1)
         self.assertEqual(bridge.state["failedOutbox"][0]["status"], "delivery_unknown")
+        self.assertTrue(bridge.state.get("deliveryPaused"))
 
         restarted = Bridge(self.store, {"user": "owner"}, {"backends": {
             "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
-        self.assertEqual(restarted.state["outbox"], [])
+        self.assertEqual(len(restarted.state["outbox"]), 1)
         self.assertEqual(restarted.state["failedOutbox"][0]["status"], "delivery_unknown")
+        sent = []
+
+        async def restarted_send(entry):
+            sent.append(entry)
+
+        restarted.channel.send = restarted_send
+        task = asyncio.create_task(restarted.sender())
+        try:
+            await asyncio.sleep(0.1)
+            self.assertEqual(sent, [])
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def test_retry_waits_grow_instead_of_hammering_the_channel(self):
         bridge = self.bridge
@@ -330,6 +382,14 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         payload = status_payload(self.store)
         self.assertEqual(payload["delivery"], "unconfirmed")
         self.assertEqual(payload["delivery_unknown"], 1)
+        self.assertEqual(payload["delivery_unknown_retained"], 1)
+        self.store.save("bridge", {
+            "deliveryUnknownTotal": 25,
+            "failedOutbox": [{"status": "delivery_unknown"}] * 20,
+        })
+        payload = status_payload(self.store)
+        self.assertEqual(payload["delivery_unknown"], 25)
+        self.assertEqual(payload["delivery_unknown_retained"], 20)
 
     async def test_failure_count_is_not_capped_or_reset_by_session_or_restart(self):
         bridge = self.bridge

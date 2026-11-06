@@ -29,7 +29,7 @@ Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应
 | `service-start` | 启动已注册的后台服务；未绑定时在当前终端扫码。前台桥接正在运行时拒绝 |
 | `stop` | 停止后台服务；前台桥接用 `Ctrl+C` 停止 |
 | `service-restart` | 重启已注册的后台服务；两个平台都等待服务稳定运行，超时才报错 |
-| `status` | 输出桥接状态 JSON；`service` 段包含 `installed`、`running`，可用的原生状态还会带 `state` 和 `last_result` |
+| `status` | 输出桥接状态 JSON；`service` 段包含 `installed`、`running`，可用的原生状态还会带 `state` 和 `last_result`；顶层 `delivery_paused` 表示 no-id 后的持久出站暂停，`delivery_unknown`/`delivery_unknown_retained` 分别表示累计和保留的未知投递数 |
 | `logs [--follow] [--service]` | 查看结构化日志；Windows 参数写作 `-Follow` / `-Service`。Linux 的 `--service` 读取 systemd journal，Windows 读取 `service.log` 及其轮转版本 |
 | `login` | 交互式扫码登录；后台服务必须已停止 |
 | `rebind [--stop-active]` | 重新绑定微信；Windows 写作 `-StopActive` |

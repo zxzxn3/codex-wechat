@@ -206,16 +206,17 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
 - 传输失败退避：只有普通传输错误（`WeChatTransportError`、超时、连接失败和 `OSError`）
   按 `SEND_RETRY_SECONDS × 3^(n-1)`（1s、3s）重试；明确 API 拒绝和未知本地异常直接失败，
   不再重试。
-- 未确认投递的特殊处置：`not_acknowledged` **首次出现即**暂停出站
-  `DELIVERY_PAUSE_SECONDS`（60s），当前条目立即隔离为 `delivery_unknown`，不发失败通知，
-  不自动重放；以 `output.delivery_unknown` 与带 `reason=not_acknowledged` 的
-  `output.send_paused` 记录。暂停时间只存内存，未知条目本身持久化在 `failedOutbox`。
-- 可观测性：存在 `delivery_unknown` 条目或连续发送失败达到 `DELIVERY_DEGRADED_THRESHOLD`
-  （3）时，`status` 的 `delivery` 从 `ok` 变为 `unconfirmed`；存在未知条目时额外输出
-  `delivery_unknown` 计数。成功一次只清连续失败计数，不抹掉历史未知条目。
+- 未确认投递的特殊处置：`not_acknowledged` **首次出现即**持久化暂停出站，直到下一条
+  被接受的入站消息；当前条目立即隔离为 `delivery_unknown`，不发失败通知，不自动重放。
+  重启不会解除暂停，也不会继续消费普通积压。以 `output.delivery_unknown` 与带
+  `reason=not_acknowledged`、`release=next_inbound` 的 `output.send_paused` 记录。
+- 可观测性：存在未知条目或连续发送失败达到 `DELIVERY_DEGRADED_THRESHOLD`（3）时，
+  `status` 的 `delivery` 从 `ok` 变为 `unconfirmed`；`delivery_unknown` 是单调累计数，
+  `delivery_unknown_retained` 是有界失败历史中的保留数。成功一次只清连续失败计数，
+  不抹掉历史未知条目。
 
-仍然待定的是**唤醒条件**：暂停目前是固定 60s，不看新入站消息；是否改成"等新入站再醒"
-还没有决定。发送间隔、失败退避和暂停三项互不排斥；入站回复额度已在下节实现。
+发送间隔、传输失败退避和 no-id 暂停三项互不排斥；入站消息继续轮询，只有出站等待下一条
+入站唤醒。
 
 ### 每条入站消息的回复额度
 

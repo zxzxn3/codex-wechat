@@ -24,8 +24,8 @@ SEND_RETRY_SECONDS = 1
 # Same-user spacing: two production bridges report 2.5 s as the smallest interval
 # the platform tolerates without complaints, and bursts are what gets filtered.
 SEND_SPACING_SECONDS = 2.5
-# After a silently dropped send the channel itself looks blocked, so stop firing.
-DELIVERY_PAUSE_SECONDS = 60
+# A no-id response is persisted as an outbound block and released by the next
+# accepted inbound message. A timer must not consume the ordinary backlog.
 DELIVERY_DEGRADED_THRESHOLD = 3
 # A stale context token is repaired by the next inbound message, not by a retry.
 CONTEXT_REJECTION_KINDS = frozenset({"prepare_failed"})
@@ -34,7 +34,6 @@ class OutputDelivery:
     def __init__(self, bridge):
         self.bridge = bridge
         self._queued_at = {}  # Monotonic timestamps belong only to this service lifetime.
-        self._paused_until = 0.0
 
     def text_entries(self, text, *, group, context, semantic=False, source=None, role="body",
                      request_id=None):
@@ -261,17 +260,13 @@ class OutputDelivery:
     async def _next_sendable(self):
         """Block until an entry may be sent; None means the caller re-checks.
 
-        Three independent gates live here so the sender loop stays about sending:
-        an empty queue, a post-failure pause, and the per-inbound reply budget.
+        Two independent gates live here so the sender loop stays about sending:
+        an empty queue and the per-inbound reply budget.
         """
         bridge = self.bridge
         if not bridge.state["outbox"]:
             bridge.send_wake.clear()
             await bridge.send_wake.wait()
-            return None
-        pause = self._paused_until - time.monotonic()
-        if pause > 0:
-            await asyncio.sleep(min(pause, 5))
             return None
         entry = bridge.state["outbox"][0]
         if entry.get("budgetNotice") or not bridge.budget_exhausted():
@@ -290,7 +285,8 @@ class OutputDelivery:
     async def sender(self):
         bridge = self.bridge
         while True:
-            if bridge.wechat_paused or bridge.state.get("wechatContextPending"):
+            if (bridge.wechat_paused or bridge.state.get("wechatContextPending")
+                    or bridge.state.get("deliveryPaused")):
                 bridge.send_wake.clear()
                 await bridge.send_wake.wait()
                 continue
@@ -330,8 +326,16 @@ class OutputDelivery:
                 if isinstance(error, WeChatNotAcknowledged):
                     # A no-id response is not a retryable failure: the first call
                     # may already have been delivered, so resending can duplicate
-                    # it. Quarantine once and stop the whole outbound queue.
-                    self._paused_until = time.monotonic() + DELIVERY_PAUSE_SECONDS
+                    # it. Quarantine once and wait for the next inbound message;
+                    # a restart must not resume consuming the ordinary backlog.
+                    retained = sum(1 for item in bridge.state.get("failedOutbox", [])
+                                   if isinstance(item, dict)
+                                   and item.get("status") == "delivery_unknown")
+                    total = bridge.state.get("deliveryUnknownTotal")
+                    if type(total) is not int:
+                        total = retained
+                    bridge.state["deliveryUnknownTotal"] = max(total, retained) + 1
+                    bridge.state["deliveryPaused"] = True
                     log_event("output.delivery_unknown", level="warning",
                               component="output", role=entry.get("role", "body"),
                               attempt=entry["attempts"], error_type=type(error).__name__,
@@ -339,8 +343,8 @@ class OutputDelivery:
                               job_id=entry.get("group"), request_id=entry.get("requestId"))
                     bridge.fail_output(entry, notify=False, status="delivery_unknown")
                     log_event("output.send_paused", level="warning", component="output",
-                              retry_in_ms=DELIVERY_PAUSE_SECONDS * 1000,
                               reason="not_acknowledged",
+                              release="next_inbound",
                               send_failures=bridge.state["consecutiveSendFailures"],
                               queued=len(bridge.state["outbox"]))
                     continue

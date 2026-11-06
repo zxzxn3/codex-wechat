@@ -109,6 +109,7 @@ def prepare_identity_change(bridge_state, account):
     bridge_state.pop("quoteCache", None)
     bridge_state.pop("context", None)
     bridge_state.pop("wechatContextPending", None)
+    bridge_state.pop("deliveryPaused", None)
     for key in ("restartRequested", "running", "phase"):
         bridge_state.pop(key, None)
     bridge_state["wechatIdentity"] = identity(account)

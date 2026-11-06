@@ -230,6 +230,7 @@ class Bridge:
         self.state["inboundSeq"] = self.state.get("inboundSeq", 0) + 1
         self.state["replyBudget"] = {"seq": self.state["inboundSeq"], "used": 0}
         self.state.pop("budgetPromptSent", None)
+        self.state.pop("deliveryPaused", None)
         self.send_wake.set()
 
     def reload_config(self):
@@ -693,8 +694,13 @@ async def startup_account(store):
 def status_payload(store):
     state = load_bridge_state(store)
     auth = wechat_auth.state(state)
-    unknown = sum(1 for entry in state.get("failedOutbox", [])
-                  if isinstance(entry, dict) and entry.get("status") == "delivery_unknown")
+    unknown_retained = sum(1 for entry in state.get("failedOutbox", [])
+                           if isinstance(entry, dict)
+                           and entry.get("status") == "delivery_unknown")
+    unknown_total = state.get("deliveryUnknownTotal")
+    if type(unknown_total) is not int:
+        unknown_total = unknown_retained
+    unknown_total = max(unknown_total, unknown_retained)
     payload = {
         "bound": bool(store.load("account")),
         "auth": auth,
@@ -709,13 +715,15 @@ def status_payload(store):
         ),
         "queued": len(state.get("inbox", [])),
         "unsent": len(state.get("outbox", [])),
+        "delivery_paused": bool(state.get("deliveryPaused")),
         "delivery": ("unconfirmed"
-                     if unknown
+                     if unknown_total
                      or state.get("consecutiveSendFailures", 0) >= DELIVERY_DEGRADED_THRESHOLD
                      else "ok"),
     }
-    if unknown:
-        payload["delivery_unknown"] = unknown
+    if unknown_total:
+        payload["delivery_unknown"] = unknown_total
+        payload["delivery_unknown_retained"] = unknown_retained
     auth_details = state.get("wechatAuth")
     if isinstance(auth_details, dict):
         if "detectedAt" in auth_details:

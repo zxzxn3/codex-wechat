@@ -66,6 +66,7 @@ class WeChatAuthTests(unittest.TestCase):
             "processingNotice": "old ack",
             "completionNotice": "old done",
             "sessionChoices": ["old-thread"],
+            "deliveryPaused": True,
         }
         counts = wechat_auth.prepare_identity_change(
             state, {"bot": "new-bot", "user": "new-user"}
@@ -75,6 +76,7 @@ class WeChatAuthTests(unittest.TestCase):
         self.assertEqual(state["seen"], [])
         self.assertNotIn("quoteCache", state)
         self.assertNotIn("context", state)
+        self.assertNotIn("deliveryPaused", state)
         self.assertEqual(state["thread"], "old-thread")
         self.assertEqual(state["backendSessions"], {"codex": {"thread": "old-thread"}})
         self.assertEqual(state["processingNotice"], "old ack")
