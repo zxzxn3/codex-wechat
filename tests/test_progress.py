@@ -103,6 +103,29 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.acknowledge({})
         self.assertEqual(self.texts()[-1], "400")
 
+    async def test_final_answer_usage_is_not_reused_from_thread_summary(self):
+        current = self.backend.active
+        self.backend.event({"method": "thread/tokenUsage/updated", "params": {
+            "threadId": "thread",
+            "tokenUsage": {"last": {"outputTokens": 999, "reasoningOutputTokens": 0}},
+        }})
+        self.backend.event({"method": "item/started", "params": {
+            "threadId": "thread", "turnId": "turn", "startedAtMs": 1_000,
+            "item": {"id": "final", "type": "agentMessage",
+                     "phase": "final_answer", "text": ""},
+        }})
+        self.backend.event({"method": "item/completed", "params": {
+            "threadId": "thread", "turnId": "turn", "completedAtMs": 3_500,
+            "item": {"id": "final", "type": "agentMessage",
+                     "phase": "final_answer", "text": "完成"},
+        }})
+        self.finish()
+        result = await current["done"]
+        self.assertIsNone(result.usage)
+        self.bridge.state["completionNotice"] = "{visible_output_tokens}|{tokens_per_second}"
+        await self.bridge.deliver_answer(result)
+        self.assertEqual(self.texts()[-1], "N/A|N/A")
+
     async def test_duplicate_late_wrong_turn_and_wrong_thread_items_are_ignored(self):
         event = self.item()
         self.backend.event(event)

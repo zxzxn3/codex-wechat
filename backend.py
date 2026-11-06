@@ -508,10 +508,6 @@ class CodexBackend:
                 self.usage_by_turn[key] = usage
                 while len(self.usage_by_turn) > 20:
                     self.usage_by_turn.pop(next(iter(self.usage_by_turn)))
-            if self.active and thread_id == self.active.get("thread"):
-                active_turn = self.active.get("turn")
-                if turn_id is None or (active_turn is not None and turn_id == active_turn):
-                    self.active["usage"] = usage
 
     def _update_thread_settings(self, params):
         # Native settings are authoritative; no replay of previously observed defaults.
@@ -601,7 +597,6 @@ class CodexBackend:
         usage = None
         if current["turn"]:
             usage = self.usage_by_turn.get((current["thread"], current["turn"]))
-        usage = usage or current.get("usage") or self.info.get("usage")
         result = TurnResult(current["source"], current["turn"],
                             text if text or has_partial_answer else self.prompt("TURN_COMPLETED_EMPTY"),
                             current["cwd"], status, tuple(current.get("requestIds", ())),
