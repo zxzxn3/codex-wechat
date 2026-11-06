@@ -423,6 +423,18 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(release, self.target / "releases" / current)
         self.assertEqual(configure.call_args.kwargs, {"update": True})
 
+    def test_same_version_update_repairs_a_missing_release_runtime(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        current = self.current()
+        release = self.target / installer.RELEASES_DIR / current
+        with patch.object(installer, "release_runtime_ready", return_value=False), \
+                patch.object(installer, "prepare_runtime") as prepare, \
+                patch.object(installer, "introduction", return_value=True), \
+                patch("builtins.input", return_value="y"):
+            self.assertEqual(installer.update(self.source, self.target), 0)
+        prepare.assert_called_once_with(release)
+
     def test_update_rejects_same_versioned_root_as_source(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)

@@ -20,6 +20,9 @@ import sys
 import time
 from pathlib import Path
 
+from log_rotation import (DEFAULT_KEEP, KeepSource, append as append_log,
+                          keep_from_config)
+
 RESTART_EXIT_CODE = 75
 RELEASE_SWITCH_EXIT_CODE = 76
 CONFIG_EXIT_CODE = 78
@@ -27,7 +30,6 @@ FAILURE_WINDOW_SECONDS = 300.0
 MAX_FAILURES = 5
 OWNER_STATUS_NAME = "service-owner.json"
 SUPERVISOR_LOCK_NAME = "supervisor.lock"
-LOG_LIMIT_BYTES = 5 * 1024 * 1024
 
 
 def data_root() -> Path:
@@ -85,29 +87,9 @@ def discard_owner_status(path: Path) -> None:
         pass
 
 
-def _rotate_log(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        if path.stat().st_size < LOG_LIMIT_BYTES:
-            return
-    except OSError:
-        return
-    rotated = path.with_name(path.name + ".1")
-    try:
-        rotated.unlink()
-    except OSError:
-        pass
-    try:
-        os.replace(path, rotated)
-    except OSError:
-        pass
-
-
-def _append_log(path: Path, message: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as stream:
-        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        stream.write(f"{stamp} supervisor: {message}\n")
+def _append_log(path: Path, message: str, *, keep: KeepSource = DEFAULT_KEEP) -> None:
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    append_log(path, f"{stamp} supervisor: {message}\n", keep)
 
 
 def _mutex_name(state_dir: Path) -> str:
@@ -285,21 +267,47 @@ def child_environment(status_path: Path, token: str) -> dict[str, str]:
 
 
 async def _spawn_bridge(command: list[str], project: Path, env: dict[str, str],
-                        log_path: Path):
+                        log_path: Path, keep: KeepSource):
     flags = 0
     if os.name == "nt":
         flags = subprocess.CREATE_NO_WINDOW
-    stream = log_path.open("ab", buffering=0)
+    process = await asyncio.create_subprocess_exec(
+        *command, cwd=str(project), env=env,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        creationflags=flags)
+    pump = asyncio.create_task(_pump_output(process.stdout, log_path, keep))
+    return process, pump
+
+
+async def _pump_output(stream, log_path: Path, keep: KeepSource) -> None:
+    if stream is None:
+        return
     try:
-        process = await asyncio.create_subprocess_exec(
-            *command, cwd=str(project), env=env,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=stream, stderr=asyncio.subprocess.STDOUT,
-            creationflags=flags)
-    except BaseException:
-        stream.close()
-        raise
-    return process, stream
+        while chunk := await stream.read(65536):
+            append_log(log_path, chunk, keep)
+    except (OSError, ValueError):
+        return
+
+
+async def _drain_pump(pump) -> None:
+    if pump is None:
+        return
+    try:
+        await pump
+    except (OSError, ValueError):
+        pass
+
+
+async def _cancel_pump(pump) -> None:
+    if pump is None:
+        return
+    if not pump.done():
+        pump.cancel()
+    try:
+        await pump
+    except (asyncio.CancelledError, OSError, ValueError):
+        pass
 
 
 async def _stop_process(process, timeout: float = 5.0) -> None:
@@ -331,6 +339,10 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
     state_dir = Path(state_dir).resolve()
     config = Path(config).resolve()
     log_path = Path(log_path).resolve()
+
+    def log_keep():
+        return keep_from_config(config)
+
     if not (project / "codex_wechat.py").is_file():
         raise FileNotFoundError("codex_wechat.py was not found in the project directory")
 
@@ -338,12 +350,10 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
     try:
         guard.acquire()
     except AlreadyRunning:
-        _rotate_log(log_path)
-        _append_log(log_path, "another supervisor is already running")
+        _append_log(log_path, "another supervisor is already running", keep=log_keep)
         return 0
 
-    _rotate_log(log_path)
-    _append_log(log_path, f"starting for {project}")
+    _append_log(log_path, f"starting for {project}", keep=log_keep)
     job = ChildJob()
     status_path = owner_status_path(state_dir)
     discard_owner_status(status_path)
@@ -353,15 +363,16 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
     backoff = 1.0
     failures: list[float] = []
     process = None
-    stream = None
+    pump = None
     try:
         job.open()
         while True:
-            stream = None
+            pump = None
             process = None
             try:
-                process, stream = await _spawn_bridge(
-                    command, project, child_environment(status_path, token), log_path)
+                process, pump = await _spawn_bridge(
+                    command, project, child_environment(status_path, token),
+                    log_path, log_keep)
                 job.assign(process.pid)
                 _atomic_json(status_path, {
                     "version": 1,
@@ -371,30 +382,34 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
                     "state_dir": str(state_dir),
                     "started_at": time.time(),
                 })
-                _append_log(log_path, f"bridge started pid={process.pid}")
+                _append_log(log_path, f"bridge started pid={process.pid}", keep=log_keep)
                 returncode = await process.wait()
-                _append_log(log_path, f"bridge exited code={returncode}")
+                await _drain_pump(pump)
+                pump = None
+                _append_log(log_path, f"bridge exited code={returncode}", keep=log_keep)
             except OSError as error:
-                _append_log(log_path, f"bridge start failed: {error}")
+                _append_log(log_path, f"bridge start failed: {error}", keep=log_keep)
                 returncode = None
                 if process is not None:
                     try:
                         await _stop_process(process)
                     except OSError:
                         pass
+                await _cancel_pump(pump)
+                pump = None
             finally:
                 remove_owner_status(status_path, token)
-                if stream is not None:
-                    stream.close()
             if returncode == 0:
-                _append_log(log_path, "bridge exited normally")
+                _append_log(log_path, "bridge exited normally", keep=log_keep)
                 return 0
             if returncode == CONFIG_EXIT_CODE:
-                _append_log(log_path, "bridge configuration failed; not restarting")
+                _append_log(log_path, "bridge configuration failed; not restarting",
+                            keep=log_keep)
                 return CONFIG_EXIT_CODE
             if returncode == RESTART_EXIT_CODE:
                 # Only the bootstrap knows the install layout; hand the restart back.
-                _append_log(log_path, "user restart requested; handing back to the bootstrap")
+                _append_log(log_path, "user restart requested; handing back to the bootstrap",
+                            keep=log_keep)
                 return RELEASE_SWITCH_EXIT_CODE
             now = time.monotonic()
             failures[:] = [stamp for stamp in failures
@@ -402,20 +417,20 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
             if not failures:
                 backoff = 1.0
             if note_failure(failures, now):
-                _append_log(log_path, "bridge failure limit reached; giving up")
+                _append_log(log_path, "bridge failure limit reached; giving up",
+                            keep=log_keep)
                 return 1
             delay = restart_delay(backoff)
             backoff = min(backoff * 2, 60.0)
-            _append_log(log_path, f"restarting in {delay:g}s")
+            _append_log(log_path, f"restarting in {delay:g}s", keep=log_keep)
             await asyncio.sleep(delay)
     finally:
         remove_owner_status(status_path, token)
-        if stream is not None:
-            stream.close()
+        await _cancel_pump(pump)
         await _stop_process(process)
         job.close()
         guard.release()
-        _append_log(log_path, "supervisor stopped")
+        _append_log(log_path, "supervisor stopped", keep=log_keep)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -437,6 +452,10 @@ def main(argv=None) -> int:
     state_dir = args.state_dir or root / ".state"
     config = args.config or root / "config.json"
     log_path = args.log or root / "logs" / "service.log"
+
+    def log_keep():
+        return keep_from_config(config)
+
     try:
         return asyncio.run(supervise(
             args.project, state_dir, config, log_path, python=args.python))
@@ -444,7 +463,8 @@ def main(argv=None) -> int:
         return 0
     except Exception as error:
         try:
-            _append_log(log_path, f"fatal: {type(error).__name__}: {error}")
+            _append_log(log_path, f"fatal: {type(error).__name__}: {error}",
+                        keep=log_keep)
         except OSError:
             pass
         return 1

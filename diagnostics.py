@@ -20,13 +20,12 @@ import threading
 from platform_support import data_root
 from storage import locked_file
 from latency import NETWORK_TIMING_FIELDS
+from log_rotation import DEFAULT_KEEP, KEEP_MIN, MAX_BYTES, prune_rotations, rotate
 from version import APP_VERSION
 
-MAX_BYTES = 5 * 1024 * 1024
-BACKUP_COUNT = 3
+BACKUP_COUNT = DEFAULT_KEEP
 # Rotated files kept on disk; the active file is extra, so usage is about
 # MAX_BYTES * (keep + 1). Only a lower bound is enforced.
-KEEP_MIN = 1
 _LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
 _EVENT = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 _PATH_LIKE = re.compile(r"(?:^|[\s(=])(?:[A-Za-z]:[\\/]|\\\\|~/|/)")
@@ -118,13 +117,7 @@ def _prune_rotations(keep):
         path = log_path()
     except OSError:
         return
-    # The configured ceiling is 100, so a few hundred probes covers every file a
-    # previous, larger setting could have left behind.
-    for number in range(keep + 1, keep + 257):
-        try:
-            (path.parent / f"{path.name}.{number}").unlink()
-        except OSError:
-            pass
+    prune_rotations(path, keep)
 
 
 def backup_count():
@@ -218,21 +211,6 @@ def _clean_field(name, value):
     return value if re.fullmatch(_TEXT_FIELDS[name], value) else None
 
 
-def _rotate(path):
-    parent = path.parent
-    for number in range(_backup_count, 1, -1):
-        source = parent / f"{path.name}.{number - 1}"
-        target = parent / f"{path.name}.{number}"
-        try:
-            os.replace(source, target)
-        except OSError:
-            pass
-    try:
-        os.replace(path, parent / f"{path.name}.1")
-    except OSError:
-        pass
-
-
 def _write(record):
     try:
         path = log_path()
@@ -246,7 +224,7 @@ def _write(record):
             with locked_file(path.with_name(path.name + ".lock")):
                 try:
                     if path.stat().st_size + len(data) > _max_bytes:
-                        _rotate(path)
+                        rotate(path, _backup_count)
                 except OSError:
                     pass
                 descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)

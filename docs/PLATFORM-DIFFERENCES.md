@@ -20,7 +20,7 @@
 | 服务重启 | `systemctl restart`（阻塞）后由 Python 等待稳定 | Python 先执行原生 stop、等待停止，再 start 并等待稳定 | Windows 子进程直接重启计划任务会死锁或被忽略，因此由 supervisor 负责服务内重启；CLI 的重启编排和稳定等待统一在 `service_adapter.py`，PowerShell helper 只发原生命令 |
 | 登录自启 | systemd `enable` / `disable`，关闭后重新 link 以保留按需启动 | Scheduled Task logon trigger | 使用各平台原生登录机制；对外命令统一为 `autostart true\|false` |
 | 崩溃恢复 | unit `Restart=on-failure`、固定退避和启动次数限制 | supervisor 的退出码、重启退避和异常退出计数 | Linux 由 systemd 管理，Windows 由项目 supervisor 管理 |
-| `logs --service` 来源 | `journalctl --user -u codex-wechat` | `logs/service.log` | 读取各平台服务控制台的原生来源；结构化 `bridge.jsonl` 两边共用 |
+| `logs --service` 来源 | `journalctl --user -u codex-wechat` | `logs/service.log` | 读取各平台服务控制台的原生来源；结构化 `bridge.jsonl` 两边共用。Windows `service.log` 按 5 MiB 轮转并共用 `logs.keep`；Linux 由 journald 管理 journal 保留 |
 | `status.service` 字段值 | `state=active/inactive/...`，`last_result=ExecMainStatus` | `state=Running/Ready/...`，`last_result=LastTaskResult` | JSON 字段形状相同，但保留原生状态词，不伪造统一枚举 |
 | 权限判断 | 实际 `euid == 0` | 管理员令牌 `IsInRole(Administrator)` | 实现不同、策略相同；只读 `status`/`logs` 和显式 `uninstall` 例外 |
 | 文件权限 | POSIX `chmod 0700` | DACL / `icacls`，显式授予当前账户、SYSTEM、Administrators | Windows 的 0700 会变成“仅所有者”，提权安装时可能锁住实际服务账户 |
@@ -49,6 +49,7 @@
 ## 已对齐
 
 以下行为没有平台语义差异：微信命令表和短别名、回复预算、发送间隔与静默丢弃处置、
-`logs.keep`、结构化 `bridge.jsonl` 字段、`autostart true|false`、`status` 的 JSON
+`logs.keep`（Windows 同时约束 `service.log`；Linux 控制台由 journald 管理）、结构化
+`bridge.jsonl` 字段、`autostart true|false`、`status` 的 JSON
 字段形状、默认保留用户数据、`start`/`service-start` 双向互斥、没有顶层
 `service-stop`/`service-status`，以及卸载默认保留数据。

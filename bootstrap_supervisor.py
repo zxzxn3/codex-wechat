@@ -15,6 +15,10 @@ import re
 import sys
 import time
 
+from log_rotation import (DEFAULT_KEEP, KeepSource, append as append_log,
+                          keep_from_config)
+from platform_support import data_root
+
 # Let the previous child finish closing before the next supervisor starts.
 RESTART_SETTLE_SECONDS = 0.2
 # `installer.release_identifier()` writes the first 16 hex digits of the hash.
@@ -69,6 +73,7 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="action", required=True)
     run = sub.add_parser("supervise", help="run the active release supervisor")
     run.add_argument("--install-root", type=Path, required=True)
+    run.add_argument("--data-root", type=Path)
     run.add_argument("--state-dir", type=Path)
     run.add_argument("--config", type=Path)
     run.add_argument("--log", type=Path)
@@ -76,22 +81,20 @@ def parser() -> argparse.ArgumentParser:
 
 
 def log_failure(error: BaseException) -> None:
-    root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
-    write_log(root / "codex-wechat" / "logs" / "service.log",
-              f"{type(error).__name__}: {error}")
+    write_log(data_root() / "logs" / "service.log",
+              f"{type(error).__name__}: {error}",
+              keep=keep_from_config(data_root() / "config.json"))
 
 
-def log_release_failure(error: BaseException, path: Path) -> None:
-    write_log(path, f"release switch: {type(error).__name__}: {error}")
+def log_release_failure(error: BaseException, path: Path, keep: KeepSource) -> None:
+    write_log(path, f"release switch: {type(error).__name__}: {error}", keep=keep)
 
 
-def write_log(path: Path, message: str) -> None:
+def write_log(path: Path, message: str, *, keep: KeepSource = DEFAULT_KEEP) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(f"{stamp} bootstrap: {message}\n")
-    except OSError:
+        append_log(path, f"{stamp} bootstrap: {message}\n", keep)
+    except (OSError, ValueError):
         pass
 
 
@@ -99,10 +102,16 @@ def main(argv=None) -> int:
     args = parser().parse_args(argv)
     install_root = args.install_root.expanduser().resolve()
     os.environ["CODEX_WECHAT_INSTALL_ROOT"] = str(install_root)
-    root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "codex-wechat"
+    if args.data_root:
+        os.environ["CODEX_WECHAT_DATA_ROOT"] = str(args.data_root.expanduser().resolve())
+    root = data_root()
     state_dir = args.state_dir or root / ".state"
     config = args.config or root / "config.json"
     log_path = args.log or root / "logs" / "service.log"
+
+    def log_keep():
+        return keep_from_config(config)
+
     active = None
     last_failure = None
     while True:
@@ -118,13 +127,14 @@ def main(argv=None) -> int:
             # A broken pointer must not leave the task without a bridge.
             failure = f"{type(error).__name__}: {error}"
             if failure != last_failure:
-                log_release_failure(error, log_path)
+                log_release_failure(error, log_path, log_keep)
                 last_failure = failure
             release, python, module = active
         else:
             last_failure = None
             if active is not None and release != active[0]:
-                write_log(log_path, f"版本指针已变化，正在加载 {release.name}")
+                write_log(log_path, f"版本指针已变化，正在加载 {release.name}",
+                          keep=log_keep)
             active = (release, python, module)
         try:
             code = asyncio.run(module.supervise(

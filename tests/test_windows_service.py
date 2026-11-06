@@ -129,6 +129,20 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(windows_service.note_failure(old, 304.0))
         self.assertEqual(old, [304.0])
 
+    async def test_child_stdout_is_pumped_into_the_service_log(self):
+        class Stream:
+            def __init__(self):
+                self.chunks = [b"first\n", b"second\n", b""]
+
+            async def read(self, size):
+                return self.chunks.pop(0)
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "service.log"
+            await windows_service._pump_output(Stream(), path, 3)
+            self.assertEqual(path.read_text(encoding="utf-8"),
+                             "first\nsecond\n")
+
     def test_single_supervisor_per_state_directory(self):
         with tempfile.TemporaryDirectory() as temp:
             first = windows_service.SingleInstance(Path(temp))
@@ -150,13 +164,9 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             async def wait(self):
                 return 75
 
-        class Stream:
-            def close(self):
-                pass
-
         calls = []
         spawn = AsyncMock(side_effect=lambda *args, **kwargs: (
-            calls.append(1) or (Process(), Stream())
+            calls.append(1) or (Process(), None)
         ))
         sleep = AsyncMock()
 
@@ -175,10 +185,6 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("handing back to the bootstrap", log.read_text(encoding="utf-8"))
 
     async def test_supervisor_exits_without_restart_on_normal_or_config_exit(self):
-        class Stream:
-            def close(self):
-                pass
-
         for returncode in (0, 78):
             class Process:
                 pid = 1234
@@ -190,7 +196,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
                     return self.returncode
 
             spawn = AsyncMock(side_effect=lambda *args, returncode=returncode, **kwargs:
-                              (Process(returncode), Stream()))
+                              (Process(returncode), None))
             sleep = AsyncMock()
             with tempfile.TemporaryDirectory() as temp:
                 with patch.object(windows_service, "_spawn_bridge", spawn), \
@@ -210,11 +216,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             async def wait(self):
                 return 1
 
-        class Stream:
-            def close(self):
-                pass
-
-        spawn = AsyncMock(side_effect=lambda *args, **kwargs: (Process(), Stream()))
+        spawn = AsyncMock(side_effect=lambda *args, **kwargs: (Process(), None))
         with tempfile.TemporaryDirectory() as temp:
             with patch.object(windows_service, "_spawn_bridge", spawn), \
                  patch.object(windows_service.asyncio, "sleep", AsyncMock()):
@@ -243,10 +245,6 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             async def wait(self):
                 return 0
 
-        class Stream:
-            def close(self):
-                pass
-
         with tempfile.TemporaryDirectory() as temp:
             state = Path(temp) / ".state"
             state.mkdir()
@@ -257,10 +255,10 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
                 encoding="utf-8")
             seen = []
 
-            async def spawn(command, project, env, log_path):
+            async def spawn(command, project, env, log_path, keep):
                 # The new supervisor must not inherit the previous owner record.
                 seen.append(status_path.exists())
-                return Process(), Stream()
+                return Process(), None
 
             with patch.object(windows_service, "_spawn_bridge", spawn):
                 result = await windows_service.supervise(

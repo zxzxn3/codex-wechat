@@ -164,7 +164,8 @@ codex-wechat logs [--follow] [--service]
 ```
 
 `--service` 才读取平台服务控制台（Linux `journalctl`，Windows `service.log`）；它不是脱敏
-结构化日志。字段、脱敏边界和延迟阶段见
+结构化日志。Windows 的 `service.log` 同样按 5 MiB 轮转，并与 `bridge.jsonl` 共用
+`logs.keep`；Linux 控制台日志的保留由 journald 管理。字段、脱敏边界和延迟阶段见
 [ARCHITECTURE](docs/ARCHITECTURE.md#诊断与隐私)。
 
 ## 文档导航

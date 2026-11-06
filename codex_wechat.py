@@ -38,6 +38,7 @@ from errors import UserFacingError, WeChatAuthExpired, WeChatPollTimeout, backen
 from platform_support import IS_WINDOWS, data_root, is_elevated, root_override_enabled
 from diagnostics import configure as configure_diagnostics
 from diagnostics import error_fields, log_event, log_path
+from log_rotation import prune_rotations
 from log_viewer import show_logs
 from prompts import (render_ack, status_fields, duration_label)
 
@@ -98,10 +99,19 @@ def apply_log_retention(config_path):
                   if config_path.exists() else {})
         if not isinstance(config, dict):
             return
-        configure_diagnostics(backups=Logs.from_config(config.get("logs")).keep)
+        configure_log_retention(Logs.from_config(config.get("logs")).keep)
     except (OSError, ValueError):
         # Log viewing stays useful even when the rest of the config is broken.
         return
+
+
+def configure_log_retention(keep):
+    """Apply one keep value to structured and Windows console log families."""
+    configure_diagnostics(backups=keep)
+    try:
+        prune_rotations(log_path().with_name("service.log"), keep)
+    except (OSError, ValueError):
+        pass
 
 
 class Bridge:
@@ -160,6 +170,7 @@ class Bridge:
         self.ingress = Ingress(self)
         self.backend_session = BackendSession(self)
         self.note_reply_budget()
+        self._applied_log_keep = None
         self.apply_log_keep()
 
     @property
@@ -175,7 +186,11 @@ class Bridge:
         return self.settings.hot.source_hint
 
     def apply_log_keep(self):
-        configure_diagnostics(backups=self.settings.hot.logs.keep)
+        keep = self.settings.hot.logs.keep
+        if keep == self._applied_log_keep:
+            return
+        configure_log_retention(keep)
+        self._applied_log_keep = keep
 
     def reply_budget(self):
         """Replies one inbound message may spend before the bridge asks for more."""
@@ -917,7 +932,7 @@ async def main():
                 raise ValueError("配置必须是 JSON 对象。")
             if ensure_backend_config(config):
                 write_config(args.config, config)
-            configure_diagnostics(backups=Logs.from_config(config.get("logs")).keep)
+            configure_log_retention(Logs.from_config(config.get("logs")).keep)
             bridge = Bridge(store, account, config, config_path=args.config)
         except ValueError as error:
             raise ConfigurationError(str(error)) from None

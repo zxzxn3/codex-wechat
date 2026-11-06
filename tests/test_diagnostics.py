@@ -207,15 +207,18 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(fields, {"error_type": "CodedError", "error_code": "-32603"})
         self.assertNotIn("PROMPT_SENTINEL_7f935", json.dumps(fields))
 
-    def test_log_files_include_rotations_and_legacy_service_log(self):
+    def test_log_files_include_bridge_and_service_rotations(self):
         diagnostics.log_event("bridge.start", component="bridge")
         for number in range(1, diagnostics.BACKUP_COUNT + 1):
             self.path.with_name(f"{self.path.name}.{number}").write_text("", encoding="utf-8")
         (self.path.parent / "service.log").write_text("console\n", encoding="utf-8")
-        (self.path.parent / "service.log.1").write_text("old console\n", encoding="utf-8")
+        for number in range(1, diagnostics.BACKUP_COUNT + 1):
+            (self.path.parent / f"service.log.{number}").write_text(
+                "old console\n", encoding="utf-8")
         names = [path.name for path in _log_files(include_service=True)]
         self.assertEqual(names, ["bridge.jsonl", "bridge.jsonl.1", "bridge.jsonl.2",
-                                 "bridge.jsonl.3", "service.log", "service.log.1"])
+                                 "bridge.jsonl.3", "service.log", "service.log.1",
+                                 "service.log.2", "service.log.3"])
         self.assertEqual([path.name for path in _log_files()],
                          ["bridge.jsonl", "bridge.jsonl.1", "bridge.jsonl.2",
                           "bridge.jsonl.3"])

@@ -177,9 +177,12 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
                     "codex_wechat.py", "logs", "--config", str(config)]), \
                     patch.object(codex_wechat.os, "umask"), \
                     patch.object(codex_wechat, "configure_diagnostics") as configure, \
+                    patch.object(codex_wechat, "prune_rotations") as prune, \
                     patch.object(codex_wechat, "show_logs") as show:
                 await codex_wechat.main()
             configure.assert_called_once_with(backups=5)
+            self.assertEqual(prune.call_args.args[0].name, "service.log")
+            self.assertEqual(prune.call_args.args[1], 5)
             show.assert_called_once_with(False, False)
 
     def test_windows_entry_routes_stop_through_python(self):

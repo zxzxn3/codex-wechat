@@ -83,6 +83,7 @@ class AutostartScriptContractTests(unittest.TestCase):
             self.assertIn("$DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT)", text)
             self.assertIn("[IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)", text)
             self.assertIn("Join-Path $env:LOCALAPPDATA 'codex-wechat'", text)
+        self.assertIn("'--data-root'", self.install)
 
     def test_fast_path_requires_the_exact_stable_action(self):
         with tempfile.TemporaryDirectory() as directory:

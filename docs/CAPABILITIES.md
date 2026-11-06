@@ -34,7 +34,7 @@
 | 自启与崩溃恢复 | 安装时注册服务但不启用登录自启；`autostart true\|false` 只改登录触发器，不启动或停止当前实例；按平台原生机制，有界崩溃重试与配置错误退出 |
 | 命令与卸载 | 公开入口统一分流；Windows 原生任务操作只在内部 helper。`uninstall` 默认保留用户数据，显式 purge 才删除；卸载从稳定入口分派，不依赖 `current`；Linux 与 Windows 的 purge 都只删已知用户数据项 |
 | 权限边界 | root/管理员拒绝写操作；只读 `status`/`logs` 和显式卸载例外，容器可用 `CODEX_WECHAT_ALLOW_ROOT=1` |
-| 日志查看 | 结构化 `bridge.jsonl` 共用；`--service` 读取平台原生控制台来源：Windows `service.log`，Linux systemd journal |
+| 日志查看 | 结构化 `bridge.jsonl` 共用；`--service` 读取平台原生控制台来源：Windows `service.log`（按 5 MiB 和 `logs.keep` 轮转），Linux systemd journal |
 | 安装与更新 | 同一网络入口、菜单、dry-run、非交互、旧版本按自身清单校验、激活前能力检查 |
 | 首次扫码与组件 | 首次交互 start / service-start 初始化，安装不扫码；skill单独入口；原生QR优先、回退按需安装 |
 | 取消与资源清理 | 统一子进程收尾，重复取消不遗弃进程/管道；原子JSON临时文件失败后清理 |

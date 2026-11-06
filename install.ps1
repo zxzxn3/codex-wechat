@@ -93,7 +93,8 @@ if ($existing) {
 }
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $arguments = @((Quote-Arg $ServiceScript), 'supervise', '--install-root', (Quote-Arg $InstallRoot),
-    '--state-dir', (Quote-Arg $StateDir), '--config', (Quote-Arg $ConfigPath), '--log', (Quote-Arg $LogPath)) -join ' '
+    '--data-root', (Quote-Arg $DataRoot), '--state-dir', (Quote-Arg $StateDir),
+    '--config', (Quote-Arg $ConfigPath), '--log', (Quote-Arg $LogPath)) -join ' '
 $action = New-ScheduledTaskAction -Execute $Python -Argument $arguments -WorkingDirectory $InstallRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
 $trigger.Enabled = $autostart

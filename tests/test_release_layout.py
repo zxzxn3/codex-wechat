@@ -45,6 +45,28 @@ class ReleaseLayoutTests(unittest.TestCase):
                         with self.subTest(platform=name, file=str(relative), module=module):
                             self.assertIn(Path(module + ".py"), declared)
 
+    def test_stable_installer_nested_imports_are_in_both_payloads(self):
+        local_modules = {path.stem for path in ROOT.glob("*.py")}
+        tree = ast.parse((ROOT / "installer.py").read_text(encoding="utf-8"))
+        for name, stable in (
+                ("linux", installer.STABLE_LINUX_FILES),
+                ("windows", installer.STABLE_WINDOWS_FILES)):
+            declared = set(stable)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    module = node.module.split(".", 1)[0]
+                elif isinstance(node, ast.Import):
+                    module = next(
+                        (alias.name.split(".", 1)[0] for alias in node.names
+                         if alias.name.split(".", 1)[0] in local_modules),
+                        "",
+                    )
+                else:
+                    continue
+                if module in local_modules:
+                    with self.subTest(platform=name, module=module):
+                        self.assertIn(Path(module + ".py"), declared)
+
     def test_required_files_are_read_from_the_actual_payload(self):
         missing = sorted(str(path) for path in installer.REQUIRED_FILES
                          if not (ROOT / path).is_file())

@@ -57,7 +57,8 @@ PATH。未创建时使用完整 `codex-wechat.ps1` 路径，行为相同。`.ps1
 - 计划任务负责原生启动、停止和查询；`service_adapter.py` 负责 restart 编排、停止等待和
   稳定运行判断。`windows/task-service.ps1` 不实现 restart 状态机。
 - 首次自启关闭；`autostart true|false` 只切换登录触发器，不启动、停止或接管当前实例。
-- `logs --service` 读取 `logs/service.log`；结构化日志仍是 `logs/bridge.jsonl`。
+- `logs --service` 读取 `logs/service.log` 及其轮转版本；结构化日志仍是
+  `logs/bridge.jsonl`。
 
 Windows 的 supervisor 使用 Mutex、Job Object 和 owner token；服务子进程由 supervisor
 启动，并通过 `CODEX_WECHAT_SERVICE_CHILD=1` 区分于前台 `start`。退出码 `75` 表示用户请求
@@ -122,8 +123,9 @@ codex-wechat logs -Service
 ```
 
 结构化日志位于数据根目录的 `logs/bridge.jsonl`，按 5 MiB 轮转并默认保留 3 份；
-可用 `/settings logs.keep 1-100` 调整。`service.log`
-和 `logs -Service` 是未脱敏控制台输出，不要原样外传。
+可用 `/settings logs.keep 1-100` 调整。`service.log` 也按 5 MiB 轮转并共用
+`logs.keep`；`logs -Service` 会读取它的完整轮转链。`service.log` 是未脱敏控制台输出，
+不要原样外传。
 
 排查网络时先看 `dns_ms`、`curl_total_ms`、`timeout_stage` 和 `proxy_used`；字段定义见
 [ARCHITECTURE](ARCHITECTURE.md#诊断与隐私)。本机网络问题、历史验收和 WMI 组合缺口见

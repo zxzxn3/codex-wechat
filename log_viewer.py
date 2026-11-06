@@ -73,8 +73,9 @@ def _log_files(include_service=False):
     candidates.extend(primary.with_name(f"{primary.name}.{number}")
                       for number in range(1, backup_count() + 1))
     if include_service:
-        candidates.extend((primary.parent / "service.log",
-                           primary.parent / "service.log.1"))
+        candidates.append(primary.parent / "service.log")
+        candidates.extend(primary.parent / f"service.log.{number}"
+                          for number in range(1, backup_count() + 1))
     return [path for path in candidates if path.is_file()]
 
 

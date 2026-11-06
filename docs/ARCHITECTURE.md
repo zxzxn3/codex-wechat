@@ -126,12 +126,14 @@ Token优先原生事件，缺失时只读当前Thread.path的有界尾部，按�
 服务启动的桥接子进程由 systemd unit 或 Windows supervisor 设置
 `CODEX_WECHAT_SERVICE_CHILD=1`，因此不会被用户前台 `start` 的互斥检查误伤。
 `logs --service` 保持平台原生来源：Windows 为 `service.log`，Linux 为
-`journalctl --user -u codex-wechat`。
+`journalctl --user -u codex-wechat`。Windows 的 `service.log` 按 5 MiB 轮转，
+保留份数与 `bridge.jsonl` 共用 `logs.keep`；Linux 控制台日志的保留由 journald 管理。
 
 ## 诊断与隐私
 
 结构化诊断写入数据目录的`logs/bridge.jsonl`，按5 MiB轮转，旋转份数由 `logs.keep` 控制
-（1–100，默认 3，可 `/settings logs.keep` 热改；磁盘占用约为 5 MiB ×(keep+1)）。每行是一个
+（1–100，默认 3，可 `/settings logs.keep` 热改；结构化日志和 Windows 控制台日志各自约为
+5 MiB ×(keep+1)）。每行是一个
 JSON对象，用随机`request_id`关联由微信输入触发的接收、准备、提交、输出入队、发送和
 发送API。中途回复携带轮次关联的请求号；同一轮有多条输入时，通过`output.related`和
 输出组`job_id`关联，不表示每段输出由某条输入独立产生。连接/恢复等生命周期事件不强行

@@ -58,7 +58,7 @@ if [ -f "$CURRENT_FILE" ]; then
         exit 1
     fi
     export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
-    export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"
+    export CODEX_WECHAT_DATA_ROOT="${CODEX_WECHAT_DATA_ROOT:-$INSTALL_ROOT}"
 fi
 export PATH="$HOME/.local/bin:$PATH"
 PYTHON=python3

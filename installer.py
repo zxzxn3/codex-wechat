@@ -87,6 +87,7 @@ REQUIRED_FILES = {
     Path("install.sh"),
     Path("install.ps1"),
     Path("installer.py"),
+    Path("platform_support.py"),
     Path("requirements.txt"),
     Path("requirements-windows.txt"),
     Path("release.py"),
@@ -110,6 +111,9 @@ STABLE_LINUX_FILES = (
 )
 STABLE_WINDOWS_FILES = (
     Path("native_codex.py"),
+    Path("platform_support.py"),
+    Path("log_rotation.py"),
+    Path("storage.py"),
     Path("codex-desktop.ps1"),
     Path("installer.py"),
     Path("bootstrap_supervisor.py"),
@@ -624,6 +628,31 @@ def _venv_python(root: Path) -> Path:
     return root / ".venv/bin/python"
 
 
+RUNTIME_CHECK_TIMEOUT_SECONDS = 30
+
+
+def release_runtime_ready(root: Path) -> bool:
+    """Check the release-local environment, not only the stable bootstrap."""
+    python = _venv_python(root)
+    if not python.is_file():
+        return False
+    try:
+        result = subprocess.run(
+            [str(python), "-c", "import codex_wechat, desktop"],
+            cwd=root, capture_output=True, text=True,
+            timeout=RUNTIME_CHECK_TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def ensure_release_runtime(root: Path) -> None:
+    if release_runtime_ready(root):
+        return
+    detail(f"修复版本 Python 环境: {root}")
+    prepare_runtime(root)
+
+
 def prepare_runtime(root: Path) -> None:
     """Create a release-local environment and verify its Python imports."""
     python = _venv_python(root)
@@ -719,6 +748,7 @@ def install_release(
     if final.exists():
         if not release_matches(target, identifier, files):
             raise ValueError(f"现有版本内容与标识不一致: {final}")
+        ensure_release_runtime(final)
         return final, False
     staging = _staging_directory(releases, ".staging-")
     try:
@@ -1063,6 +1093,8 @@ def _common_install(
             # `uninstall` removes the platform service but keeps the release, so
             # the same short-circuit would otherwise leave a command that cannot
             # start anything. Both platform steps are idempotent.
+            with InstallLock(target):
+                ensure_release_runtime(target / RELEASES_DIR / identifier)
             configure_platform_service(target / "releases" / identifier, target,
                                        update=update)
             print(f"版本 {identifier} 已经安装，没有修改。")

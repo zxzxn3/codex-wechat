@@ -6,6 +6,7 @@ import os
 import sys
 from prompts import validate_prompt_overrides
 from diagnostics import error_fields, log_event
+from log_rotation import DEFAULT_KEEP, KEEP_MAX, KEEP_MIN, normalize_keep
 
 DEFAULT_SOURCE_HINT = "[User from WeChat.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
@@ -27,9 +28,9 @@ SLICING_TARGET_MIN = 80
 SLICING_TARGET_MAX = 20000
 TEXT_LIMIT_BYTES = 3000
 SOURCE_HINT_LIMIT_BYTES = 4000
-LOG_KEEP_MIN = 1
-LOG_KEEP_MAX = 100
-DEFAULT_LOG_KEEP = 3
+LOG_KEEP_MIN = KEEP_MIN
+LOG_KEEP_MAX = KEEP_MAX
+DEFAULT_LOG_KEEP = DEFAULT_KEEP
 QUOTA_WINDOWS = ("primary", "secondary")
 DEFAULT_QUOTA_THRESHOLDS = {
     "primary": (50, 25, 10, 5, 1),
@@ -123,11 +124,7 @@ class Logs:
         value = {} if value is None else value
         if not isinstance(value, dict) or set(value) - {"keep"}:
             raise ValueError("logs 仅支持 keep")
-        keep = value.get("keep", DEFAULT_LOG_KEEP)
-        if type(keep) is not int or not LOG_KEEP_MIN <= keep <= LOG_KEEP_MAX:
-            raise ValueError(
-                f"logs.keep 必须是 {LOG_KEEP_MIN}–{LOG_KEEP_MAX} 的整数")
-        return cls(keep)
+        return cls(normalize_keep(value.get("keep", DEFAULT_LOG_KEEP)))
 
 
 @dataclass(frozen=True)
