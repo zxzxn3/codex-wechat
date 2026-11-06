@@ -24,6 +24,7 @@ def active_work(state):
         state.get("currentInput")
         or state.get("running")
         or state.get("restartRequested")
+        or state.get("pendingControls")
     )
 
 

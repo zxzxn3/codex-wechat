@@ -205,7 +205,9 @@ def _clean_field(name, value):
         return None
     if name not in _TEXT_FIELDS:
         return None
-    if name in {"backend_version", "reason"} and _PATH_LIKE.search(value):
+    if name == "backend_version" and _PATH_LIKE.search(value):
+        return None
+    if name == "reason" and re.search(r"[/\\]", value):
         return None
     value = _clean_text(value)
     return value if re.fullmatch(_TEXT_FIELDS[name], value) else None

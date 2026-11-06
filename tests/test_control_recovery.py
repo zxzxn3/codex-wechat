@@ -3,8 +3,10 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from codex_wechat import Bridge
+from commands import command_restart
 from storage import Store
 
 
@@ -93,4 +95,93 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        store.close()
+
+    async def test_cancelling_a_running_control_keeps_its_recovery_marker(self):
+        store = Store(self.root / "state")
+        bridge = Bridge(store, self.account, self.config)
+        control = {
+            "id": "cancel-control",
+            "text": "/help",
+            "received": {"request_id": "cancel-control", "controlId": "cancel-control"},
+            "state": "queued",
+            "lane": "local",
+        }
+        bridge.state["pendingControls"] = [control]
+        self.assertTrue(bridge.enqueue_control(control))
+        entered = asyncio.Event()
+
+        async def block(*args, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+        bridge.control = block
+        task = asyncio.create_task(bridge.control_worker("local"))
+        await entered.wait()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        self.assertEqual(bridge.state["pendingControls"][0]["state"], "running")
+        store.close()
+
+    async def test_restore_accepts_every_pending_control_in_one_lane(self):
+        store = Store(self.root / "state")
+        bridge = Bridge(store, self.account, self.config)
+        bridge.state["pendingControls"] = [{
+            "id": f"control-{index}",
+            "text": "/help",
+            "received": {"controlId": f"control-{index}"},
+            "state": "queued",
+            "lane": "local",
+        } for index in range(21)]
+        bridge.restore_controls()
+        self.assertEqual(bridge.controls["local"].qsize(), 21)
+        self.assertEqual(len(bridge.state["pendingControls"]), 21)
+        store.close()
+
+    async def test_restart_keeps_a_recovery_marker_until_the_service_restarts(self):
+        store = Store(self.root / "state")
+        bridge = Bridge(store, self.account, self.config)
+        bridge.state["pendingControls"] = [{
+            "id": "restart-control",
+            "text": "/restart",
+            "received": {"controlId": "restart-control"},
+            "state": "running",
+            "lane": "local",
+        }]
+        async def restart_then_interrupt():
+            bridge.state["restartRequested"] = True
+            bridge.save()
+            raise KeyboardInterrupt
+
+        with patch.object(bridge, "restart_service", restart_then_interrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                await command_restart(
+                    bridge, "/restart", "",
+                    {"controlId": "restart-control"},
+                )
+        self.assertEqual(bridge.state["pendingControls"][0]["state"], "restarting")
+        store.close()
+
+        store = Store(self.root / "state")
+        restarted = Bridge(store, self.account, self.config)
+        self.assertTrue(restarted.confirm_restart())
+        self.assertEqual(restarted.state["pendingControls"], [])
+        store.close()
+
+    async def test_an_unconfirmed_restart_is_reported_instead_of_replayed(self):
+        store = Store(self.root / "state")
+        store.save("bridge", {
+            "context": "ctx",
+            "pendingControls": [{
+                "id": "restart-control",
+                "text": "/restart",
+                "received": {"controlId": "restart-control"},
+                "state": "restarting",
+                "lane": "local",
+            }],
+        })
+        bridge = Bridge(store, self.account, self.config)
+        bridge.restore_controls()
+        self.assertTrue(bridge.controls["local"].empty())
+        self.assertIn("可能未完成", bridge.state["outbox"][-1]["text"])
         store.close()

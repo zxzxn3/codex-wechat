@@ -25,7 +25,7 @@ from backend_session import BackendSession
 from storage import Store
 from wechat import WeChat, login
 from commands import dispatch, notice, parse_control
-from command_specs import CONTROL_LANES
+from command_specs import CONTROL_LANES, PENDING_CONTROL_LIMIT
 from configuration import (ConfigLoader, ConfigurationError, HotSettings, Logs,
                            REPLY_BUDGET_CEILING, write_config)
 from prompts import (prompt_text)
@@ -142,7 +142,9 @@ class Bridge:
                              next(iter(self.backend_configs)))
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
-        self.controls = {lane: asyncio.Queue(maxsize=20) for lane in CONTROL_LANES}
+        self.controls = {
+            lane: asyncio.Queue(maxsize=PENDING_CONTROL_LIMIT) for lane in CONTROL_LANES
+        }
         self.connection_lock = asyncio.Lock()
         self.input_paused = False
         self.backend_recovering = False
@@ -515,12 +517,18 @@ class Bridge:
             return False
         return True
 
-    def mark_control_running(self, control_id):
+    def mark_control_state(self, control_id, state):
         control = self.pending_control(control_id)
         if control is None:
             return
-        control["state"] = "running"
+        control["state"] = state
         self.save()
+
+    def mark_control_running(self, control_id):
+        self.mark_control_state(control_id, "running")
+
+    def mark_control_restarting(self, control_id):
+        self.mark_control_state(control_id, "restarting")
 
     def finish_control(self, control_id):
         if not control_id:
@@ -539,13 +547,13 @@ class Bridge:
         for control in pending:
             if not isinstance(control, dict):
                 continue
-            if control.get("state") == "running":
+            if control.get("state") != "queued":
                 interrupted += 1
                 continue
             if self.enqueue_control(control):
                 kept.append(control)
             else:
-                kept.append(control)
+                interrupted += 1
         if kept != pending:
             self.state["pendingControls"] = kept
             self.save()
@@ -553,6 +561,17 @@ class Bridge:
             self.reply(self.prompt("CONTROL_INTERRUPTED", {"count": interrupted}))
             log_event("control.interrupted", level="warning", component="input",
                       count=interrupted)
+
+    def confirm_restart(self):
+        if not self.state.pop("restartRequested", False):
+            return False
+        pending = self.state.get("pendingControls", [])
+        self.state["pendingControls"] = [
+            control for control in pending
+            if not (isinstance(control, dict) and control.get("state") == "restarting")
+        ]
+        self.save()
+        return True
 
     async def receive(self, batch):
         await self.ingress.receive(batch)
@@ -603,16 +622,19 @@ class Bridge:
             control_id = received.get("controlId") if isinstance(received, dict) else None
             started = time.perf_counter()
             self.mark_control_running(control_id)
+            completed = False
             try:
                 if lane == "urgent":
                     await asyncio.wait_for(self.control(text, received=received), 5)
                 else:
                     await self.control(text, received=received)
+                completed = True
             except TimeoutError:
                 self.reply(self.prompt("CONTROL_TIMEOUT"))
                 log_event("control.timeout", level="warning", component="input",
                           kind=lane, request_id=received.get("request_id"), command=received.get("command"),
                           duration_ms=(time.perf_counter() - started) * 1000)
+                completed = True
             except Exception as error:
                 self.reply(self.prompt("CONTROL_FAILED"))
                 log_event("control.failed", level="warning", component="input",
@@ -620,8 +642,10 @@ class Bridge:
                           duration_ms=(time.perf_counter() - started) * 1000,
                           **error_fields(error))
                 print(f"控制失败：{type(error).__name__}", file=sys.stderr, flush=True)
+                completed = True
             finally:
-                self.finish_control(control_id)
+                if completed:
+                    self.finish_control(control_id)
                 queue.task_done()
                 self.wake.set()
 
@@ -675,7 +699,7 @@ class Bridge:
     async def run(self):
         tasks = []
         try:
-            if self.state.pop("restartRequested", False):
+            if self.confirm_restart():
                 self.reply(self.prompt("RESTART_READY"))
             self.recover_inputs()
             self.restore_controls()

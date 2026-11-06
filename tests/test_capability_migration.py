@@ -33,6 +33,7 @@ class ConnectionCapabilities(unittest.TestCase):
     def test_queue_alone_does_not_require_forced_rebind(self):
         self.assertFalse(rebind.active_work({'inbox': [{'text': 'later'}]}))
         self.assertTrue(rebind.active_work({'currentInput': {'phase': 'accepted'}}))
+        self.assertTrue(rebind.active_work({'pendingControls': [{'id': 'control'}]}))
 
 
 class RuntimeCapabilities(unittest.IsolatedAsyncioTestCase):

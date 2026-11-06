@@ -103,6 +103,7 @@ def prepare_identity_change(bridge_state, account):
     if records:
         bridge_state["inputRecords"] = records[-20:]
     bridge_state["inbox"] = []
+    bridge_state["pendingControls"] = []
 
     bridge_state["cursor"] = ""
     bridge_state["seen"] = []
@@ -132,6 +133,11 @@ def prepare_rebind(bridge_state, previous, account):
         # Uploaded references and retry budgets belong to the old connection.
         entry.pop("item", None)
         entry.pop("attempts", None)
+    for control in bridge_state.get("pendingControls", []):
+        received = control.get("received") if isinstance(control, dict) else None
+        media = received.get("media") if isinstance(received, dict) else None
+        if isinstance(media, dict):
+            media["context"] = ""
     bridge_state["wechatIdentity"] = identity(account)
     return {"inputs": 0, "outbox": 0}
 
@@ -142,3 +148,8 @@ def accept_context(bridge_state, context):
     if bridge_state.pop("wechatContextPending", False):
         for entry in bridge_state.get("outbox", []):
             entry["context"] = context
+        for control in bridge_state.get("pendingControls", []):
+            received = control.get("received") if isinstance(control, dict) else None
+            media = received.get("media") if isinstance(received, dict) else None
+            if isinstance(media, dict):
+                media["context"] = context

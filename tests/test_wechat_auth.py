@@ -67,6 +67,7 @@ class WeChatAuthTests(unittest.TestCase):
             "completionNotice": "old done",
             "sessionChoices": ["old-thread"],
             "deliveryPaused": True,
+            "pendingControls": [{"id": "old-control", "state": "queued"}],
         }
         counts = wechat_auth.prepare_identity_change(
             state, {"bot": "new-bot", "user": "new-user"}
@@ -85,6 +86,7 @@ class WeChatAuthTests(unittest.TestCase):
         self.assertNotIn("currentInput", state)
         self.assertEqual(state["inbox"], [])
         self.assertEqual(state["outbox"], [])
+        self.assertEqual(state["pendingControls"], [])
         self.assertEqual([item["id"] for item in state["inputRecords"]],
                          ["current", "queued"])
         self.assertTrue(all(item["phase"] == wechat_auth.IDENTITY_CHANGED
@@ -93,6 +95,23 @@ class WeChatAuthTests(unittest.TestCase):
                          ["historical", "unsent"])
         self.assertEqual(state["failedOutbox"][-1]["user"], "old-user")
         self.assertEqual(state["wechatAuth"]["user"], "new-user")
+
+    def test_same_user_rebind_refreshes_pending_media_context(self):
+        state = {
+            "context": "old",
+            "pendingControls": [{
+                "id": "get-control",
+                "state": "queued",
+                "received": {"media": {"context": "old", "cwd": "/work"}},
+            }],
+        }
+        wechat_auth.prepare_rebind(
+            state, {"user": "u", "bot": "old"}, {"user": "u", "bot": "new"})
+        media = state["pendingControls"][0]["received"]["media"]
+        self.assertEqual(media["context"], "")
+        self.assertEqual(media["cwd"], "/work")
+        wechat_auth.accept_context(state, "fresh")
+        self.assertEqual(media["context"], "fresh")
 
 
 if __name__ == "__main__":

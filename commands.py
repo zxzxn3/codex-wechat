@@ -855,7 +855,7 @@ async def command_restart(bridge, command, argument, received=None):
         bridge.reply(bridge.prompt("RESTART_USAGE"))
         return
     try:
-        bridge.finish_control((received or {}).get("controlId"))
+        bridge.mark_control_restarting((received or {}).get("controlId"))
         await bridge.restart_service()
     except UserFacingError as error:
         bridge.reply(bridge.prompt("RESTART_REJECTED", {"reason": str(error)}))

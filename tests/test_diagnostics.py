@@ -101,15 +101,15 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertNotIn("backend_version", records[0])
 
     def test_reason_rejects_absolute_paths_without_dropping_safe_values(self):
-        diagnostics.log_event(
-            "backend.app_attach_failed", component="backend",
-            reason="/srv/customer/acme/private")
+        for value in ("/srv/customer/acme/private", "err:/srv/x", "file:///srv/x"):
+            diagnostics.log_event(
+                "backend.app_attach_failed", component="backend", reason=value)
         diagnostics.log_event(
             "output.send_paused", component="output",
             reason="not_acknowledged")
         records = self.records()
-        self.assertNotIn("reason", records[0])
-        self.assertEqual(records[1]["reason"], "not_acknowledged")
+        self.assertTrue(all("reason" not in record for record in records[:-1]))
+        self.assertEqual(records[-1]["reason"], "not_acknowledged")
 
     def test_request_id_correlates_events_and_unknown_fields_are_dropped(self):
         with diagnostics.request_context("req-abc123"):
