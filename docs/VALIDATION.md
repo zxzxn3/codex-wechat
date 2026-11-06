@@ -6,7 +6,7 @@ Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据
 
 | 范围 | 当前证据 | 状态 |
 |---|---|---|
-| 离线单测 | `python -m unittest discover -s tests`：Linux 930 项、909 通过、21 跳过、0 失败（2026-11-07 当前树）；Windows 侧曾有 894 项、875 通过、19 跳过、0 失败的报告，但未记录可核对的提交号，不能作为当前 HEAD 的独立证据；新增 `codex_wechat/` 包化后的 stable payload/import 烟测、动态 release 包加载、数据根跨实现契约矩阵、Bridge 状态不变量与保存边界故障注入、平台用户目录回退和服务状态矩阵；套件把诊断写入临时 sink，不污染数据根下的 `logs/bridge.jsonl` | 已验证 |
+| 离线单测 | `python -m unittest discover -s tests`：Linux 934 项、913 通过、21 跳过、0 失败（2026-11-07 当前树）；Windows 侧曾有 894 项、875 通过、19 跳过、0 失败的报告，但未记录可核对的提交号，不能作为当前 HEAD 的独立证据；新增 `codex_wechat/` 包化后的 stable payload/import 烟测、动态 release 包加载、数据根跨实现契约矩阵、Bridge 状态不变量与保存边界故障注入、平台用户目录回退和服务状态矩阵；套件把诊断写入临时 sink，不污染数据根下的 `logs/bridge.jsonl` | 已验证 |
 | 静态检查 | ruff、shellcheck、`py_compile`、pyright（0 errors、5 个环境导入 warning） | 已验证 |
 | Windows 服务基础生命周期 | PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、通知 | 历史证据，无当前提交号；不作为当前 HEAD 证据 |
 | Windows App IPC | writer 冲突连接、身份核对、无 App / App 已持有 / App 后启动三种命名管道状态 | 历史证据，无当前提交号；仍受 App 版本影响 |
@@ -40,7 +40,7 @@ Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据
   2026-11-06 之后新增的能力目前**只有单测覆盖**，尚未真机复测：每条入站约 10 条的回复额度
   （`sending.replyBudget` 默认 9、`/` 续传提示；额度按**服务端应答次数**计，故障期的真实表现
   未实测）、`logs.keep` 热改、`backend.version` 版本记录、
-  新增的短指令（`/n` `/c` `/u` `/b` `/r` `/d` `/g`）、以及发送与请求日志的降噪改动；
+  新增的短指令（`/n` `/c` `/u` `/b` `/r` `/d` `/g`；`/d` 为 `/discard`）、以及发送与请求日志的降噪改动；
   新 bot（`bd29824c4f7d`）上已复测文本、文件、语音；图片、引用、原生提问、审批未逐项复测，
   2026-11-06 决定暂不测（模型配额原因），旧 bot 的历史窗口结论仍然有效；
   2026-11-06 11:49–12:01 CST 的再次静默失败时间线、统计和脱敏事件见
