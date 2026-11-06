@@ -247,7 +247,12 @@ if ($task) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
     Write-Host "已移除计划任务: $TaskName"
 }
-Remove-Item -LiteralPath (Join-Path $InstallRoot '.data-root') -Force -ErrorAction SilentlyContinue
+if ($PurgeData) {
+    # Only a purge forgets the root: the marker is the single pointer back to the
+    # data a data-preserving uninstall deliberately keeps, and a reinstall (which
+    # resolves to `update` because the install tree stays) reads it.
+    Remove-Item -LiteralPath (Join-Path $InstallRoot '.data-root') -Force -ErrorAction SilentlyContinue
+}
 $Shim = Join-Path $env:USERPROFILE '.local\bin\codex-wechat.cmd'
 if (Test-Path -LiteralPath $Shim -PathType Leaf) {
     $shimText = Get-Content -LiteralPath $Shim -Raw -Encoding UTF8 -ErrorAction SilentlyContinue

@@ -128,6 +128,10 @@ Linux stable `uninstall.py` 与 Windows stable `uninstall.ps1` 是内部实现�
 持有状态锁时，卸载会拒绝继续；先按 `Ctrl+C` 退出。自定义数据目录通过
 `CODEX_WECHAT_DATA_ROOT` 指定，Windows 内部 helper 另外接受 `-DataRoot`。
 
+不带 purge 的卸载会保留 `.data-root`：安装树仍在（卸载只移除服务与入口），所以重新运行安装器
+会解析为 update，并继续使用原来的数据根。想让重装改判到平台默认目录，删除该标记或显式设置
+`CODEX_WECHAT_DATA_ROOT` 即可。
+
 ## 目录和配置
 
 Linux 默认安装根目录为 `~/.local/share/codex-wechat`；默认用户数据根由

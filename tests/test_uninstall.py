@@ -22,7 +22,30 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             await uninstall.uninstall()
         service.assert_awaited_once_with()
         command.assert_called_once_with()
-        marker.assert_called_once_with()
+        # The marker is the only pointer to preserved data: a reinstall resolves
+        # the same root only if it survives a data-preserving uninstall.
+        marker.assert_not_called()
+
+    async def test_a_data_preserving_uninstall_keeps_the_marker_and_purge_drops_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            custom = Path(directory) / "custom"
+            install.mkdir()
+            custom.mkdir()
+            marker = install / uninstall.DATA_ROOT_FILE
+            marker.write_text(str(custom) + "\n", encoding="utf-8")
+            with patch.object(uninstall, "IS_WINDOWS", False), \
+                    patch.object(uninstall, "INSTALL_ROOT", install), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
+                    patch.object(uninstall, "_require_no_bridge", Mock()), \
+                    patch.object(uninstall, "_linux_command_removal", Mock()), \
+                    patch.dict(uninstall.os.environ,
+                               {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                await uninstall.uninstall()
+                self.assertTrue(marker.is_file())
+                await uninstall.uninstall(purge=True)
+                self.assertFalse(marker.exists())
 
     async def test_data_root_is_validated_before_service_removal(self):
         events = []

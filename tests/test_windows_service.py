@@ -365,6 +365,13 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             "$RequestedDataRoot = if (-not [string]::IsNullOrWhiteSpace($DataRoot))", text)
 
+    def test_uninstall_only_forgets_the_data_root_when_purging(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        guard = text.index("if ($PurgeData) {\n    # Only a purge forgets the root")
+        removal = text.index("Remove-Item -LiteralPath (Join-Path $InstallRoot '.data-root')")
+        self.assertGreater(removal, guard)
+        self.assertEqual(text.count("'.data-root') -Force"), 1)
+
     def test_uninstall_checks_exact_task_ownership_before_stopping(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("ExpectedActionExecutables", text)

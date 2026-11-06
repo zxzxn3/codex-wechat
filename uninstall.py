@@ -165,10 +165,13 @@ async def uninstall(*, purge: bool = False) -> None:
     _linux_command_removal()
     if purge:
         _purge_linux_data(root)
-    _remove_data_root_marker()
-    if not purge:
+        # Only a purge forgets the root: the marker is the single pointer back to
+        # data that a data-preserving uninstall deliberately keeps.
+        _remove_data_root_marker()
+    else:
         print(f"用户数据已保留: {root}")
-        print("如需同时删除配置、登录和待办，请使用 --purge-data。")
+        print("重新运行安装器会继续使用这个数据根；如需同时删除配置、登录和待办，"
+              "请使用 --purge-data。")
 
 
 def main(argv=None) -> int:
