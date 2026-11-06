@@ -41,6 +41,12 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn("CODEX_WECHAT_ALLOW_ROOT", text)
         self.assertIn("不要使用 root/sudo", text)
 
+    def test_public_entry_does_not_expose_the_internal_cli(self):
+        text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
+        self.assertNotIn('exec "$INSTALL_ROOT/codex-desktop"', text)
+        self.assertNotIn('ACTION="$1"; shift', text)
+        self.assertTrue((ROOT / "codex-desktop").is_file())
+
     def test_windows_public_entry_is_a_python_router(self):
         text = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
         self.assertIn("@($Agent, $Command", text)

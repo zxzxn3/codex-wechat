@@ -1,4 +1,4 @@
-"""CLI access and shared runtime preparation; does not launch the App."""
+"""Internal CLI access and shared runtime preparation; does not launch the App."""
 import argparse
 import asyncio
 import json
@@ -79,8 +79,7 @@ def configure(name, config, path, *, url=None, executable=None, native=False):
         config.setdefault("backends", {})[name] = candidate
         _atomic_write(path, (json.dumps(config, ensure_ascii=False, indent=2) + "\n").encode(),
                       0o600, root=target)
-    entry = "codex-desktop.ps1 cli" if IS_WINDOWS else "codex-wechat cli"
-    print(f"共享后台已配置；CLI 可通过 {entry} 进入，App 请正常打开。")
+    print("共享后台已配置；App 请正常打开。")
     print("若更改了后端连接配置，请重新启动微信桥。")
     return 0
 
