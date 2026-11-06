@@ -7,28 +7,35 @@
 
 - Python 3.11+。
 - 已安装并登录 Codex；独立 CLI 或已注册的 App 内置 Codex 均可。
-- `curl`。缺少它不妨碍安装，但网络测速和部分网络操作不可用。
+- Git；私有安装入口用它认证 clone，运行时网络测速和部分网络操作仍使用 `curl`。
+- Linux 一行安装还需要 `curl`；Windows 一行安装使用 PowerShell `Invoke-WebRequest`。
 - Linux 可选 systemd 用户服务；没有 `systemctl --user` 时安装器会跳过服务注册，仍可使用前台
   `start`。
 - 二维码优先使用 `qrencode`；缺少时按安装器提示安装轻量 Python 回退。
 
 ## 首次安装
 
-公开仓库地址尚未确定。网络安装命令中的 `OWNER/REPO` 需要替换为实际仓库。
+仓库保持私有。fine-grained PAT 只选择 `zxzxn3/codex-wechat`，Repository permissions
+仅授予 `Contents: Read-only`；`Metadata: Read-only` 由 GitHub 保留。将下面的
+`github_pat_REPLACE_ME` 替换为实际 PAT 后运行对应平台命令。
 
 Linux：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.sh | bash -s -- --repo https://github.com/OWNER/REPO --ref main'
+CODEX_WECHAT_TOKEN='github_pat_REPLACE_ME' bash -o pipefail -c 'curl -fsSL --proto "=https" --tlsv1.2 -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
 ```
 
 Windows PowerShell：
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing https://raw.githubusercontent.com/OWNER/REPO/main/bootstrap.ps1))) -Repo https://github.com/OWNER/REPO -Ref main
+$env:CODEX_WECHAT_TOKEN='github_pat_REPLACE_ME'; try { Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content) } finally { Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue }
 ```
 
-没有公开仓库时，将完整源码目录或源码压缩包交给使用者，在源码目录运行本地入口：
+入口先从 GitHub Contents API 取得同仓库中的 bootstrap。bootstrap 使用 PAT 认证 clone
+到临时目录，再调用本地安装器；token 不写入 Git remote、`.update-source.json`、配置或日志。
+重跑同一入口即可安装或更新。
+
+也可以直接将完整源码目录或源码压缩包交给使用者，在源码目录运行本地入口：
 
 ```bash
 # Linux

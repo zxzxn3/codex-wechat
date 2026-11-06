@@ -1,7 +1,7 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$Repo,
+    [string]$Repo = 'https://github.com/zxzxn3/codex-wechat',
     [string]$Ref = 'main',
     [string]$Dir,
     [switch]$DryRun,
@@ -18,10 +18,13 @@ if ($RepoUri.Scheme -ne 'https' -or $RepoUri.Authority -ne 'github.com' -or $Rep
         $RepoUri.Query -or $RepoUri.Fragment -or
         $RepositoryPath -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*$' -or
         -not $Ref -or $Ref.StartsWith('-') -or $Ref -match '[\s\x00-\x1f]') {
-    throw 'A public GitHub HTTPS repository and a branch or tag are required.'
+    throw 'A GitHub HTTPS repository and a branch or tag are required.'
 }
 if ($DryRun) {
     Write-Host "Dry run: no download or file changes. Source: $Repo ($Ref)"
+    if ($env:CODEX_WECHAT_TOKEN) {
+        Write-Host 'The private repository would be authenticated with CODEX_WECHAT_TOKEN.'
+    }
     Write-Host 'Target directory checks are bypassed because of -DryRun; this is not an environment preflight.'
     Write-Host '1. Install / Update  2. Components  0. Exit'
     Write-Host 'The installer will show the plan; no login, new autostart or service start.'
@@ -48,15 +51,47 @@ New-Item -ItemType Directory -Path $TaskTemporary | Out-Null
 try {
     $Installer = Join-Path $TaskTemporary 'installer.py'
     $Release = Join-Path $TaskTemporary 'release.py'
-    $InstallerBaseUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' + [Uri]::EscapeDataString($Ref)
-    $InstallerUri = $InstallerBaseUri + '/installer.py'
-    $ReleaseUri = $InstallerBaseUri + '/release.py'
-    Invoke-WebRequest -UseBasicParsing -Uri $InstallerUri -OutFile $Installer -TimeoutSec 120
-    Invoke-WebRequest -UseBasicParsing -Uri $ReleaseUri -OutFile $Release -TimeoutSec 120
-    $InstallerArguments = @($Installer, 'bootstrap', '--repo', $Repo, '--ref', $Ref)
+    $PrivateSource = -not [string]::IsNullOrWhiteSpace($env:CODEX_WECHAT_TOKEN)
+    if ($PrivateSource) {
+        if ($env:CODEX_WECHAT_TOKEN -notmatch '^[A-Za-z0-9_]+$') {
+            throw 'CODEX_WECHAT_TOKEN has an invalid format.'
+        }
+        $Source = Join-Path $TaskTemporary 'source'
+        $Auth = [Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes("x-access-token:$env:CODEX_WECHAT_TOKEN"))
+        $PreviousGitPrompt = $env:GIT_TERMINAL_PROMPT
+        try {
+            $env:GIT_TERMINAL_PROMPT = '0'
+            & git.exe -c credential.helper= -c "http.extraHeader=Authorization: Basic $Auth" `
+                clone --depth 1 --single-branch --branch $Ref -- $Repo $Source
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Private repository clone failed. Check that CODEX_WECHAT_TOKEN is valid and has Contents: Read-only access.'
+            }
+        } finally {
+            if ($null -eq $PreviousGitPrompt) {
+                Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
+            } else {
+                $env:GIT_TERMINAL_PROMPT = $PreviousGitPrompt
+            }
+            Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue
+            Remove-Variable Auth -ErrorAction SilentlyContinue
+        }
+        $Installer = Join-Path $Source 'installer.py'
+        $InstallerArguments = @($Installer, 'menu')
+    } else {
+        $InstallerBaseUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' + [Uri]::EscapeDataString($Ref)
+        $InstallerUri = $InstallerBaseUri + '/installer.py'
+        $ReleaseUri = $InstallerBaseUri + '/release.py'
+        Invoke-WebRequest -UseBasicParsing -Uri $InstallerUri -OutFile $Installer -TimeoutSec 120
+        Invoke-WebRequest -UseBasicParsing -Uri $ReleaseUri -OutFile $Release -TimeoutSec 120
+        $InstallerArguments = @($Installer, 'bootstrap', '--repo', $Repo, '--ref', $Ref)
+    }
     if ($Component) {
         $InstallerArguments[1] = 'components'
         $InstallerArguments += @('--component', $Component)
+        if (-not $PrivateSource) {
+            $InstallerArguments += @('--repo', $Repo, '--ref', $Ref)
+        }
     }
     if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }

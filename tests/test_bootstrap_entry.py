@@ -1,5 +1,7 @@
 """One-line entry chooses install/update without contacting a real repository."""
+import base64
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -113,3 +115,72 @@ class BootstrapEntryTests(unittest.TestCase):
         powershell = (Path(__file__).resolve().parents[1] / "bootstrap.ps1").read_text(encoding="utf-8")
         self.assertIn("release.py", shell)
         self.assertIn("release.py", powershell)
+
+    @unittest.skipUnless(shutil.which("bash"), "Bash unavailable")
+    def test_private_shell_entry_authenticates_clone_and_clears_the_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binaries = root / "bin"
+            binaries.mkdir()
+            git_arguments = root / "git-arguments"
+            installer_arguments = root / "installer-arguments"
+            fake_installer = root / "fake-installer.py"
+            fake_installer.write_text(
+                "import json, os, sys\n"
+                "with open(os.environ['FAKE_INSTALLER_ARGS'], 'w', encoding='utf-8') as stream:\n"
+                "    json.dump({'args': sys.argv[1:], "
+                "'token': os.environ.get('CODEX_WECHAT_TOKEN')}, stream)\n",
+                encoding="utf-8")
+            fake_git = binaries / "git"
+            fake_git.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "printf '%s\\n' \"$@\" > \"$FAKE_GIT_ARGS\"\n"
+                "destination=''\n"
+                "for argument in \"$@\"; do destination=$argument; done\n"
+                "mkdir -p \"$destination\"\n"
+                "cp \"$FAKE_INSTALLER\" \"$destination/installer.py\"\n",
+                encoding="utf-8")
+            fake_git.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = str(binaries) + os.pathsep + environment["PATH"]
+            environment["CODEX_WECHAT_TOKEN"] = "github_pat_test"
+            environment["FAKE_GIT_ARGS"] = str(git_arguments)
+            environment["FAKE_INSTALLER"] = str(fake_installer)
+            environment["FAKE_INSTALLER_ARGS"] = str(installer_arguments)
+            entry = Path(__file__).resolve().parents[1] / "bootstrap.sh"
+            result = subprocess.run(
+                [shutil.which("bash"), str(entry), "--non-interactive"],
+                capture_output=True, text=True, timeout=20, env=environment)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            git_args = git_arguments.read_text(encoding="utf-8").splitlines()
+            header = next(arg for arg in git_args
+                          if arg.startswith("http.extraHeader=Authorization: Basic "))
+            encoded = header.removeprefix("http.extraHeader=Authorization: Basic ")
+            self.assertEqual(base64.b64decode(encoded), b"x-access-token:github_pat_test")
+            self.assertNotIn("github_pat_test", "\n".join(git_args))
+            self.assertIn("https://github.com/zxzxn3/codex-wechat", git_args)
+            self.assertIn("main", git_args)
+            self.assertFalse(Path(git_args[-1]).exists())
+            installed = json.loads(installer_arguments.read_text(encoding="utf-8"))
+            self.assertEqual(installed, {"args": ["menu", "--non-interactive"], "token": None})
+
+    def test_private_entry_contracts_are_present_in_both_platforms(self):
+        root = Path(__file__).resolve().parents[1]
+        shell = (root / "bootstrap.sh").read_text(encoding="utf-8")
+        powershell = (root / "bootstrap.ps1").read_text(encoding="utf-8")
+        self.assertIn("http.extraHeader", shell)
+        self.assertIn("unset auth CODEX_WECHAT_TOKEN", shell)
+        self.assertIn("http.extraHeader", powershell)
+        self.assertIn("Remove-Item Env:CODEX_WECHAT_TOKEN", powershell)
+        self.assertNotIn("$CODEX_WECHAT_TOKEN@github.com", shell)
+        self.assertNotIn("$env:CODEX_WECHAT_TOKEN@github.com", powershell)
+
+    def test_private_install_commands_fetch_bootstrap_through_the_contents_api(self):
+        root = Path(__file__).resolve().parents[1]
+        for relative in ("README.md", "docs/INSTALL.md"):
+            text = (root / relative).read_text(encoding="utf-8")
+            self.assertIn("contents/bootstrap.sh?ref=main", text)
+            self.assertIn("contents/bootstrap.ps1?ref=main", text)
+            self.assertIn("application/vnd.github.raw+json", text)
