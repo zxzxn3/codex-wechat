@@ -79,6 +79,14 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertNotIn(sentinel, data)
         self.assertNotIn("/home/private/", data)
 
+    def test_backend_version_rejects_absolute_paths(self):
+        diagnostics.log_event(
+            "backend.version", component="backend",
+            backend_version="/srv/customer/acme/private")
+        records = self.records()
+        self.assertEqual(len(records), 1)
+        self.assertNotIn("backend_version", records[0])
+
     def test_request_id_correlates_events_and_unknown_fields_are_dropped(self):
         with diagnostics.request_context("req-abc123"):
             diagnostics.log_event("input.prepare", component="input", count=1,
@@ -117,6 +125,21 @@ class DiagnosticsTests(unittest.TestCase):
         diagnostics.configure(path=self.path, backups=2)
         remaining = sorted(p.name for p in self.path.parent.glob(f"{self.path.name}.*"))
         self.assertEqual(remaining, [f"{self.path.name}.1", f"{self.path.name}.2"])
+
+    def test_reapplying_the_same_kept_count_still_prunes_stale_files(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for number in range(1, 7):
+            self.path.with_name(f"{self.path.name}.{number}").write_text("{}")
+        diagnostics.configure(path=self.path, backups=3)
+        remaining = sorted(p.name for p in self.path.parent.glob(f"{self.path.name}.*"))
+        self.assertEqual(remaining, [f"{self.path.name}.{number}" for number in range(1, 4)])
+
+    def test_same_path_and_keep_does_not_rescan_on_every_reload(self):
+        diagnostics.configure(path=self.path, backups=3)
+        with patch.object(diagnostics, "_prune_rotations") as prune:
+            diagnostics.configure(path=self.path, backups=3)
+            diagnostics.configure(path=self.path, backups=3)
+        prune.assert_not_called()
 
     def test_the_kept_file_count_is_configurable(self):
         diagnostics.configure(path=self.path, max_bytes=200, backups=5)

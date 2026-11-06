@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from string import Formatter
 from types import MappingProxyType
+from typing import Protocol
 
 
 MAX_NOTICE_BYTES = 1000
@@ -626,6 +627,16 @@ def status_summary(**kwargs):
     return status_from_fields(status_fields(**kwargs))
 
 
+class SlicingView(Protocol):
+    mode: str
+    target_chars: int
+
+
+class NotificationsView(Protocol):
+    compaction: bool
+    quota_thresholds: dict[str, tuple[int, ...]]
+
+
 @dataclass(frozen=True)
 class SettingsView:
     """Everything the /settings panel renders, so the signature stops growing.
@@ -637,8 +648,8 @@ class SettingsView:
     notice: str
     attachment_mib: int
     completion_notice: str = ""
-    slicing: object = None
-    notifications: object = None
+    slicing: SlicingView | None = None
+    notifications: NotificationsView | None = None
     source_hint: str | None = None
     autostart: str | None = None
     shared: str | None = None

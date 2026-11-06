@@ -11,6 +11,7 @@ import uuid
 from configuration import completion_template
 from records import TurnResult
 from slicing import split_text
+from wechat import acknowledged_message_id
 from media import MediaError, MAX_ATTACHMENTS, split_answer
 from wechat_content import entry_summary, remember_quote
 from errors import (WeChatApiError, WeChatAuthExpired, WeChatNotAcknowledged,
@@ -314,8 +315,9 @@ class OutputDelivery:
                     raise
                 send_ms = (time.perf_counter() - send_started) * 1000
                 self.charge_reply(entry)
-                if isinstance(response, dict) and response.get("message_id") is not None:
-                    remember_quote(bridge.state, response["message_id"], entry_summary(entry))
+                message_id = acknowledged_message_id(response)
+                if message_id is not None:
+                    remember_quote(bridge.state, message_id, entry_summary(entry))
             except WeChatAuthExpired:
                 await bridge.require_wechat_rebind()
                 continue

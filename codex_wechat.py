@@ -91,6 +91,19 @@ def show_log_path():
         print(f"完整日志: {log_path()}", flush=True)
 
 
+def apply_log_retention(config_path):
+    """Apply logs.keep before the standalone logs viewer enumerates rotations."""
+    try:
+        config = (json.loads(config_path.read_text(encoding="utf-8-sig"))
+                  if config_path.exists() else {})
+        if not isinstance(config, dict):
+            return
+        configure_diagnostics(backups=Logs.from_config(config.get("logs")).keep)
+    except (OSError, ValueError):
+        # Log viewing stays useful even when the rest of the config is broken.
+        return
+
+
 class Bridge:
     def __init__(self, store, account, config, backend_factory=CodexBackend, channel=None, config_path=None):
         self.store, self.account, self.config = store, account, config
@@ -861,6 +874,7 @@ async def main():
         parser.error("true|false 只能与 autostart 一起使用")
     os.umask(0o077)
     if args.action == "logs":
+        apply_log_retention(args.config)
         show_logs(args.follow, args.service)
         return
     if args.action == "stop":

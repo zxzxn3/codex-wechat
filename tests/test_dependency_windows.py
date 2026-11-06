@@ -37,4 +37,4 @@ class WindowsInstallerAdapterTests(unittest.TestCase):
             result = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-File', str(ROOT/'install.ps1'),
                                      '-PreparedRuntime'], env=env, capture_output=True, text=True, timeout=30)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn('InstallRoot and LOCALAPPDATA are required', result.stderr)
+            self.assertIn('InstallRoot and a usable data root are required', result.stderr)

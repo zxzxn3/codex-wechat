@@ -29,12 +29,14 @@ BACKUP_COUNT = 3
 KEEP_MIN = 1
 _LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
 _EVENT = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
+_PATH_LIKE = re.compile(r"(?:^|[\s(=])(?:[A-Za-z]:[\\/]|\\\\|~/|/)")
 _REQUEST_ID = contextvars.ContextVar("codex_wechat_request_id", default=None)
 _lock = threading.Lock()
 _path = None
 _level = None
 _max_bytes = MAX_BYTES
 _backup_count = BACKUP_COUNT
+_pruned_backup_key = None
 _ENDPOINTS = frozenset("ilink/bot/" + name for name in (
     "get_bot_qrcode", "get_qrcode_status", "getupdates", "getuploadurl",
     "sendmessage", "getconfig", "sendtyping", "msg/notifystart", "msg/notifystop",
@@ -87,7 +89,7 @@ def _configured_level():
 
 def configure(*, path=None, level=None, max_bytes=None, backups=None):
     """Override the log destination for tests or embedders."""
-    global _path, _level, _max_bytes, _backup_count
+    global _path, _level, _max_bytes, _backup_count, _pruned_backup_key
     if path is not None:
         _path = Path(path)
     if level is not None:
@@ -96,11 +98,18 @@ def configure(*, path=None, level=None, max_bytes=None, backups=None):
         _max_bytes = max(64, int(max_bytes))
     if backups is not None:
         wanted = max(KEEP_MIN, int(backups))
-        # Lowering the count must free the files that are now out of range,
-        # otherwise the disk usage only ever grows.
-        if wanted != _backup_count:
-            _backup_count = wanted
-            _prune_rotations(wanted)
+        _backup_count = wanted
+        # A fresh process must clean files left by an older setting, but a hot
+        # reload with the same destination and count must not rescan on every
+        # prompt. Keep the key process-local; path or count changes rescan.
+        try:
+            key = (str(log_path()), wanted)
+        except OSError:
+            _pruned_backup_key = None
+        else:
+            if key != _pruned_backup_key:
+                _prune_rotations(wanted)
+                _pruned_backup_key = key
 
 
 def _prune_rotations(keep):
@@ -125,11 +134,12 @@ def backup_count():
 
 def reset():
     """Restore production defaults; intended for test isolation."""
-    global _path, _level, _max_bytes, _backup_count
+    global _path, _level, _max_bytes, _backup_count, _pruned_backup_key
     _path = None
     _level = None
     _max_bytes = MAX_BYTES
     _backup_count = BACKUP_COUNT
+    _pruned_backup_key = None
     _REQUEST_ID.set(None)
 
 
@@ -201,6 +211,8 @@ def _clean_field(name, value):
     elif not isinstance(value, str):
         return None
     if name not in _TEXT_FIELDS:
+        return None
+    if name == "backend_version" and _PATH_LIKE.search(value):
         return None
     value = _clean_text(value)
     return value if re.fullmatch(_TEXT_FIELDS[name], value) else None

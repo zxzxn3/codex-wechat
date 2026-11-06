@@ -28,6 +28,22 @@ TYPING_TIMEOUT = 2
 # Successful routine requests below this stay at debug; slow ones and failures
 # remain visible at info so a shared log still shows the interesting requests.
 SLOW_REQUEST_SECONDS = 2
+ACK_ID_KEYS = ("msgid", "msg_id", "message_id", "messageId", "msgId")
+
+
+def acknowledged_message_id(result):
+    """Return a usable send acknowledgement id, not merely a present key."""
+    if not isinstance(result, dict):
+        return None
+    for key in ACK_ID_KEYS:
+        value = result.get(key)
+        if isinstance(value, str):
+            value = value.strip()
+            if value:
+                return value
+        elif isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+    return None
 
 
 def api_error_kind(code, message):
@@ -177,8 +193,8 @@ class WeChat:
         # A 200 alone does not prove delivery: record whether the server
         # acknowledged the message with an id, so a silent drop is visible.
         keys = result if isinstance(result, dict) else {}
-        acknowledged = any(key in keys for key in (
-            "msgid", "msg_id", "message_id", "messageId", "msgId"))
+        message_id = acknowledged_message_id(keys)
+        acknowledged = message_id is not None
         log_event("wechat.send_ack", level="debug", component="wechat",
                   status="acked" if acknowledged else "no_id", count=len(keys),
                   request_id=entry.get("requestId"))

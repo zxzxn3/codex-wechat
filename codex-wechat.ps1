@@ -137,7 +137,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $Project 'codex_wechat.py') -PathTyp
 }
 
 $env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot
-$DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
+$DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT) {
+    [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
+} else {
+    Join-Path $env:LOCALAPPDATA 'codex-wechat'
+}
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
 $VenvPython = Join-Path $Project '.venv\Scripts\python.exe'

@@ -169,6 +169,19 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 store.lock.close()
 
+    async def test_logs_applies_log_keep_before_viewing_rotations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            config.write_text('{"logs":{"keep":5}}', encoding="utf-8")
+            with patch.object(sys, "argv", [
+                    "codex_wechat.py", "logs", "--config", str(config)]), \
+                    patch.object(codex_wechat.os, "umask"), \
+                    patch.object(codex_wechat, "configure_diagnostics") as configure, \
+                    patch.object(codex_wechat, "show_logs") as show:
+                await codex_wechat.main()
+            configure.assert_called_once_with(backups=5)
+            show.assert_called_once_with(False, False)
+
     def test_windows_entry_routes_stop_through_python(self):
         script = (Path(__file__).parents[1] / "codex-wechat.ps1").read_text(encoding="utf-8")
         self.assertIn("'stop'", script)

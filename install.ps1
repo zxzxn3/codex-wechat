@@ -32,11 +32,17 @@ if (-not $PreparedRuntime) {
     exit $LASTEXITCODE
 }
 # Internal integration only: Python has finished downloads and runtime checks.
-if (-not $InstallRoot -or -not $env:LOCALAPPDATA) { throw 'InstallRoot and LOCALAPPDATA are required.' }
+if (-not $InstallRoot -or (-not $env:LOCALAPPDATA -and -not $env:CODEX_WECHAT_DATA_ROOT)) {
+    throw 'InstallRoot and a usable data root are required.'
+}
 if ($DryRun -or $NonInteractive -or $Repo -or $Ref) { throw 'Invalid internal integration arguments.' }
 $TaskName = 'CodexWeChat'
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
-$DataRoot = Join-Path $env:LOCALAPPDATA 'codex-wechat'
+$DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT) {
+    [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
+} else {
+    Join-Path $env:LOCALAPPDATA 'codex-wechat'
+}
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
 $LogPath = Join-Path $DataRoot 'logs\service.log'

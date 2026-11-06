@@ -78,10 +78,17 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertIn(r"releases\$ReleaseId", self.entry)
         self.assertIn("[IO.FileAttributes]::ReparsePoint", self.entry)
 
+    def test_entry_and_task_honor_the_custom_data_root(self):
+        for text in (self.entry, self.install):
+            self.assertIn("$DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT)", text)
+            self.assertIn("[IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)", text)
+            self.assertIn("Join-Path $env:LOCALAPPDATA 'codex-wechat'", text)
+
     def test_fast_path_requires_the_exact_stable_action(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with patch.object(autostart, "INSTALL_ROOT", root):
+            with patch.object(autostart, "INSTALL_ROOT", root), \
+                    patch.object(autostart, "_exec_action", side_effect=lambda action: action):
                 # The Scheduling COM action exposes `Path`; it has no `Execute`
                 # member, so a fake carrying one would hide a field-name bug.
                 action = SimpleNamespace(
