@@ -28,7 +28,6 @@ SEND_SPACING_SECONDS = 2.5
 # A no-id response is persisted as an outbound block and released by the next
 # accepted inbound message. A timer must not consume the ordinary backlog.
 DELIVERY_DEGRADED_THRESHOLD = 3
-STALE_OUTBOX_LIMIT = 200
 # A stale context token is repaired by the next inbound message, not by a retry.
 CONTEXT_REJECTION_KINDS = frozenset({"prepare_failed"})
 
@@ -36,6 +35,8 @@ class OutputDelivery:
     def __init__(self, bridge):
         self.bridge = bridge
         self._queued_at = {}  # Monotonic timestamps belong only to this service lifetime.
+        self._in_flight_id = None
+        self.paused = False
 
     def text_entries(self, text, *, group, context, semantic=False, source=None, role="body",
                      request_id=None):
@@ -239,40 +240,34 @@ class OutputDelivery:
         if not bridge.state["outbox"]:
             bridge.outbox_drained.set()
 
-    def quarantine_paused_backlog(self):
-        """Drop the pre-pause queue from delivery while retaining an audit trail.
+    def resume_delivery(self):
+        """Release a runtime-only no-id pause; the next send is the retry probe."""
+        self.paused = False
+        self.bridge.send_wake.set()
 
-        The next accepted inbound message releases the channel for new replies,
-        not for work that accumulated while delivery was unconfirmed. Snapshot
-        the whole current queue before the wake-up so a sender cannot resume the
-        old order in the same event-loop turn.
-        """
+    def discard_outbox(self, *, reason="user", persist=True):
+        """Clear pending output without disturbing a send already in flight."""
         bridge = self.bridge
-        if not bridge.state.pop("deliveryPaused", False):
+        kept = []
+        removed = []
+        for entry in bridge.state.get("outbox", []):
+            if self._in_flight_id and entry.get("id") == self._in_flight_id:
+                kept.append(entry)
+            else:
+                removed.append(entry)
+        if not removed:
             return 0
-        queued = bridge.state.get("outbox", [])
-        if not queued:
-            return 0
-        quarantined_at = int(time.time())
-        stale = []
-        for entry in queued:
-            saved = dict(entry)
-            saved.update(status="stale", reason="delivery_paused",
-                         quarantinedAt=quarantined_at)
-            stale.append(saved)
+        bridge.state["outbox"] = kept
+        for entry in removed:
             self._queued_at.pop(entry.get("id"), None)
-        bridge.state["outbox"] = []
-        bridge.state["staleOutbox"] = (
-            bridge.state.get("staleOutbox", []) + stale
-        )[-STALE_OUTBOX_LIMIT:]
-        bridge.state["deliveryStaleTotal"] = (
-            bridge.state.get("deliveryStaleTotal", 0) + len(stale)
-        )
-        bridge.outbox_drained.set()
-        log_event("output.backlog_stale", level="warning", component="output",
-                  count=len(stale), retained=len(bridge.state["staleOutbox"]),
-                  reason="delivery_paused")
-        return len(stale)
+        if not kept:
+            bridge.outbox_drained.set()
+        log_event("output.discarded", level="info", component="output",
+                  count=len(removed), reason=reason,
+                  role=removed[0].get("role", "body"), queued=len(kept))
+        if persist:
+            bridge.save()
+        return len(removed)
 
     def budget_notice_entries(self):
         """The one notice that asks the user for the next inbound message."""
@@ -327,18 +322,22 @@ class OutputDelivery:
         bridge = self.bridge
         while True:
             if (bridge.wechat_paused or bridge.state.get("wechatContextPending")
-                    or bridge.state.get("deliveryPaused")):
+                    or self.paused):
+                self._in_flight_id = None
                 bridge.send_wake.clear()
                 await bridge.send_wake.wait()
                 continue
             entry = await self._next_sendable()
             if entry is None:
+                self._in_flight_id = None
                 continue
+            self._in_flight_id = entry.get("id")
             try:
                 if "asset" in entry and "item" not in entry:
                     entry["item"] = await bridge.media.upload(entry)
                     bridge.save()
                 if bridge.wechat_paused:
+                    self._in_flight_id = None
                     continue
                 queued_at = self._queued_at.get(entry.get("id"))
                 waiting = ({"queue_wait_ms": max(0, (time.perf_counter() - queued_at) * 1000)}
@@ -361,22 +360,24 @@ class OutputDelivery:
                     remember_quote(bridge.state, message_id, entry_summary(entry))
             except WeChatAuthExpired:
                 await bridge.require_wechat_rebind()
+                self._in_flight_id = None
                 continue
             except WeChatApiError as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1
                 if isinstance(error, WeChatNotAcknowledged):
                     # A no-id response is not a retryable failure: the first call
                     # may already have been delivered, so resending can duplicate
-                    # it. Quarantine once and wait for the next inbound message;
-                    # a restart must not resume consuming the ordinary backlog.
+                    # it. Pause sending and keep the remaining queue intact for
+                    # the user's later /discard-or-resume decision.
                     bridge.state["deliveryUnknownTotal"] += 1
-                    bridge.state["deliveryPaused"] = True
+                    self.paused = True
                     log_event("output.delivery_unknown", level="warning",
                               component="output", role=entry.get("role", "body"),
                               attempt=entry["attempts"], error_type=type(error).__name__,
                               error_code=error.code, queued=len(bridge.state["outbox"]),
                               job_id=entry.get("group"), request_id=entry.get("requestId"))
                     bridge.fail_output(entry, notify=False, status="delivery_unknown")
+                    self._in_flight_id = None
                     log_event("output.send_paused", level="warning", component="output",
                               reason="not_acknowledged",
                               release="next_inbound",
@@ -396,6 +397,7 @@ class OutputDelivery:
                               status="pending", queued=len(bridge.state["outbox"]))
                     bridge.state["wechatContextPending"] = True
                 bridge.fail_output(entry)
+                self._in_flight_id = None
                 continue
             except Exception as error:
                 entry["attempts"] = entry.get("attempts", 0) + 1
@@ -407,11 +409,14 @@ class OutputDelivery:
                               error_type=type(error).__name__, queued=len(bridge.state["outbox"]),
                               job_id=entry.get("group"), request_id=entry.get("requestId"))
                     bridge.fail_output(entry)
+                    self._in_flight_id = None
                     continue
                 if entry["attempts"] >= SEND_ATTEMPTS:
                     bridge.fail_output(entry)
+                    self._in_flight_id = None
                     continue
                 bridge.save()
+                self._in_flight_id = None
                 delay = SEND_RETRY_SECONDS * 3 ** (entry["attempts"] - 1)
                 log_event("output.send_failed", level="warning", component="output",
                           role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
@@ -423,6 +428,7 @@ class OutputDelivery:
                 continue
             bridge.state["outbox"].pop(0)
             self._queued_at.pop(entry.get("id"), None)
+            self._in_flight_id = None
             bridge.state["consecutiveSendFailures"] = 0
             log_event("output.sent", component="output", role=entry.get("role", "body"),
                       attempt=entry.get("attempts", 0), duration_ms=send_ms,

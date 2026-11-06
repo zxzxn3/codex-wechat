@@ -190,7 +190,8 @@ rate_limit_hint、other），仅按明确提示归类，不保存 errmsg，也�
 发送是否成功以服务端返回的有效消息 id 为准：HTTP 200 且 ret=0、但响应不含非空的
 msgid/msg_id/message_id/messageId/msgId 时判定为**投递未知**（WeChatNotAcknowledged），
 不自动重试。首次出现即隔离当前条目并暂停整个出站队列；条目进入 failedOutbox，标记
-`status=delivery_unknown`，计入连续发送失败，重启后不会被当作普通 outbox 重放。这是**经验判据而非契约**：
+`status=delivery_unknown`，计入连续发送失败；其余 outbox 保留。暂停是运行时状态，
+重启后不会保留，但 outbox 本身仍持久化。这是**经验判据而非契约**：
 协议文档的成功响应示例就是 `{"ret":0,"errmsg":""}`，字段表没有消息 id，官方维护者也说明
 "ret=0 只代表 API 层接受、不保证投递"，契约本身无法区分投递与静默过滤（出处见
 [SOURCES](SOURCES.md) 的"微信下行投递"一节）。该错误属于响应内容
@@ -218,20 +219,20 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
 - 传输失败退避：只有普通传输错误（`WeChatTransportError`、超时、连接失败和 `OSError`）
   按 `SEND_RETRY_SECONDS × 3^(n-1)`（1s、3s）重试；明确 API 拒绝和未知本地异常直接失败，
   不再重试。
-- 未确认投递的特殊处置：`not_acknowledged` **首次出现即**持久化暂停出站；当前条目立即
-  隔离为 `delivery_unknown`，不发失败通知，不自动重放。重启不会解除暂停，也不会继续
-  消费普通积压。下一条被接受的入站消息只恢复**新回复**：暂停发生时及此后积压的旧队列
-  整体移入 `staleOutbox`，标记 `status=stale`、`reason=delivery_paused`，不参与发送。
-  以 `output.delivery_unknown`、`output.send_paused` 和 `output.backlog_stale` 记录。
-- 可观测性：`delivery` 只回答"**现在**是否健康"——出站被 no-id 暂停，或连续发送失败达到
-  `DELIVERY_DEGRADED_THRESHOLD`（3）时为 `unconfirmed`，否则 `ok`。历史另由单调累计的
+- 未确认投递的特殊处置：`not_acknowledged` **首次出现即**暂停出站；当前条目立即隔离为
+  `delivery_unknown`，不发失败通知，不自动重放。暂停只存在于运行时，当前 outbox 和
+  暂停期间新增的输出都保留。下一次被接受的入站消息清除运行时暂停并刷新预算，sender
+  按原顺序继续发送；如果用户先发 `/discard`，则先清空 pending outbox，再恢复。
+  以 `output.delivery_unknown`、`output.send_paused` 和 `output.discarded` 记录。
+- 可观测性：`delivery` 只回答"**现在**是否健康"——连续发送失败达到
+  `DELIVERY_DEGRADED_THRESHOLD`（3）时为 `unconfirmed`，否则 `ok`。no-id 暂停本身不写
+  `status`，因为它只是运行时状态；历史另由单调累计的
   `delivery_unknown`（曾发生多少次无 id）与有界的 `delivery_unknown_retained`（仍留在失败历史
-  中的条数）表达；旧积压同理：`delivery_stale` 是累计隔离数，`delivery_stale_retained` 是审计
-  历史中的保留数。成功一次只清连续失败计数，不抹掉历史总量，也不让一次历史事件把
-  `delivery` 永久钉在 `unconfirmed`。
+  中的条数）表达。成功一次只清连续失败计数，不抹掉历史总量，也不让一次历史事件把
+  `delivery` 永久钉在 `unconfirmed`。连续失败计数属于运行时状态，重启后归零。
 
-发送间隔、传输失败退避和 no-id 暂停三项互不排斥；入站消息继续轮询，只有出站等待下一条
-入站唤醒。
+发送间隔、传输失败退避和 no-id 暂停三项互不排斥；入站消息继续轮询。用户可用 `/discard`
+主动清空 pending outbox；清空操作保留正在发送中的一条，并在清空后追加一条数量确认。
 
 ### 每条入站消息的回复额度
 

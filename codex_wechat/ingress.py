@@ -72,14 +72,16 @@ class Ingress:
             if identity in bridge.state["seen"]:
                 continue
             bridge.state["seen"].append(identity)
-            bridge.refresh_reply_budget()
             body_text = message_text(msg)
-            quote = quote_context(msg, bridge.state["quoteCache"])
-            text = quoted_prompt(body_text, quote)
+            command, argument = parse_control(body_text)
             attachments = [item for item in msg.get("item_list", [])
                            if item.get("type") in (2, 4, 5)]
+            # /discard must clear the backlog before the sender is woken.
+            defer_resume = command == "/discard" and not attachments
+            bridge.refresh_reply_budget(resume=not defer_resume)
+            quote = quote_context(msg, bridge.state["quoteCache"])
+            text = quoted_prompt(body_text, quote)
             remember_quote(bridge.state, identity, message_summary(msg))
-            command, argument = parse_control(body_text)
             spec = REGISTRY.get(command)
             queued = bool(spec and spec.route == "input")
             received = bridge.latency.received_any(message_timestamps(msg))
@@ -110,6 +112,8 @@ class Ingress:
                               status="queue_full", request_id=request_id,
                               command=received.get("command"))
                     bridge.reply(bridge.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
+                    if defer_resume:
+                        bridge.resume_deferred_delivery()
                 else:
                     received["controlId"] = request_id
                     control = {
@@ -161,5 +165,7 @@ class Ingress:
                       command=control["received"].get("command"))
             bridge.finish_control(control["id"])
             bridge.reply(bridge.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
+            if control["text"].startswith("/discard"):
+                bridge.resume_deferred_delivery()
         bridge.wake.set()
         bridge.steer_wake.set()

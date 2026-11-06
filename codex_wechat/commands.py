@@ -919,6 +919,12 @@ async def command_stop(bridge, command, argument, received=None):
         bridge.reply(bridge.prompt("STOP_UNCONFIRMED") + cleared_note)
 
 
+async def command_discard(bridge, command, argument, received=None):
+    count = bridge.discard_outbox()
+    bridge.resume_delivery()
+    bridge.reply(bridge.prompt("DISCARDED", {"count": count}))
+
+
 async def command_approval(bridge, command, argument, received=None):
     try:
         accept = command == "/approve"
@@ -952,6 +958,7 @@ _HANDLER_FUNCTIONS = {
     "compact": command_compact,
     "unqueue": command_unqueue,
     "stop": command_stop,
+    "discard": command_discard,
     "ping": command_ping,
     "switch": command_switch,
     "backend": command_backend,
@@ -1040,3 +1047,6 @@ async def dispatch(bridge, text, *, received=None):
                       kind="command", duration_ms=(time.perf_counter() - started) * 1000,
                       **fields, **error_fields(error))
             print(f"{command}失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)
+        finally:
+            if command == "/discard":
+                bridge.resume_deferred_delivery()

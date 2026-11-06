@@ -8,7 +8,6 @@ from unittest.mock import patch
 from codex_wechat.app import BRIDGE_STATE_DEFAULTS, Bridge
 from codex_wechat.command_specs import PENDING_CONTROL_LIMIT
 from codex_wechat.errors import WeChatNotAcknowledged
-from codex_wechat.output_delivery import STALE_OUTBOX_LIMIT
 from codex_wechat.records import InputPhase
 from codex_wechat.storage import Store
 
@@ -39,11 +38,10 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
     def assert_contract(self, state, *, bridge=None):
         for key in BRIDGE_STATE_DEFAULTS:
             self.assertIn(key, state)
-        for key in ("inbox", "outbox", "seen", "staleOutbox", "pendingControls"):
+        for key in ("inbox", "outbox", "seen", "pendingControls"):
             self.assertIsInstance(state[key], list, key)
 
         self.assertLessEqual(len(state["inbox"]), INBOX_LIMIT)
-        self.assertLessEqual(len(state["staleOutbox"]), STALE_OUTBOX_LIMIT)
         self.assertLessEqual(len(state["pendingControls"]), PENDING_CONTROL_LIMIT)
         self.assertLessEqual(len(state.get("failedOutbox", [])), FAILED_OUTBOX_LIMIT)
         self.assertLessEqual(len(state["seen"]), SEEN_LIMIT)
@@ -56,10 +54,9 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(current.get("id"), inbox_ids)
             self.assertFalse(any(job is current for job in state["inbox"]))
 
-        for key in ("outbox", "staleOutbox"):
-            ids = [entry.get("id") for entry in state[key]]
-            self.assertTrue(all(isinstance(identity, str) and identity for identity in ids), key)
-            self.assertEqual(len(ids), len(set(ids)), key)
+        ids = [entry.get("id") for entry in state["outbox"]]
+        self.assertTrue(all(isinstance(identity, str) and identity for identity in ids))
+        self.assertEqual(len(ids), len(set(ids)))
 
         control_ids = [control.get("id") for control in state["pendingControls"]]
         self.assertTrue(all(isinstance(identity, str) and identity
@@ -74,17 +71,13 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
             if "controlId" in received:
                 self.assertEqual(received["controlId"], control["id"])
 
-        for key in ("deliveryUnknownTotal", "deliveryStaleTotal"):
-            self.assertIs(type(state[key]), int)
-            self.assertGreaterEqual(state[key], 0)
+        self.assertIs(type(state["deliveryUnknownTotal"]), int)
+        self.assertGreaterEqual(state["deliveryUnknownTotal"], 0)
         unknown_retained = sum(
             1 for entry in state.get("failedOutbox", [])
             if entry.get("status") == "delivery_unknown"
         )
         self.assertGreaterEqual(state["deliveryUnknownTotal"], unknown_retained)
-        self.assertGreaterEqual(state["deliveryStaleTotal"], len(state["staleOutbox"]))
-        self.assertTrue(all(entry.get("status") == "stale"
-                            for entry in state["staleOutbox"]))
 
         phases = {str(phase) for phase in InputPhase}
         jobs = ([current] if current else []) + state["inbox"]
@@ -211,7 +204,7 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bridge.state["outbox"], [])
         self.assertEqual(self.bridge.state["consecutiveSendFailures"], 0)
 
-    async def test_no_id_pause_is_durable_after_the_save_that_commits_it(self):
+    async def test_no_id_pause_is_runtime_only_and_keeps_the_backlog(self):
         self.bridge.reply("one")
         self.bridge.reply("two")
 
@@ -223,9 +216,10 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(SimulatedCrash):
                 await self.bridge.sender()
 
+        self.assertTrue(self.bridge.output.paused)
         saved = self.store.load("bridge")
         self.assert_contract(saved)
-        self.assertTrue(saved["deliveryPaused"])
+        self.assertNotIn("deliveryPaused", saved)
         self.assertEqual(saved["deliveryUnknownTotal"], 1)
         self.assertEqual(saved["failedOutbox"][-1]["status"], "delivery_unknown")
         self.assertEqual([entry["text"] for entry in saved["outbox"]], ["two"])
@@ -233,9 +227,8 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
         restarted = Bridge(self.store, self.account, self.config)
         restarted.refresh_reply_budget()
         self.assert_contract(restarted.state, bridge=restarted)
-        self.assertFalse(restarted.state.get("deliveryPaused", False))
-        self.assertEqual([entry["text"] for entry in restarted.state["staleOutbox"]], ["two"])
-        self.assertEqual(restarted.state["deliveryStaleTotal"], 1)
+        self.assertFalse(restarted.output.paused)
+        self.assertEqual([entry["text"] for entry in restarted.state["outbox"]], ["two"])
         self.assert_persisted_contract()
 
     async def test_a_crash_before_the_no_id_save_leaves_the_uncertain_payload_queued(self):

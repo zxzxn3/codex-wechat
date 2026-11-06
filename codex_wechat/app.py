@@ -62,8 +62,6 @@ BRIDGE_STATE_DEFAULTS = {
     "inboundSeq": 0,
     "replyBudget": {},
     "deliveryUnknownTotal": 0,
-    "deliveryStaleTotal": 0,
-    "staleOutbox": [],
     "pendingControls": [],
 }
 
@@ -73,6 +71,8 @@ def load_bridge_state(store):
     saved = store.load("bridge")
     if not isinstance(saved, dict):
         saved = {}
+    for key in ("staleOutbox", "deliveryStaleTotal", "deliveryPaused"):
+        saved.pop(key, None)
     return {**deepcopy(BRIDGE_STATE_DEFAULTS), **saved}
 
 
@@ -125,7 +125,7 @@ class Bridge:
         ensure_backend_config(self.config)
         self.settings = ConfigLoader(config, config_path)
         self.state = load_bridge_state(store)
-        self.state.setdefault("consecutiveSendFailures", 0)
+        self.state["consecutiveSendFailures"] = 0
         self.state.setdefault("quoteCache", {})
         self.wechat_paused = wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED
         self.auth_wake = asyncio.Event()
@@ -169,6 +169,7 @@ class Bridge:
         self.model_choices = []
         self.session_catalog = None
         self.restarting = False
+        self.deferred_resume = False
         self.outbox_drained = asyncio.Event()
         if not self.state["outbox"]:
             self.outbox_drained.set()
@@ -232,13 +233,21 @@ class Bridge:
     def budget_exhausted(self):
         return self.budget_state().get("used", 0) >= self.reply_budget()
 
-    def refresh_reply_budget(self):
+    def refresh_reply_budget(self, *, resume=True):
         """Every accepted inbound message refreshes what we may send back."""
-        self.output.quarantine_paused_backlog()
         self.state["inboundSeq"] = self.state.get("inboundSeq", 0) + 1
         self.state["replyBudget"] = {"seq": self.state["inboundSeq"], "used": 0}
         self.state.pop("budgetPromptSent", None)
-        self.send_wake.set()
+        if resume:
+            self.resume_delivery()
+        else:
+            self.deferred_resume = True
+
+    def resume_deferred_delivery(self):
+        """Resume after a command that had to clear the queue before waking sender."""
+        if not self.deferred_resume:
+            return
+        self.resume_delivery()
 
     def reload_config(self):
         changed = self.settings.reload(self.state)
@@ -425,9 +434,6 @@ class Bridge:
             rate_limits=rate_limits,
             connection="本地后台" if self.backend.shared else "独立进程",
             shared_fallback=self.backend.shared_fallback,
-            # Cumulative: how many queued replies were quarantined when a
-            # no-id pause was lifted. Shown only while non-zero.
-            delivery_stale=self.state.get("deliveryStaleTotal", 0),
         )
         values.update(self.last_final_answer_fields)
         values.update(self.latency.values(ingress_ms))
@@ -453,6 +459,17 @@ class Bridge:
 
     def reply(self, text, *, persist=True, request_id=None):
         return self.output.reply(text, persist=persist, request_id=request_id)
+
+    @property
+    def delivery_paused(self):
+        return self.output.paused
+
+    def resume_delivery(self):
+        self.deferred_resume = False
+        return self.output.resume_delivery()
+
+    def discard_outbox(self, **kwargs):
+        return self.output.discard_outbox(**kwargs)
 
     def asset_entry(self, asset, *, group=None, context=None, source=None, request_id=None):
         return self.output.asset_entry(asset, group=group, context=context, source=source,
@@ -801,8 +818,6 @@ def status_payload(store):
                            if isinstance(entry, dict)
                            and entry.get("status") == "delivery_unknown")
     unknown_total = state["deliveryUnknownTotal"]
-    stale_total = state["deliveryStaleTotal"]
-    stale_retained = len(state["staleOutbox"])
     payload = {
         "bound": bool(store.load("account")),
         "auth": auth,
@@ -817,22 +832,17 @@ def status_payload(store):
         ),
         "queued": len(state.get("inbox", [])),
         "unsent": len(state.get("outbox", [])),
-        "delivery_paused": bool(state.get("deliveryPaused")),
         # "Now", not "ever": a single unknown delivery used to pin this to
         # unconfirmed for the rest of the installation's life, so it stopped
         # answering the question an operator asks. History stays in the
-        # delivery_unknown/delivery_stale totals below.
+        # delivery_unknown total below.
         "delivery": ("unconfirmed"
-                     if state.get("deliveryPaused")
-                     or state.get("consecutiveSendFailures", 0) >= DELIVERY_DEGRADED_THRESHOLD
+                     if state.get("consecutiveSendFailures", 0) >= DELIVERY_DEGRADED_THRESHOLD
                      else "ok"),
     }
     if unknown_total:
         payload["delivery_unknown"] = unknown_total
         payload["delivery_unknown_retained"] = unknown_retained
-    if stale_total:
-        payload["delivery_stale"] = stale_total
-        payload["delivery_stale_retained"] = stale_retained
     auth_details = state.get("wechatAuth")
     if isinstance(auth_details, dict):
         if "detectedAt" in auth_details:
