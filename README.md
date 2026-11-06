@@ -202,4 +202,6 @@ codex-wechat logs [--follow] [--service]
 条款见 [LICENSE](LICENSE)。
 
 配置、账户、交付状态和日志只保存在本机；凭据不进入命令行、仓库或微信。自动回传和 `/get`
-都只读取当前会话工作目录内的普通文件，并拒绝微信桥自身状态；不提高原生沙箱权限。
+都只读取当前会话工作目录内的普通文件，并拒绝微信桥自身状态。这个 cwd 范围是
+**保守近似，不是 Codex sandbox 等价边界**：桥不知道 agent 的 deny-read、permission profile
+或外部 sandbox 规则，因此在某些配置下仍可能读取 agent 被拒绝的 cwd 内文件。
