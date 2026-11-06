@@ -211,11 +211,12 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
   消费普通积压。下一条被接受的入站消息只恢复**新回复**：暂停发生时及此后积压的旧队列
   整体移入 `staleOutbox`，标记 `status=stale`、`reason=delivery_paused`，不参与发送。
   以 `output.delivery_unknown`、`output.send_paused` 和 `output.backlog_stale` 记录。
-- 可观测性：存在未知条目或连续发送失败达到 `DELIVERY_DEGRADED_THRESHOLD`（3）时，
-  `status` 的 `delivery` 从 `ok` 变为 `unconfirmed`；`delivery_unknown` 是单调累计数，
-  `delivery_unknown_retained` 是有界失败历史中的保留数。旧积压另有
-  `delivery_stale` / `delivery_stale_retained`，分别表示累计隔离数和有界审计历史中的
-  保留数。成功一次只清连续失败计数，不抹掉历史未知条目。
+- 可观测性：`delivery` 只回答"**现在**是否健康"——出站被 no-id 暂停，或连续发送失败达到
+  `DELIVERY_DEGRADED_THRESHOLD`（3）时为 `unconfirmed`，否则 `ok`。历史另由单调累计的
+  `delivery_unknown`（曾发生多少次无 id）与有界的 `delivery_unknown_retained`（仍留在失败历史
+  中的条数）表达；旧积压同理：`delivery_stale` 是累计隔离数，`delivery_stale_retained` 是审计
+  历史中的保留数。成功一次只清连续失败计数，不抹掉历史总量，也不让一次历史事件把
+  `delivery` 永久钉在 `unconfirmed`。
 
 发送间隔、传输失败退避和 no-id 暂停三项互不排斥；入站消息继续轮询，只有出站等待下一条
 入站唤醒。

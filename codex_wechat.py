@@ -718,8 +718,12 @@ def status_payload(store):
         "queued": len(state.get("inbox", [])),
         "unsent": len(state.get("outbox", [])),
         "delivery_paused": bool(state.get("deliveryPaused")),
+        # "Now", not "ever": a single unknown delivery used to pin this to
+        # unconfirmed for the rest of the installation's life, so it stopped
+        # answering the question an operator asks. History stays in the
+        # delivery_unknown/delivery_stale totals below.
         "delivery": ("unconfirmed"
-                     if unknown_total
+                     if state.get("deliveryPaused")
                      or state.get("consecutiveSendFailures", 0) >= DELIVERY_DEGRADED_THRESHOLD
                      else "ok"),
     }

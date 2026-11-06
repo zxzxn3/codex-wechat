@@ -417,12 +417,21 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         for failures, expected in ((0, "ok"), (2, "ok"), (3, "unconfirmed")):
             self.store.save("bridge", {"consecutiveSendFailures": failures})
             self.assertEqual(status_payload(self.store)["delivery"], expected)
+        # A pause that survives restart is current trouble, so it reports as such.
+        self.store.save("bridge", {"deliveryPaused": True})
+        self.assertEqual(status_payload(self.store)["delivery"], "unconfirmed")
+
+    def test_a_past_unknown_delivery_does_not_pin_delivery_to_unconfirmed(self):
+        # `delivery` answers "is it healthy now"; the totals answer "what has
+        # happened". A recovered channel must read as ok again.
+        from codex_wechat import status_payload
         self.store.save("bridge", {
             "deliveryUnknownTotal": 1,
             "failedOutbox": [{"status": "delivery_unknown"}],
+            "consecutiveSendFailures": 0,
         })
         payload = status_payload(self.store)
-        self.assertEqual(payload["delivery"], "unconfirmed")
+        self.assertEqual(payload["delivery"], "ok")
         self.assertEqual(payload["delivery_unknown"], 1)
         self.assertEqual(payload["delivery_unknown_retained"], 1)
         self.store.save("bridge", {
