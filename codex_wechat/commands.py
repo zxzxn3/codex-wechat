@@ -1048,5 +1048,5 @@ async def dispatch(bridge, text, *, received=None):
                       **fields, **error_fields(error))
             print(f"{command}失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)
         finally:
-            if command == "/discard":
+            if spec and spec.defers_resume:
                 bridge.resume_deferred_delivery()

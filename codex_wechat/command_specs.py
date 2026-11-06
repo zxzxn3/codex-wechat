@@ -18,6 +18,7 @@ class Command:
     query_local: bool = False
     default_help: bool = True
     help_usage: str | None = None
+    defers_resume: bool = False
 
 
 COMMANDS = (
@@ -31,7 +32,8 @@ COMMANDS = (
     Command("/queue", "/queue {提示词}", HELP_DESCRIPTIONS['/queue'], route="input", aliases=("/q",)),
     Command("/unqueue", "/unqueue", HELP_DESCRIPTIONS['/unqueue'], lane="urgent", aliases=("/u",)),
     Command("/stop", "/stop", HELP_DESCRIPTIONS['/stop'], lane="urgent"),
-    Command("/discard", "/discard", HELP_DESCRIPTIONS['/discard'], lane="local", aliases=("/d",)),
+    Command("/discard", "/discard", HELP_DESCRIPTIONS['/discard'], lane="local",
+            defers_resume=True, aliases=("/d",)),
     Command("/ping", "/ping", HELP_DESCRIPTIONS['/ping'], lane="probe", aliases=("/p",), default_help=False),
     Command("/switch", "/switch {编号、ID前缀或搜索词}", HELP_DESCRIPTIONS['/switch'], "managed", needs_backend=True, section="会话", required=True, default_help=False),
     Command("/backend", "/backend {名称}", HELP_DESCRIPTIONS['/backend'], "managed", section="会话", query_local=True, aliases=("/b",)),

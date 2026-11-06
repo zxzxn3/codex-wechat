@@ -72,8 +72,11 @@ class DiscardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([entry["text"] for entry in bridge.state["outbox"]],
                          ["1 条消息被清空。"])
 
-    async def test_discard_clears_backlog_before_the_sender_can_wake(self):
-        bridge = self.bridge
+    async def _assert_command_clears_backlog_before_sender(self, command):
+        temp = tempfile.TemporaryDirectory()
+        store = Store(Path(temp.name) / "state")
+        bridge = Bridge(store, {"user": "owner"}, {})
+        bridge.state["context"] = "context"
         bridge.reply("old finish")
         for _ in range(bridge.reply_budget()):
             bridge.spend_reply_budget()
@@ -90,31 +93,40 @@ class DiscardTests(unittest.IsolatedAsyncioTestCase):
             "from_user_id": "owner",
             "message_type": 1,
             "context_token": "context",
-            "item_list": [{"type": 1, "text_item": {"text": "/discard"}}],
+            "item_list": [{"type": 1, "text_item": {"text": command}}],
         }
-        with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
-            sender = asyncio.create_task(bridge.sender())
-            worker = None
-            try:
-                await asyncio.sleep(0.01)
-                self.assertEqual(sent, [])
-
-                await bridge.receive({"msgs": [message]})
-                await asyncio.sleep(0.01)
-                self.assertEqual(sent, [])
-
-                worker = asyncio.create_task(bridge.control_worker("local"))
-                for _ in range(200):
-                    if sent:
-                        break
+        try:
+            with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
+                sender = asyncio.create_task(bridge.sender())
+                worker = None
+                try:
                     await asyncio.sleep(0.01)
-                self.assertEqual(sent, ["1 条消息被清空。"])
-            finally:
-                if worker is not None:
-                    worker.cancel()
-                    await asyncio.gather(worker, return_exceptions=True)
-                sender.cancel()
-                await asyncio.gather(sender, return_exceptions=True)
+                    self.assertEqual(sent, [])
+
+                    await bridge.receive({"msgs": [message]})
+                    await asyncio.sleep(0.01)
+                    self.assertEqual(sent, [])
+
+                    worker = asyncio.create_task(bridge.control_worker("local"))
+                    for _ in range(200):
+                        if sent:
+                            break
+                        await asyncio.sleep(0.01)
+                    self.assertEqual(sent, ["1 条消息被清空。"])
+                finally:
+                    if worker is not None:
+                        worker.cancel()
+                        await asyncio.gather(worker, return_exceptions=True)
+                    sender.cancel()
+                    await asyncio.gather(sender, return_exceptions=True)
+        finally:
+            store.lock.close()
+            temp.cleanup()
+
+    async def test_discard_and_alias_clear_backlog_before_the_sender_can_wake(self):
+        for command in ("/discard", "/d"):
+            with self.subTest(command=command):
+                await self._assert_command_clears_backlog_before_sender(command)
 
 
 if __name__ == "__main__":
