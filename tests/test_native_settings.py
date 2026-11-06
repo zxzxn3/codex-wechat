@@ -203,3 +203,41 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
                     }}})
                 result = await backend.active["done"]
                 self.assertEqual(result.text, prompt_text(prompt_name))
+
+    async def test_http_error_objects_share_the_same_status_mapping(self):
+        cases = (
+            ("http_connection_failed", "http_status_code", 402, "TURN_FAILED_USAGE_LIMIT"),
+            ("httpConnectionFailed", "httpStatusCode", 402, "TURN_FAILED_USAGE_LIMIT"),
+            ("responseStreamConnectionFailed", "httpStatusCode", 429, "TURN_FAILED_RATE_LIMIT"),
+            ("responseStreamDisconnected", "httpStatusCode", 503, "TURN_FAILED_SERVICE_UNAVAILABLE"),
+            ("responseTooManyFailedAttempts", "httpStatusCode", None,
+             "TURN_FAILED_SERVICE_UNAVAILABLE"),
+        )
+        for name, status_key, status, prompt_name in cases:
+            with self.subTest(name=name, status=status):
+                detail = {} if status is None else {status_key: status}
+                error = {
+                    "message": "upstream failure",
+                    "codexErrorInfo": {name: detail},
+                }
+                backend = CodexBackend({}, "/tmp", lambda _: None)
+                backend.selected_thread = "t"
+                backend.active = backend.new_turn("t", "turn", owned=True)
+                backend.event({"method": "turn/completed", "params": {
+                    "threadId": "t", "turn": {
+                        "id": "turn", "status": "failed", "error": error,
+                    }}})
+                result = await backend.active["done"]
+                self.assertEqual(result.text, prompt_text(prompt_name))
+
+    async def test_insufficient_balance_message_still_uses_the_usage_limit_prompt(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.selected_thread = "t"
+        backend.active = backend.new_turn("t", "turn", owned=True)
+        backend.event({"method": "turn/completed", "params": {
+            "threadId": "t", "turn": {
+                "id": "turn", "status": "failed",
+                "error": {"message": "Insufficient Balance"},
+            }}})
+        result = await backend.active["done"]
+        self.assertEqual(result.text, prompt_text("TURN_FAILED_USAGE_LIMIT"))

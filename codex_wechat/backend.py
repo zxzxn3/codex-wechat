@@ -66,7 +66,19 @@ TURN_ERROR_PROMPTS = {
     "misalignmentPolicyViolation": "TURN_FAILED_POLICY",
     "tooManyDenials": "TURN_FAILED_TOO_MANY_DENIALS",
     "sandboxError": "TURN_FAILED_SANDBOX",
+    "httpConnectionFailed": "TURN_FAILED_SERVICE_UNAVAILABLE",
 }
+
+HTTP_ERROR_VARIANTS = (
+    "httpConnectionFailed",
+    "http_connection_failed",
+    "responseStreamConnectionFailed",
+    "response_stream_connection_failed",
+    "responseStreamDisconnected",
+    "response_stream_disconnected",
+    "responseTooManyFailedAttempts",
+    "response_too_many_failed_attempts",
+)
 
 
 class DeferTurn(RuntimeError):
@@ -77,6 +89,16 @@ class DeferTurn(RuntimeError):
 class TurnStalled(RuntimeError):
     """The turn stopped reporting events; it was abandoned locally."""
     error_actions = ErrorAction.TERMINAL
+
+
+def _insufficient_balance_message(message):
+    if not isinstance(message, str):
+        return False
+    normalized = message.casefold()
+    return ("insufficient balance" in normalized
+            or "insufficient_quota" in normalized
+            or ("402" in normalized and "payment required" in normalized))
+
 
 class CodexBackend:
     def __init__(self, config, cwd, notify):
@@ -541,10 +563,33 @@ class CodexBackend:
 
     @staticmethod
     def _turn_error_code(error):
+        if isinstance(error, str):
+            return "usageLimitExceeded" if _insufficient_balance_message(error) else None
         if not isinstance(error, dict):
             return None
-        code = error.get("codexErrorInfo")
-        return code if isinstance(code, str) else None
+        info = error.get("codexErrorInfo")
+        if info is None:
+            info = error.get("codex_error_info")
+        if isinstance(info, str) and info:
+            return info
+        if isinstance(info, dict):
+            for name in HTTP_ERROR_VARIANTS:
+                detail = info.get(name)
+                if not isinstance(detail, dict):
+                    continue
+                status = detail.get("httpStatusCode", detail.get("http_status_code"))
+                if status == 402:
+                    return "usageLimitExceeded"
+                if status == 429:
+                    return "rateLimitExceeded"
+                if isinstance(status, int) and 500 <= status <= 599:
+                    return "serverOverloaded"
+                return "httpConnectionFailed"
+            if "activeTurnNotSteerable" in info or "active_turn_not_steerable" in info:
+                return "activeTurnNotSteerable"
+        if _insufficient_balance_message(error.get("message")):
+            return "usageLimitExceeded"
+        return None
 
     def _update_thread_settings(self, params):
         # Native settings are authoritative; no replay of previously observed defaults.

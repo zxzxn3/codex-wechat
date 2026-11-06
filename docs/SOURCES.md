@@ -44,6 +44,10 @@ item/completed 提供完整 agentMessage；commentary/partial_answer 可即时�
 thread/tokenUsage/updated 同时带 turnId 和 outputTokens/reasoningOutputTokens。模板中的
 final_answer 起止时间与 tokens_per_second 来自这些字段；可见输出 token 按 output 减
 reasoning 近似，时间戳缺失或时长不大于零时显示 N/A，不承诺等于供应商基准口径。
+`TurnError.codexErrorInfo` 也允许对象变体：httpConnectionFailed、
+responseStreamConnectionFailed、responseStreamDisconnected、responseTooManyFailedAttempts
+均带可空 httpStatusCode，activeTurnNotSteerable 带 turnKind。桥接只对这四类 HTTP/流错误
+共用状态码映射，未知对象回落通用提示。
 CLI 0.166.0 的公开schema确认 agentMessage 可带 `delivery=async` 与结构化 `questions`
 （`title`、字符串 `options`）；本机 App 26.1027.51404 用
 `<send_user_message_question_reply>` 包裹逐题答案并通过当前轮次补充输入提交。
