@@ -68,7 +68,9 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
             }],
         })
         bridge = Bridge(store, self.account, self.config)
-        bridge.restore_controls()
+        with patch.object(bridge, "save", wraps=bridge.save) as save:
+            bridge.restore_controls()
+        save.assert_called_once()
         self.assertTrue(bridge.controls["urgent"].empty())
         self.assertIn("可能未完成", bridge.state["outbox"][-1]["text"])
         self.assertEqual(bridge.state["pendingControls"], [])
