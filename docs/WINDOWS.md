@@ -51,7 +51,8 @@ PATH。未创建时使用完整 `codex-wechat.ps1` 路径，行为相同。`.ps1
 ## 服务和数据
 
 - 安装根目录：`%LOCALAPPDATA%\codex-wechat\app`，保存 stable 入口和不可变 release。
-- 数据根目录：`%LOCALAPPDATA%\codex-wechat`，保存 `config.json`、`.state`、`workspace`、
+- 数据根目录：默认 `%LOCALAPPDATA%\codex-wechat`，可用 `CODEX_WECHAT_DATA_ROOT` 覆盖；
+  保存 `config.json`、`.state`、`workspace`、
   `logs`、`shared` 和 `active-release`。
 - 计划任务负责原生启动、停止和查询；`service_adapter.py` 负责 restart 编排、停止等待和
   稳定运行判断。`windows/task-service.ps1` 不实现 restart 状态机。
@@ -93,7 +94,8 @@ resume 同一 `CODEX_HOME` 的启动器。确认后禁用该客户端，或让�
 ## 共享 daemon
 
 Windows 默认使用独立 app-server（`sharedDaemon: false`），适合 App 为主的工作流。
-如果主要通过 Codex CLI 与微信双向收发，在微信执行：
+如果主要通过普通 Codex CLI 与微信双向收发，直接运行 `codex` 或 `codex-deepseek`；
+`codex-wechat` 不再提供 CLI 包装命令。然后在微信执行：
 
 ```text
 /settings shared true
@@ -119,7 +121,8 @@ codex-wechat logs -Follow
 codex-wechat logs -Service
 ```
 
-结构化日志位于数据根目录的 `logs/bridge.jsonl`，按 5 MiB 轮转并保留 3 份。`service.log`
+结构化日志位于数据根目录的 `logs/bridge.jsonl`，按 5 MiB 轮转并默认保留 3 份；
+可用 `/settings logs.keep 1-100` 调整。`service.log`
 和 `logs -Service` 是未脱敏控制台输出，不要原样外传。
 
 排查网络时先看 `dns_ms`、`curl_total_ms`、`timeout_stage` 和 `proxy_used`；字段定义见

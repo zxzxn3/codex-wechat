@@ -6,8 +6,8 @@
 
 ## 快速开始
 
-公开仓库地址尚未确定。网络安装命令中的 `OWNER/REPO` 需要替换；没有公开仓库时使用
-[本地源码安装](docs/INSTALL.md#首次安装)。
+当前没有公开安装地址。网络安装命令中的 `OWNER/REPO` 需要替换；没有公开仓库时使用
+[本地源码安装](docs/INSTALL.md#首次安装)。开发远端和发布边界见 [DISTRIBUTION](docs/DISTRIBUTION.md)。
 
 Linux：
 
@@ -108,9 +108,9 @@ Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本�
 - Linux Codex CLI 为主：保持 `true`
 - Linux App 为主：改为 `false`
 
-`cli` 入口仅 Linux 使用 `codex-wechat cli -- ...`；Windows 使用
-`codex-desktop.ps1 cli -- ...`。`codex-desktop` 只准备或连接 CLI/微信后台，不启动 App，
-也不改写系统桌面入口。旧 `codex-wechat desktop` 别名已删除。
+普通 CLI 直接运行 `codex` 或对应 backend 的 launcher，例如 `codex-deepseek`。`codex-wechat`
+不提供 CLI 包装命令；桥接和 CLI 通过同一 Codex daemon/`CODEX_HOME` 协同。
+`codex-desktop` / `codex-desktop.ps1` 只作为内部共享后台适配器保留，不是公开命令。
 
 ## 配置
 
@@ -136,6 +136,7 @@ Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本�
 /settings connectionIdleSeconds 0-3600
 /settings media.maxMiB 1-100
 /settings slicing.targetChars <number>
+/settings logs.keep 1-100
 /help settings
 ```
 
@@ -155,7 +156,8 @@ Windows 使用 `.\codex-wechat.ps1 rebind`；已有提交工作时要加
 `--stop-active` / `-StopActive`。同微信号保留交付和偏好；bot 变化时重置协议上下文；换微信
 号时隔离旧交付。
 
-日志默认写入数据目录的 `logs/bridge.jsonl`，按 5 MiB 轮转并保留 3 份备份：
+日志默认写入数据目录的 `logs/bridge.jsonl`，按 5 MiB 轮转并保留 3 份备份；可用
+`/settings logs.keep 1-100` 调整保留份数：
 
 ```bash
 codex-wechat logs [--follow] [--service]

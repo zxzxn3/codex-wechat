@@ -7,7 +7,7 @@
 - codex_connection：唯一连接意图和校验；native_codex：CLI/App 可执行入口发现。
 - backend_runtime：后台准备与所有权；codex_transport：字节连接、JSON-RPC和关闭；backend：原生会话/轮次/事件。
 - app_ipc：App 的有界帧、持有者发现、会话快照/增量和 follower 请求适配；app_ipc_windows 只负责本机管道连接与身份核对。
-- desktop：CLI 接入和后台准备，不启动 App、不改写桌面入口；代理由调用者提供。
+- desktop：内部 CLI 接入和共享后台准备；不启动 App、不改写桌面入口，也不作为公开命令。
 - wechat / media：微信和CDN协议；wechat_auth / rebind：认证状态、身份与重绑编排。
 - ingress：微信入站过滤、去重、引用归一化和命令路由；不复制 Bridge 状态。
 - backend_session：连接建立和后台恢复循环；不承载微信或交付策略。
@@ -146,7 +146,8 @@ endpoint、HTTP/curl状态和耗时。事件字段由固定白名单校验，正
 `wechat.send_ack`、poll、getconfig、sendtyping 成功以及 2 秒内完成的微信请求只记 debug，
 故障与慢请求仍在 info/warning。`output.sent` 带 `queue_wait_ms`，不再靠 send_start 才能拿到
 排队等待。每条记录都带桥的 `version` 与 `platform`；`backend.version` 在连接建立后记一次
-`backend_version`（取自 app-server initialize 响应的 `userAgent`），用于区分 Codex 侧的版本。
+`backend_version`（取自 app-server initialize 响应的 `userAgent`），用于区分 Codex 侧的版本；
+带绝对路径形状的 `userAgent` 字段会被丢弃，不进入结构化日志。
 typing 的 getconfig/sendtyping 与输入处理并行，不等待网络完成再准备或提交消息。
 并发输入共用引用计数，最后一项结束时取消启动/保活任务，再尽力发送停止状态。
 typing ticket 缓存最多 600s，以单调时钟计时；到期或身份变化时，在下一次启动、保活或停止
@@ -172,8 +173,8 @@ typing 的认证失效进入同一暂停与重绑通知流程，但发现失效�
 超时及其它接口的超时仍为故障，外部取消继续传播。
 业务错误额外记录固定 api_error_kind（auth_expired、prepare_failed、unknown_error、
 rate_limit_hint、other），仅按明确提示归类，不保存 errmsg，也不将 -2 自动认定为限流。
-发送是否成功以服务端返回的消息 id 为准：HTTP 200 且 ret=0、但响应不含 msgid/msg_id/
-message_id/messageId/msgId 时判定为未投递（WeChatNotAcknowledged），按可重试处理，
+发送是否成功以服务端返回的有效消息 id 为准：HTTP 200 且 ret=0、但响应不含非空的
+msgid/msg_id/message_id/messageId/msgId 时判定为未投递（WeChatNotAcknowledged），按可重试处理，
 重试耗尽后进入 failedOutbox 并计入连续发送失败，不再记 output.sent。这是**经验判据而非契约**：
 协议文档的成功响应示例就是 `{"ret":0,"errmsg":""}`，字段表没有消息 id，官方维护者也说明
 "ret=0 只代表 API 层接受、不保证投递"，契约本身无法区分投递与静默过滤（出处见
@@ -200,10 +201,8 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
 - 可观测性：连续发送失败达到 `DELIVERY_DEGRADED_THRESHOLD`（3）时，`status` 的 `delivery`
   从 `ok` 变为 `unconfirmed`，成功一次即恢复。
 
-仍然待定的是**唤醒条件**：暂停目前是固定 60s，不看新入站消息；是否改成"等新入站再醒"，
-以及下面那条入站配额是否要实现，一起决定。
-
-三者互不排斥，但都会改变"一条回复最多发几次"的可观测行为，因此不擅自实现。
+仍然待定的是**唤醒条件**：暂停目前是固定 60s，不看新入站消息；是否改成"等新入站再醒"
+还没有决定。发送间隔、失败退避和暂停三项互不排斥；入站回复额度已在下节实现。
 
 ### 每条入站消息的回复额度
 

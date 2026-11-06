@@ -1,6 +1,6 @@
 # 依据与兼容边界
 
-2026-11-05。文档/源码核对不等于功能验收；实际执行见 [VALIDATION](VALIDATION.md)。
+2026-11-06。文档/源码核对不等于功能验收；实际执行见 [VALIDATION](VALIDATION.md)。
 本文是外部依据和兼容性证据，当前运行契约以 [ARCHITECTURE](ARCHITECTURE.md) 和
 [PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md) 为准。
 
@@ -105,10 +105,25 @@ Windows 监督器的 Mutex 与 Job Object 使用 pywin32 的 win32event/win32job
 - `ret=0` 只表示 API 层接受并处理，**不保证消息被投递或展示**；出于平台安全与滥用防治，
   微信可能对违规账号和消息做**静默限制或过滤，此时 API 仍返回成功**。该表述来自
   [openclaw-weixin #278 的维护者回复](https://github.com/Tencent/openclaw-weixin/issues/278#issuecomment-5490284595)（2026-09-01）。
-- 协议文档里 `sendmessage` 的成功响应示例就是 `{ret:0,errmsg:"}`，字段表只有
+- 协议文档里 `sendmessage` 的成功响应示例就是 `{"ret":0,"errmsg":""}`，字段表只有
   `ret`/`errcode`/`errmsg`，见
   [protocol_zh_CN.md](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md) 的响应示例与字段表。
   也就是说**文档契约本身无法表达已投递**，成功与静默丢弃在响应形状上不可区分。
 - 文档化冷却只有一处：`getUpdates` 返回 `-14` 时触发**一小时的账号会话暂停**（同一文档的端点行为表）。
-- 官方**没有**文档化出站配额、频率阈值、24 小时回复窗口或内容审核流程；CHANGELOG 里只出现过
-  为
+- 官方**没有**文档化出站配额、频率阈值、24 小时回复窗口或内容审核流程；仓库 CHANGELOG
+  也未给出这些阈值或对应的自动恢复机制。
+
+**社区观测（非官方）。**
+
+- [#81](https://github.com/Tencent/openclaw-weixin/issues/81) 报告同一 `context_token`
+  连续回复约 10 条后返回 `ret=-2`，但没有给出官方可依赖的固定额度。
+- [#268](https://github.com/Tencent/openclaw-weixin/issues/268) 和
+  [#278](https://github.com/Tencent/openclaw-weixin/issues/278) 记录了大量
+  HTTP 200、`ret=0`、无 `message_id` 的静默丢弃；重新扫码、重装和换 bot 不总能恢复，
+  社区报告的恢复时间从数小时到数天不等，也有切换微信账号后恢复的案例。
+- [#286](https://github.com/Tencent/openclaw-weixin/issues/286) 和
+  [#309](https://github.com/Tencent/openclaw-weixin/issues/309) 报告长时间无入站或长回合后
+  `ret=-2 / prepare failed`，新的入站消息通常能恢复；`context_token` 的精确 TTL
+  未被官方确认。
+
+以上社区结论只用于解释现场现象和设计保守的本地限额，不应当写成微信 API 的契约。

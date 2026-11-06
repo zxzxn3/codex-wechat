@@ -9,7 +9,7 @@
 | 普通 Codex / DeepSeek | 同一个 App Server 接口；DeepSeek 使用自己的启动入口和身份环境，不复制密钥 |
 | App 内置 CLI 发现 | native_codex；PATH、独立安装、已注册 Windows App，Linux 已知打包位置或显式配置 |
 | CLI / App / 微信共享 | ConnectionSpec + BackendRuntime + desktop；共享失败不悄悄改成另一写入后台 |
-| App 与 CLI 入口 | 同一配置；原生 CLI --remote，App 连接环境仅注入子进程，保留终端/目录/退出码 |
+| App 与内部 CLI 接入 | 同一配置；内部 helper 可用原生 CLI --remote 做显式连接，App 连接环境仅注入子进程；不暴露公开 CLI 包装命令 |
 | 代理启动器 | 仅代理与转交；项目不保存第二份 proxy 设置，后端按环境变量或平台系统代理注入 |
 | 后台与连接所有权 | 原生 daemon 优先；App WS 必要时按平台管理；客户端关闭不终止共享后台 |
 | 会话与模型设置 | 原生列表、搜索、翻页、恢复、新建、模型/强度/目录；普通输入不重放显示缓存 |

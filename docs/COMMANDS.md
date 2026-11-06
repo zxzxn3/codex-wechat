@@ -13,11 +13,11 @@
 |---|---|---|
 | 主入口 | `~/.local/bin/codex-wechat` | `%USERPROFILE%\.local\bin\codex-wechat.cmd` |
 | 安装入口 | 源码目录的 `install.sh` | 源码目录的 `install.ps1` |
-| CLI/共享后端 | `codex-wechat cli -- ...` | `codex-desktop.ps1 cli -- ...` |
 
 Windows 的 `.cmd` 只转交稳定的 `codex-wechat.ps1`；后者只负责定位当前 release 并调用
-Python，不再实现服务状态机。`codex-desktop.ps1` 保留给需要显式 `websocketUrl` 的 CLI
-连接；Windows 暂不增加 `codex-wechat cli` 薄转发，这是有意的功能不对称。
+Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应 backend 的 launcher；
+`codex-desktop` / `codex-desktop.ps1` 仅作为内部共享后台适配器，不通过
+`codex-wechat` 暴露。
 安装器不会修改 PATH；只有 `~/.local/bin` 已存在且在 PATH 中时才会生成 `.cmd`。
 
 ## 命令
@@ -37,12 +37,35 @@ Python，不再实现服务状态机。`codex-desktop.ps1` 保留给需要显式
 | `autostart true\|false` | 开启或关闭登录自启；只改登录触发器，不启动、停止或接管当前桥接 |
 | `uninstall [--purge-data\|-PurgeData]` | 停止并移除后台服务与命令入口；默认保留用户数据。Linux 用 `--purge-data`，Windows 用 `-PurgeData`；稳定入口不依赖 `current` |
 | `update` / `install` / `menu` / `components` | 转交同一个 `installer.py` |
-| `cli -- ...` | Linux 专用；连接桥接使用的共享后端，参数原样转发 |
+
+### 微信短别名
+
+| 短名 | 等价命令 |
+|---|---|
+| `/s` | `/status` |
+| `/n` | `/new` |
+| `/c` | `/compact` |
+| `/q` | `/queue` |
+| `/u` | `/unqueue` |
+| `/p` | `/ping` |
+| `/b` | `/backend` |
+| `/m` | `/model` |
+| `/e` | `/effort` |
+| `/a` | `/approve` |
+| `/d` | `/deny` |
+| `/g` | `/get` |
+| `/r` | `/restart` |
+| `/` | `/continue` |
+| `/h` | `/help` |
+
+短别名与完整命令走同一张命令表，平台之间没有差异；默认 `/help` 只显示常用项，
+`/help all` 显示完整命令面。
 
 不再存在：
 
 - `service-stop` / `service-status`：用 `stop` / `status`。
-- `codex-wechat desktop`：直接运行保留的 `codex-desktop` / `codex-desktop.ps1`。
+- `codex-wechat desktop`：内部 `codex-desktop` / `codex-desktop.ps1` 不作为用户命令。
+- `codex-wechat cli`：普通 CLI 使用 `codex` / `codex-deepseek`；共享后台准备留在内部 helper。
 - `autostart on|off`：只接受 `true|false`。
 
 ## 平台行为
@@ -70,7 +93,7 @@ Linux 停止并移除用户 unit、命令软链；默认保留 `config.json`、`
 若无法读取后台服务状态，卸载会 fail-closed 而不是继续删除；没有 systemd 客户端时视为
 没有可移除的服务。
 Windows 自定义数据目录由 `CODEX_WECHAT_DATA_ROOT`（或原生 helper 的
-`-DataRoot`）传递，Python 不会忽略它。
+`-DataRoot`）传递；公开入口、Python 命令和计划任务都使用同一个数据根。Python 不会忽略它。
 
 Linux 的 stable `codex-wechat` 和 Windows 的 `codex-wechat.ps1` 在读取 `current` 之前
 直接分派 `uninstall` 到稳定卸载组件。这样 `current` 缺失、损坏或活动 release 不完整时，
@@ -83,7 +106,7 @@ Linux 的 stable `codex-wechat` 和 Windows 的 `codex-wechat.ps1` 在读取 `cu
 
 ### 版本指针
 
-Linux stable 入口、Windows `codex-wechat.ps1`、Windows `codex-desktop.ps1` 和
+Linux stable 入口、Windows `codex-wechat.ps1`、内部 `codex-desktop.ps1` 和
 `bootstrap_supervisor.py` 都只接受 16 位小写十六进制 release ID。`..`、斜杠和其它
 非规范值直接拒绝；PowerShell 入口使用大小写敏感匹配，避免大写 ID 被发现后再变成另一路径。
 
