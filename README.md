@@ -129,9 +129,10 @@ Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本�
 热加载；无效配置保留上一组有效值并提示一次，不中断当前回合。
 
 后端定义位于 `backends.<名字>`，进程启动和每次 `/backend` 前重新读取，支持 `label`、
-`command`、`env`、`sharedDaemon`、`useSystemProxy` 和 `threadOptions`。修改当前后端后再次
-执行 `/backend` 会重连；`/settings` 只处理热配置，不重读后端定义。新建会话才应用
-`threadOptions`，已有会话保留自己的设置。
+`command`、`env`、`sharedDaemon`、`useSystemProxy` 和 `threadOptions`。`label` 只是该标识的
+显示别名，展开时统一小写（写 `label: "DeepSeek"` 仍显示 `deepseek`），以便和 `/backend`
+接受的名称完全一致。修改当前后端后再次执行 `/backend` 会重连；`/settings` 只处理热配置，
+不重读后端定义。新建会话才应用 `threadOptions`，已有会话保留自己的设置。
 
 常用微信设置：
 
