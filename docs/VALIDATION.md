@@ -5,12 +5,13 @@
 
 | 范围 | 当前证据 | 状态 |
 |---|---|---|
-| Linux 离线单测 | `python -m unittest discover -s tests`：889 项，869 通过、20 跳过、0 失败（2026-11-06 当前树）；新增安装后 stable payload/import 烟测、数据根冲突、平台用户目录回退和服务状态矩阵；历史 Windows 复测数字仅保留作记录，不能替代当前树验收 | 已验证 |
+| 离线单测 | `python -m unittest discover -s tests`：Linux 889 项、869 通过、20 跳过、0 失败；2026-11-06 在 Windows 上对同一棵树（含当日修复）复测 894 项、875 通过、19 跳过、0 失败；新增安装后 stable payload/import 烟测、数据根冲突、平台用户目录回退和服务状态矩阵；套件现在把诊断写入临时 sink，不再污染数据根下的 `logs/bridge.jsonl` | 已验证 |
 | 静态检查 | ruff、shellcheck、`py_compile`、pyright（0 errors、5 个环境导入 warning） | 已验证 |
 | Windows 服务基础生命周期 | PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、通知 | 已实机验证（历史窗口） |
 | Windows App IPC | writer 冲突连接、身份核对、无 App / App 已持有 / App 后启动三种命名管道状态 | 已验证；仍受 App 版本影响 |
 | Windows 真实微信 | 文本、图片、文件、语音、引用、原生提问、审批 | 已实机验证（历史窗口） |
 | Windows 新命令入口 | 2026-11-06 在历史 Windows 构建上实机复测（当前 Linux 仓库不能复核该构建的提交号）：`.cmd` 短入口在 cmd.exe 与 PowerShell 均可用；无参数默认 `status` 且输出一份 JSON（`service` 段含 `state`/`last_result`）；`service-stop`/`service-status`/`desktop`/`autostart on`/`status -Json` 全部被拒；`start` 在服务运行时 exit 78，`service-start` 在前台持锁时 exit 78；`logs` / `logs -Service` 分别读 `bridge.jsonl` / `service.log`；版本指针拒绝大写 ID、`..`、短 ID、17 位 | 已实机验证（历史构建） |
+| Windows 安装/更新（数据根标记） | 2026-11-06 在当前树上实机：`installer.py update --source . --dir %LOCALAPPDATA%\codex-wechat\app` 写出 `.data-root`（内容为平台用户目录）、激活新版本并重配计划任务；同一源码再跑一次走“已经安装，没有修改”分支；`service-restart` 后 `status` 为 `bound: true`、`auth: valid`、`delivery: ok`、`unsent: 0`、`state: Running`。顺带修掉一个只在中文 Windows 出现的缺陷：服务子进程带 `PYTHONUTF8=1`，`icacls` 的本地化输出按 UTF-8 解码会在读取线程里抛 `UnicodeDecodeError`，每次启动都往 `service.log` 写一段 traceback（不影响 ACL 生效），现已显式指定编码并用 `errors="replace"` | 已实机验证 |
 | Windows 卸载/重启 | 2026-11-06 实机复测：`service-restart` 跨"正在停止"状态 18.6 s 后 `backend.connected`；配置无效时 32.8 s 后 exit 78 且 `last_result=78`（不假成功）；`current` 损坏时 `uninstall` 仍 exit 0；`uninstall` 保留 7418 个数据文件；`uninstall -PurgeData` 删除已知数据项且重建后需重新扫码；通过短入口卸载 exit 0、stderr 无输出、入口在数秒后消失 | 已实机验证 |
 | Windows 提权拒绝 | 提权令牌下 `status`、`logs` 放行（只读例外），`autostart`、`service-start`、`service-restart`、`update` 均 exit 78 并提示「请以普通用户身份运行，不要使用 root/sudo 或管理员终端。」。`service-start` 由操作者在管理员终端实际撞到 | 已实机验证 |
 | App / CLI / 微信三端并发 | 2026-11-06 实机：App 侧发起后 `backend.writer_kept status=followed` 成功跟随 App 会话，App 回复经 `output.enqueued`（body + completion）进入发件箱，即"跟随 + 转发"跑通；但这几条出站被服务端静默丢弃（见下一行）；微信↔CLI 双向不在本次范围——该能力此前已在 `sharedDaemon: true` 的窗口里验证过（微信→CLI 与 CLI→微信均通，见会话记录），Windows 默认关闭是设计选择（面向偏好 App 的用户，且避免影响 App）；此后改动很多，重新启用需复测 | 部分覆盖 |
