@@ -165,6 +165,7 @@ class BootstrapEntryTests(unittest.TestCase):
             config = git_config.read_text(encoding="utf-8")
             header = next(line for line in config.splitlines()
                           if "Authorization: Basic " in line)
+            self.assertEqual(header.count("Authorization: Basic "), 1)
             encoded = header.rsplit("Authorization: Basic ", 1)[1]
             self.assertEqual(base64.b64decode(encoded), b"x-access-token:github_pat_test")
             self.assertNotIn("github_pat_test", "\n".join(git_args))

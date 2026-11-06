@@ -68,8 +68,7 @@ import base64, os, re, sys
 token = os.environ.get("CODEX_WECHAT_TOKEN", "")
 if not re.fullmatch(r"[A-Za-z0-9_]+", token):
     sys.exit("CODEX_WECHAT_TOKEN 格式无效")
-print("Authorization: Basic " + base64.b64encode(
-    ("x-access-token:" + token).encode()).decode())
+print(base64.b64encode(("x-access-token:" + token).encode()).decode())
 ' 2>/dev/null) || { echo 'CODEX_WECHAT_TOKEN 格式无效。' >&2; return 1; }
         git_config="$task_temporary/gitconfig"
         (umask 077; printf '[http]\n\textraHeader = Authorization: Basic %s\n' \
