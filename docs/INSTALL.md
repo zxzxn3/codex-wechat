@@ -140,7 +140,8 @@ Linux 默认安装根目录为 `~/.local/share/codex-wechat`；默认用户数�
 因此修改数据根只需通过安装器更新标记，不需要额外改服务配置。
 升级没有 `.data-root` 的旧自定义安装时，如果安装根已有 `config.json`、`.state`、
 `workspace`、`logs` 或 `shared`，安装器会把安装根作为旧数据根并补写 marker，不会改用
-新的平台默认空目录。
+新的平台默认空目录。若旧版曾错误写入平台默认 marker，而安装根仍有这些数据且该平台默认
+根为空，更新会修复回安装根；非平台默认的自定义 marker 不会被自动改写。
 
 `current`、`active-release`、`releases/`、`.state/`、`logs/`、`workspace/`、`shared/` 和
 `config.json` 各有独立职责，不复制供应商凭据或会话历史。配置与提示的细节见

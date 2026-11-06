@@ -489,6 +489,23 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.update(self.source, self.target), 0)
         prepare.assert_called_once_with(release)
 
+    def test_update_repairs_a_platform_default_marker_with_legacy_data(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        self.add_private_data(self.target)
+        xdg = self.base / "xdg"
+        wrong = xdg / "codex-wechat"
+        (self.target / installer.DATA_ROOT_FILE).write_text(
+            str(wrong) + "\n", encoding="utf-8")
+
+        with patch.dict(os.environ, {
+                "CODEX_WECHAT_DATA_ROOT": "",
+                "XDG_DATA_HOME": str(xdg),
+        }, clear=False), patch("builtins.input", return_value="y"):
+            self.assertEqual(installer.update(self.source, self.target), 0)
+
+        self.assertEqual(installer.saved_data_root(self.target), self.target.resolve())
+
     def test_release_runtime_ready_checks_direct_dependencies(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

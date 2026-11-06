@@ -279,12 +279,30 @@ def _has_legacy_data(target: Path) -> bool:
     return any((Path(target) / name).exists() for name in LEGACY_DATA_NAMES)
 
 
+def _looks_like_platform_default(root: Path) -> bool:
+    try:
+        return Path(root).resolve() == _default_data_root()
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def _repair_wrong_platform_marker(target: Path, saved: Path) -> bool:
+    target = Path(target).resolve()
+    saved = Path(saved).resolve()
+    return (saved != target
+            and _has_legacy_data(target)
+            and not _has_legacy_data(saved)
+            and _looks_like_platform_default(saved))
+
+
 def configured_data_root(target: Path) -> Path:
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     if override:
         return Path(override).expanduser().resolve()
     saved = saved_data_root(target)
     if saved is not None:
+        if _repair_wrong_platform_marker(target, saved):
+            return Path(target).resolve()
         return saved
     # Pre-platformdirs custom installs kept data next to the installation.
     # Preserve that root before the first marker is written.
