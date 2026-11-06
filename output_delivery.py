@@ -27,6 +27,7 @@ SEND_SPACING_SECONDS = 2.5
 # A no-id response is persisted as an outbound block and released by the next
 # accepted inbound message. A timer must not consume the ordinary backlog.
 DELIVERY_DEGRADED_THRESHOLD = 3
+STALE_OUTBOX_LIMIT = 200
 # A stale context token is repaired by the next inbound message, not by a retry.
 CONTEXT_REJECTION_KINDS = frozenset({"prepare_failed"})
 
@@ -233,6 +234,41 @@ class OutputDelivery:
         if not bridge.state["outbox"]:
             bridge.outbox_drained.set()
 
+    def quarantine_paused_backlog(self):
+        """Drop the pre-pause queue from delivery while retaining an audit trail.
+
+        The next accepted inbound message releases the channel for new replies,
+        not for work that accumulated while delivery was unconfirmed. Snapshot
+        the whole current queue before the wake-up so a sender cannot resume the
+        old order in the same event-loop turn.
+        """
+        bridge = self.bridge
+        if not bridge.state.pop("deliveryPaused", False):
+            return 0
+        queued = bridge.state.get("outbox", [])
+        if not queued:
+            return 0
+        quarantined_at = int(time.time())
+        stale = []
+        for entry in queued:
+            saved = dict(entry)
+            saved.update(status="stale", reason="delivery_paused",
+                         quarantinedAt=quarantined_at)
+            stale.append(saved)
+            self._queued_at.pop(entry.get("id"), None)
+        bridge.state["outbox"] = []
+        bridge.state["staleOutbox"] = (
+            bridge.state.get("staleOutbox", []) + stale
+        )[-STALE_OUTBOX_LIMIT:]
+        bridge.state["deliveryStaleTotal"] = (
+            bridge.state.get("deliveryStaleTotal", 0) + len(stale)
+        )
+        bridge.outbox_drained.set()
+        log_event("output.backlog_stale", level="warning", component="output",
+                  count=len(stale), retained=len(bridge.state["staleOutbox"]),
+                  reason="delivery_paused")
+        return len(stale)
+
     def budget_notice_entries(self):
         """The one notice that asks the user for the next inbound message."""
         bridge = self.bridge
@@ -328,13 +364,7 @@ class OutputDelivery:
                     # may already have been delivered, so resending can duplicate
                     # it. Quarantine once and wait for the next inbound message;
                     # a restart must not resume consuming the ordinary backlog.
-                    retained = sum(1 for item in bridge.state.get("failedOutbox", [])
-                                   if isinstance(item, dict)
-                                   and item.get("status") == "delivery_unknown")
-                    total = bridge.state.get("deliveryUnknownTotal")
-                    if type(total) is not int:
-                        total = retained
-                    bridge.state["deliveryUnknownTotal"] = max(total, retained) + 1
+                    bridge.state["deliveryUnknownTotal"] += 1
                     bridge.state["deliveryPaused"] = True
                     log_event("output.delivery_unknown", level="warning",
                               component="output", role=entry.get("role", "body"),

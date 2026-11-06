@@ -206,15 +206,16 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
 - 传输失败退避：只有普通传输错误（`WeChatTransportError`、超时、连接失败和 `OSError`）
   按 `SEND_RETRY_SECONDS × 3^(n-1)`（1s、3s）重试；明确 API 拒绝和未知本地异常直接失败，
   不再重试。
-- 未确认投递的特殊处置：`not_acknowledged` **首次出现即**持久化暂停出站，直到下一条
-  被接受的入站消息；当前条目立即隔离为 `delivery_unknown`，不发失败通知，不自动重放。
-  重启不会解除暂停，也不会继续消费普通积压。以 `output.delivery_unknown` 与带
-  `reason=not_acknowledged`、`release=next_inbound` 的 `output.send_paused` 记录。
+- 未确认投递的特殊处置：`not_acknowledged` **首次出现即**持久化暂停出站；当前条目立即
+  隔离为 `delivery_unknown`，不发失败通知，不自动重放。重启不会解除暂停，也不会继续
+  消费普通积压。下一条被接受的入站消息只恢复**新回复**：暂停发生时及此后积压的旧队列
+  整体移入 `staleOutbox`，标记 `status=stale`、`reason=delivery_paused`，不参与发送。
+  以 `output.delivery_unknown`、`output.send_paused` 和 `output.backlog_stale` 记录。
 - 可观测性：存在未知条目或连续发送失败达到 `DELIVERY_DEGRADED_THRESHOLD`（3）时，
   `status` 的 `delivery` 从 `ok` 变为 `unconfirmed`；`delivery_unknown` 是单调累计数，
-  `delivery_unknown_retained` 是有界失败历史中的保留数。成功一次只清连续失败计数，
-  不抹掉历史未知条目。升级旧状态时以当前 retained 数为下界补种累计数；旧版本已经淘汰的
-  历史无法还原，因此升级后的累计数表示“至少”而非完整历史。
+  `delivery_unknown_retained` 是有界失败历史中的保留数。旧积压另有
+  `delivery_stale` / `delivery_stale_retained`，分别表示累计隔离数和有界审计历史中的
+  保留数。成功一次只清连续失败计数，不抹掉历史未知条目。
 
 发送间隔、传输失败退避和 no-id 暂停三项互不排斥；入站消息继续轮询，只有出站等待下一条
 入站唤醒。
@@ -238,11 +239,12 @@ output.failed 的 send_failures 保存当时连续发送失败条目数，成功
   这样用户发来的日志能直接看出"被封可能是自己调高了额度"。
 - 额度用尽时不再发正文，改为插入一条 `budgetNotice`（"还有 N 段待发，回复 `/` 继续"）后等入站；
   该提示豁免预算检查，每个入站周期最多一条。
-- 这条提示本身也是一次发送。若它拿不到回执（通道正在丢弃消息），按"不再叠加"处理：不派生失败
-  通知、也不重新排队，发件箱原样保留，等下一条入站刷新额度后按原顺序继续——所以提示丢失时
-  用户看不到任何消息，需要靠再发一条消息来解开。
+- 这条提示本身也是一次发送。若它拿不到回执（通道正在丢弃消息），按"不再叠加"处理：
+  不派生失败通知、也不重新排队；它触发 no-id 暂停，下一条入站会把旧队列标为 stale，
+  只允许之后的新回复发送。
 - 任何被接受的入站消息（含 `/` 与任意命令）都会刷新额度：`refresh_reply_budget()` 递增
-  `inboundSeq`、把已用条数清零并唤醒发送循环，队列按原顺序继续。
+  `inboundSeq`、把已用条数清零并唤醒发送循环。普通额度耗尽时队列按原顺序继续；
+  若存在 no-id 暂停，则先隔离旧队列，再只发送这次入站之后产生的新回复。
 - 已用条数与 `inboundSeq` 一起持久化，重启后不会被误当成"额度已刷新"；序号对不上时按新周期算。
 - `/` 是 `/continue` 的别名，只出现在 `/help all`；它自己的处理函数不产生任何回复，
   避免"用 `/` 换一条 `/` 回执"的死循环。

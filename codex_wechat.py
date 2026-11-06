@@ -61,6 +61,8 @@ BRIDGE_STATE_DEFAULTS = {
     "inboundSeq": 0,
     "replyBudget": {},
     "deliveryUnknownTotal": 0,
+    "deliveryStaleTotal": 0,
+    "staleOutbox": [],
 }
 
 
@@ -70,17 +72,6 @@ def load_bridge_state(store):
     if not isinstance(saved, dict):
         saved = {}
     return {**deepcopy(BRIDGE_STATE_DEFAULTS), **saved}
-
-
-def migrate_delivery_unknown_total(state):
-    """Persist a lower bound for unknown deliveries after upgrading old state."""
-    retained = sum(1 for entry in state.get("failedOutbox", [])
-                   if isinstance(entry, dict) and entry.get("status") == "delivery_unknown")
-    total = state.get("deliveryUnknownTotal")
-    if type(total) is not int or total < retained:
-        state["deliveryUnknownTotal"] = retained
-        return True
-    return False
 
 
 def mark_active_release():
@@ -132,7 +123,6 @@ class Bridge:
         ensure_backend_config(self.config)
         self.settings = ConfigLoader(config, config_path)
         self.state = load_bridge_state(store)
-        unknown_migrated = migrate_delivery_unknown_total(self.state)
         self.state.setdefault("consecutiveSendFailures", 0)
         self.state.setdefault("quoteCache", {})
         self.wechat_paused = wechat_auth.state(self.state) == wechat_auth.AUTH_REQUIRED
@@ -186,8 +176,6 @@ class Bridge:
         self.note_reply_budget()
         self._applied_log_keep = None
         self.apply_log_keep()
-        if unknown_migrated:
-            self.save()
 
     @property
     def slicing(self):
@@ -242,10 +230,10 @@ class Bridge:
 
     def refresh_reply_budget(self):
         """Every accepted inbound message refreshes what we may send back."""
+        self.output.quarantine_paused_backlog()
         self.state["inboundSeq"] = self.state.get("inboundSeq", 0) + 1
         self.state["replyBudget"] = {"seq": self.state["inboundSeq"], "used": 0}
         self.state.pop("budgetPromptSent", None)
-        self.state.pop("deliveryPaused", None)
         self.send_wake.set()
 
     def reload_config(self):
@@ -712,10 +700,9 @@ def status_payload(store):
     unknown_retained = sum(1 for entry in state.get("failedOutbox", [])
                            if isinstance(entry, dict)
                            and entry.get("status") == "delivery_unknown")
-    unknown_total = state.get("deliveryUnknownTotal")
-    if type(unknown_total) is not int:
-        unknown_total = unknown_retained
-    unknown_total = max(unknown_total, unknown_retained)
+    unknown_total = state["deliveryUnknownTotal"]
+    stale_total = state["deliveryStaleTotal"]
+    stale_retained = len(state["staleOutbox"])
     payload = {
         "bound": bool(store.load("account")),
         "auth": auth,
@@ -739,6 +726,9 @@ def status_payload(store):
     if unknown_total:
         payload["delivery_unknown"] = unknown_total
         payload["delivery_unknown_retained"] = unknown_retained
+    if stale_total:
+        payload["delivery_stale"] = stale_total
+        payload["delivery_stale_retained"] = stale_retained
     auth_details = state.get("wechatAuth")
     if isinstance(auth_details, dict):
         if "detectedAt" in auth_details:

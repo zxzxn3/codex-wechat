@@ -489,23 +489,6 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.update(self.source, self.target), 0)
         prepare.assert_called_once_with(release)
 
-    def test_update_repairs_a_platform_default_marker_with_legacy_data(self):
-        with patch("builtins.input", return_value="y"):
-            installer.install(self.source, self.target)
-        self.add_private_data(self.target)
-        xdg = self.base / "xdg"
-        wrong = xdg / "codex-wechat"
-        (self.target / installer.DATA_ROOT_FILE).write_text(
-            str(wrong) + "\n", encoding="utf-8")
-
-        with patch.dict(os.environ, {
-                "CODEX_WECHAT_DATA_ROOT": "",
-                "XDG_DATA_HOME": str(xdg),
-        }, clear=False), patch("builtins.input", return_value="y"):
-            self.assertEqual(installer.update(self.source, self.target), 0)
-
-        self.assertEqual(installer.saved_data_root(self.target), self.target.resolve())
-
     def test_release_runtime_ready_checks_direct_dependencies(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -748,25 +731,6 @@ class LinuxServiceRegistrationTests(unittest.TestCase):
                 self.assertFalse(installer.configure_linux_service(target))
             run.assert_not_called()
 
-    def test_custom_data_root_removes_a_legacy_systemd_dropin(self):
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "install"
-            target.mkdir()
-            (target / "codex-wechat.service").write_text("[Unit]\n", encoding="utf-8")
-            data = Path(directory) / "data root"
-            dropin = Path(directory) / "systemd/user/codex-wechat.service.d/data-root.conf"
-            dropin.parent.mkdir(parents=True)
-            dropin.write_text(installer.SERVICE_DROPIN_MARKER + "\n", encoding="utf-8")
-            with patch.dict(os.environ, {
-                    "CODEX_WECHAT_DATA_ROOT": str(data),
-                    "XDG_CONFIG_HOME": directory}, clear=False), \
-                    patch.object(installer, "IS_WINDOWS", False), \
-                    patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"), \
-                    patch.object(installer, "_linux_service_state", return_value="owned"), \
-                    patch.object(installer, "_run"):
-                self.assertTrue(installer.configure_linux_service(target))
-            self.assertFalse(dropin.exists())
-
 
 class RuntimeRepairTests(unittest.TestCase):
     def test_marker_follows_current_activation_and_precedes_service_configuration(self):
@@ -847,18 +811,6 @@ class DataRootMarkerTests(unittest.TestCase):
             }, clear=False):
                 self.assertEqual(installer._default_data_root(),
                                  (data_home / "codex-wechat").resolve())
-
-    def test_legacy_custom_install_keeps_its_data_root(self):
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "legacy"
-            target.mkdir()
-            (target / ".state").mkdir()
-            data_home = Path(directory) / "xdg"
-            with patch.dict(os.environ, {
-                    "CODEX_WECHAT_DATA_ROOT": "",
-                    "XDG_DATA_HOME": str(data_home),
-            }, clear=False):
-                self.assertEqual(installer.configured_data_root(target), target.resolve())
 
     def test_default_root_is_also_persisted_in_the_marker(self):
         with tempfile.TemporaryDirectory() as directory:

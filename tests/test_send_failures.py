@@ -200,7 +200,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
-    async def test_a_new_inbound_releases_delivery_pause(self):
+    async def test_a_new_inbound_discards_the_old_backlog_and_sends_only_new_replies(self):
         bridge = self.bridge
         bridge.reply("one")
         bridge.reply("two")
@@ -213,7 +213,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             return {"message_id": len(attempts)}
 
         bridge.channel.send = send
-        with patch("output_delivery.log_event"):
+        with patch("output_delivery.log_event") as log_event:
             task = asyncio.create_task(bridge.sender())
             try:
                 for _ in range(50):
@@ -222,13 +222,26 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0.02)
                 self.assertTrue(bridge.state.get("deliveryPaused"))
                 bridge.refresh_reply_budget()
+                self.assertFalse(bridge.state.get("deliveryPaused"))
+                self.assertEqual(bridge.state["outbox"], [])
+                self.assertEqual([entry["text"] for entry in bridge.state["staleOutbox"]],
+                                 ["two"])
+                self.assertEqual(bridge.state["staleOutbox"][0]["status"], "stale")
+                self.assertEqual(bridge.state["staleOutbox"][0]["reason"],
+                                 "delivery_paused")
+                self.assertEqual(bridge.state["deliveryStaleTotal"], 1)
+                self.assertTrue(bridge.outbox_drained.is_set())
+                stale_event = next(call for call in log_event.call_args_list
+                                   if call.args and call.args[0] == "output.backlog_stale")
+                self.assertEqual(stale_event.kwargs["count"], 1)
+                self.assertEqual(stale_event.kwargs["retained"], 1)
+                bridge.reply("three")
                 for _ in range(50):
                     if not bridge.state["outbox"]:
                         break
                     await asyncio.sleep(0.02)
-                self.assertFalse(bridge.state.get("deliveryPaused"))
-                self.assertEqual(sum(1 for entry in attempts
-                                     if not entry.get("failureNotice")), 2)
+                self.assertEqual([entry["text"] for entry in attempts
+                                  if not entry.get("failureNotice")], ["one", "three"])
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -310,6 +323,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         self.assertEqual(len(restarted.state["outbox"]), 1)
         self.assertEqual(restarted.state["failedOutbox"][0]["status"], "delivery_unknown")
+        self.assertEqual(restarted.state["outbox"][0]["text"], "second")
         sent = []
 
         async def restarted_send(entry):
@@ -320,6 +334,16 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         try:
             await asyncio.sleep(0.1)
             self.assertEqual(sent, [])
+            restarted.refresh_reply_budget()
+            self.assertEqual(restarted.state["outbox"], [])
+            self.assertEqual([entry["text"] for entry in restarted.state["staleOutbox"]],
+                             ["second"])
+            restarted.reply("fresh")
+            for _ in range(50):
+                if not restarted.state["outbox"]:
+                    break
+                await asyncio.sleep(0.02)
+            self.assertEqual([entry["text"] for entry in sent], ["fresh"])
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -352,6 +376,21 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(task, return_exceptions=True)
         self.assertEqual(delays[:2], [1, 3])  # 1 s then 3 s, not 1 s twice
 
+    async def test_stale_history_is_bounded_while_the_total_stays_monotonic(self):
+        bridge = self.bridge
+        bridge.state["outbox"] = [
+            bridge.text_entries(f"old-{index}", group=str(index), context="context")[0]
+            for index in range(3)
+        ]
+        bridge.state["deliveryPaused"] = True
+        with patch("output_delivery.STALE_OUTBOX_LIMIT", 2), \
+                patch("output_delivery.log_event"):
+            self.assertEqual(bridge.output.quarantine_paused_backlog(), 3)
+        self.assertEqual(bridge.state["outbox"], [])
+        self.assertEqual([entry["text"] for entry in bridge.state["staleOutbox"]],
+                         ["old-1", "old-2"])
+        self.assertEqual(bridge.state["deliveryStaleTotal"], 3)
+
     async def test_consecutive_sends_are_spaced(self):
         bridge = self.bridge
         bridge.reply("one")
@@ -378,7 +417,10 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         for failures, expected in ((0, "ok"), (2, "ok"), (3, "unconfirmed")):
             self.store.save("bridge", {"consecutiveSendFailures": failures})
             self.assertEqual(status_payload(self.store)["delivery"], expected)
-        self.store.save("bridge", {"failedOutbox": [{"status": "delivery_unknown"}]})
+        self.store.save("bridge", {
+            "deliveryUnknownTotal": 1,
+            "failedOutbox": [{"status": "delivery_unknown"}],
+        })
         payload = status_payload(self.store)
         self.assertEqual(payload["delivery"], "unconfirmed")
         self.assertEqual(payload["delivery_unknown"], 1)
@@ -391,20 +433,17 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["delivery_unknown"], 25)
         self.assertEqual(payload["delivery_unknown_retained"], 20)
 
-    def test_startup_persists_unknown_total_baseline(self):
+    def test_status_reports_stale_backlog_totals(self):
         from codex_wechat import status_payload
         self.store.save("bridge", {
-            "failedOutbox": [{"status": "delivery_unknown"}] * 20,
+            "deliveryUnknownTotal": 1,
+            "failedOutbox": [{"status": "delivery_unknown"}],
+            "deliveryStaleTotal": 3,
+            "staleOutbox": [{"status": "stale"}] * 2,
         })
-        Bridge(self.store, {"user": "owner"}, {"backends": {
-            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
-        saved = self.store.load("bridge")
-        self.assertEqual(saved["deliveryUnknownTotal"], 20)
-        saved["failedOutbox"] = saved["failedOutbox"][-19:]
-        self.store.save("bridge", saved)
         payload = status_payload(self.store)
-        self.assertEqual(payload["delivery_unknown"], 20)
-        self.assertEqual(payload["delivery_unknown_retained"], 19)
+        self.assertEqual(payload["delivery_stale"], 3)
+        self.assertEqual(payload["delivery_stale_retained"], 2)
 
     async def test_failure_count_is_not_capped_or_reset_by_session_or_restart(self):
         bridge = self.bridge
@@ -422,13 +461,3 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
         self.assertEqual(restarted.prompt_fields()["send_failures"], 25)
         self.assertEqual(len(restarted.state["failedOutbox"]), 20)
-
-    async def test_legacy_history_is_preserved_without_inventing_a_counter(self):
-        state = self.bridge.state
-        state.pop("consecutiveSendFailures")
-        state["failedOutbox"] = [{"id": "historical"}]
-        self.store.save("bridge", state)
-        restored = Bridge(self.store, {"user": "owner"}, {"backends": {
-            "codex": {}, "deepseek": {"command": ["fake-deepseek", "app-server"]}}})
-        self.assertEqual(restored.prompt_fields()["send_failures"], 0)
-        self.assertEqual(restored.state["failedOutbox"], [{"id": "historical"}])
