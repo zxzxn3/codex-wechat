@@ -36,7 +36,7 @@ Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应
 | `autostart` | 查询登录自启，输出 `true` / `false`；服务未安装时也是 `false` |
 | `autostart true\|false` | 开启或关闭登录自启；只改登录触发器，不启动、停止或接管当前桥接 |
 | `uninstall [--purge-data\|-PurgeData]` | 停止并移除后台服务与命令入口；默认保留用户数据。Linux 用 `--purge-data`，Windows 用 `-PurgeData`；稳定入口不依赖 `current` |
-| `update` / `install` / `menu` / `components` | 转交同一个 `installer.py` |
+| `update` / `install` / `menu` / `components` | 转交同一个 `installer.py`；私有网络入口不保存更新来源，`update` 需显式 `--source` 或重跑同一入口 |
 
 ### 微信短别名
 
@@ -94,6 +94,8 @@ Linux 停止并移除用户 unit、命令软链；默认保留 `config.json`、`
 没有可移除的服务。
 Windows 自定义数据目录由 `CODEX_WECHAT_DATA_ROOT`（或原生 helper 的
 `-DataRoot`）传递；公开入口、Python 命令和计划任务都使用同一个数据根。Python 不会忽略它。
+Linux 后台服务的数据根在安装/更新时由 `CODEX_WECHAT_DATA_ROOT` 写入 systemd drop-in；
+安装后修改该环境变量需重新运行安装器，否则正在注册的服务仍使用旧根。
 
 Linux 的 stable `codex-wechat` 和 Windows 的 `codex-wechat.ps1` 在读取 `current` 之前
 直接分派 `uninstall` 到稳定卸载组件。这样 `current` 缺失、损坏或活动 release 不完整时，

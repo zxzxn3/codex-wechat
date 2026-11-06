@@ -7,23 +7,32 @@
 ## 快速开始
 
 仓库保持私有。创建一个只能读取 `zxzxn3/codex-wechat` 的 fine-grained PAT，Repository
-permissions 仅授予 `Contents: Read-only`，然后替换下面命令中的 `github_pat_REPLACE_ME`。
+permissions 仅授予 `Contents: Read-only`，然后运行下面的命令；PAT 从终端交互输入。
 入口通过 GitHub Contents API 取得 bootstrap，再由 bootstrap 认证克隆到临时目录并安装。
 
 Linux：
 
 ```bash
-CODEX_WECHAT_TOKEN='github_pat_REPLACE_ME' bash -o pipefail -c 'curl -fsSL --proto "=https" --tlsv1.2 -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
+read -rsp 'GitHub PAT: ' CODEX_WECHAT_TOKEN; echo
+export CODEX_WECHAT_TOKEN
+curl -fsSL --proto "=https" --tlsv1.2 \
+  --config <(printf 'header = "Authorization: Bearer %s"\n' "$CODEX_WECHAT_TOKEN") \
+  -H "Accept: application/vnd.github.raw+json" \
+  "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash
+unset CODEX_WECHAT_TOKEN
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:CODEX_WECHAT_TOKEN='github_pat_REPLACE_ME'; try { Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content) } finally { Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue }
+$secure = Read-Host 'GitHub PAT' -AsSecureString
+$env:CODEX_WECHAT_TOKEN = [Net.NetworkCredential]::new('', $secure).Password
+try { Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content) } finally { Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue }
 ```
 
 安装需要 Python 3.11+、Git、Codex 和 `curl`。PAT 可以共享给多名测试者，也可以每人一个；
-撤销后新的安装和更新立即失效。PAT 会进入 shell 历史，但不会写入仓库配置或安装状态。
+撤销后新的安装和更新立即失效。上面的入口用交互输入或内存中的认证头，不会把 PAT
+写入 shell 历史、仓库配置或安装状态。
 详细前提、更新和卸载见 [安装、更新与卸载](docs/INSTALL.md)。
 
 ## 第一次使用

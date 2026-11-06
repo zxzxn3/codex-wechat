@@ -16,23 +16,32 @@
 ## 首次安装
 
 仓库保持私有。fine-grained PAT 只选择 `zxzxn3/codex-wechat`，Repository permissions
-仅授予 `Contents: Read-only`；`Metadata: Read-only` 由 GitHub 保留。将下面的
-`github_pat_REPLACE_ME` 替换为实际 PAT 后运行对应平台命令。
+仅授予 `Contents: Read-only`；`Metadata: Read-only` 由 GitHub 保留。运行对应平台命令后，
+按提示在终端输入 PAT。
 
 Linux：
 
 ```bash
-CODEX_WECHAT_TOKEN='github_pat_REPLACE_ME' bash -o pipefail -c 'curl -fsSL --proto "=https" --tlsv1.2 -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
+read -rsp 'GitHub PAT: ' CODEX_WECHAT_TOKEN; echo
+export CODEX_WECHAT_TOKEN
+curl -fsSL --proto "=https" --tlsv1.2 \
+  --config <(printf 'header = "Authorization: Bearer %s"\n' "$CODEX_WECHAT_TOKEN") \
+  -H "Accept: application/vnd.github.raw+json" \
+  "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash
+unset CODEX_WECHAT_TOKEN
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:CODEX_WECHAT_TOKEN='github_pat_REPLACE_ME'; try { Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content) } finally { Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue }
+$secure = Read-Host 'GitHub PAT' -AsSecureString
+$env:CODEX_WECHAT_TOKEN = [Net.NetworkCredential]::new('', $secure).Password
+try { Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main').Content) } finally { Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue }
 ```
 
 入口先从 GitHub Contents API 取得同仓库中的 bootstrap。bootstrap 使用 PAT 认证 clone
-到临时目录，再调用本地安装器；token 不写入 Git remote、`.update-source.json`、配置或日志。
+到临时目录，再调用本地安装器；认证头只放在临时 git config 和进程环境中，不进入 argv、
+Git remote、`.update-source.json`、配置或日志。
 重跑同一入口即可安装或更新。
 
 也可以直接将完整源码目录或源码压缩包交给使用者，在源码目录运行本地入口：
@@ -85,7 +94,9 @@ codex-wechat service-start
 
 ## 更新
 
-再次运行同一个网络入口或本地入口即可更新已有安装。更新会保留配置、登录、待办、工作目录、
+再次运行同一个网络入口或本地入口即可更新已有安装。私有网络入口不会保存 PAT，也不会
+自动写入可复用的更新来源；安装后若要使用 `codex-wechat update`，请显式传
+`--source`（或重跑同一个网络入口）。更新会保留配置、登录、待办、工作目录、
 日志和已有的登录自启状态，不重启正在运行的桥接；新版本先进入独立 release 并完成检查和
 运行时准备，最后才切换 `current`。项目不提供安装回滚命令。
 
@@ -122,6 +133,8 @@ Linux stable `uninstall.py` 与 Windows stable `uninstall.ps1` 是内部实现�
 Linux 默认安装根目录同时保存程序、配置和状态；Windows 程序位于
 `%LOCALAPPDATA%\codex-wechat\app`，用户数据根为 `%LOCALAPPDATA%\codex-wechat`。可用
 `CODEX_WECHAT_DATA_ROOT` 和 `CODEX_WECHAT_INSTALL_ROOT` 明确分离位置。
+Linux 后台服务使用安装时的 `CODEX_WECHAT_DATA_ROOT` 生成 systemd drop-in；修改数据根后
+需要重新运行安装器以更新服务配置。
 
 `current`、`active-release`、`releases/`、`.state/`、`logs/`、`workspace/`、`shared/` 和
 `config.json` 各有独立职责，不复制供应商凭据或会话历史。配置与提示的细节见

@@ -39,7 +39,8 @@ class StandaloneInstallerTests(unittest.TestCase):
                 python=installer._venv_python(root)
                 python.parent.mkdir(parents=True)
                 python.touch()
-                with patch.object(installer, '_run') as run, \
+                with patch.object(installer, '_runtime_python_works', return_value=True), \
+                        patch.object(installer, '_run') as run, \
                         patch.object(installer.shutil, 'which', return_value=native):
                     installer.prepare_runtime(root)
                 commands=[call.args[0] for call in run.call_args_list]

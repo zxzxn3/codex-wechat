@@ -123,6 +123,7 @@ class BootstrapEntryTests(unittest.TestCase):
             binaries = root / "bin"
             binaries.mkdir()
             git_arguments = root / "git-arguments"
+            git_config = root / "git-config"
             installer_arguments = root / "installer-arguments"
             fake_installer = root / "fake-installer.py"
             fake_installer.write_text(
@@ -136,6 +137,11 @@ class BootstrapEntryTests(unittest.TestCase):
                 "#!/usr/bin/env bash\n"
                 "set -euo pipefail\n"
                 "printf '%s\\n' \"$@\" > \"$FAKE_GIT_ARGS\"\n"
+                "for argument in \"$@\"; do\n"
+                "  if [[ \"$argument\" == include.path=* ]]; then\n"
+                "    cp \"${argument#include.path=}\" \"$FAKE_GIT_CONFIG\"\n"
+                "  fi\n"
+                "done\n"
                 "destination=''\n"
                 "for argument in \"$@\"; do destination=$argument; done\n"
                 "mkdir -p \"$destination\"\n"
@@ -146,6 +152,7 @@ class BootstrapEntryTests(unittest.TestCase):
             environment["PATH"] = str(binaries) + os.pathsep + environment["PATH"]
             environment["CODEX_WECHAT_TOKEN"] = "github_pat_test"
             environment["FAKE_GIT_ARGS"] = str(git_arguments)
+            environment["FAKE_GIT_CONFIG"] = str(git_config)
             environment["FAKE_INSTALLER"] = str(fake_installer)
             environment["FAKE_INSTALLER_ARGS"] = str(installer_arguments)
             entry = Path(__file__).resolve().parents[1] / "bootstrap.sh"
@@ -155,11 +162,17 @@ class BootstrapEntryTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             git_args = git_arguments.read_text(encoding="utf-8").splitlines()
-            header = next(arg for arg in git_args
-                          if arg.startswith("http.extraHeader=Authorization: Basic "))
-            encoded = header.removeprefix("http.extraHeader=Authorization: Basic ")
+            config = git_config.read_text(encoding="utf-8")
+            header = next(line for line in config.splitlines()
+                          if "Authorization: Basic " in line)
+            encoded = header.rsplit("Authorization: Basic ", 1)[1]
             self.assertEqual(base64.b64decode(encoded), b"x-access-token:github_pat_test")
             self.assertNotIn("github_pat_test", "\n".join(git_args))
+            self.assertNotIn("github_pat_test", config)
+            config_path = Path(next(
+                arg.removeprefix("include.path=") for arg in git_args
+                if arg.startswith("include.path=")))
+            self.assertFalse(config_path.exists())
             self.assertIn("https://github.com/zxzxn3/codex-wechat", git_args)
             self.assertIn("main", git_args)
             self.assertFalse(Path(git_args[-1]).exists())
@@ -170,10 +183,13 @@ class BootstrapEntryTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         shell = (root / "bootstrap.sh").read_text(encoding="utf-8")
         powershell = (root / "bootstrap.ps1").read_text(encoding="utf-8")
-        self.assertIn("http.extraHeader", shell)
+        self.assertIn("include.path", shell)
+        self.assertIn("extraHeader = Authorization: Basic", shell)
         self.assertIn("unset auth CODEX_WECHAT_TOKEN", shell)
-        self.assertIn("http.extraHeader", powershell)
+        self.assertIn("include.path", powershell)
+        self.assertIn("extraHeader = Authorization: Basic", powershell)
         self.assertIn("Remove-Item Env:CODEX_WECHAT_TOKEN", powershell)
+        self.assertIn("Remove-Item -LiteralPath $GitConfig", powershell)
         self.assertNotIn("$CODEX_WECHAT_TOKEN@github.com", shell)
         self.assertNotIn("$env:CODEX_WECHAT_TOKEN@github.com", powershell)
 
@@ -184,3 +200,6 @@ class BootstrapEntryTests(unittest.TestCase):
             self.assertIn("contents/bootstrap.sh?ref=main", text)
             self.assertIn("contents/bootstrap.ps1?ref=main", text)
             self.assertIn("application/vnd.github.raw+json", text)
+            self.assertIn("read -rsp", text)
+            self.assertIn("Read-Host 'GitHub PAT' -AsSecureString", text)
+            self.assertNotIn("CODEX_WECHAT_TOKEN='github_pat_REPLACE_ME'", text)

@@ -1,4 +1,5 @@
 """Offline contracts for the Windows per-user service; no Windows calls."""
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -142,6 +143,12 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             await windows_service._pump_output(Stream(), path, 3)
             self.assertEqual(path.read_text(encoding="utf-8"),
                              "first\nsecond\n")
+
+    async def test_output_pump_wait_is_bounded_when_a_pipe_never_closes(self):
+        event = asyncio.Event()
+        pump = asyncio.create_task(event.wait())
+        await windows_service._drain_pump(pump, timeout=0.01)
+        self.assertTrue(pump.done())
 
     def test_single_supervisor_per_state_directory(self):
         with tempfile.TemporaryDirectory() as temp:

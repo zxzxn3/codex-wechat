@@ -9,8 +9,8 @@ GitHub Contents API 和 fine-grained PAT 从同一仓库取得 bootstrap，不�
 Windows 开发从同一远端取得源码，切换环境前先同步，避免两份源码分叉。
 
 内测 PAT 只授予该仓库 `Contents: Read-only`。bootstrap 使用临时 Authorization header
-clone 到临时目录，再调用同一个本地安装器；token 不进入 remote URL、更新来源、配置或日志，
-clone 完成后立即从安装环境清除。PAT 撤销后新安装与更新立即失效。
+clone 到临时目录，再调用同一个本地安装器；token 不进入 argv、remote URL、更新来源、
+持久配置或日志，临时 git config 在 clone 完成后立即删除。PAT 撤销后新安装与更新立即失效。
 
 平台网络入口调用同一个安装器；依赖声明集中在 `installer.py` 和 requirements 文件。
 原生二维码可用时不安装 Python 回退；附件 skill 由组件入口选择安装。

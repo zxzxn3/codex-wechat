@@ -81,6 +81,15 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(uninstall._unit_link(),
                              Path("/tmp/xdg/systemd/user/codex-wechat.service"))
 
+    def test_managed_systemd_data_root_dropin_is_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dropin = Path(directory) / "systemd/user/codex-wechat.service.d/data-root.conf"
+            dropin.parent.mkdir(parents=True)
+            dropin.write_text(uninstall.UNIT_DROPIN_MARKER + "\n", encoding="utf-8")
+            with patch.dict(uninstall.os.environ, {"XDG_CONFIG_HOME": directory}):
+                uninstall._remove_unit_dropin()
+            self.assertFalse(dropin.exists())
+
     def test_purge_refuses_a_data_root_that_contains_the_home_directory(self):
         with patch.object(uninstall, "INSTALL_ROOT", Path("/tmp/install")), \
                 patch.object(uninstall, "data_root", return_value=Path.home()):

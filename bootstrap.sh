@@ -3,7 +3,7 @@
 set -euo pipefail
 
 main() {
-    local repo='https://github.com/zxzxn3/codex-wechat' source_ref=main dry_run=0 non_interactive=0 target='' component='' skills_dir='' python_command installer_url release_url task_temporary auth private_source=0 installer
+    local repo='https://github.com/zxzxn3/codex-wechat' source_ref=main dry_run=0 non_interactive=0 target='' component='' skills_dir='' python_command installer_url release_url task_temporary auth git_config private_source=0 installer
     while (($#)); do
         case "$1" in
             --repo|--ref|--dir|--component|--skills-dir)
@@ -71,17 +71,22 @@ if not re.fullmatch(r"[A-Za-z0-9_]+", token):
 print("Authorization: Basic " + base64.b64encode(
     ("x-access-token:" + token).encode()).decode())
 ' 2>/dev/null) || { echo 'CODEX_WECHAT_TOKEN 格式无效。' >&2; return 1; }
-        # Keep the credential out of the remote URL and the installer's environment.
+        git_config="$task_temporary/gitconfig"
+        (umask 077; printf '[http]\n\textraHeader = Authorization: Basic %s\n' \
+            "$auth" > "$git_config")
+        # Keep the credential out of argv, the remote URL and the installer env.
         if ! (
             unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
             unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
             GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c core.hooksPath=/dev/null \
-                -c http.extraHeader="$auth" clone --depth 1 --single-branch \
+                -c include.path="$git_config" clone --depth 1 --single-branch \
                 --branch "$source_ref" -- "$repo" "$task_temporary/source"
         ); then
+            unset auth
             echo '私有仓库下载失败；请检查 PAT 是否仍有效并具有该仓库的 Contents: Read-only 权限。' >&2
             return 1
         fi
+        rm -f -- "$git_config"
         unset auth CODEX_WECHAT_TOKEN
         installer="$task_temporary/source/installer.py"
         local -a installer_arguments=("$installer" menu)

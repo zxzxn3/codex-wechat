@@ -30,6 +30,7 @@ FAILURE_WINDOW_SECONDS = 300.0
 MAX_FAILURES = 5
 OWNER_STATUS_NAME = "service-owner.json"
 SUPERVISOR_LOCK_NAME = "supervisor.lock"
+OUTPUT_DRAIN_TIMEOUT_SECONDS = 5.0
 
 
 def data_root() -> Path:
@@ -290,11 +291,17 @@ async def _pump_output(stream, log_path: Path, keep: KeepSource) -> None:
         return
 
 
-async def _drain_pump(pump) -> None:
+async def _drain_pump(pump, timeout: float | None = None) -> None:
     if pump is None:
         return
+    if timeout is None:
+        timeout = OUTPUT_DRAIN_TIMEOUT_SECONDS
     try:
-        await pump
+        await asyncio.wait_for(pump, timeout)
+    except TimeoutError:
+        # A descendant can keep the inherited stdout pipe open after the
+        # bridge itself exits. Do not let log draining block supervision.
+        await _cancel_pump(pump)
     except (OSError, ValueError):
         pass
 

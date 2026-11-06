@@ -59,10 +59,15 @@ try {
         $Source = Join-Path $TaskTemporary 'source'
         $Auth = [Convert]::ToBase64String(
             [Text.Encoding]::UTF8.GetBytes("x-access-token:$env:CODEX_WECHAT_TOKEN"))
+        $GitConfig = Join-Path $TaskTemporary 'gitconfig'
+        [IO.File]::WriteAllText(
+            $GitConfig,
+            "[http]`n`textraHeader = Authorization: Basic $Auth`n",
+            [Text.UTF8Encoding]::new($false))
         $PreviousGitPrompt = $env:GIT_TERMINAL_PROMPT
         try {
             $env:GIT_TERMINAL_PROMPT = '0'
-            & git.exe -c credential.helper= -c "http.extraHeader=Authorization: Basic $Auth" `
+            & git.exe -c credential.helper= -c "include.path=$GitConfig" `
                 clone --depth 1 --single-branch --branch $Ref -- $Repo $Source
             if ($LASTEXITCODE -ne 0) {
                 throw 'Private repository clone failed. Check that CODEX_WECHAT_TOKEN is valid and has Contents: Read-only access.'
@@ -74,6 +79,7 @@ try {
                 $env:GIT_TERMINAL_PROMPT = $PreviousGitPrompt
             }
             Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $GitConfig -Force -ErrorAction SilentlyContinue
             Remove-Variable Auth -ErrorAction SilentlyContinue
         }
         $Installer = Join-Path $Source 'installer.py'

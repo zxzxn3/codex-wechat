@@ -8,6 +8,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -435,6 +436,19 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.update(self.source, self.target), 0)
         prepare.assert_called_once_with(release)
 
+    def test_release_runtime_ready_checks_direct_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            python = installer._venv_python(root)
+            python.parent.mkdir(parents=True)
+            python.write_text("fake", encoding="utf-8")
+            with patch.object(installer.subprocess, "run",
+                              return_value=SimpleNamespace(returncode=0)) as run:
+                self.assertTrue(installer.release_runtime_ready(root))
+            import_command = run.call_args_list[1].args[0][2]
+            for module in installer.RUNTIME_IMPORTS:
+                self.assertIn(module, import_command)
+
     def test_update_rejects_same_versioned_root_as_source(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
@@ -609,6 +623,13 @@ class InstallerCommandTests(unittest.TestCase):
 
 
 class LinuxServiceRegistrationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.xdg = Path(self.temporary.name) / "config"
+        self.enterContext(patch.dict(
+            os.environ, {"XDG_CONFIG_HOME": str(self.xdg)}, clear=False))
+
     def test_registration_links_without_enabling_or_starting(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "install"
@@ -654,6 +675,48 @@ class LinuxServiceRegistrationTests(unittest.TestCase):
                     patch.object(installer, "_run") as run:
                 self.assertFalse(installer.configure_linux_service(target))
             run.assert_not_called()
+
+    def test_custom_data_root_is_persisted_in_a_systemd_dropin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "install"
+            target.mkdir()
+            (target / "codex-wechat.service").write_text("[Unit]\n", encoding="utf-8")
+            data = Path(directory) / "data root"
+            with patch.dict(os.environ, {
+                    "CODEX_WECHAT_DATA_ROOT": str(data)}, clear=False), \
+                    patch.object(installer, "IS_WINDOWS", False), \
+                    patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"), \
+                    patch.object(installer, "_linux_service_state", return_value="owned"), \
+                    patch.object(installer, "_run"):
+                self.assertTrue(installer.configure_linux_service(target))
+            text = installer.linux_service_dropin().read_text(encoding="utf-8")
+            self.assertIn("ConditionPathExists=\n", text)
+            self.assertIn(
+                f"ConditionPathExists={data / '.state/account.json'}", text)
+            self.assertIn(
+                f'Environment="CODEX_WECHAT_DATA_ROOT={data}"', text)
+
+
+class RuntimeRepairTests(unittest.TestCase):
+    def test_prepare_runtime_rebuilds_a_broken_venv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            python = installer._venv_python(root)
+            python.parent.mkdir(parents=True)
+            python.write_text("broken", encoding="utf-8")
+            calls = []
+
+            def run(command, *, cwd):
+                calls.append(command)
+                if command[1:3] == ["-m", "venv"]:
+                    python.parent.mkdir(parents=True, exist_ok=True)
+                    python.write_text("rebuilt", encoding="utf-8")
+
+            with patch.object(installer, "_runtime_python_works", return_value=False), \
+                    patch.object(installer, "_run", side_effect=run), \
+                    patch.object(installer, "project_files", return_value={}):
+                installer.prepare_runtime(root)
+            self.assertEqual(calls[0][1:3], ["-m", "venv"])
 
 
 if __name__ == "__main__":
