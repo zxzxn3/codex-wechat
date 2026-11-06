@@ -412,6 +412,20 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.thread.assert_awaited_once_with(target, {})
         self.assertEqual(self.bridge.state["thread"], target)
 
+    async def test_switch_accepts_a_numeric_id_prefix(self):
+        target = "1234abcd-0000-0000-0000-000000000000"
+        self.bridge.state.update(context="context", thread="current")
+        self.bridge.backend.list_threads = AsyncMock(return_value={
+            "data": [{"id": target, "name": "数字前缀目标"},
+                     {"id": "deadbeef-0000-0000-0000-000000000000",
+                      "name": "其他会话"}]})
+        self.bridge.backend.read_thread = AsyncMock(return_value={
+            "id": target, "status": {"type": "inactive"}})
+        self.bridge.backend.thread = AsyncMock(return_value=target)
+        await handle(self.bridge, "/switch", "1234")
+        self.bridge.backend.thread.assert_awaited_once_with(target, {})
+        self.assertEqual(self.bridge.state["thread"], target)
+
     async def test_switch_ambiguous_id_prefix_lists_choices(self):
         first = "01a13162-8d25-7883-ae2b-c70389dc9d58"
         second = "01a1dead-0000-0000-0000-000000000000"

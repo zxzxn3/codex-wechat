@@ -58,6 +58,9 @@ IPC steer 在发出前核对快照中的 expectedTurnId；App 内部 follower �
 输入以一次保存从inbox进入currentInput。RPC前记dispatching，接受后记accepted；
 preparing可恢复，dispatching结果未知、accepted均不自动重发。clientUserMessageId只是
 追踪标识，未经验证不承诺服务端持久去重。明确不能steer可排队；超时/断连不算明确拒绝。
+控制命令在入站保存时进入有界 `pendingControls`：尚未开始执行的条目重启后重新入队；
+已经开始执行但进程中断的条目不盲目重放，恢复时提示用户重试。这样避免保存与内存队列之间的
+静默丢失，同时不承诺跨进程恰好一次执行。
 
 会话标题检索使用原生 `thread/list` 的 `searchTerm`；4–32 位会话 ID 前缀通过分页枚举
 会话列表后本地匹配。两者都不解析 Agent 正文，也不调用模型。`/switch` 对唯一匹配直接

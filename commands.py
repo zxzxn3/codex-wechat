@@ -647,6 +647,13 @@ async def command_switch(bridge, command, argument, received=None):
             target = choices[index]
         elif prefix is None:
             raise UserFacingError(bridge.prompt("SESSION_INDEX_INVALID"))
+        if target is None and prefix is not None:
+            matches = await _id_prefix_matches(bridge, prefix)
+            if len(matches) == 1:
+                target = matches[0]["id"]
+            elif matches:
+                _session_choices(bridge, matches, argument, id_prefix=True)
+                return
     elif _is_thread_id(argument):
         target = argument
     elif prefix is not None:
@@ -848,6 +855,7 @@ async def command_restart(bridge, command, argument, received=None):
         bridge.reply(bridge.prompt("RESTART_USAGE"))
         return
     try:
+        bridge.finish_control((received or {}).get("controlId"))
         await bridge.restart_service()
     except UserFacingError as error:
         bridge.reply(bridge.prompt("RESTART_REJECTED", {"reason": str(error)}))

@@ -28,7 +28,7 @@ BACKUP_COUNT = DEFAULT_KEEP
 # MAX_BYTES * (keep + 1). Only a lower bound is enforced.
 _LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
 _EVENT = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
-_PATH_LIKE = re.compile(r"(?:^|[\s(=])(?:[A-Za-z]:[\\/]|\\\\|~/|/)")
+_PATH_LIKE = re.compile(r"""(?:^|[\s(='"])(?:[A-Za-z]:[\\/]|\\\\|~/|/)""")
 _REQUEST_ID = contextvars.ContextVar("codex_wechat_request_id", default=None)
 _lock = threading.Lock()
 _path = None
@@ -205,7 +205,7 @@ def _clean_field(name, value):
         return None
     if name not in _TEXT_FIELDS:
         return None
-    if name == "backend_version" and _PATH_LIKE.search(value):
+    if name in {"backend_version", "reason"} and _PATH_LIKE.search(value):
         return None
     value = _clean_text(value)
     return value if re.fullmatch(_TEXT_FIELDS[name], value) else None

@@ -51,6 +51,7 @@ COMMANDS = (
             aliases=("/h",), help_usage="/help"),
 )
 CONTROL_LANES = tuple(dict.fromkeys(spec.lane for spec in COMMANDS if spec.route != "input"))
+PENDING_CONTROL_LIMIT = 100
 REGISTRY = {}
 for spec in COMMANDS:
     for name in (spec.name, *spec.aliases):

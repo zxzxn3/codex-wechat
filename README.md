@@ -126,7 +126,8 @@ Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本�
 ## 配置
 
 运行配置是 `config.json`，示例见 [config.example.json](config.example.json)。配置按文件变化
-热加载；无效配置保留上一组有效值并提示一次，不中断当前回合。
+热加载；无效配置保留上一组有效值并提示一次，不中断当前回合。`media.maxMiB` 例外：修改文件后
+需重启服务，或使用 `/settings media.maxMiB` 立即应用。
 
 后端定义位于 `backends.<名字>`，进程启动和每次 `/backend` 前重新读取，支持 `label`、
 `command`、`env`、`sharedDaemon`、`useSystemProxy` 和 `threadOptions`。`label` 是显示名，按原文

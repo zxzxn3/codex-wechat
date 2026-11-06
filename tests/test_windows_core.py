@@ -53,6 +53,8 @@ class PlatformTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(platform_support, "IS_WINDOWS", True), \
                     patch("platform_support.account_identity", return_value="*S-1-5-21"), \
+                    patch.object(platform_support.subprocess, "CREATE_NO_WINDOW",
+                                 0x08000000, create=True), \
                     patch("platform_support.subprocess.run") as run:
                 run.return_value.returncode = 0
                 platform_support.make_private(Path(directory))

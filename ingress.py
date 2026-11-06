@@ -1,11 +1,11 @@
 """Inbound WeChat normalization, deduplication and command routing."""
-import asyncio
+from dataclasses import asdict
 import hashlib
 import json
 import uuid
 
 import wechat_auth
-from command_specs import REGISTRY, command_lane
+from command_specs import PENDING_CONTROL_LIMIT, REGISTRY, command_lane
 from commands import parse_control
 from diagnostics import log_event, new_request_id
 from latency import message_timestamps
@@ -13,6 +13,15 @@ from media import MAX_ATTACHMENTS
 from records import InputPhase
 from wechat_content import (message_key, message_summary, message_text,
                             quote_context, quoted_prompt, remember_quote)
+
+
+def _persisted_received(received):
+    """Copy receive metadata without the in-memory Source record."""
+    saved = dict(received)
+    media = saved.get("media")
+    if isinstance(media, dict) and hasattr(media.get("source"), "__dataclass_fields__"):
+        saved["media"] = {**media, "source": asdict(media["source"])}
+    return saved
 
 
 class Ingress:
@@ -25,6 +34,7 @@ class Ingress:
         bridge = self.bridge
         bridge.reload_config()
         controls = []
+        pending_controls = bridge.state.setdefault("pendingControls", [])
         for msg in batch.get("msgs", []):
             request_id = new_request_id()
             if msg.get("from_user_id") != bridge.account["user"] or msg.get("group_id"):
@@ -94,7 +104,22 @@ class Ingress:
                 received["command"] = spec.name if spec else None
                 if spec and spec.lane == "media":
                     received["media"] = bridge.media_origin()
-                controls.append((body_text, received))
+                if len(pending_controls) >= PENDING_CONTROL_LIMIT:
+                    log_event("control.rejected", component="input", kind="command",
+                              status="queue_full", request_id=request_id,
+                              command=received.get("command"))
+                    bridge.reply(bridge.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
+                else:
+                    received["controlId"] = request_id
+                    control = {
+                        "id": request_id,
+                        "text": body_text,
+                        "received": _persisted_received(received),
+                        "state": "queued",
+                        "lane": command_lane(spec.name if spec else command, argument),
+                    }
+                    pending_controls.append(control)
+                    controls.append(control)
             elif (text or attachments) and len(text) <= 20000:
                 if len(bridge.state["inbox"]) >= 20:
                     bridge.reject_input(request_id, kind, "queue_full")
@@ -123,16 +148,14 @@ class Ingress:
         # Persist cursor and incoming work together, before starting any agent work.
         bridge.save()
         bridge.send_wake.set()
-        for command, received in controls:
-            name, argument = parse_control(command)
-            queue = bridge.controls[command_lane(name, argument)]
-            try:
-                queue.put_nowait((command, received))
-            except asyncio.QueueFull:
-                request_id = received.get("request_id")
-                log_event("control.rejected", component="input", kind="command",
-                          status="queue_full", request_id=request_id,
-                          command=received.get("command"))
-                bridge.reply(bridge.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
+        for control in controls:
+            if bridge.enqueue_control(control):
+                continue
+            request_id = control["received"].get("request_id")
+            log_event("control.rejected", component="input", kind="command",
+                      status="queue_full", request_id=request_id,
+                      command=control["received"].get("command"))
+            bridge.finish_control(control["id"])
+            bridge.reply(bridge.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
         bridge.wake.set()
         bridge.steer_wake.set()

@@ -17,6 +17,7 @@ import service_adapter
 import service_control
 import wechat_auth
 from backend import CodexBackend
+from records import Source
 from output_delivery import DELIVERY_DEGRADED_THRESHOLD, OutputDelivery
 from input_delivery import InputDelivery
 from ingress import Ingress
@@ -63,6 +64,7 @@ BRIDGE_STATE_DEFAULTS = {
     "deliveryUnknownTotal": 0,
     "deliveryStaleTotal": 0,
     "staleOutbox": [],
+    "pendingControls": [],
 }
 
 
@@ -488,6 +490,70 @@ class Bridge:
         log_event("input.rejected", component="input", request_id=request_id,
                   kind=kind, status=status)
 
+    def pending_control(self, control_id):
+        if not control_id:
+            return None
+        return next((control for control in self.state.get("pendingControls", [])
+                     if isinstance(control, dict) and control.get("id") == control_id), None)
+
+    def enqueue_control(self, control):
+        lane = control.get("lane", "local")
+        queue = self.controls.get(lane)
+        saved = control.get("received")
+        if queue is None or not isinstance(saved, dict):
+            return False
+        received = dict(saved)
+        media = received.get("media")
+        if isinstance(media, dict) and isinstance(media.get("source"), dict):
+            received["media"] = {
+                **media,
+                "source": Source(**media["source"]),
+            }
+        try:
+            queue.put_nowait((control.get("text", ""), received))
+        except asyncio.QueueFull:
+            return False
+        return True
+
+    def mark_control_running(self, control_id):
+        control = self.pending_control(control_id)
+        if control is None:
+            return
+        control["state"] = "running"
+        self.save()
+
+    def finish_control(self, control_id):
+        if not control_id:
+            return
+        pending = self.state.get("pendingControls", [])
+        kept = [control for control in pending
+                if not (isinstance(control, dict) and control.get("id") == control_id)]
+        if len(kept) != len(pending):
+            self.state["pendingControls"] = kept
+            self.save()
+
+    def restore_controls(self):
+        pending = self.state.setdefault("pendingControls", [])
+        kept = []
+        interrupted = 0
+        for control in pending:
+            if not isinstance(control, dict):
+                continue
+            if control.get("state") == "running":
+                interrupted += 1
+                continue
+            if self.enqueue_control(control):
+                kept.append(control)
+            else:
+                kept.append(control)
+        if kept != pending:
+            self.state["pendingControls"] = kept
+            self.save()
+        if interrupted:
+            self.reply(self.prompt("CONTROL_INTERRUPTED", {"count": interrupted}))
+            log_event("control.interrupted", level="warning", component="input",
+                      count=interrupted)
+
     async def receive(self, batch):
         await self.ingress.receive(batch)
 
@@ -534,7 +600,9 @@ class Bridge:
         queue = self.controls[lane]
         while True:
             text, received = await queue.get()
+            control_id = received.get("controlId") if isinstance(received, dict) else None
             started = time.perf_counter()
+            self.mark_control_running(control_id)
             try:
                 if lane == "urgent":
                     await asyncio.wait_for(self.control(text, received=received), 5)
@@ -553,6 +621,7 @@ class Bridge:
                           **error_fields(error))
                 print(f"控制失败：{type(error).__name__}", file=sys.stderr, flush=True)
             finally:
+                self.finish_control(control_id)
                 queue.task_done()
                 self.wake.set()
 
@@ -609,6 +678,7 @@ class Bridge:
             if self.state.pop("restartRequested", False):
                 self.reply(self.prompt("RESTART_READY"))
             self.recover_inputs()
+            self.restore_controls()
             if self.wechat_paused:
                 await self.require_wechat_rebind()
             tasks = [asyncio.create_task(fn()) for fn in

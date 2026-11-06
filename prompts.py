@@ -239,6 +239,7 @@ INPUT_RESULT_INTERRUPTED = "任务已提交，但结果接收中断，未重新�
 CONTROL_QUEUE_FULL = "指令等待过多，请稍后重试。"
 CONTROL_TIMEOUT = "控制请求未确认，请查看 `/status`；不会自动重发。"
 CONTROL_FAILED = "指令未完成，请查看 `/status` 后重试。"
+CONTROL_INTERRUPTED = "重启时有 {count} 条控制指令可能未完成，请重试。"
 GENERIC_FAILURE = "操作失败"
 COMMAND_USAGE = "用法: `{usage}`"
 HELP_USAGE = "用法: `/help`、`/help all` 或 `/help settings`"
