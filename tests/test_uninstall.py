@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-import platform_support
-import uninstall
+from codex_wechat import platform_support
+from codex_wechat import uninstall
 
 
 class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):

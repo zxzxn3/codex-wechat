@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from curl_cffi import CurlInfo, CurlOpt
 from curl_cffi.requests.exceptions import RequestException
 
-from wechat_http import PooledHTTP, _metrics, _session
+from codex_wechat.wechat_http import PooledHTTP, _metrics, _session
 
 URL = 'https://ilinkai.weixin.qq.com/ilink/bot/getconfig'
 
@@ -26,7 +26,7 @@ class PoolTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.sessions = []
         self.transport = PooledHTTP()
-        self.factory = patch('wechat_http._session', side_effect=self.make_session)
+        self.factory = patch('codex_wechat.wechat_http._session', side_effect=self.make_session)
         self.factory.start()
 
     async def asyncTearDown(self):
@@ -170,7 +170,7 @@ class PoolTests(unittest.IsolatedAsyncioTestCase):
         session = self.transport.outgoing.acquire()
         self.transport.outgoing.release()
         session.request.side_effect = too_large
-        with patch('wechat_http.MAX_RESPONSE_BYTES', 4):
+        with patch('codex_wechat.wechat_http.MAX_RESPONSE_BYTES', 4):
             output, metrics = await self.fetch()
         self.assertEqual(aborted, [0xFFFFFFFF])
         self.assertEqual(metrics['curl_code'], 63)

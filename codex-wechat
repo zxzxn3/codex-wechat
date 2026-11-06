@@ -60,14 +60,15 @@ case "${1:-}" in
         ;;
 esac
 if [ "$ACTION" = "uninstall" ]; then
-    UNINSTALLER="$INSTALL_ROOT/uninstall.py"
+    UNINSTALLER="$INSTALL_ROOT/codex_wechat/uninstall.py"
     if [ ! -f "$UNINSTALLER" ]; then
         echo "codex-wechat: 稳定卸载组件缺失: $UNINSTALLER" >&2
         exit 1
     fi
     export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
     shift
-    exec python3 -B -u "$UNINSTALLER" "$@"
+    exec env PYTHONPATH="$INSTALL_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+        python3 -B -u -m codex_wechat.uninstall "$@"
 fi
 if [ -L "$CURRENT_FILE" ]; then
     echo "codex-wechat: 当前版本指针 current 不能是符号链接或重解析点: $CURRENT_FILE" >&2
@@ -88,7 +89,7 @@ if [ -f "$CURRENT_FILE" ]; then
         exit 1
     fi
     PROJECT_DIR="$INSTALL_ROOT/releases/$RELEASE_ID"
-    if [ ! -f "$PROJECT_DIR/codex_wechat.py" ]; then
+    if [ ! -f "$PROJECT_DIR/codex_wechat/app.py" ]; then
         echo "codex-wechat: 当前版本不完整: $PROJECT_DIR" >&2
         echo "请从新源码重新运行 update。" >&2
         exit 1
@@ -100,4 +101,5 @@ PYTHON=python3
 if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
     PYTHON="$PROJECT_DIR/.venv/bin/python"
 fi
-exec "$PYTHON" -u "$PROJECT_DIR/codex_wechat.py" "$@"
+exec env PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PYTHON" -u -m codex_wechat "$@"

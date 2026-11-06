@@ -3,7 +3,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from backend_session import BackendSession
+from codex_wechat.backend_session import BackendSession
 
 
 class BackendSessionTests(unittest.IsolatedAsyncioTestCase):

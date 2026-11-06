@@ -1,8 +1,8 @@
 """Threshold detection using synthetic account snapshots only."""
 import unittest
 
-from configuration import Notifications
-from quota import quota_warnings
+from codex_wechat.configuration import Notifications
+from codex_wechat.quota import quota_warnings
 
 
 class QuotaTests(unittest.TestCase):

@@ -4,9 +4,9 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
-from codex_wechat import Bridge
-from storage import Store
-import wechat_auth
+from codex_wechat.app import Bridge
+from codex_wechat.storage import Store
+from codex_wechat import wechat_auth
 
 
 class RebindDeliveryTests(unittest.IsolatedAsyncioTestCase):

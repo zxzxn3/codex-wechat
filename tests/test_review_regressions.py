@@ -2,8 +2,8 @@
 import asyncio
 import unittest
 
-from subprocess_io import communicate
-import wechat_auth
+from codex_wechat.subprocess_io import communicate
+from codex_wechat import wechat_auth
 
 
 class WeChatIdentityRegressionTests(unittest.TestCase):

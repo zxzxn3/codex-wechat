@@ -123,9 +123,9 @@ class InstallerTests(unittest.TestCase):
         if not installer.IS_WINDOWS:
             self.assertTrue((release / "codex-wechat").stat().st_mode & stat.S_IXUSR)
         self.assertTrue(installer.release_matches(self.target, identifier))
-        self.assertTrue((self.target / installer._stable_files()[0]).is_file())
+        self.assertTrue((self.target / installer._stable_files(self.source)[0]).is_file())
         self.assertTrue((self.target / "installer.py").is_file())
-        self.assertTrue((self.target / "release.py").is_file())
+        self.assertTrue((self.target / "codex_wechat/app.py").is_file())
         self.assertFalse((self.target / "config.json").exists())
         self.assertFalse((self.target / ".state").exists())
 
@@ -434,11 +434,11 @@ class InstallerTests(unittest.TestCase):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
         current = self.current()
-        (self.target / installer._stable_files()[0]).unlink()
+        (self.target / installer._stable_files(self.source)[0]).unlink()
         with patch.object(installer, "introduction", return_value=True), patch("builtins.input", return_value="y"):
             self.assertEqual(installer.update(self.source, self.target), 0)
         self.assertEqual(self.current(), current)
-        self.assertTrue((self.target / installer._stable_files()[0]).is_file())
+        self.assertTrue((self.target / installer._stable_files(self.source)[0]).is_file())
 
     def test_same_version_update_repairs_the_command_entry(self):
         with patch("builtins.input", return_value="y"):
@@ -595,7 +595,9 @@ class RuntimeDiscoveryTests(unittest.TestCase):
     def test_local_source_discovery_is_used_in_every_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory)
-            (source / "native_codex.py").write_text(
+            helper = source / "codex_wechat/native_codex.py"
+            helper.parent.mkdir(parents=True)
+            helper.write_text(
                 "def discover_codex(env=None, *, windows=None):\n"
                 "    return '/found/by/source'\n", encoding="utf-8")
             self.assertEqual(installer._discover_runtime(source), "/found/by/source")
@@ -603,19 +605,23 @@ class RuntimeDiscoveryTests(unittest.TestCase):
     def test_discovery_does_not_cache_bytecode_in_the_source(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory)
-            (source / "native_codex.py").write_text(
+            helper = source / "codex_wechat/native_codex.py"
+            helper.parent.mkdir(parents=True)
+            helper.write_text(
                 "def discover_codex(env=None, *, windows=None):\n"
                 "    return '/found/by/source'\n", encoding="utf-8")
             with patch.object(installer.sys, "dont_write_bytecode", False):
                 installer._discover_runtime(source)
-            self.assertFalse((source / "__pycache__").exists())
+            self.assertFalse((source / "codex_wechat/__pycache__").exists())
 
     def test_missing_or_broken_helper_falls_back_to_path(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory)
             with patch.object(installer.shutil, "which", return_value="/from/path"):
                 self.assertEqual(installer._discover_runtime(source), "/from/path")
-                (source / "native_codex.py").write_text(
+                helper = source / "codex_wechat/native_codex.py"
+                helper.parent.mkdir(parents=True)
+                helper.write_text(
                     "raise ValueError('broken helper')\n", encoding="utf-8")
                 self.assertEqual(installer._discover_runtime(source), "/from/path")
 
@@ -645,7 +651,7 @@ class InstallerCommandTests(unittest.TestCase):
             import win32security
         except ImportError:
             self.skipTest("pywin32 未安装")
-        import platform_support
+        from codex_wechat import platform_support
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "state"
             platform_support.make_private(target)
@@ -664,16 +670,17 @@ class InstallerCommandTests(unittest.TestCase):
     def test_unreadable_install_entry_is_reported(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
-            for name in (*installer._stable_files(), installer.CURRENT_FILE):
+            files = installer._stable_files(installer.SOURCE_ROOT)
+            for name in (*files, installer.CURRENT_FILE):
                 path = target / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("x", encoding="utf-8")
             (target / "releases" / "abc").mkdir(parents=True)
-            installer.check_user_access(target, "abc")
+            installer.check_user_access(target, "abc", installer.SOURCE_ROOT)
             with patch.object(installer, "_readable",
                               side_effect=lambda path: path.name != installer.CURRENT_FILE):
                 with self.assertRaisesRegex(ValueError, "chmod|icacls") as caught:
-                    installer.check_user_access(target, "abc")
+                    installer.check_user_access(target, "abc", installer.SOURCE_ROOT)
             self.assertIn(installer.CURRENT_FILE, str(caught.exception))
 
 
@@ -809,7 +816,7 @@ class DataRootMarkerTests(unittest.TestCase):
                     "CODEX_WECHAT_DATA_ROOT": "",
                     "XDG_DATA_HOME": str(data_home),
             }, clear=False), \
-                    patch("platform_support._platform_user_data_dir", xdg_user_data_dir):
+                    patch("codex_wechat.platform_support._platform_user_data_dir", xdg_user_data_dir):
                 self.assertEqual(installer._default_data_root(),
                                  (data_home / "codex-wechat").resolve())
 

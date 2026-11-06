@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import AsyncMock
 
-from backend import CodexBackend
+from codex_wechat.backend import CodexBackend
 
 
 class AttachmentInputTests(unittest.IsolatedAsyncioTestCase):

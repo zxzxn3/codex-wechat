@@ -6,21 +6,21 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from codex_wechat import Bridge
-from backend import CodexBackend
-from command_specs import COMMANDS, HELP_ALL, REGISTRY, command_lane
-from commands import HANDLERS, handle, parse_control, validate
-from configuration import (ConfigLoader, DEFAULT_COMPLETION_TEMPLATE,
+from codex_wechat.app import Bridge
+from codex_wechat.backend import CodexBackend
+from codex_wechat.command_specs import COMMANDS, HELP_ALL, REGISTRY, command_lane
+from codex_wechat.commands import HANDLERS, handle, parse_control, validate
+from codex_wechat.configuration import (ConfigLoader, DEFAULT_COMPLETION_TEMPLATE,
                            completion_template, processing_template)
-from errors import UserFacingError
-from storage import Store
-from usage import UsageCache
-from codex_transport import CodexRpcError, CodexTransport
+from codex_wechat.errors import UserFacingError
+from codex_wechat.storage import Store
+from codex_wechat.usage import UsageCache
+from codex_wechat.codex_transport import CodexRpcError, CodexTransport
 
 
 class ConfigLoaderExtraTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(patch("configuration.log_event"))
+        self.enterContext(patch("codex_wechat.configuration.log_event"))
         self.ticks = 0
 
     def rewrite(self, path, payload):
@@ -146,7 +146,7 @@ class UsageCacheExtraTests(unittest.TestCase):
                 path.write_text(f"revision-{index}")
                 paths.append(path)
             cache = UsageCache()
-            with patch("usage.stored_usage", side_effect=lambda *args: {"file": args[0].name}):
+            with patch("codex_wechat.usage.stored_usage", side_effect=lambda *args: {"file": args[0].name}):
                 for path in paths:
                     cache.read(path, path.stem)
                 self.assertLessEqual(len(cache.entries), 20)

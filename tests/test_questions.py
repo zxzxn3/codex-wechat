@@ -3,9 +3,9 @@ import json
 import unittest
 from unittest.mock import AsyncMock
 
-from backend import CodexBackend, PENDING_TOKEN_ALPHABET, PENDING_TOKEN_LENGTH
-from command_specs import REGISTRY, command_lane
-from questions import (
+from codex_wechat.backend import CodexBackend, PENDING_TOKEN_ALPHABET, PENDING_TOKEN_LENGTH
+from codex_wechat.command_specs import REGISTRY, command_lane
+from codex_wechat.questions import (
     ASYNC_REPLY_CLOSE,
     ASYNC_REPLY_OPEN,
     QUESTION_METHOD,

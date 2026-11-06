@@ -3,7 +3,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from codex_transport import CodexTransport, CodexRpcError
+from codex_wechat.codex_transport import CodexTransport, CodexRpcError
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
@@ -27,7 +27,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         messages = iter([b'{"method": "event"}', b""])
         transport.receive = AsyncMock(side_effect=lambda: next(messages))
         records = []
-        with patch("codex_transport.log_event",
+        with patch("codex_wechat.codex_transport.log_event",
                    side_effect=lambda name, **fields: records.append((name, fields))):
             await transport.read()
         self.assertEqual(records[0][0], "codex.read_failed")

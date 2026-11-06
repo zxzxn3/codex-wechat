@@ -4,10 +4,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from codex_wechat import Bridge
-from commands import SETTINGS, current_numeric_setting, dispatch, handle, notice
-from configuration import HotSettings, Notifications, completion_template
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.commands import SETTINGS, current_numeric_setting, dispatch, handle, notice
+from codex_wechat.configuration import HotSettings, Notifications, completion_template
+from codex_wechat.storage import Store
 
 
 class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
@@ -87,7 +87,7 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 store.lock.close()
 
     async def test_settings_summary_shows_independent_quota_windows(self):
-        from prompts import SettingsView, settings_summary
+        from codex_wechat.prompts import SettingsView, settings_summary
         text = settings_summary(SettingsView(
             notice="", attachment_mib=20,
             notifications=Notifications.from_config({"quotaWarningThresholds": {
@@ -211,7 +211,7 @@ class ConnectionIdleSettingsTests(unittest.IsolatedAsyncioTestCase):
                 store.close()
 
     async def test_settings_summary_shows_effective_value(self):
-        from prompts import SettingsView, settings_summary
+        from codex_wechat.prompts import SettingsView, settings_summary
         text = settings_summary(SettingsView(notice="", attachment_mib=10, connection_idle_seconds=2))
         self.assertIn("ack: \n", text)
         self.assertIn("connectionIdleSeconds: 2", text)

@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import diagnostics
-from latency import CURL_WRITE_OUT, curl_timings, timeout_stage
-from wechat import WeChat
+from codex_wechat import diagnostics
+from codex_wechat.latency import CURL_WRITE_OUT, curl_timings, timeout_stage
+from codex_wechat.wechat import WeChat
 from tests.http_fixtures import exchange
 
 
@@ -109,7 +109,7 @@ class RequestTimingTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with exchange(stderr=b'{"time_connect":0.02,"time_appconnect":0.05,'
                                      b'"time_pretransfer":0.06,"time_starttransfer":0.08,"time_total":0.1}'), \
-                     patch('wechat.time.perf_counter', side_effect=[0, .5]):
+                     patch('codex_wechat.wechat.time.perf_counter', side_effect=[0, .5]):
                     result = await WeChat({'token': 'fixture'}).request('ilink/bot/getconfig')
                 self.assertEqual(result, {'ret': 0})
                 record = json.loads(path.read_text())

@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import diagnostics
-from errors import WeChatAuthExpired
-from wechat import WeChat
+from codex_wechat import diagnostics
+from codex_wechat.errors import WeChatAuthExpired
+from codex_wechat.wechat import WeChat
 from tests.http_fixtures import exchange
 
 
@@ -58,7 +58,7 @@ class WeChatTransportTests(unittest.IsolatedAsyncioTestCase):
         for error in (OSError("SECRET-PATH"), TimeoutError("SECRET-RESPONSE")):
             with self.subTest(error=type(error).__name__):
                 before = len(self.records()) if self.path.exists() else 0
-                with patch("wechat.PooledHTTP.request", AsyncMock(side_effect=error)):
+                with patch("codex_wechat.wechat.PooledHTTP.request", AsyncMock(side_effect=error)):
                     with self.assertRaises(type(error)) as caught:
                         await self.client.request("ilink/bot/sendmessage", request_id="req-failure")
                     self.assertIs(caught.exception, error)
@@ -68,7 +68,7 @@ class WeChatTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("SECRET", json.dumps(records))
 
     async def test_cancellation_is_propagated_and_not_logged_as_warning(self):
-        with patch("wechat.PooledHTTP.request", AsyncMock(side_effect=asyncio.CancelledError())):
+        with patch("codex_wechat.wechat.PooledHTTP.request", AsyncMock(side_effect=asyncio.CancelledError())):
             with self.assertRaises(asyncio.CancelledError):
                 await self.client.request("ilink/bot/getupdates")
         records = self.records()

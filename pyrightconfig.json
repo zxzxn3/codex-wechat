@@ -1,5 +1,5 @@
 {
-  "include": ["*.py", "tests/*.py"],
+  "include": ["*.py", "codex_wechat/*.py", "tests/*.py"],
   "exclude": [".venv", ".state", "logs", "workspace", "__pycache__"],
   "pythonVersion": "3.11",
   "pythonPlatform": "Linux",

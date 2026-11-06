@@ -11,16 +11,16 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 from pathlib import PureWindowsPath
 
-import rebind
-import wechat
-import wechat_auth
+from codex_wechat import rebind
+from codex_wechat import wechat
+from codex_wechat import wechat_auth
 from tests.http_fixtures import exchange
-from codex_wechat import Bridge, startup_account
-from configuration import ConfigurationError
-from errors import WeChatAuthExpired
-from service_adapter import ServiceState
-from storage import Store
-from wechat import LoginResult
+from codex_wechat.app import Bridge, startup_account
+from codex_wechat.configuration import ConfigurationError
+from codex_wechat.errors import WeChatAuthExpired
+from codex_wechat.service_adapter import ServiceState
+from codex_wechat.storage import Store
+from codex_wechat.wechat import LoginResult
 
 
 class RebindCommandTests(unittest.TestCase):
@@ -179,7 +179,7 @@ class StartupPendingTests(unittest.IsolatedAsyncioTestCase):
         account = {"token": "t", "user": "u", "bot": "b"}
         state = {"bindingPending": {"target": {"user": "u", "bot": "b2"}}}
         store = Mock(load=Mock(side_effect=lambda name, default=None: account if name == "account" else state))
-        with patch("codex_wechat.login", AsyncMock()) as login:
+        with patch("codex_wechat.app.login", AsyncMock()) as login:
             with self.assertRaises(ConfigurationError) as caught:
                 await startup_account(store)
         self.assertIn("rebind", str(caught.exception))
@@ -229,7 +229,7 @@ class PollerNetworkTests(unittest.IsolatedAsyncioTestCase):
             called.set()
             raise RuntimeError("network down")
         self.channel.poll = poll
-        with patch("codex_wechat.service_adapter.notify", AsyncMock()) as notify:
+        with patch("codex_wechat.app.service_adapter.notify", AsyncMock()) as notify:
             task = asyncio.create_task(self.bridge.poller())
             await asyncio.wait_for(called.wait(), 1)
             task.cancel()
@@ -245,9 +245,10 @@ class EntryRetirementTests(unittest.TestCase):
         for arguments in (["relink"], ["rebind", "--replace-identity"]):
             with self.subTest(arguments=arguments):
                 result = subprocess.run(
-                    [sys.executable, "-B", str(root / "codex_wechat.py"), *arguments],
+                    [sys.executable, "-B", "-m", "codex_wechat", *arguments],
                     capture_output=True, text=True, timeout=20,
-                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+                         "PYTHONPATH": str(root)})
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertNotIn("Traceback", result.stderr)
 

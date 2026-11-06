@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import log_rotation
+from codex_wechat import log_rotation
 
 
 class LogRotationTests(unittest.TestCase):

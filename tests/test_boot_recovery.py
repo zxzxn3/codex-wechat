@@ -6,13 +6,13 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from codex_wechat import Bridge
-from codex_transport import CodexTransport, SharedDaemonUnavailable
-import daemon_control
-from errors import UserFacingError, backend_reason
-from latency import Latency
-from records import InputPhase
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.codex_transport import CodexTransport, SharedDaemonUnavailable
+from codex_wechat import daemon_control
+from codex_wechat.errors import UserFacingError, backend_reason
+from codex_wechat.latency import Latency
+from codex_wechat.records import InputPhase
+from codex_wechat.storage import Store
 
 
 class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -30,9 +30,9 @@ class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
         return {"id": "one", "clientId": "stable", "text": "work", "phase": phase, "ingress_ms": 23926394}
 
     def test_old_messages_and_saved_jobs_are_not_network_samples(self):
-        with patch("latency.time.time", return_value=1000):
+        with patch("codex_wechat.latency.time.time", return_value=1000):
             latency = Latency()
-        with patch("latency.time.time", return_value=1001):
+        with patch("codex_wechat.latency.time.time", return_value=1001):
             self.assertNotIn("ingress_ms", latency.received(1000000 - 3600000))
             self.assertEqual(latency.received(1000500)["ingress_ms"], 500)
         self.bridge.state["inbox"] = [self.job()]
@@ -46,8 +46,8 @@ class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
         b.state["inbox"] = [job]
         b.backend_recovering = True
         b.reply = lambda *_: None  # No sender needed for this scheduling test.
-        with patch("codex_wechat.service_control.require_service_owner", AsyncMock()), \
-             patch("codex_wechat.service_control.restart", AsyncMock(side_effect=RuntimeError("simulated"))) as restart:
+        with patch("codex_wechat.app.service_control.require_service_owner", AsyncMock()), \
+             patch("codex_wechat.app.service_control.restart", AsyncMock(side_effect=RuntimeError("simulated"))) as restart:
             async with b.session_lock:
                 with self.assertRaises(RuntimeError):
                     await b.restart_service()
@@ -62,11 +62,11 @@ class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
         b.state["outbox"] = [{"id": "pending", "role": "body", "user": "owner",
                               "context": "context", "text": "待发送"}]
         b.outbox_drained.clear()
-        with patch("codex_wechat.service_control.require_service_owner", AsyncMock()), \
-             patch("codex_wechat.service_control.restart",
+        with patch("codex_wechat.app.service_control.require_service_owner", AsyncMock()), \
+             patch("codex_wechat.app.service_control.restart",
                    AsyncMock(side_effect=RuntimeError("simulated"))) as restart, \
-             patch("codex_wechat.RESTART_DRAIN_GRACE_SECONDS", 0.01), \
-             patch("codex_wechat.log_event") as log_event:
+             patch("codex_wechat.app.RESTART_DRAIN_GRACE_SECONDS", 0.01), \
+             patch("codex_wechat.app.log_event") as log_event:
             with self.assertRaises(RuntimeError):
                 await b.restart_service()
         restart.assert_awaited_once()
@@ -113,9 +113,9 @@ class BootRecoveryTests(unittest.IsolatedAsyncioTestCase):
         async def abort():
             b.input_paused = True
             raise RuntimeError("simulated restart failure")
-        with patch("input_delivery.ensure_session", prepare), \
-             patch("codex_wechat.service_control.require_service_owner", owner), \
-             patch("codex_wechat.service_control.restart", abort):
+        with patch("codex_wechat.input_delivery.ensure_session", prepare), \
+             patch("codex_wechat.app.service_control.require_service_owner", owner), \
+             patch("codex_wechat.app.service_control.restart", abort):
             task = asyncio.create_task(b.worker())
             try:
                 await asyncio.wait_for(entered.wait(), 1)
@@ -137,9 +137,9 @@ class DaemonRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_active_launcher_is_reused_without_spawning(self):
         transport = self.transport()
-        with patch("backend_runtime.shutil.which", return_value="/bin/codex-deepseek"), \
-             patch("daemon_control.status", AsyncMock(return_value={"ActiveState": "active"})), \
-             patch("codex_transport.asyncio.create_subprocess_exec", AsyncMock()) as spawn:
+        with patch("codex_wechat.backend_runtime.shutil.which", return_value="/bin/codex-deepseek"), \
+             patch("codex_wechat.daemon_control.status", AsyncMock(return_value={"ActiveState": "active"})), \
+             patch("codex_wechat.codex_transport.asyncio.create_subprocess_exec", AsyncMock()) as spawn:
             one = await transport.start_shared_daemon(["codex-deepseek", "app-server"], {"HOME": "/tmp"})
             two = await transport.start_shared_daemon(["codex-deepseek", "app-server"], {"HOME": "/tmp"})
         self.assertEqual(one, two)
@@ -151,7 +151,7 @@ class DaemonRecoveryTests(unittest.IsolatedAsyncioTestCase):
         transport.connect = AsyncMock(side_effect=RuntimeError("connection failed"))
         transport.close = AsyncMock()
         transport.start_shared_daemon = AsyncMock(return_value="unit.service")
-        with patch("daemon_control.status", AsyncMock(return_value=state)):
+        with patch("codex_wechat.daemon_control.status", AsyncMock(return_value=state)):
             with self.assertRaises(SharedDaemonUnavailable) as caught:
                 await transport.start()
         self.assertIn("密钥环", str(caught.exception))

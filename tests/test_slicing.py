@@ -1,8 +1,8 @@
 """Offline text contracts; no model, channel, state directory or service."""
 import unittest
 
-from configuration import Slicing, TEXT_LIMIT_BYTES
-from slicing import split_text
+from codex_wechat.configuration import Slicing, TEXT_LIMIT_BYTES
+from codex_wechat.slicing import split_text
 
 
 class SlicingTests(unittest.TestCase):

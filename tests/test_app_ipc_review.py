@@ -9,9 +9,9 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from app_ipc import AppSession, VERSIONS
-from backend import CodexBackend
-from codex_transport import CodexRpcError
+from codex_wechat.app_ipc import AppSession, VERSIONS
+from codex_wechat.backend import CodexBackend
+from codex_wechat.codex_transport import CodexRpcError
 
 
 def turn(turn_id, *, status="completed", items=None):

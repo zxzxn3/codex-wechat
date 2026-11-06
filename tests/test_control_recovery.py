@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from codex_wechat import Bridge
-from commands import command_restart
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.commands import command_restart
+from codex_wechat.storage import Store
 
 
 class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):

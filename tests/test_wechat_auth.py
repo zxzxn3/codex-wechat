@@ -1,7 +1,7 @@
 """Shared WeChat authentication state and identity-change policy."""
 import unittest
 
-import wechat_auth
+from codex_wechat import wechat_auth
 
 
 class WeChatAuthTests(unittest.TestCase):

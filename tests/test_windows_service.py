@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import service_control
-import windows_service
+from codex_wechat import service_control
+from codex_wechat import windows_service
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -279,8 +279,8 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         install = (ROOT / "install.ps1").read_text(encoding="utf-8")
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
         task = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
-        service = (ROOT / "windows_service.py").read_text(encoding="utf-8")
-        adapter = (ROOT / "service_adapter.py").read_text(encoding="utf-8")
+        service = (ROOT / "codex_wechat/windows_service.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "codex_wechat/service_adapter.py").read_text(encoding="utf-8")
         self.assertIn("New-ScheduledTaskTrigger -AtLogOn", install)
         self.assertIn("-LogonType Interactive", install)
         self.assertIn("-RunLevel Limited", install)
@@ -325,7 +325,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("taskkill", service.lower())
 
     def test_documented_restart_does_not_restart_scheduled_task(self):
-        service = (ROOT / "service_control.py").read_text(encoding="utf-8")
+        service = (ROOT / "codex_wechat/service_control.py").read_text(encoding="utf-8")
         windows = service[service.index("async def restart():"):]
         self.assertIn("RESTART_EXIT_CODE", windows)
         self.assertIn("raise_signal(signal.SIGINT)", windows)
@@ -349,7 +349,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
 
     def test_supervisor_resolves_the_configured_data_root(self):
         # The marker, not the platform default, decides where state and logs live.
-        with patch("platform_support.data_root", return_value=Path("/custom root")):
+        with patch("codex_wechat.platform_support.data_root", return_value=Path("/custom root")):
             self.assertEqual(windows_service.data_root(), Path("/custom root"))
 
     def test_uninstall_refuses_a_live_foreground_bridge(self):
@@ -433,7 +433,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("$UninstallerArguments += @('-DataRoot'", block)
 
     def test_installer_requires_native_codex_exe(self):
-        discovery = (ROOT / "native_codex.py").read_text(encoding="utf-8")
+        discovery = (ROOT / "codex_wechat/native_codex.py").read_text(encoding="utf-8")
         self.assertIn(
             "Programs/OpenAI/Codex/bin/codex.exe", discovery)
         self.assertIn('shutil.which("codex.exe"', discovery)

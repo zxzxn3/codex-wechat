@@ -3,8 +3,8 @@ import os
 import unittest
 from unittest.mock import patch
 
-from codex_connection import ConnectionSpec
-from platform_support import (
+from codex_wechat.codex_connection import ConnectionSpec
+from codex_wechat.platform_support import (
     apply_system_proxy, endpoint_host, local_endpoint, proxy_label, system_proxy,
 )
 
@@ -32,9 +32,9 @@ class SystemProxyTests(unittest.TestCase):
             ("org.gnome.system.proxy.socks", "port"): 7897,
             ("org.gnome.system.proxy", "ignore-hosts"): ["localhost", "127.0.0.1"],
         }
-        with patch("platform_support.getproxies", return_value={}), \
-                patch("platform_support.sys.platform", "linux"), \
-                patch("platform_support._gsettings", side_effect=lambda schema, key: settings[(schema, key)]):
+        with patch("codex_wechat.platform_support.getproxies", return_value={}), \
+                patch("codex_wechat.platform_support.sys.platform", "linux"), \
+                patch("codex_wechat.platform_support._gsettings", side_effect=lambda schema, key: settings[(schema, key)]):
             self.assertEqual(system_proxy(), {
                 "HTTP_PROXY": "http://127.0.0.1:7897",
                 "HTTPS_PROXY": "http://127.0.0.1:7897",
@@ -42,9 +42,9 @@ class SystemProxyTests(unittest.TestCase):
             })
 
     def test_gnome_automatic_mode_is_not_guessed(self):
-        with patch("platform_support.getproxies", return_value={}), \
-                patch("platform_support.sys.platform", "linux"), \
-                patch("platform_support._gsettings", return_value="auto"):
+        with patch("codex_wechat.platform_support.getproxies", return_value={}), \
+                patch("codex_wechat.platform_support.sys.platform", "linux"), \
+                patch("codex_wechat.platform_support._gsettings", return_value="auto"):
             self.assertEqual(system_proxy(), {})
 
     def test_gnome_keeps_http_and_https_proxies_separate(self):
@@ -59,9 +59,9 @@ class SystemProxyTests(unittest.TestCase):
             ("org.gnome.system.proxy.socks", "port"): 0,
             ("org.gnome.system.proxy", "ignore-hosts"): [],
         }
-        with patch("platform_support.getproxies", return_value={}), \
-                patch("platform_support.sys.platform", "linux"), \
-                patch("platform_support._gsettings",
+        with patch("codex_wechat.platform_support.getproxies", return_value={}), \
+                patch("codex_wechat.platform_support.sys.platform", "linux"), \
+                patch("codex_wechat.platform_support._gsettings",
                       side_effect=lambda schema, key: settings[(schema, key)]):
             self.assertEqual(system_proxy(), {
                 "HTTP_PROXY": "http://127.0.0.1:7890",
@@ -80,9 +80,9 @@ class SystemProxyTests(unittest.TestCase):
             ("org.gnome.system.proxy.socks", "port"): 7897,
             ("org.gnome.system.proxy", "ignore-hosts"): ["localhost"],
         }
-        with patch("platform_support.getproxies", return_value={}), \
-                patch("platform_support.sys.platform", "linux"), \
-                patch("platform_support._gsettings",
+        with patch("codex_wechat.platform_support.getproxies", return_value={}), \
+                patch("codex_wechat.platform_support.sys.platform", "linux"), \
+                patch("codex_wechat.platform_support._gsettings",
                       side_effect=lambda schema, key: settings[(schema, key)]):
             self.assertEqual(system_proxy(), {
                 "ALL_PROXY": "socks5h://127.0.0.1:7897",
@@ -90,16 +90,16 @@ class SystemProxyTests(unittest.TestCase):
             })
 
     def test_environment_proxy_wins_over_gnome(self):
-        with patch("platform_support.getproxies",
+        with patch("codex_wechat.platform_support.getproxies",
                    return_value={"https": "http://env-proxy:8080"}), \
-                patch("platform_support.sys.platform", "linux"), \
-                patch("platform_support._gsettings") as settings:
+                patch("codex_wechat.platform_support.sys.platform", "linux"), \
+                patch("codex_wechat.platform_support._gsettings") as settings:
             self.assertEqual(system_proxy(), {"HTTPS_PROXY": "http://env-proxy:8080"})
             settings.assert_not_called()
 
     def test_detected_proxy_fills_both_schemes_and_keeps_localhost_direct(self):
         env = {}
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)):
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)):
             apply_system_proxy(env)
         self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:7897")
         self.assertEqual(env["HTTP_PROXY"], "http://127.0.0.1:7897")
@@ -107,48 +107,48 @@ class SystemProxyTests(unittest.TestCase):
 
     def test_an_environment_that_already_names_a_proxy_is_untouched(self):
         env = {"HTTPS_PROXY": "http://localhost:1234"}
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)) as probe:
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)) as probe:
             apply_system_proxy(env)
         probe.assert_not_called()
         self.assertEqual(env, {"HTTPS_PROXY": "http://localhost:1234"})
 
     def test_no_detected_proxy_leaves_the_environment_alone(self):
         env = {"PATH": "x"}
-        with patch("platform_support.system_proxy", return_value={}):
+        with patch("codex_wechat.platform_support.system_proxy", return_value={}):
             apply_system_proxy(env)
         self.assertEqual(env, {"PATH": "x"})
 
     def test_all_proxy_also_counts_as_an_explicit_choice(self):
         env = {"ALL_PROXY": "socks5://localhost:1080"}
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)) as probe:
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)) as probe:
             apply_system_proxy(env)
         probe.assert_not_called()
         self.assertEqual(env, {"ALL_PROXY": "socks5://localhost:1080"})
 
     def test_backend_environment_carries_the_system_proxy(self):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)), \
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)), \
                 no_ambient_proxy():
             env = spec.environment({})
         self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:7897")
 
     def test_backend_config_proxy_wins_over_the_system_proxy(self):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)):
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)):
             env = spec.environment({"env": {"HTTPS_PROXY": "http://user:1080"}})
         self.assertEqual(env["HTTPS_PROXY"], "http://user:1080")
 
     def test_inheriting_the_system_proxy_is_recorded(self):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)), \
-                no_ambient_proxy(), patch("codex_connection.log_event") as log:
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)), \
+                no_ambient_proxy(), patch("codex_wechat.codex_connection.log_event") as log:
             spec.environment({})
         log.assert_called_once_with("backend.proxy_inherited", component="backend",
                                     source="system", proxy="127.0.0.1:7897")
 
     def test_an_explicit_proxy_records_nothing(self):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
-        with patch("codex_connection.log_event") as log:
+        with patch("codex_wechat.codex_connection.log_event") as log:
             spec.environment({"env": {"HTTPS_PROXY": "http://user:1080"}})
         log.assert_not_called()
 
@@ -165,7 +165,7 @@ class SystemProxyTests(unittest.TestCase):
                      "http://192.168.1.9:8000", "http://10.0.0.4:8080",
                      "http://gateway:8080", "http://lmstudio.local/v1"):
             with self.subTest(base=base), \
-                    patch("platform_support.system_proxy", return_value=dict(PROXY)) as probe:
+                    patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)) as probe:
                 env = {"OPENAI_BASE_URL": base}
                 self.assertEqual(apply_system_proxy(env), {})
                 self.assertEqual(env, {"OPENAI_BASE_URL": base})
@@ -173,7 +173,7 @@ class SystemProxyTests(unittest.TestCase):
 
     def test_a_remote_base_url_still_gets_the_proxy(self):
         env = {"OPENAI_BASE_URL": "https://api.example.com/v1"}
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)):
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)):
             self.assertTrue(apply_system_proxy(env))
         self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:7897")
 
@@ -188,12 +188,12 @@ class SystemProxyTests(unittest.TestCase):
     def test_the_user_can_switch_the_injection_off(self):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"],
                                            "useSystemProxy": False})
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)) as probe, \
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)) as probe, \
                 patch.dict(os.environ, {
                     "HTTPS_PROXY": "http://ambient:1",
                     "https_proxy": "http://ambient:1",
                     "ALL_PROXY": "socks5://ambient:2",
-                }), patch("codex_connection.log_event") as log:
+                }), patch("codex_wechat.codex_connection.log_event") as log:
             env = spec.environment({})
         probe.assert_not_called()
         log.assert_not_called()
@@ -205,7 +205,7 @@ class SystemProxyTests(unittest.TestCase):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"],
                                            "useSystemProxy": False})
         with patch.dict(os.environ, {"HTTPS_PROXY": "http://ambient:1"}), \
-                patch("platform_support.system_proxy", return_value=dict(PROXY)):
+                patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)):
             env = spec.environment({"env": {"HTTPS_PROXY": "http://explicit:2"}})
         self.assertEqual(env["HTTPS_PROXY"], "http://explicit:2")
 
@@ -222,13 +222,13 @@ class SystemProxyTests(unittest.TestCase):
 
     def test_an_empty_no_proxy_does_not_leave_loopback_proxied(self):
         env = {"NO_PROXY": ""}
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)):
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)):
             apply_system_proxy(env)
         self.assertEqual(env["NO_PROXY"], "localhost,127.0.0.1,::1")
 
     def test_a_user_no_proxy_is_kept(self):
         env = {"NO_PROXY": "*.corp.example"}
-        with patch("platform_support.system_proxy", return_value=dict(PROXY)):
+        with patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)):
             apply_system_proxy(env)
         self.assertEqual(env["NO_PROXY"], "*.corp.example")
 
@@ -243,8 +243,8 @@ class SystemProxyTests(unittest.TestCase):
     def test_an_ambient_proxy_counts_as_an_explicit_choice(self):
         spec = ConnectionSpec.from_config({"command": ["codex", "app-server"]})
         with patch.dict(os.environ, {"HTTPS_PROXY": "http://ambient:1"}), \
-                patch("platform_support.system_proxy", return_value=dict(PROXY)) as probe, \
-                patch("codex_connection.log_event") as log:
+                patch("codex_wechat.platform_support.system_proxy", return_value=dict(PROXY)) as probe, \
+                patch("codex_wechat.codex_connection.log_event") as log:
             env = spec.environment({})
         probe.assert_not_called()
         log.assert_not_called()

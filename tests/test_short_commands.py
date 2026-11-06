@@ -4,11 +4,11 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from codex_wechat import Bridge
-from command_specs import REGISTRY, command_lane, HELP, HELP_ALL
-from commands import dispatch
-from prompts import SETTINGS_HELP
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.command_specs import REGISTRY, command_lane, HELP, HELP_ALL
+from codex_wechat.commands import dispatch
+from codex_wechat.prompts import SETTINGS_HELP
+from codex_wechat.storage import Store
 
 
 class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -88,7 +88,7 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_alias_passes_arguments_to_canonical_handler(self):
         handler = AsyncMock()
         self.bridge.ensure_backend = AsyncMock()
-        with patch.dict("commands.HANDLERS", {"/model": handler}):
+        with patch.dict("codex_wechat.commands.HANDLERS", {"/model": handler}):
             await dispatch(self.bridge, "/m 2")
         handler.assert_awaited_once_with(self.bridge, "/model", "2", None)
         self.bridge.ensure_backend.assert_awaited_once()

@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import autostart
-from codex_wechat import Bridge
-from commands import dispatch
-from storage import Store
+from codex_wechat import autostart
+from codex_wechat.app import Bridge
+from codex_wechat.commands import dispatch
+from codex_wechat.storage import Store
 
 
 class AutostartTests(unittest.IsolatedAsyncioTestCase):
@@ -123,8 +123,8 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
                 bridge = Bridge(store, {"user": "owner"}, {})
                 bridge.state["context"] = "context"
                 bridge.ensure_backend = AsyncMock(side_effect=AssertionError("no backend"))
-                with patch("commands.autostart.status", AsyncMock(return_value=True)), \
-                        patch("commands.autostart.set_enabled", AsyncMock(return_value=False)) as setter:
+                with patch("codex_wechat.commands.autostart.status", AsyncMock(return_value=True)), \
+                        patch("codex_wechat.commands.autostart.set_enabled", AsyncMock(return_value=False)) as setter:
                     await dispatch(bridge, "/settings")
                     self.assertIn("autostart: true", bridge.state["outbox"][-1]["text"])
                     settings_text = bridge.state["outbox"][-1]["text"]
@@ -158,7 +158,7 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
             try:
                 bridge = Bridge(store, {"user": "owner"}, {})
                 bridge.state["context"] = "context"
-                with patch("commands.autostart.set_enabled", AsyncMock(side_effect=RuntimeError("denied"))):
+                with patch("codex_wechat.commands.autostart.set_enabled", AsyncMock(side_effect=RuntimeError("denied"))):
                     await dispatch(bridge, "/settings autostart true")
                 self.assertIn("未确认", bridge.state["outbox"][-1]["text"])
             finally:
@@ -171,7 +171,7 @@ class AutostartTests(unittest.IsolatedAsyncioTestCase):
                 bridge = Bridge(store, {"user": "owner"}, {})
                 bridge.state["context"] = "context"
                 bridge.running = True
-                with patch("commands.autostart.set_enabled", AsyncMock(return_value=True)) as setter:
+                with patch("codex_wechat.commands.autostart.set_enabled", AsyncMock(return_value=True)) as setter:
                     await dispatch(bridge, "/settings autostart true")
                 setter.assert_awaited_once_with(True)
                 self.assertEqual(bridge.state["outbox"][-1]["text"], "autostart: true")

@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, patch
 
 from curl_cffi.requests.exceptions import RequestException
 
-from media import Media, MediaError
-from storage import Store
-from wechat_http import PooledHTTP
+from codex_wechat.media import Media, MediaError
+from codex_wechat.storage import Store
+from codex_wechat.wechat_http import PooledHTTP
 
 URL = "https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=SECRET"
 
@@ -21,13 +21,13 @@ _isolated = None
 def setUpModule():
     # These fixtures drive real transfers, which log; keep them out of the bridge log.
     global _isolated
-    import diagnostics
+    from codex_wechat import diagnostics
     _isolated = tempfile.TemporaryDirectory()
     diagnostics.configure(path=Path(_isolated.name) / "bridge.jsonl")
 
 
 def tearDownModule():
-    import diagnostics
+    from codex_wechat import diagnostics
     diagnostics.reset()
     _isolated.cleanup()
 
@@ -64,7 +64,7 @@ class PooledTransferTests(unittest.IsolatedAsyncioTestCase):
     def install_session(self, handler):
         session = FakeSession(handler)
         self.sessions.append(session)
-        patcher = patch("wechat_http._session", return_value=session)
+        patcher = patch("codex_wechat.wechat_http._session", return_value=session)
         patcher.start()
         self.addCleanup(patcher.stop)
         return session
@@ -158,7 +158,7 @@ class PooledTransferTests(unittest.IsolatedAsyncioTestCase):
             created.append(session)
             return session
 
-        with patch("wechat_http._session", side_effect=factory):
+        with patch("codex_wechat.wechat_http._session", side_effect=factory):
             transport = PooledHTTP()
             try:
                 await transport.transfer(URL, None, limit=1024)
@@ -189,7 +189,7 @@ class PooledTransferTests(unittest.IsolatedAsyncioTestCase):
             created.append(session)
             return session
 
-        with patch("wechat_http._session", side_effect=factory):
+        with patch("codex_wechat.wechat_http._session", side_effect=factory):
             transport = PooledHTTP()
             first = asyncio.create_task(transport.transfer(URL, None, limit=1024))
             await started.wait()
@@ -233,7 +233,7 @@ class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
         records = []
         media, channel = self.media(SimpleNamespace(
             transfer=AsyncMock(return_value=(b"", 0, 28, None))))
-        with patch("media.log_event", side_effect=lambda name, **fields: records.append((name, fields))):
+        with patch("codex_wechat.media.log_event", side_effect=lambda name, **fields: records.append((name, fields))):
             with self.assertRaises(MediaError):
                 await media.transfer(URL)
         self.assertEqual(records[0][0], "media.transfer_failed")
@@ -244,7 +244,7 @@ class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_one_transient_stall_is_retried(self):
         media, channel = self.media(SimpleNamespace(transfer=AsyncMock(side_effect=[
             (b"", 0, 28, None), (b"body", 200, 0, "parameter")])))
-        with patch("media.log_event"):
+        with patch("codex_wechat.media.log_event"):
             received, parameter = await media.transfer(URL)
         self.assertEqual((received, parameter), (b"body", "parameter"))
         self.assertEqual(channel.http.transfer.await_count, 2)
@@ -252,7 +252,7 @@ class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_an_upload_stall_is_not_retried_on_the_same_filekey(self):
         media, channel = self.media(SimpleNamespace(transfer=AsyncMock(side_effect=[
             (b"", 0, 28, None), (b"", 200, 0, "parameter")])))
-        with patch("media.log_event"):
+        with patch("codex_wechat.media.log_event"):
             with self.assertRaisesRegex(MediaError, "curl 28"):
                 await media.transfer(URL, b"ciphertext")
         self.assertEqual(channel.http.transfer.await_count, 1)
@@ -271,20 +271,20 @@ class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
         http = SimpleNamespace(transfer=AsyncMock(side_effect=transfer),
                                discard_outgoing=discard)
         media, _channel = self.media(http)
-        with patch("media.log_event"):
+        with patch("codex_wechat.media.log_event"):
             await media.transfer(URL)
         self.assertEqual(order, ["transfer", "discard", "transfer"])
 
     async def test_size_limit_and_server_errors_are_not_retried(self):
         media, channel = self.media(SimpleNamespace(
             transfer=AsyncMock(return_value=(b"", 0, 63, None))))
-        with patch("media.log_event"):
+        with patch("codex_wechat.media.log_event"):
             with self.assertRaisesRegex(MediaError, "大小限制"):
                 await media.transfer(URL)
         self.assertEqual(channel.http.transfer.await_count, 1)
         channel.http.transfer.reset_mock()
         channel.http.transfer.return_value = (b"", 500, 0, None)
-        with patch("media.log_event"):
+        with patch("codex_wechat.media.log_event"):
             with self.assertRaisesRegex(MediaError, "HTTP 200"):
                 await media.transfer(URL)
         self.assertEqual(channel.http.transfer.await_count, 1)
@@ -316,7 +316,7 @@ class MediaBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
         source = Path(self.temp.name) / "asset.bin"
         source.write_bytes(b"asset")
-        with patch("media.cipher", return_value=b"ciphertext"):
+        with patch("codex_wechat.media.cipher", return_value=b"ciphertext"):
             item = await media.upload({
                 "asset": {"path": str(source), "name": "asset.bin", "kind": "file"},
                 "user": "owner",

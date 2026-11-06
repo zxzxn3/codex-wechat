@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import service_adapter
+from codex_wechat import service_adapter
 
 
 class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):

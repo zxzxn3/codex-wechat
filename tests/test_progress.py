@@ -5,11 +5,11 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
-from codex_wechat import Bridge
-from backend import DeferTurn
-from codex_transport import CodexRpcError
-from records import AgentMessage, InputPhase
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.backend import DeferTurn
+from codex_wechat.codex_transport import CodexRpcError
+from codex_wechat.records import AgentMessage, InputPhase
+from codex_wechat.storage import Store
 
 
 class ProgressTests(unittest.IsolatedAsyncioTestCase):

@@ -2,7 +2,7 @@
 import json
 import unittest
 
-from latency import curl_timings
+from codex_wechat.latency import curl_timings
 
 
 class NetworkTimingFailureTests(unittest.TestCase):

@@ -3,7 +3,7 @@ import asyncio
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
-from subprocess_io import communicate
+from codex_wechat.subprocess_io import communicate
 
 class Process:
     def __init__(self, *, ignores_terminate=False):

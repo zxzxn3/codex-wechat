@@ -6,11 +6,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import codex_wechat
-import service_adapter
-from configuration import ConfigurationError
-from service_adapter import ServiceState
-from storage import Store
+from codex_wechat import app as codex_wechat
+from codex_wechat import service_adapter
+from codex_wechat.configuration import ConfigurationError
+from codex_wechat.service_adapter import ServiceState
+from codex_wechat.storage import Store
 
 
 def interactive(input_is_tty=True, output_is_tty=True):
@@ -189,7 +189,8 @@ class ServiceFailureShapeTests(unittest.IsolatedAsyncioTestCase):
 
 class CommandRoutingTests(unittest.IsolatedAsyncioTestCase):
     def test_service_help_names_the_native_log_sources(self):
-        source = (Path(__file__).parents[1] / "codex_wechat.py").read_text(encoding="utf-8")
+        source = (Path(__file__).parents[1] / "codex_wechat/app.py").read_text(
+            encoding="utf-8")
         self.assertIn("Linux: journalctl", source)
         self.assertIn("Windows: service.log", source)
         self.assertNotIn("supervisor/service.log", source)

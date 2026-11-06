@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unicodedata
 from urllib.parse import urlsplit
 
@@ -52,6 +53,7 @@ RELEASES_DIR = "releases"
 ACTIVE_FILE = "active-release"
 SERVICE_UNIT = "codex-wechat.service"
 DATA_ROOT_FILE = ".data-root"
+PACKAGE_ROOT = Path("codex_wechat")
 # A directory handle held for a moment - by a scanner or a just-exited process -
 # blocks the rename that makes a release deletable; one retry covers it.
 PRUNE_RETRY_SECONDS = 0.2
@@ -86,44 +88,32 @@ REQUIRED_FILES = {
     Path("bootstrap_supervisor.py"),
     Path("codex-wechat"),
     Path("codex-wechat.ps1"),
-    Path("codex_wechat.py"),
+    PACKAGE_ROOT / "__init__.py",
+    PACKAGE_ROOT / "app.py",
+    PACKAGE_ROOT / "bootstrap_supervisor.py",
+    PACKAGE_ROOT / "platform_support.py",
+    PACKAGE_ROOT / "windows_service.py",
     Path("config.default.json"),
     Path("install.sh"),
     Path("install.ps1"),
     Path("installer.py"),
-    Path("platform_support.py"),
     Path("requirements.txt"),
     Path("requirements-windows.txt"),
-    Path("release.py"),
-    Path("uninstall.py"),
     Path("windows/wmi_launch.py"),
     Path("windows/task-service.ps1"),
 }
 STABLE_LINUX_FILES = (
     Path("codex-desktop"),
-    Path("native_codex.py"),
     Path("codex-wechat"),
     Path("codex-wechat.service"),
     Path("installer.py"),
-    Path("platform_support.py"),
-    Path("release.py"),
-    Path("service_adapter.py"),
-    Path("service_control.py"),
-    Path("storage.py"),
-    Path("subprocess_io.py"),
-    Path("uninstall.py"),
 )
 STABLE_WINDOWS_FILES = (
-    Path("native_codex.py"),
-    Path("platform_support.py"),
-    Path("log_rotation.py"),
-    Path("storage.py"),
     Path("codex-desktop.ps1"),
     Path("installer.py"),
     Path("bootstrap_supervisor.py"),
     Path("codex-wechat.ps1"),
     Path("uninstall.ps1"),
-    Path("release.py"),
     Path("windows/task-service.ps1"),
 )
 
@@ -252,7 +242,7 @@ def saved_data_root(target: Path) -> Path | None:
 
 def _default_data_root() -> Path:
     try:
-        from platform_support import default_data_root
+        from codex_wechat.platform_support import default_data_root
     except ImportError:
         default_data_root = None
     if default_data_root is not None:
@@ -359,7 +349,7 @@ def check_runtime_compatibility(files, config):
                    for item in definitions)
     if not required:
         return
-    declaration = files.get(Path("codex_connection.py")) if files else None
+    declaration = files.get(PACKAGE_ROOT / "codex_connection.py") if files else None
     try:
         module = ast.parse(declaration[0]) if declaration else None
         values = [ast.literal_eval(node.value) for node in module.body
@@ -481,14 +471,14 @@ def _readable(path: Path) -> bool:
     return True
 
 
-def check_user_access(target: Path, identifier: str) -> None:
+def check_user_access(target: Path, identifier: str, source: Path) -> None:
     """The service starts as the installing user, so entries must be readable.
 
     A restricted or elevated sandbox can create files with a private DACL: the
     install looks successful while `pythonw` fails to load the entry, and the
     scheduled task logs nothing. Detect that here instead.
     """
-    entries = [target / relative for relative in _stable_files()]
+    entries = [target / relative for relative in _stable_files(source)]
     entries += [target / CURRENT_FILE, release_path(target, identifier)]
     denied = [path for path in entries if not _readable(path)]
     if denied:
@@ -695,7 +685,7 @@ def _venv_python(root: Path) -> Path:
 RUNTIME_CHECK_TIMEOUT_SECONDS = 30
 RUNTIME_IMPORTS = (
     "codex_wechat",
-    "desktop",
+    "codex_wechat.desktop",
     "packaging",
     "platformdirs",
     "curl_cffi",
@@ -901,12 +891,28 @@ def install_release(
             shutil.rmtree(staging)
 
 
-def _stable_files() -> tuple[Path, ...]:
-    return STABLE_WINDOWS_FILES if IS_WINDOWS else STABLE_LINUX_FILES
+def _package_files(source: Path) -> tuple[Path, ...]:
+    package = Path(source) / PACKAGE_ROOT
+    if package.is_symlink() or not package.is_dir():
+        raise ValueError(f"运行期包目录不存在或不是目录: {package}")
+    return tuple(sorted(
+        path.relative_to(source)
+        for path in package.rglob("*.py")
+        if path.is_file() and not path.is_symlink()
+    ))
+
+
+def _stable_files(source: Path) -> tuple[Path, ...]:
+    entries = STABLE_WINDOWS_FILES if IS_WINDOWS else STABLE_LINUX_FILES
+    return tuple(entries) + _package_files(source)
 
 
 def stable_files_match(source: Path, target: Path) -> bool:
-    for relative in _stable_files():
+    try:
+        files = _stable_files(source)
+    except (OSError, ValueError):
+        return False
+    for relative in files:
         source_path = source / relative
         target_path = target / relative
         if (source_path.is_symlink() or target_path.is_symlink()
@@ -928,14 +934,15 @@ def install_bootstrap(source: Path, target: Path) -> None:
     # Allocate/write every entry before replacing the first installed file.
     staging = _staging_directory(target, ".entry-")
     try:
-        for relative in _stable_files():
+        files = _stable_files(source)
+        for relative in files:
             source_path = source / relative
             destination = target / relative
             if not source_path.is_file() or source_path.is_symlink() or destination.is_symlink():
                 raise ValueError(f"安装入口不是普通文件: {relative}")
             _atomic_write(staging / relative, source_path.read_bytes(),
                           stat.S_IMODE(source_path.stat().st_mode), root=staging)
-        for relative in _stable_files():
+        for relative in files:
             destination = target / relative
             if destination.parent.is_symlink():
                 raise ValueError(f"安装入口目录不能是符号链接: {destination.parent}")
@@ -950,14 +957,42 @@ def activate_release(target: Path, identifier: str) -> None:
 
 
 def prune_releases(target: Path, *, keep, report=None) -> list[str]:
-    """Compatibility wrapper around the isolated release lifecycle module."""
-    import release as release_state
-    return release_state.prune_releases(
-        target,
-        keep=keep,
-        report=report or detail,
-        retry_seconds=PRUNE_RETRY_SECONDS,
-    )
+    """Delete stale releases, but never the one a running bridge marked active."""
+    releases = Path(target) / RELEASES_DIR
+    if releases.is_symlink() or not releases.is_dir():
+        return []
+    kept = {name for name in keep if name}
+    active_file = Path(target) / ACTIVE_FILE
+    try:
+        active = active_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        active = None
+    if active:
+        kept.add(active)
+    for stale in releases.glob(".trash-*"):
+        shutil.rmtree(stale, ignore_errors=True)
+    candidates = [entry for entry in releases.iterdir()
+                  if not entry.name.startswith(".") and entry.is_dir()
+                  and not entry.is_symlink()]
+    removed = []
+    for entry in sorted(candidates, key=lambda item: item.name):
+        if entry.name in kept:
+            continue
+        trash = releases / (".trash-" + entry.name)
+        for attempt in range(2):
+            try:
+                os.replace(entry, trash)
+            except OSError:
+                if attempt:
+                    if report:
+                        report(f"跳过旧版本 {entry.name}（仍被占用，下次更新再删）")
+                    continue
+                time.sleep(PRUNE_RETRY_SECONDS)
+            else:
+                shutil.rmtree(trash, ignore_errors=True)
+                removed.append(entry.name)
+                break
+    return removed
 
 
 def _linux_command_link() -> Path:
@@ -1277,7 +1312,11 @@ def _common_install(
     service_ready = False
     marker_ready = False
     try:
-        from platform_support import make_private
+        sys.path.insert(0, str(source))
+        try:
+            from codex_wechat.platform_support import make_private
+        finally:
+            sys.path.pop(0)
         make_private(target)
         with InstallLock(target):
             check_install_target(source, target, update=update)
@@ -1301,7 +1340,7 @@ def _common_install(
             marker_ready = True
             service_ready = configure_platform_service(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
-            check_user_access(target, identifier)
+            check_user_access(target, identifier, source)
             try:
                 pruned = prune_releases(target, keep=(identifier, current))
             except OSError as error:
@@ -1508,7 +1547,7 @@ def _discover_runtime(source: Path):
     # it only reads PATH, LOCALAPPDATA and the registered App, so a dry run can
     # report the same answer without writing files or using the network.
     fallback = shutil.which("codex.exe" if IS_WINDOWS else "codex")
-    helper = source / "native_codex.py"
+    helper = source / PACKAGE_ROOT / "native_codex.py"
     if not helper.is_file() or helper.is_symlink():
         return fallback
     # A dry run must not leave files behind, including a bytecode cache.

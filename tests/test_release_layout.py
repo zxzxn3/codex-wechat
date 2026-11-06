@@ -21,17 +21,18 @@ class ReleaseLayoutTests(unittest.TestCase):
                 ("linux", installer.STABLE_LINUX_FILES),
                 ("windows", installer.STABLE_WINDOWS_FILES)):
             with self.subTest(platform=name):
-                for relative in stable:
+                for relative in installer._stable_files(ROOT):
                     self.assertTrue((ROOT / relative).is_file(), relative)
+                self.assertIn(Path("codex_wechat/app.py"), stable + installer._package_files(ROOT))
         self.assertIn(Path("windows/task-service.ps1"), installer.STABLE_WINDOWS_FILES)
         self.assertNotIn(Path("windows/task-service.ps1"), installer.STABLE_LINUX_FILES)
 
     def test_stable_python_imports_are_present_in_the_manifest(self):
-        local_modules = {path.stem for path in ROOT.glob("*.py")}
+        package_files = installer._package_files(ROOT)
         for name, stable in (
                 ("linux", installer.STABLE_LINUX_FILES),
                 ("windows", installer.STABLE_WINDOWS_FILES)):
-            declared = set(stable)
+            declared = set(stable) | set(package_files)
             for relative in stable:
                 if relative.suffix != ".py":
                     continue
@@ -42,36 +43,36 @@ class ReleaseLayoutTests(unittest.TestCase):
                     elif isinstance(node, ast.Import):
                         module = next(
                             (alias.name.split(".", 1)[0] for alias in node.names
-                             if alias.name.split(".", 1)[0] in local_modules),
+                             if alias.name == "codex_wechat"),
                             "",
                         )
                     else:
                         continue
-                    if module in local_modules:
+                    if module == "codex_wechat":
                         with self.subTest(platform=name, file=str(relative), module=module):
-                            self.assertIn(Path(module + ".py"), declared)
+                            self.assertIn(Path("codex_wechat/__init__.py"), declared)
 
     def test_stable_installer_nested_imports_are_in_both_payloads(self):
-        local_modules = {path.stem for path in ROOT.glob("*.py")}
+        package_files = set(installer._package_files(ROOT))
         tree = ast.parse((ROOT / "installer.py").read_text(encoding="utf-8"))
         for name, stable in (
                 ("linux", installer.STABLE_LINUX_FILES),
                 ("windows", installer.STABLE_WINDOWS_FILES)):
-            declared = set(stable)
+            declared = set(stable) | package_files
             for node in ast.walk(tree):
                 if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                     module = node.module.split(".", 1)[0]
                 elif isinstance(node, ast.Import):
                     module = next(
                         (alias.name.split(".", 1)[0] for alias in node.names
-                         if alias.name.split(".", 1)[0] in local_modules),
+                         if alias.name.split(".", 1)[0] == "codex_wechat"),
                         "",
                     )
                 else:
                     continue
-                if module in local_modules:
+                if module == "codex_wechat":
                     with self.subTest(platform=name, module=module):
-                        self.assertIn(Path(module + ".py"), declared)
+                        self.assertIn(Path("codex_wechat/__init__.py"), declared)
 
     def test_runtime_version_requirements_match_the_manifests(self):
         # The installer probe hard-codes the pins because it runs before the
@@ -105,14 +106,19 @@ class ReleaseLayoutTests(unittest.TestCase):
             with patch.object(installer, "IS_WINDOWS", True):
                 installer.install_bootstrap(ROOT, target)
             self.assertTrue((target / "windows/task-service.ps1").is_file())
+            self.assertTrue((target / "codex_wechat/app.py").is_file())
 
     def test_installed_stable_payload_imports_without_the_source_tree(self):
         cases = (
-            ("linux", ("installer", "release", "platform_support", "storage",
-                       "service_adapter", "service_control", "subprocess_io",
-                       "uninstall")),
-            ("windows", ("installer", "release", "platform_support", "storage",
-                         "log_rotation", "native_codex", "bootstrap_supervisor")),
+            ("linux", ("installer", "codex_wechat.platform_support",
+                       "codex_wechat.storage", "codex_wechat.service_adapter",
+                       "codex_wechat.service_control", "codex_wechat.subprocess_io",
+                       "codex_wechat.uninstall")),
+            ("windows", ("installer", "codex_wechat.platform_support",
+                         "codex_wechat.storage", "codex_wechat.log_rotation",
+                         "codex_wechat.native_codex",
+                         "codex_wechat.bootstrap_supervisor",
+                         "codex_wechat.windows_service")),
         )
         probe = (
             "import importlib, pathlib, sys\n"

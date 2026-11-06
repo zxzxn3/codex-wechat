@@ -50,7 +50,6 @@ $TaskTemporary = Join-Path ([IO.Path]::GetTempPath()) ('codex-wechat-bootstrap-'
 New-Item -ItemType Directory -Path $TaskTemporary | Out-Null
 try {
     $Installer = Join-Path $TaskTemporary 'installer.py'
-    $Release = Join-Path $TaskTemporary 'release.py'
     $PrivateSource = -not [string]::IsNullOrWhiteSpace($env:CODEX_WECHAT_TOKEN)
     if ($PrivateSource) {
         if ($env:CODEX_WECHAT_TOKEN -notmatch '^[A-Za-z0-9_]+$') {
@@ -110,9 +109,7 @@ try {
     } else {
         $InstallerBaseUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' + [Uri]::EscapeDataString($Ref)
         $InstallerUri = $InstallerBaseUri + '/installer.py'
-        $ReleaseUri = $InstallerBaseUri + '/release.py'
         Invoke-WebRequest -UseBasicParsing -Uri $InstallerUri -OutFile $Installer -TimeoutSec 120
-        Invoke-WebRequest -UseBasicParsing -Uri $ReleaseUri -OutFile $Release -TimeoutSec 120
         $InstallerArguments = @($Installer, 'bootstrap', '--repo', $Repo, '--ref', $Ref)
     }
     if ($Component) {

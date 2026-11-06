@@ -4,12 +4,12 @@ import unittest
 import re
 from unittest.mock import AsyncMock
 
-from codex_wechat import Bridge
-from commands import handle
-from prompts import (VALUE_UNAVAILABLE, context_usage, duration_label, final_answer_fields,
+from codex_wechat.app import Bridge
+from codex_wechat.commands import handle
+from codex_wechat.prompts import (VALUE_UNAVAILABLE, context_usage, duration_label, final_answer_fields,
                      prompt_text, rate_limit_label, render_ack, status_fields,
                      status_from_fields, token_count)
-from storage import Store
+from codex_wechat.storage import Store
 
 
 class PromptFieldsTests(unittest.IsolatedAsyncioTestCase):

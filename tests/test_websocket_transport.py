@@ -3,7 +3,7 @@ import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
-from codex_transport import CodexTransport
+from codex_wechat.codex_transport import CodexTransport
 
 class WebSocketTransportTests(unittest.IsolatedAsyncioTestCase):
     def transport(self, url="ws://127.0.0.1:45231"):
@@ -19,7 +19,7 @@ class WebSocketTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_external_connection_does_not_require_local_cli(self):
         transport = self.transport()
         transport.connect = AsyncMock()
-        with patch("backend_runtime.resolve_command", side_effect=AssertionError("spawned CLI")):
+        with patch("codex_wechat.backend_runtime.resolve_command", side_effect=AssertionError("spawned CLI")):
             await transport.start()
         transport.connect.assert_awaited_once()
         self.assertTrue(transport.shared)

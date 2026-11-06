@@ -8,15 +8,15 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from backend import (CodexBackend, TurnStalled, WRITER_BUSY, WRITER_FOLLOWED,
+from codex_wechat.backend import (CodexBackend, TurnStalled, WRITER_BUSY, WRITER_FOLLOWED,
                      WRITER_NATIVE, WRITER_RELEASED)
-import backend_runtime
-from codex_transport import CodexTransport, CodexRpcError, SharedDaemonUnavailable
-from errors import BackendStartupError
-from pipe_websocket import PipeWebSocket
-from profiles import definitions, resume_or_adopt
-from storage import Store
-import platform_support
+from codex_wechat import backend_runtime
+from codex_wechat.codex_transport import CodexTransport, CodexRpcError, SharedDaemonUnavailable
+from codex_wechat.errors import BackendStartupError
+from codex_wechat.pipe_websocket import PipeWebSocket
+from codex_wechat.profiles import definitions, resume_or_adopt
+from codex_wechat.storage import Store
+from codex_wechat import platform_support
 from websockets.server import ServerProtocol
 from websockets.http11 import Request
 from websockets.frames import Frame, Opcode
@@ -30,7 +30,7 @@ def xdg_user_data_dir(name, appauthor=False):
 
 class PlatformTests(unittest.TestCase):
     def test_existing_directory_is_tightened(self):
-        import platform_support
+        from codex_wechat import platform_support
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "state"
             target.mkdir(mode=0o755)
@@ -42,7 +42,7 @@ class PlatformTests(unittest.TestCase):
     def test_explicit_codex_path_is_not_replaced_by_path_installation(self):
         explicit = "/custom/codex.exe"
         with patch.object(platform_support, "IS_WINDOWS", True), \
-                patch("platform_support.shutil.which", return_value=explicit) as which:
+                patch("codex_wechat.platform_support.shutil.which", return_value=explicit) as which:
             self.assertEqual(platform_support.resolve_command([explicit, "app-server"], {}),
                              [explicit, "app-server"])
         which.assert_called_once_with(explicit, path=None)
@@ -52,10 +52,10 @@ class PlatformTests(unittest.TestCase):
         # UTF-8 decode fail on a Chinese Windows host.
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(platform_support, "IS_WINDOWS", True), \
-                    patch("platform_support.account_identity", return_value="*S-1-5-21"), \
+                    patch("codex_wechat.platform_support.account_identity", return_value="*S-1-5-21"), \
                     patch.object(platform_support.subprocess, "CREATE_NO_WINDOW",
                                  0x08000000, create=True), \
-                    patch("platform_support.subprocess.run") as run:
+                    patch("codex_wechat.platform_support.subprocess.run") as run:
                 run.return_value.returncode = 0
                 platform_support.make_private(Path(directory))
         options = run.call_args.kwargs
@@ -85,7 +85,7 @@ class PlatformTests(unittest.TestCase):
                 patch.object(platform_support, "INSTALL_ROOT", Path(directory)), \
                 patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": "/tmp/stable-data"}):
             self.assertEqual(platform_support.data_root(), Path("/tmp/stable-data").resolve())
-        with patch("profiles.IS_WINDOWS", True):
+        with patch("codex_wechat.profiles.IS_WINDOWS", True):
             self.assertEqual(set(definitions({})), {"codex"})
             self.assertEqual(set(definitions({"backends": {"deepseek": {
                 "command": ["custom.exe", "app-server"]}}})), {"deepseek"})
@@ -149,18 +149,18 @@ class PlatformTests(unittest.TestCase):
 
     def test_windows_refuses_implicit_shell(self):
         with patch.object(platform_support, "IS_WINDOWS", True), \
-                patch("platform_support.shutil.which", return_value="/tmp/codex.cmd"):
+                patch("codex_wechat.platform_support.shutil.which", return_value="/tmp/codex.cmd"):
             with self.assertRaises(ValueError):
                 platform_support.resolve_command(["codex", "app-server"], {})
         with patch.object(platform_support, "IS_WINDOWS", True), \
-                patch("platform_support.shutil.which", return_value="/tmp/codex.exe"):
+                patch("codex_wechat.platform_support.shutil.which", return_value="/tmp/codex.exe"):
             self.assertEqual(platform_support.resolve_command(["codex", "app-server"], {}),
                              ["/tmp/codex.exe", "app-server"])
 
     def test_windows_store_uses_byte_lock_and_unicode(self):
         with tempfile.TemporaryDirectory() as directory, \
-                patch("storage.IS_WINDOWS", True), \
-                patch("storage.msvcrt", SimpleNamespace(locking=Mock(), LK_NBLCK=2), create=True):
+                patch("codex_wechat.storage.IS_WINDOWS", True), \
+                patch("codex_wechat.storage.msvcrt", SimpleNamespace(locking=Mock(), LK_NBLCK=2), create=True):
             store = Store(Path(directory) / "中文状态")
             try:
                 store.save("bridge", {"text": "鲸鱼娘", "queue": []})
@@ -348,7 +348,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_windows_defaults_to_stdio_and_preserves_explicit_shared_choice(self):
         callbacks = dict(on_request=AsyncMock(), on_event=Mock(), on_connect=Mock(),
                          on_disconnect=Mock())
-        with patch("codex_connection.IS_WINDOWS", True):
+        with patch("codex_wechat.codex_connection.IS_WINDOWS", True):
             self.assertFalse(CodexTransport({}, "/tmp", **callbacks).shared)
             self.assertTrue(CodexTransport({"sharedDaemon": True}, "/tmp", **callbacks).shared)
 
@@ -427,7 +427,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend = CodexBackend({"sharedDaemon": True}, "/tmp", lambda _: None)
         backend.transport.start = AsyncMock(
             side_effect=SharedDaemonUnavailable("this CLI has no complete local package"))
-        with patch("backend.CodexTransport") as transport:
+        with patch("codex_wechat.backend.CodexTransport") as transport:
             transport.return_value.start = AsyncMock()
             transport.return_value.shared = False
             await backend.start()
@@ -444,7 +444,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
             thread=AsyncMock(side_effect=[
                 CodexRpcError(-32600, "thread t already has an active writer"), "t"]),
             adopt_thread=AsyncMock())
-        with patch("profiles.asyncio.sleep", AsyncMock()):
+        with patch("codex_wechat.profiles.asyncio.sleep", AsyncMock()):
             self.assertEqual(await resume_or_adopt(candidate, "t", True), "t")
         candidate.adopt_thread.assert_not_called()
 
@@ -545,7 +545,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.transport.reader = SimpleNamespace(done=lambda: False)
         candidate = SimpleNamespace(attach=AsyncMock(side_effect=ValueError("App 返回了其它会话")),
                                     settings=AsyncMock(), close=AsyncMock())
-        import app_ipc
+        from codex_wechat import app_ipc
         with tempfile.NamedTemporaryFile() as endpoint:
             with patch.object(app_ipc, "ipc_path", return_value=Path(endpoint.name)), \
                     patch.object(app_ipc, "AppSession", return_value=candidate):
@@ -608,8 +608,8 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.info = {"provider": "custom"}
         backend.rpc = AsyncMock(return_value={"config": {"model_providers": {
             "custom": {"base_url": "https://example.com/v1"}}}})
-        with patch("backend.IS_WINDOWS", True), \
-                patch("platform_support.getproxies",
+        with patch("codex_wechat.backend.IS_WINDOWS", True), \
+                patch("codex_wechat.platform_support.getproxies",
                       return_value={"https": "http://127.0.0.1:7897", "no": "localhost;127.*"}):
             _, env = await backend.probe_target()
         self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:7897")
@@ -623,8 +623,8 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.info = {"provider": "custom"}
         backend.rpc = AsyncMock(return_value={"config": {"model_providers": {
             "custom": {"base_url": "https://example.com/v1"}}}})
-        with patch("backend.IS_WINDOWS", True), \
-                patch("platform_support.getproxies",
+        with patch("codex_wechat.backend.IS_WINDOWS", True), \
+                patch("codex_wechat.platform_support.getproxies",
                       return_value={"https": "http://127.0.0.1:7897"}):
             _, env = await backend.probe_target()
         self.assertNotIn("HTTPS_PROXY", env)
@@ -637,8 +637,8 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.info = {"provider": "custom"}
         backend.rpc = AsyncMock(return_value={"config": {"model_providers": {
             "custom": {"base_url": "https://example.com/v1"}}}})
-        with patch("backend.IS_WINDOWS", True), \
-                patch("platform_support.getproxies",
+        with patch("codex_wechat.backend.IS_WINDOWS", True), \
+                patch("codex_wechat.platform_support.getproxies",
                       return_value={"https": "http://127.0.0.1:7897"}):
             _, env = await backend.probe_target()
         self.assertEqual(env["HTTPS_PROXY"], "http://localhost:1234")
@@ -651,7 +651,7 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.info = {"provider": "custom"}
         backend.rpc = AsyncMock(return_value={"config": {"model_providers": {
             "custom": {"base_url": "https://example.com/v1"}}}})
-        with patch("backend.IS_WINDOWS", True), patch.dict("os.environ", {"API_KEY": "private"}):
+        with patch("codex_wechat.backend.IS_WINDOWS", True), patch.dict("os.environ", {"API_KEY": "private"}):
             endpoint, env = await backend.probe_target()
         self.assertEqual(endpoint, "https://example.com/v1")
         self.assertEqual(env["HTTPS_PROXY"], "http://localhost:1234")
@@ -667,15 +667,15 @@ class AppAvailabilityTests(unittest.TestCase):
     def test_busy_pipe_still_counts_as_available(self):
         busy = OSError("所有的管道实例都在使用中。")
         busy.winerror = 231
-        with patch("app_ipc.ipc_path", return_value=r"\\.\pipe\codex-ipc"), \
-                patch("backend.Path.exists", side_effect=busy):
+        with patch("codex_wechat.app_ipc.ipc_path", return_value=r"\\.\pipe\codex-ipc"), \
+                patch("codex_wechat.backend.Path.exists", side_effect=busy):
             self.assertTrue(self._backend().app_available())
 
     def test_other_pipe_errors_mean_unavailable(self):
-        with patch("app_ipc.ipc_path", return_value=r"\\.\pipe\codex-ipc"), \
-                patch("backend.Path.exists", side_effect=OSError(2, "missing")):
+        with patch("codex_wechat.app_ipc.ipc_path", return_value=r"\\.\pipe\codex-ipc"), \
+                patch("codex_wechat.backend.Path.exists", side_effect=OSError(2, "missing")):
             self.assertFalse(self._backend().app_available())
 
     def test_without_a_candidate_path_nothing_is_available(self):
-        with patch("app_ipc.ipc_path", return_value=None):
+        with patch("codex_wechat.app_ipc.ipc_path", return_value=None):
             self.assertFalse(self._backend().app_available())

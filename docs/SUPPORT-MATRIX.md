@@ -20,7 +20,7 @@
 
 - root/sudo 或管理员终端运行写命令默认拒绝；只读 `status` / `logs` 和显式 `uninstall`
   例外，容器/CI 才使用 `CODEX_WECHAT_ALLOW_ROOT=1`。
-- 直接执行 `uninstall.py`、`uninstall.ps1`、`windows/task-service.ps1` 等内部 helper 不属于
+- 直接执行 `codex_wechat/uninstall.py`、`uninstall.ps1`、`windows/task-service.ps1` 等内部 helper 不属于
   用户命令契约；应通过稳定入口调用。
 - Windows 空 App 发现、三端并发、`service.log` 连续轮转、非 ASCII 用户目录下的 `.cmd`、
   Linux systemd 下的 GNOME 代理探测尚未完成或未复测，不能写成全平台已验证。

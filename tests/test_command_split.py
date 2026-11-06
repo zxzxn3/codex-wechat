@@ -4,12 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import commands
-from codex_wechat import Bridge
-from command_specs import COMMANDS, HELP_ALL, REGISTRY
-from commands import HANDLERS, handle
-from errors import UserFacingError
-from storage import Store
+from codex_wechat import commands
+from codex_wechat.app import Bridge
+from codex_wechat.command_specs import COMMANDS, HELP_ALL, REGISTRY
+from codex_wechat.commands import HANDLERS, handle
+from codex_wechat.errors import UserFacingError
+from codex_wechat.storage import Store
 
 
 class CommandSplitTests(unittest.IsolatedAsyncioTestCase):

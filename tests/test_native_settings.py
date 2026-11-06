@@ -6,13 +6,13 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from codex_wechat import Bridge
-from backend import CodexBackend, WRITER_BUSY, WRITER_NATIVE, WRITER_RELEASED
-from codex_transport import CodexRpcError
-from commands import activate
-from input_delivery import InputDelivery
-from prompts import prompt_text
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.backend import CodexBackend, WRITER_BUSY, WRITER_NATIVE, WRITER_RELEASED
+from codex_wechat.codex_transport import CodexRpcError
+from codex_wechat.commands import activate
+from codex_wechat.input_delivery import InputDelivery
+from codex_wechat.prompts import prompt_text
+from codex_wechat.storage import Store
 
 
 class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 main() {
-    local repo='https://github.com/zxzxn3/codex-wechat' source_ref=main dry_run=0 non_interactive=0 target='' component='' skills_dir='' python_command installer_url release_url task_temporary auth git_config private_source=0 installer
+    local repo='https://github.com/zxzxn3/codex-wechat' source_ref=main dry_run=0 non_interactive=0 target='' component='' skills_dir='' python_command installer_url task_temporary auth git_config private_source=0 installer
     while (($#)); do
         case "$1" in
             --repo|--ref|--dir|--component|--skills-dir)
@@ -40,7 +40,6 @@ if (url.scheme != "https" or url.netloc.lower() != "github.com" or url.query or 
 print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
 ' "$repo" "$source_ref") || return 1
     installer_url="$installer_base_url/installer.py"
-    release_url="$installer_base_url/release.py"
     if ((dry_run)); then
         printf '演练模式，不下载或修改文件。\n来源 %s\n分支或标签 %s\n' "$repo" "$source_ref"
         if [[ -n "${CODEX_WECHAT_TOKEN:-}" ]]; then
@@ -93,8 +92,6 @@ print(base64.b64encode(("x-access-token:" + token).encode()).decode())
         command -v curl >/dev/null || { echo '需要 curl，安装后重跑相同命令。' >&2; return 1; }
         curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
             --connect-timeout 15 --max-time 120 "$installer_url" -o "$task_temporary/installer.py"
-        curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            --connect-timeout 15 --max-time 120 "$release_url" -o "$task_temporary/release.py"
         installer="$task_temporary/installer.py"
         local -a installer_arguments=("$installer" bootstrap --repo "$repo" --ref "$source_ref")
     fi

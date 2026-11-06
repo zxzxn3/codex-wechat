@@ -30,7 +30,7 @@ codex-wechat service-start
 codex-wechat <args>
   -> %USERPROFILE%\.local\bin\codex-wechat.cmd
   -> powershell -ExecutionPolicy Bypass -File <stable>\codex-wechat.ps1 <args>
-  -> codex_wechat.py
+  -> python -m codex_wechat
 ```
 
 只有 `%USERPROFILE%\.local\bin` 已存在且在用户 PATH 中时，安装器才创建 `.cmd`；不会修改
@@ -55,7 +55,7 @@ PATH。未创建时使用完整 `codex-wechat.ps1` 路径，行为相同。`.ps1
   保存 `config.json`、`.state`、`workspace`、
   `logs`、`shared` 和 `active-release`；当前值记录在安装根的 `.data-root`，
   计划任务只传安装根，公开入口和服务 supervisor 都读取该标记。
-- 计划任务负责原生启动、停止和查询；`service_adapter.py` 负责 restart 编排、停止等待和
+- 计划任务负责原生启动、停止和查询；`codex_wechat/service_adapter.py` 负责 restart 编排、停止等待和
   稳定运行判断。`windows/task-service.ps1` 不实现 restart 状态机。
 - 首次自启关闭；`autostart true|false` 只切换登录触发器，不启动、停止或接管当前实例。
 - `logs --service` 读取 `logs/service.log` 及其轮转版本；结构化日志仍是

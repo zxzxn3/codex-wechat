@@ -33,7 +33,7 @@ if [ -f "$INSTALL_ROOT/current" ]; then
     PROJECT_DIR="$INSTALL_ROOT/releases/$VERSION"
     export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"
 fi
-if [ ! -f "$PROJECT_DIR/desktop.py" ]; then
+if [ ! -f "$PROJECT_DIR/codex_wechat/desktop.py" ]; then
     echo "codex-desktop: 当前版本不完整: $PROJECT_DIR" >&2
     echo '请从新源码重新运行 update。' >&2
     exit 1
@@ -41,4 +41,5 @@ fi
 export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
 PYTHON=python3
 if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then PYTHON="$PROJECT_DIR/.venv/bin/python"; fi
-exec "$PYTHON" -u "$PROJECT_DIR/desktop.py" "$@"
+exec env PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PYTHON" -u -m codex_wechat.desktop "$@"

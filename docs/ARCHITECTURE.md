@@ -18,8 +18,9 @@
 - platform_ui / platform_support / service_adapter：二维码、通知、平台路径与原生服务操作。
 - subprocess_io / storage：有界子进程收尾、私有JSON与原生单实例锁。
 - installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。安装器必须是单文件可运行，
-  stable payload 清单由测试校验顶层本地导入闭包。release.py 只负责 release 目录清理，
-  active-release 标记保留正在运行的版本。Windows Mutex/Job Object 使用 pywin32 封装原生 API。
+  运行期代码集中在 `codex_wechat/`，根目录只保留安装器、supervisor 薄入口和平台入口脚本；
+  stable payload 与包内导入由测试校验。release 目录清理并入安装器，active-release 标记
+  保留正在运行的版本。Windows Mutex/Job Object 使用 pywin32 封装原生 API。
   每个版本建独立虚拟环境，但依赖安装复用本机 pip 缓存（`PIP_NO_CACHE_DIR=1` 可恢复旧行为）；
   重复更新因此不再重下同版本 wheel，缓存未命中时才联网。
 

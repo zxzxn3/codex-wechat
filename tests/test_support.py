@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
-import diagnostics
+from codex_wechat import diagnostics
 
 
 def xdg_user_data_dir(name, appauthor=False):

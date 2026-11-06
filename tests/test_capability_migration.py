@@ -5,14 +5,14 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from backend import CodexBackend
-from codex_connection import ConnectionSpec
-from codex_wechat import Bridge, startup_account
-from configuration import ConfigurationError
-from records import InputPhase
-from storage import Store
-import rebind
-import wechat_auth
+from codex_wechat.backend import CodexBackend
+from codex_wechat.codex_connection import ConnectionSpec
+from codex_wechat.app import Bridge, startup_account
+from codex_wechat.configuration import ConfigurationError
+from codex_wechat.records import InputPhase
+from codex_wechat.storage import Store
+from codex_wechat import rebind
+from codex_wechat import wechat_auth
 
 
 class ConnectionCapabilities(unittest.TestCase):
@@ -56,7 +56,7 @@ class RuntimeCapabilities(unittest.IsolatedAsyncioTestCase):
                 bridge.state['thread'] = 't'
                 job = {'text': 'pending', 'phase': InputPhase.PREPARING}
                 bridge.state['inbox'].append(job)
-                with patch('codex_wechat.service_adapter.notify', AsyncMock()) as notify:
+                with patch('codex_wechat.app.service_adapter.notify', AsyncMock()) as notify:
                     await bridge.require_wechat_rebind()
                     await bridge.require_wechat_rebind()
                     self.assertFalse(bridge.dispatch_input(job, InputPhase.DISPATCHING, None, bridge.backend))

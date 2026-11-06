@@ -8,7 +8,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import platform_ui
+from codex_wechat import platform_ui
 
 
 class FakeProcess:

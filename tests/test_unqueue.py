@@ -4,11 +4,11 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
-from codex_wechat import Bridge
-from command_specs import HELP, REGISTRY, command_lane
-from commands import dispatch
-from records import InputPhase
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.command_specs import HELP, REGISTRY, command_lane
+from codex_wechat.commands import dispatch
+from codex_wechat.records import InputPhase
+from codex_wechat.storage import Store
 
 
 class UnqueueTests(unittest.IsolatedAsyncioTestCase):

@@ -6,11 +6,11 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-import diagnostics
-from codex_wechat import Bridge
-from errors import WeChatPollTimeout
-from storage import Store
-from wechat import WeChat
+from codex_wechat import diagnostics
+from codex_wechat.app import Bridge
+from codex_wechat.errors import WeChatPollTimeout
+from codex_wechat.storage import Store
+from codex_wechat.wechat import WeChat
 
 
 class PollTimeoutTests(unittest.IsolatedAsyncioTestCase):
@@ -35,7 +35,7 @@ class PollTimeoutTests(unittest.IsolatedAsyncioTestCase):
     async def test_wait_deadline_is_debug_control_flow_not_console_failure(self):
         metrics = self.timings()
         with patch.object(self.client.http, 'request', AsyncMock(return_value=(b'\n0', metrics))) as request, \
-                patch('wechat.print') as console:
+                patch('codex_wechat.wechat.print') as console:
             with self.assertRaises(WeChatPollTimeout):
                 await self.client.poll('PRIVATE-CURSOR')
         self.assertEqual(request.await_args.kwargs['timeout'], 40)
@@ -96,7 +96,7 @@ class PollTimeoutTests(unittest.IsolatedAsyncioTestCase):
         try:
             with patch.object(self.client, 'poll', AsyncMock(side_effect=[
                     WeChatPollTimeout(), RuntimeError('unavailable'), asyncio.CancelledError()])) as poll, \
-                    patch('codex_wechat.asyncio.sleep', AsyncMock()) as sleep:
+                    patch('codex_wechat.app.asyncio.sleep', AsyncMock()) as sleep:
                 with self.assertRaises(asyncio.CancelledError):
                     await bridge.poller()
             self.assertEqual(poll.await_count, 3)

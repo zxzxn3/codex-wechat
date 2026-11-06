@@ -33,7 +33,8 @@ class BootstrapEntryTests(unittest.TestCase):
     def test_fresh_install_does_not_treat_an_unversioned_directory_as_an_install(self):
         target = self.root / "target"
         target.mkdir()
-        (target / "codex_wechat.py").write_text("old")
+        (target / "codex_wechat").mkdir()
+        (target / "codex_wechat/app.py").write_text("old")
         (target / "installer.py").write_text("old")
         with patch.object(installer, "fetch_update_source") as fetch:
             with self.assertRaisesRegex(ValueError, "非空"):
@@ -110,11 +111,13 @@ class BootstrapEntryTests(unittest.TestCase):
             if valid:
                 self.assertIn("不下载或修改文件", result.stdout)
 
-    def test_network_entry_fetches_the_release_helper(self):
+    def test_network_entry_only_downloads_the_installer(self):
         shell = (Path(__file__).resolve().parents[1] / "bootstrap.sh").read_text(encoding="utf-8")
         powershell = (Path(__file__).resolve().parents[1] / "bootstrap.ps1").read_text(encoding="utf-8")
-        self.assertIn("release.py", shell)
-        self.assertIn("release.py", powershell)
+        self.assertIn("installer.py", shell)
+        self.assertIn("installer.py", powershell)
+        self.assertNotIn("release.py", shell)
+        self.assertNotIn("release.py", powershell)
 
     @unittest.skipUnless(shutil.which("bash"), "Bash unavailable")
     def test_private_shell_entry_authenticates_clone_and_clears_the_token(self):

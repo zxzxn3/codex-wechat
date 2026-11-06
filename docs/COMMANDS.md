@@ -2,7 +2,7 @@
 
 用户命令只有一个公开入口：Linux 的 `codex-wechat`，Windows 的
 `%USERPROFILE%\.local\bin\codex-wechat.cmd`。Windows 入口是薄启动器，最终也转到
-`codex_wechat.py`；原生计划任务操作只存在于内部 helper
+`python -m codex_wechat`；原生计划任务操作只存在于内部 helper
 `windows/task-service.ps1`，不是用户命令。
 
 产品决策和已移除项见 [COMMANDS-DECISIONS](COMMANDS-DECISIONS.md)。
@@ -75,7 +75,7 @@ Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应
 ### 互斥
 
 `start` 在后台服务运行时直接拒绝；`service-start` 在前台桥接持有状态锁时直接拒绝。
-判断在 `codex_wechat.py`，不依赖 PowerShell 或 shell 的重复实现。
+判断在 `codex_wechat.app`，不依赖 PowerShell 或 shell 的重复实现。
 
 ### 权限
 
@@ -104,8 +104,8 @@ Linux 后台服务的数据根由安装根 `.data-root` 提供（包括默认根
 Linux 的 stable `codex-wechat` 和 Windows 的 `codex-wechat.ps1` 在读取 `current` 之前
 直接分派 `uninstall` 到稳定卸载组件。这样 `current` 缺失、损坏或活动 release 不完整时，
 仍能移除服务和命令入口，而不是先因为版本指针错误而无法卸载。
-其中 Linux stable `uninstall.py` 仅处理 Linux；Windows stable `uninstall.ps1` 仅处理 Windows。
-`codex_wechat.py` 不再提供 `uninstall` action，因此不存在给普通用户使用的 Python 次级卸载路径。
+其中 Linux stable `codex_wechat/uninstall.py` 仅处理 Linux；Windows stable `uninstall.ps1` 仅处理 Windows。
+`codex_wechat.app` 不再提供 `uninstall` action，因此不存在给普通用户使用的 Python 次级卸载路径。
 
 服务未安装时，`autostart` 查询统一返回 `false` 并退出 0；只有同名服务/任务属于另一个
 安装目录时才报错。

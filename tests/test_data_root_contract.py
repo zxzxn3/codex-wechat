@@ -6,8 +6,8 @@ import unittest
 from unittest.mock import patch
 
 import installer
-import platform_support
-import windows_service
+from codex_wechat import platform_support
+from codex_wechat import windows_service
 
 try:
     from .test_support import requires_symlinks, xdg_user_data_dir

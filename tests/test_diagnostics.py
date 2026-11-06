@@ -10,12 +10,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import diagnostics
-from codex_wechat import Bridge
-from log_viewer import _log_files, _read_log_updates, _tail_lines, show_logs
-from commands import dispatch
-from storage import Store
-from wechat import WeChat
+from codex_wechat import diagnostics
+from codex_wechat.app import Bridge
+from codex_wechat.log_viewer import _log_files, _read_log_updates, _tail_lines, show_logs
+from codex_wechat.commands import dispatch
+from codex_wechat.storage import Store
+from codex_wechat.wechat import WeChat
 from tests.http_fixtures import exchange
 
 
@@ -176,11 +176,11 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertFalse(self.path.with_name(f"{self.path.name}.6").exists())
 
     def test_log_write_failure_is_silent(self):
-        with patch("diagnostics.os.open", side_effect=OSError("disk full")):
+        with patch("codex_wechat.diagnostics.os.open", side_effect=OSError("disk full")):
             diagnostics.log_event("test.write_failed", component="bridge")
 
     def test_busy_process_lock_drops_diagnostic_without_writing(self):
-        with patch("storage._lock_descriptor", side_effect=BlockingIOError()):
+        with patch("codex_wechat.storage._lock_descriptor", side_effect=BlockingIOError()):
             diagnostics.log_event("test.lock_busy", component="bridge")
         self.assertFalse(self.path.exists())
         diagnostics.log_event("test.lock_available", component="bridge")
@@ -221,7 +221,7 @@ class DiagnosticsTests(unittest.TestCase):
             if args == ("old",):
                 with self.path.open("a", encoding="utf-8", newline="\n") as stream:
                     stream.write("raced append\n")
-        with patch("log_viewer.print", side_effect=print_and_append):
+        with patch("codex_wechat.log_viewer.print", side_effect=print_and_append):
             _read_log_updates([self.path], positions, initial=True)
         output = StringIO()
         with redirect_stdout(output):
@@ -270,7 +270,7 @@ class DiagnosticsTests(unittest.TestCase):
 
     def test_windows_logs_command_uses_the_shared_viewer(self):
         script = (Path(__file__).parents[1] / "codex-wechat.ps1").read_text(encoding="utf-8")
-        self.assertIn("@($Agent, $Command", script)
+        self.assertIn("@('-m', 'codex_wechat', $Command", script)
         self.assertIn("--follow", script)
         self.assertIn("--service", script)
         self.assertNotIn("Get-Content -LiteralPath $BridgeLog", script)
@@ -279,9 +279,9 @@ class DiagnosticsTests(unittest.TestCase):
         diagnostics.log_event("bridge.start", component="bridge")
         output = StringIO()
         result = SimpleNamespace(stdout="systemd service output\n", returncode=0)
-        with patch("log_viewer.IS_WINDOWS", False), \
-                patch("log_viewer.shutil.which", return_value="/usr/bin/journalctl"), \
-                patch("log_viewer.subprocess.run", return_value=result) as run, \
+        with patch("codex_wechat.log_viewer.IS_WINDOWS", False), \
+                patch("codex_wechat.log_viewer.shutil.which", return_value="/usr/bin/journalctl"), \
+                patch("codex_wechat.log_viewer.subprocess.run", return_value=result) as run, \
                 redirect_stdout(output):
             show_logs(include_service=True)
         command = run.call_args.args[0]
@@ -411,7 +411,7 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await client.request("ilink/bot/sendmessage")
         # A fast successful send is routine: output.sent already records the result.
         self.assertEqual(self.records(), [])
-        with exchange(), patch("wechat.SLOW_REQUEST_SECONDS", 0):
+        with exchange(), patch("codex_wechat.wechat.SLOW_REQUEST_SECONDS", 0):
             await client.request("ilink/bot/sendmessage")
         self.assertEqual(self.records()[-1]["endpoint"], "ilink/bot/sendmessage")
         self.assertEqual(self.records()[-1]["level"], "info")
@@ -445,7 +445,7 @@ class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         client = WeChat({"token": "token",
                          "base_url": "https://ilinkai.weixin.qq.com"})
         with exchange(), \
-             patch("wechat.time.perf_counter", side_effect=[0, 18]):
+             patch("codex_wechat.wechat.time.perf_counter", side_effect=[0, 18]):
             diagnostics.configure(level="info")
             await client.request("ilink/bot/getupdates")
         self.assertFalse(any(item["event"] == "wechat.request"

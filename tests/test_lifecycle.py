@@ -4,17 +4,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
-import commands
-from errors import UserFacingError
-from codex_wechat import Bridge
-from lifecycle import (
+from codex_wechat import commands
+from codex_wechat.errors import UserFacingError
+from codex_wechat.app import Bridge
+from codex_wechat.lifecycle import (
     can_change_session,
     can_prepare_input,
     can_restart,
     can_steer_input,
 )
-from records import InputPhase
-from storage import Store
+from codex_wechat.records import InputPhase
+from codex_wechat.storage import Store
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):

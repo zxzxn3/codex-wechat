@@ -1,4 +1,4 @@
-from errors import UserFacingError, attachment_reason, backend_reason
+from codex_wechat.errors import UserFacingError, attachment_reason, backend_reason
 import asyncio
 import os
 from pathlib import Path
@@ -7,15 +7,15 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from codex_wechat import Bridge, parse_control
-from backend import CodexBackend, CodexRpcError
-from media import OUTPUT_HINT, MediaError
-from latency import Latency
-from command_specs import HELP, HELP_ALL
-from commands import dispatch, handle, info, reload_backend_definitions
-from configuration import (DEFAULT_ACK_TEMPLATE, DEFAULT_COMPLETION_TEMPLATE,
+from codex_wechat.app import Bridge, parse_control
+from codex_wechat.backend import CodexBackend, CodexRpcError
+from codex_wechat.media import OUTPUT_HINT, MediaError
+from codex_wechat.latency import Latency
+from codex_wechat.command_specs import HELP, HELP_ALL
+from codex_wechat.commands import dispatch, handle, info, reload_backend_definitions
+from codex_wechat.configuration import (DEFAULT_ACK_TEMPLATE, DEFAULT_COMPLETION_TEMPLATE,
                            completion_template, processing_template)
-from prompts import (
+from codex_wechat.prompts import (
     PING_REPLY,
     RESTART_NOT_SERVICE,
     UNSUPPORTED_MESSAGE_TYPE,
@@ -26,9 +26,9 @@ from prompts import (
   settings_summary,
     status_summary,
 )
-from storage import Store
-from wechat import trusted_url
-from profiles import backend_label, default_backends, definitions, ensure_backend_config
+from codex_wechat.storage import Store
+from codex_wechat.wechat import trusted_url
+from codex_wechat.profiles import backend_label, default_backends, definitions, ensure_backend_config
 
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -149,7 +149,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_settings_remain_available_without_backend(self):
         self.bridge.state["context"] = "context"
-        with patch("commands.autostart.status", AsyncMock(return_value=True)):
+        with patch("codex_wechat.commands.autostart.status", AsyncMock(return_value=True)):
             await self.bridge.control("/settings")
         self.assertIn("media.maxMiB", self.store.load("bridge")["outbox"][-1]["text"])
         self.assertFalse(self.bridge.backend_started)
@@ -287,7 +287,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_missing_launcher_is_named_in_the_disconnect_log(self):
         # Without the reason a shared log only shows FileNotFoundError.
-        with patch("codex_wechat.log_event") as log_event:
+        with patch("codex_wechat.app.log_event") as log_event:
             self.bridge.backend_connection(
                 self.bridge.backend, False,
                 FileNotFoundError(2, "系统找不到指定的文件。", "codex.exe"))
@@ -298,7 +298,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_restart_refuses_non_service_owner(self):
         owner = AsyncMock(side_effect=ValueError("not service owner"))
-        with patch("codex_wechat.service_control.require_service_owner", owner):
+        with patch("codex_wechat.app.service_control.require_service_owner", owner):
             with self.assertRaises(UserFacingError) as raised:
                 await self.bridge.restart_service()
         self.assertEqual(str(raised.exception), RESTART_NOT_SERVICE)
@@ -541,7 +541,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         reload_backend_definitions(self.bridge)
         path.write_text('{"backends": {"codex": {"useSystemProxy": false}}}',
                         encoding="utf-8")
-        with patch("commands.switch", AsyncMock()) as switch:
+        with patch("codex_wechat.commands.switch", AsyncMock()) as switch:
             await handle(self.bridge, "/backend", "codex")
         switch.assert_awaited_once_with(self.bridge, "codex", force=True)
 

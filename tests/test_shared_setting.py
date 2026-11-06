@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from backend import WRITER_BUSY
-from codex_wechat import Bridge
-from commands import dispatch
-from storage import Store
+from codex_wechat.backend import WRITER_BUSY
+from codex_wechat.app import Bridge
+from codex_wechat.commands import dispatch
+from codex_wechat.storage import Store
 
 
 class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
@@ -42,7 +42,7 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
                              encoding="utf-8")
         bridge = self.bridge({"backends": {"codex": {
             "command": ["codex", "app-server"]}}, "cwd": self.temp.name})
-        with patch("commands.switch", self.reconnect(True)) as switch:
+        with patch("codex_wechat.commands.switch", self.reconnect(True)) as switch:
             await dispatch(bridge, "/settings shared true")
         saved = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertTrue(saved["backends"]["codex"]["sharedDaemon"])
@@ -60,7 +60,7 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
                              encoding="utf-8")
         bridge = self.bridge({"backends": {"codex": {"sharedDaemon": True}}})
         self.assertTrue(bridge.backend.shared)
-        with patch("commands.switch", self.reconnect(False)):
+        with patch("codex_wechat.commands.switch", self.reconnect(False)):
             await dispatch(bridge, "/settings shared false")
         saved = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertFalse(saved["backends"]["codex"]["sharedDaemon"])
@@ -70,7 +70,7 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
         bridge = self.bridge()
         bridge.backend.shared_fallback = None
         bridge.backend.transport.shared = True
-        with patch("commands.switch", self.reconnect(False)) as switch:
+        with patch("codex_wechat.commands.switch", self.reconnect(False)) as switch:
             await dispatch(bridge, "/settings shared false")
         bridge.backend.release_thread.assert_awaited_once_with("thread-1")
         saved = json.loads(self.path.read_text(encoding="utf-8"))
@@ -80,7 +80,7 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_mode_change_is_refused_while_a_turn_runs(self):
         bridge = self.bridge()
         bridge.running = True
-        with patch("commands.switch", AsyncMock()) as switch:
+        with patch("codex_wechat.commands.switch", AsyncMock()) as switch:
             await dispatch(bridge, "/settings shared true")
         # Switching mode restarts the backend, which would abort the live turn.
         self.assertIn(bridge.prompt("BUSY_CHANGE"), bridge.state["outbox"][-1]["text"])
@@ -91,14 +91,14 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
         bridge = self.bridge()
         bridge.backend.transport.shared = True
         bridge.backend.set_writer(WRITER_BUSY, "thread-1")
-        with patch("commands.switch", self.reconnect(False)):
+        with patch("codex_wechat.commands.switch", self.reconnect(False)):
             await dispatch(bridge, "/settings shared false")
         self.assertIn("下一条消息会自动接管", bridge.state["outbox"][-1]["text"])
 
     async def test_shared_summary_reports_the_unavailable_reason(self):
         bridge = self.bridge()
         bridge.backend.shared_fallback = "共享后台自动启动后仍未连接成功：连接超时"
-        with patch("commands.switch", AsyncMock()):
+        with patch("codex_wechat.commands.switch", AsyncMock()):
             await dispatch(bridge, "/settings shared true")
         text = bridge.state["outbox"][-1]["text"]
         self.assertIn("共享后台不可用", text)
@@ -107,7 +107,7 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
     async def test_settings_lists_the_current_mode(self):
         bridge = self.bridge()
         bridge.ensure_backend = AsyncMock(side_effect=AssertionError("no backend"))
-        with patch("commands.autostart.status", AsyncMock(return_value=True)):
+        with patch("codex_wechat.commands.autostart.status", AsyncMock(return_value=True)):
             await dispatch(bridge, "/settings")
         self.assertIn("shared:", bridge.state["outbox"][-1]["text"])
         await dispatch(bridge, "/settings shared maybe")
@@ -116,7 +116,7 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
     async def test_unwritable_configuration_is_reported(self):
         bridge = Bridge(self.store, {"user": "owner"}, {})
         bridge.state["context"] = "context"
-        with patch("commands.switch", AsyncMock()) as switch:
+        with patch("codex_wechat.commands.switch", AsyncMock()) as switch:
             await dispatch(bridge, "/settings shared true")
         self.assertIn("未保存共享后台设置", bridge.state["outbox"][-1]["text"])
         switch.assert_not_called()
@@ -125,7 +125,7 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
         self.path.write_text(json.dumps({"backends": {"codex": {"sharedDaemon": True}}}),
                              encoding="utf-8")
         bridge = self.bridge({"backends": {"codex": {"sharedDaemon": True}}})
-        with patch("commands.switch", AsyncMock(side_effect=RuntimeError("boom"))):
+        with patch("codex_wechat.commands.switch", AsyncMock(side_effect=RuntimeError("boom"))):
             await dispatch(bridge, "/settings shared false")
         self.assertIn("失败", bridge.state["outbox"][-1]["text"])
         saved = json.loads(self.path.read_text(encoding="utf-8"))

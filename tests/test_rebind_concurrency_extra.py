@@ -5,11 +5,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import rebind
-import wechat_auth
-from service_adapter import ServiceState
-from storage import Store
-from wechat import LoginResult
+from codex_wechat import rebind
+from codex_wechat import wechat_auth
+from codex_wechat.service_adapter import ServiceState
+from codex_wechat.storage import Store
+from codex_wechat.wechat import LoginResult
 
 
 class FakeAdapter:
@@ -250,7 +250,7 @@ class BindedRedirectTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     async def login(self, client):
-        import wechat
+        from codex_wechat import wechat
         with patch.object(wechat, "WeChat", return_value=client), \
                 patch.object(wechat, "print_qr"):
             return await wechat.login(self.store, rebind=True, persist=False)

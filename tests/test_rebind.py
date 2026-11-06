@@ -4,11 +4,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import rebind
-import wechat_auth
-from service_adapter import ServiceState
-from storage import Store
-from wechat import LoginResult
+from codex_wechat import rebind
+from codex_wechat import wechat_auth
+from codex_wechat.service_adapter import ServiceState
+from codex_wechat.storage import Store
+from codex_wechat.wechat import LoginResult
 
 
 class FakeAdapter:

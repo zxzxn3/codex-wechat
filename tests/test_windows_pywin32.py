@@ -6,7 +6,7 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock, patch
 
-import windows_service
+from codex_wechat import windows_service
 
 
 class FakeHandle:

@@ -43,16 +43,23 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     if (-not $native) { throw 'Python runtime is unavailable.' }
     $python = $native.Source
 }
-$script = Join-Path $project 'desktop.py'
+$script = Join-Path $project 'codex_wechat\desktop.py'
 if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
     throw "codex-desktop.ps1: 当前版本不完整: $project`n请从新源码重新运行 update。"
 }
 $before = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT','Process')
+$beforePythonPath = [Environment]::GetEnvironmentVariable('PYTHONPATH','Process')
 try {
     $env:CODEX_WECHAT_INSTALL_ROOT = $installRoot
-    & $python -u $script @args
+    $env:PYTHONPATH = if ($beforePythonPath) {
+        "$project;$beforePythonPath"
+    } else {
+        $project
+    }
+    & $python -u -m codex_wechat.desktop @args
     $result = $LASTEXITCODE
 } finally {
     [Environment]::SetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT',$before,'Process')
+    [Environment]::SetEnvironmentVariable('PYTHONPATH',$beforePythonPath,'Process')
 }
 exit $result

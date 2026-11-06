@@ -7,11 +7,11 @@ import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from codex_wechat import Bridge
-from commands import dispatch
-import diagnostics
-from storage import Store
-from wechat import WeChat
+from codex_wechat.app import Bridge
+from codex_wechat.commands import dispatch
+from codex_wechat import diagnostics
+from codex_wechat.storage import Store
+from codex_wechat.wechat import WeChat
 from tests.http_fixtures import exchange
 
 
@@ -76,7 +76,7 @@ class DiagnosticStageTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.reply('reply')
         entry = self.bridge.state['outbox'][0]
         self.bridge.output._queued_at[entry['id']] -= .25
-        with patch('output_delivery.print') as console:
+        with patch('codex_wechat.output_delivery.print') as console:
             await self.send_one()
         console.assert_not_called()
         start = next(record for record in self.records() if record['event'] == 'output.send_start')

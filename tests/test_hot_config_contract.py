@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import unittest
 
-from configuration import HOT_CONFIG_KEYS, HotSettings
+from codex_wechat.configuration import HOT_CONFIG_KEYS, HotSettings
 
 
 class HotConfigContractTests(unittest.TestCase):

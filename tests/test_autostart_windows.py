@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import autostart
+from codex_wechat import autostart
 
 ROOT = Path(__file__).resolve().parents[1]
 

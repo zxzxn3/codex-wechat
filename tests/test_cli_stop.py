@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import codex_wechat
-from prompts import SERVICE_STOPPING
-from service_adapter import ServiceState
-from storage import Store
+from codex_wechat import app as codex_wechat
+from codex_wechat.prompts import SERVICE_STOPPING
+from codex_wechat.service_adapter import ServiceState
+from codex_wechat.storage import Store
 
 
 class TtyBuffer(StringIO):
@@ -188,6 +188,6 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
     def test_windows_entry_routes_stop_through_python(self):
         script = (Path(__file__).parents[1] / "codex-wechat.ps1").read_text(encoding="utf-8")
         self.assertIn("'stop'", script)
-        self.assertIn("@($Agent, $Command", script)
+        self.assertIn("@('-m', 'codex_wechat', $Command", script)
         self.assertIn("& $VenvPython -u @Arguments", script)
         self.assertNotIn("'service-stop'", script)

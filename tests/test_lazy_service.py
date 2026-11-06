@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import autostart
-from codex_wechat import startup_store
+from codex_wechat import autostart
+from codex_wechat.app import startup_store
 
 
 class LazyRegistrationTests(unittest.IsolatedAsyncioTestCase):
@@ -55,19 +55,19 @@ class StartupOwnershipTests(unittest.IsolatedAsyncioTestCase):
     async def test_managed_start_waits_for_foreground_lock(self):
         expected = object()
         args = SimpleNamespace(state_dir=self.root / ".state", action="start")
-        with patch("codex_wechat.IS_WINDOWS", False), \
-                patch("codex_wechat.Store", side_effect=[RuntimeError("locked"), expected]) as store, \
-                patch("codex_wechat.service_control.require_service_owner", AsyncMock()) as owner, \
-                patch("codex_wechat.asyncio.sleep", AsyncMock()):
+        with patch("codex_wechat.app.IS_WINDOWS", False), \
+                patch("codex_wechat.app.Store", side_effect=[RuntimeError("locked"), expected]) as store, \
+                patch("codex_wechat.app.service_control.require_service_owner", AsyncMock()) as owner, \
+                patch("codex_wechat.app.asyncio.sleep", AsyncMock()):
             self.assertIs(await startup_store(args), expected)
         self.assertEqual(store.call_count, 2)
         owner.assert_awaited_once()
 
     async def test_unmanaged_second_process_does_not_wait_or_take_over(self):
         args = SimpleNamespace(state_dir=self.root / ".state", action="start")
-        with patch("codex_wechat.IS_WINDOWS", False), \
-                patch("codex_wechat.Store", side_effect=RuntimeError("locked")) as store, \
-                patch("codex_wechat.service_control.require_service_owner", AsyncMock(side_effect=ValueError("not managed"))):
+        with patch("codex_wechat.app.IS_WINDOWS", False), \
+                patch("codex_wechat.app.Store", side_effect=RuntimeError("locked")) as store, \
+                patch("codex_wechat.app.service_control.require_service_owner", AsyncMock(side_effect=ValueError("not managed"))):
             with self.assertRaises(RuntimeError):
                 await startup_store(args)
         store.assert_called_once()

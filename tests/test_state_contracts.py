@@ -5,12 +5,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from codex_wechat import BRIDGE_STATE_DEFAULTS, Bridge
-from command_specs import PENDING_CONTROL_LIMIT
-from errors import WeChatNotAcknowledged
-from output_delivery import STALE_OUTBOX_LIMIT
-from records import InputPhase
-from storage import Store
+from codex_wechat.app import BRIDGE_STATE_DEFAULTS, Bridge
+from codex_wechat.command_specs import PENDING_CONTROL_LIMIT
+from codex_wechat.errors import WeChatNotAcknowledged
+from codex_wechat.output_delivery import STALE_OUTBOX_LIMIT
+from codex_wechat.records import InputPhase
+from codex_wechat.storage import Store
 
 
 INBOX_LIMIT = 20
@@ -219,7 +219,7 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
             raise WeChatNotAcknowledged(0)
 
         self.bridge.channel.send = send
-        with patch("output_delivery.log_event"), self.crashing_save(self.bridge, "after"):
+        with patch("codex_wechat.output_delivery.log_event"), self.crashing_save(self.bridge, "after"):
             with self.assertRaises(SimulatedCrash):
                 await self.bridge.sender()
 
@@ -248,7 +248,7 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
             raise WeChatNotAcknowledged(0)
 
         self.bridge.channel.send = send
-        with patch("output_delivery.log_event"), self.crashing_save(self.bridge, "before"):
+        with patch("codex_wechat.output_delivery.log_event"), self.crashing_save(self.bridge, "before"):
             with self.assertRaises(SimulatedCrash):
                 await self.bridge.sender()
 

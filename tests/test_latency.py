@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from latency import Latency, connection_probe, message_timestamps, provider_latency
+from codex_wechat.latency import Latency, connection_probe, message_timestamps, provider_latency
 
 
 class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
@@ -13,7 +13,7 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
         process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(
             json.dumps({"time_appconnect": .185, "time_starttransfer": 2,
                         "time_total": 3}).encode(), None)), stdin=None)
-        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as spawn:
+        with patch("codex_wechat.latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)) as spawn:
             result = await connection_probe("https://api.example/v1?secret=hidden", {})
         self.assertEqual(result, "185ms")
         config = process.communicate.call_args.args[0].decode()
@@ -24,20 +24,20 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
     async def test_completed_handshake_survives_http_timeout(self):
         process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
             b'{"time_appconnect":0.2}', None)), stdin=None)
-        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        with patch("codex_wechat.latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
             self.assertEqual(await connection_probe("https://api.example", {}), "200ms")
 
     async def test_connection_timeout_is_not_reported_as_zero(self):
         process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
             b'{"time_appconnect":0}', None)), stdin=None)
-        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        with patch("codex_wechat.latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
             self.assertEqual(await connection_probe("https://api.example", {}),
                              "timeout(直连,未配置代理)")
 
     async def test_timeout_names_the_failing_path(self):
         process = SimpleNamespace(returncode=28, communicate=AsyncMock(return_value=(
             b'{"time_appconnect":0}', None)), stdin=None)
-        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        with patch("codex_wechat.latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
             self.assertEqual(
                 await connection_probe("https://api.example", {"HTTPS_PROXY": "http://127.0.0.1:7897"}),
                 "timeout(代理未响应)")
@@ -49,7 +49,7 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
         # curl 7 = could not connect, which a blocked direct route returns at once.
         process = SimpleNamespace(returncode=7, communicate=AsyncMock(return_value=(
             b'{"time_appconnect":0}', None)), stdin=None)
-        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        with patch("codex_wechat.latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
             self.assertEqual(await connection_probe("https://api.example", {}),
                              "unreachable(直连,未配置代理)")
             self.assertEqual(
@@ -74,7 +74,7 @@ class NetworkLatencyTests(unittest.IsolatedAsyncioTestCase):
         process = SimpleNamespace(returncode=None, communicate=communicate,
                                   wait=AsyncMock(), stdin=None)
         process.terminate = lambda: setattr(process, "returncode", -15)
-        with patch("latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        with patch("codex_wechat.latency.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
             task = asyncio.create_task(connection_probe("https://api.example", {}))
             await entered.wait()
             task.cancel()
@@ -92,10 +92,10 @@ class MessageTimestampTests(unittest.TestCase):
         self.assertEqual(message_timestamps(message), (1000500.0, 1000600))
 
     def test_latency_uses_first_usable_timestamp(self):
-        with patch("latency.time.time", return_value=1000):
+        with patch("codex_wechat.latency.time.time", return_value=1000):
             latency = Latency()
-        with patch("latency.time.time", return_value=1001), \
-             patch("latency.time.perf_counter", return_value=1):
+        with patch("codex_wechat.latency.time.time", return_value=1001), \
+             patch("codex_wechat.latency.time.perf_counter", return_value=1):
             received = latency.received_any(message_timestamps({
                 "create_time_ms": 999000,
                 "update_time_ms": 1000500,
@@ -104,9 +104,9 @@ class MessageTimestampTests(unittest.TestCase):
         self.assertEqual(received["ingress_ms"], 500)
 
     def test_missing_timestamps_do_not_create_a_sample(self):
-        with patch("latency.time.time", return_value=1000):
+        with patch("codex_wechat.latency.time.time", return_value=1000):
             latency = Latency()
-        with patch("latency.time.time", return_value=1001):
+        with patch("codex_wechat.latency.time.time", return_value=1001):
             self.assertNotIn("ingress_ms", latency.received_any(message_timestamps({
                 "item_list": [{"type": 1}],
             })))

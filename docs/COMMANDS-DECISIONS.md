@@ -10,7 +10,7 @@
 - Windows 原生计划任务操作集中在内部 `windows/task-service.ps1`，不暴露顶层
   `service-stop` / `service-status`；统一使用 `stop` / `status`。
 - 不提供公开 `codex-wechat cli`。普通 CLI 使用 `codex` 或对应 backend 的 launcher；
-  可复用的连接、`ensure` 和 `setup` 能力继续留在内部 `desktop.py` /
+  可复用的连接、`ensure` 和 `setup` 能力继续留在内部 `codex_wechat/desktop.py` /
   `codex-desktop` / `codex-desktop.ps1`。
 - 删除 `codex-wechat desktop` 和 `codex-wechat cli`；内部 helper 不作为用户命令。
 
@@ -27,5 +27,5 @@
 - Linux 以实际 `euid == 0` 拒绝 root；Windows 以管理员令牌拒绝提权终端。
 - 只读 `status` / `logs` 和显式 `uninstall` 例外；CI/容器保留
   `CODEX_WECHAT_ALLOW_ROOT=1` 逃生口。
-- 用户只通过公开入口卸载；Linux stable `uninstall.py` 和 Windows stable `uninstall.ps1`
+- 用户只通过公开入口卸载；Linux stable `codex_wechat/uninstall.py` 和 Windows stable `uninstall.ps1`
   是内部实现，避免出现第二套锁、超时和数据目录语义。

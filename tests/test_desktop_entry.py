@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import desktop
-from codex_connection import ConnectionSpec
+from codex_wechat import desktop
+from codex_wechat.codex_connection import ConnectionSpec
 
 
 class DesktopEntryTests(unittest.IsolatedAsyncioTestCase):

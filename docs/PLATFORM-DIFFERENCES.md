@@ -17,7 +17,7 @@
 | 程序与数据目录 | 默认安装根目录同时保存程序、配置和状态 | 程序在 `%LOCALAPPDATA%\codex-wechat\app`，数据根默认 `%LOCALAPPDATA%\codex-wechat` | 遵循平台目录约定；Windows 将不可变程序与用户数据分开。两边都可用 `CODEX_WECHAT_DATA_ROOT` 覆盖数据根，安装器始终把当前数据根（包括默认根）写入安装根的 `.data-root`，公开入口、systemd 服务和 Windows supervisor 都从该标记解析 |
 | 后台服务 | systemd 用户 unit | Windows Scheduled Task | 使用各平台原生服务生命周期；不强行抽象成统一的跨平台服务 API |
 | 服务归属验证 | unit `FragmentPath` 与 systemd `MainPID` | 计划任务 action、venv 可执行文件、进程父子链、所有者 token | 防止误停其它安装或外部进程。Windows 没有与 systemd `MainPID` 等价的单一校验点 |
-| 服务重启 | `systemctl restart`（阻塞）后由 Python 等待稳定 | Python 先执行原生 stop、等待停止，再 start 并等待稳定 | Windows 子进程直接重启计划任务会死锁或被忽略，因此由 supervisor 负责服务内重启；CLI 的重启编排和稳定等待统一在 `service_adapter.py`，PowerShell helper 只发原生命令 |
+| 服务重启 | `systemctl restart`（阻塞）后由 Python 等待稳定 | Python 先执行原生 stop、等待停止，再 start 并等待稳定 | Windows 子进程直接重启计划任务会死锁或被忽略，因此由 supervisor 负责服务内重启；CLI 的重启编排和稳定等待统一在 `codex_wechat/service_adapter.py`，PowerShell helper 只发原生命令 |
 | 登录自启 | systemd `enable` / `disable`，关闭后重新 link 以保留按需启动 | Scheduled Task logon trigger | 使用各平台原生登录机制；对外命令统一为 `autostart true\|false` |
 | 崩溃恢复 | unit `Restart=on-failure`、固定退避和启动次数限制 | supervisor 的退出码、重启退避和异常退出计数 | Linux 由 systemd 管理，Windows 由项目 supervisor 管理 |
 | `logs --service` 来源 | `journalctl --user -u codex-wechat` | `logs/service.log` | 读取各平台服务控制台的原生来源；结构化 `bridge.jsonl` 两边共用。Windows `service.log` 按 5 MiB 轮转并共用 `logs.keep`；Linux 由 journald 管理 journal 保留 |
@@ -35,7 +35,7 @@
 ## 卸载入口
 
 正常用户使用公开入口：Linux `codex-wechat uninstall [--purge-data]`，Windows
-`codex-wechat uninstall [-PurgeData]`。稳定 `uninstall.py` / `uninstall.ps1` 是内部实现，
+`codex-wechat uninstall [-PurgeData]`。稳定 `codex_wechat/uninstall.py` / `uninstall.ps1` 是内部实现，
 正常用户不应直接调用。完整流程、数据保留规则和损坏 `current` 的处理见
 [INSTALL](INSTALL.md#卸载)。
 

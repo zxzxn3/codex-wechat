@@ -1,9 +1,9 @@
 """Contracts for independent error-handling axes and retry priority."""
 import unittest
 
-from backend import DeferTurn, TurnStalled
-from codex_transport import CodexRpcError, SharedDaemonUnavailable
-from errors import (BackendStartupError, ErrorAction, UserFacingError,
+from codex_wechat.backend import DeferTurn, TurnStalled
+from codex_wechat.codex_transport import CodexRpcError, SharedDaemonUnavailable
+from codex_wechat.errors import (BackendStartupError, ErrorAction, UserFacingError,
                     WeChatApiError, WeChatAuthExpired, WeChatNotAcknowledged,
                     WeChatPollTimeout, WeChatTransportError, disposition,
                     writer_conflict)

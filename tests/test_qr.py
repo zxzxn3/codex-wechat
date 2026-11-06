@@ -6,8 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import wechat
-import platform_ui
+from codex_wechat import wechat
+from codex_wechat import platform_ui
 
 
 class FakeQRCode:

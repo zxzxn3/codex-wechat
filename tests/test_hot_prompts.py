@@ -5,13 +5,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from backend import CodexBackend
-from codex_wechat import Bridge
-from command_specs import HELP, HELP_ALL, help_text
-from configuration import TEXT_LIMIT_BYTES
-from prompts import (DEFAULT_PROMPTS, command_approval, prompt_text,
+from codex_wechat.backend import CodexBackend
+from codex_wechat.app import Bridge
+from codex_wechat.command_specs import HELP, HELP_ALL, help_text
+from codex_wechat.configuration import TEXT_LIMIT_BYTES
+from codex_wechat.prompts import (DEFAULT_PROMPTS, command_approval, prompt_text,
                      validate_prompt_overrides)
-from storage import Store
+from codex_wechat.storage import Store
 
 
 class PromptCatalogueTests(unittest.TestCase):
@@ -58,7 +58,7 @@ class PromptCatalogueTests(unittest.TestCase):
 class HotPromptTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.config_log = self.enterContext(patch("configuration.log_event"))
+        self.config_log = self.enterContext(patch("codex_wechat.configuration.log_event"))
         root = Path(self.temp.name)
         self.path = root / "config.json"
         self.config = {"prompts": {"STOP_IDLE": "idle {model}"}}

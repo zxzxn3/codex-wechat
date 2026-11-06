@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from codex_wechat import Bridge
-from backend import CodexRpcError, DeferTurn
-from records import InputPhase, TurnResult
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.backend import CodexRpcError, DeferTurn
+from codex_wechat.records import InputPhase, TurnResult
+from codex_wechat.storage import Store
 
 
 class DeliveryTests(unittest.IsolatedAsyncioTestCase):
@@ -261,7 +261,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.acknowledge(job)
         self.assertEqual(len(self.bridge.state["outbox"]), 2)
         delays = []
-        with patch("input_delivery.time.time", return_value=1000.0):
+        with patch("codex_wechat.input_delivery.time.time", return_value=1000.0):
             for _ in range(4):
                 self.assertTrue(self.bridge.inputs.queue_writer_conflict(self.bridge, job))
                 delays.append(job["writerRetryAt"] - 1000.0)

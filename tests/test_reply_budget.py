@@ -5,12 +5,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from codex_wechat import Bridge
-from commands import HANDLERS, SETTINGS
-from command_specs import HELP, HELP_ALL, REGISTRY
-from configuration import Sending
-from errors import WeChatApiError, WeChatNotAcknowledged
-from storage import Store
+from codex_wechat.app import Bridge
+from codex_wechat.commands import HANDLERS, SETTINGS
+from codex_wechat.command_specs import HELP, HELP_ALL, REGISTRY
+from codex_wechat.configuration import Sending
+from codex_wechat.errors import WeChatApiError, WeChatNotAcknowledged
+from codex_wechat.storage import Store
 
 
 class SendingConfigTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class SendingConfigTests(unittest.TestCase):
             Sending.from_config({"replyBudget": 3, "nope": 1})
 
     def test_log_retention_is_configured_with_a_floor_and_a_ceiling(self):
-        from configuration import Logs
+        from codex_wechat.configuration import Logs
         self.assertEqual(Logs.from_config(None).keep, 3)
         self.assertEqual(Logs.from_config({}).keep, 3)
         self.assertEqual(Logs.from_config({"keep": 1}).keep, 1)
@@ -42,7 +42,7 @@ class SendingConfigTests(unittest.TestCase):
             Logs.from_config({"keep": 3, "maxMiB": 5})
 
     def test_the_knob_is_settable_but_absent_from_the_panel(self):
-        from prompts import SETTINGS_HELP, SettingsView, settings_summary
+        from codex_wechat.prompts import SETTINGS_HELP, SettingsView, settings_summary
         for name in ("budgets", "sending.replyBudget"):
             self.assertEqual(SETTINGS[name].maximum, 100)
             self.assertEqual(SETTINGS[name].path, ("sending", "replyBudget"))
@@ -80,7 +80,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
             return {"message_id": len(sent)}
 
         bridge.channel.send = send
-        with patch("output_delivery.SEND_SPACING_SECONDS", 0):
+        with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
             task = asyncio.create_task(bridge.sender())
             try:
                 self.assertTrue(await self.wait_for(lambda: len(sent) >= 3))
@@ -112,7 +112,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
             return {"message_id": calls}
 
         bridge.channel.send = send
-        with patch("output_delivery.log_event"), patch("output_delivery.SEND_RETRY_SECONDS", 0):
+        with patch("codex_wechat.output_delivery.log_event"), patch("codex_wechat.output_delivery.SEND_RETRY_SECONDS", 0):
             task = asyncio.create_task(bridge.sender())
             try:
                 self.assertTrue(await self.wait_for(lambda: not bridge.state["outbox"]))
@@ -135,7 +135,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
 
         bridge.channel.send = send
         with patch.object(Bridge, "reply_budget", lambda self: 9), \
-                patch("output_delivery.log_event"):
+                patch("codex_wechat.output_delivery.log_event"):
             task = asyncio.create_task(bridge.sender())
             try:
                 self.assertTrue(await self.wait_for(lambda: not bridge.state["outbox"]))
@@ -158,7 +158,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
             raise WeChatApiError(-2, "prepare_failed")
 
         bridge.channel.send = send
-        with patch("output_delivery.log_event"):
+        with patch("codex_wechat.output_delivery.log_event"):
             task = asyncio.create_task(bridge.sender())
             try:
                 self.assertTrue(await self.wait_for(
@@ -180,7 +180,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
             return {"message_id": len(sent)}
 
         bridge.channel.send = send
-        with patch("output_delivery.SEND_SPACING_SECONDS", 0):
+        with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
             task = asyncio.create_task(bridge.sender())
             try:
                 self.assertTrue(await self.wait_for(lambda: len(sent) >= 3))
@@ -208,7 +208,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
 
     def test_a_budget_past_the_ceiling_is_logged_once_with_its_value(self):
         config = {"backends": {"codex": {}}, "sending": {"replyBudget": 20}}
-        with patch("codex_wechat.log_event") as log_event:
+        with patch("codex_wechat.app.log_event") as log_event:
             bridge = Bridge(self.store, {"user": "owner"}, config)
             bridge.reload_config()
             bridge.reload_config()
@@ -220,7 +220,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0].kwargs["ceiling"], 9)
 
     def test_the_default_budget_logs_nothing(self):
-        with patch("codex_wechat.log_event") as log_event:
+        with patch("codex_wechat.app.log_event") as log_event:
             Bridge(self.store, {"user": "owner"}, {"backends": {"codex": {}}})
         self.assertNotIn("config.reply_budget_above_ceiling",
                          [call.args[0] for call in log_event.call_args_list if call.args])

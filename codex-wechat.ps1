@@ -174,7 +174,7 @@ if ($null -eq $CurrentItem) {
     }
     $Project = Join-Path $InstallRoot "releases\$ReleaseId"
 }
-if (-not (Test-Path -LiteralPath (Join-Path $Project 'codex_wechat.py') -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath (Join-Path $Project 'codex_wechat\app.py') -PathType Leaf)) {
     throw "codex-wechat.ps1: 当前版本不完整: $Project`n请从新源码重新运行 update。"
 }
 
@@ -187,12 +187,11 @@ $DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT) {
 $StateDir = Join-Path $DataRoot '.state'
 $ConfigPath = Join-Path $DataRoot 'config.json'
 $VenvPython = Join-Path $Project '.venv\Scripts\python.exe'
-$Agent = Join-Path $Project 'codex_wechat.py'
 if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
     throw "Python environment not found at $VenvPython; run .\install.ps1 first"
 }
 
-$Arguments = @($Agent, $Command, '--state-dir', $StateDir, '--config', $ConfigPath)
+$Arguments = @('-m', 'codex_wechat', $Command, '--state-dir', $StateDir, '--config', $ConfigPath)
 if ($Command -eq 'logs') {
     if ($Follow) { $Arguments += '--follow' }
     if ($Service) { $Arguments += '--service' }
@@ -203,5 +202,20 @@ if ($Command -eq 'rebind' -and $StopActive) {
 if ($Command -eq 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
     $Arguments += $Value
 }
-& $VenvPython -u @Arguments
-exit $LASTEXITCODE
+$PreviousPythonPath = $env:PYTHONPATH
+try {
+    $env:PYTHONPATH = if ($PreviousPythonPath) {
+        "$Project;$PreviousPythonPath"
+    } else {
+        $Project
+    }
+    & $VenvPython -u @Arguments
+    $Result = $LASTEXITCODE
+} finally {
+    if ($null -eq $PreviousPythonPath) {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONPATH = $PreviousPythonPath
+    }
+}
+exit $Result

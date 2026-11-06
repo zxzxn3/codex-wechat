@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
-import wechat
-import wechat_auth
-from storage import Store
+from codex_wechat import wechat
+from codex_wechat import wechat_auth
+from codex_wechat.storage import Store
 
 
 class FakeWeChat:

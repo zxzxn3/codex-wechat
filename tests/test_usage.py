@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from usage import stored_usage
+from codex_wechat.usage import stored_usage
 
 
 class StoredUsageTests(unittest.TestCase):

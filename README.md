@@ -120,6 +120,13 @@ Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本�
 不提供 CLI 包装命令；桥接和 CLI 通过同一 Codex daemon/`CODEX_HOME` 协同。
 `codex-desktop` / `codex-desktop.ps1` 只作为内部共享后台适配器保留，不是公开命令。
 
+## 源码结构
+
+运行期 Python 代码位于 `codex_wechat/`，包内使用相对导入；根目录只保留单文件
+`installer.py`、Windows supervisor 薄入口 `bootstrap_supervisor.py`，以及安装、bootstrap
+和公开命令的平台入口脚本。安装器会把整个包复制到 stable payload，并从
+`codex_wechat.app` 启动桥接。开发与验证命令见 [DEVELOPMENT](docs/DEVELOPMENT.md)。
+
 ## 配置
 
 运行配置是 `config.json`，示例见 [config.example.json](config.example.json)。配置按文件变化

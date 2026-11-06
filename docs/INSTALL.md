@@ -113,7 +113,7 @@ codex-wechat uninstall -PurgeData   # 删除已知用户数据
 ```
 
 卸载不依赖 `current` 指向的 release；版本指针损坏或 release 不完整时仍可移除服务和入口。
-Linux stable `uninstall.py` 与 Windows stable `uninstall.ps1` 是内部实现，正常用户不应直接调用；
+Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是内部实现，正常用户不应直接调用；
 它们只在维护者排查损坏入口时使用。
 
 `--purge-data` / `-PurgeData` 只删除已知用户数据项，不递归删除自定义数据根目录。前台桥接仍

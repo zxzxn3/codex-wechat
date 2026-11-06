@@ -6,13 +6,13 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from codex_wechat import Bridge
-from command_specs import REGISTRY
-from media import Media, split_answer
-from storage import Store
-from wechat import SEND_TIMEOUT, TYPING_TIMEOUT, WeChat
-from wechat_content import remember_quote
-from errors import WeChatAuthExpired, WeChatNotAcknowledged
+from codex_wechat.app import Bridge
+from codex_wechat.command_specs import REGISTRY
+from codex_wechat.media import Media, split_answer
+from codex_wechat.storage import Store
+from codex_wechat.wechat import SEND_TIMEOUT, TYPING_TIMEOUT, WeChat
+from codex_wechat.wechat_content import remember_quote
+from codex_wechat.errors import WeChatAuthExpired, WeChatNotAcknowledged
 
 
 class FakeChannel:
@@ -121,7 +121,7 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         channel = FakeChannel()
         channel.typing_ticket = AsyncMock(side_effect=["first", "second", "third"])
         bridge = Bridge(self.store, {"user": "owner", "bot": "bot", "token": "token"}, {}, channel=channel)
-        with patch("typing_indicator.time.monotonic", return_value=100) as clock:
+        with patch("codex_wechat.typing_indicator.time.monotonic", return_value=100) as clock:
             self.assertEqual(await bridge.typing._get_ticket(), "first")
             clock.return_value = 699
             self.assertEqual(await bridge.typing._get_ticket(), "first")
@@ -210,7 +210,7 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=channel)
         bridge.require_wechat_rebind = AsyncMock()
         bridge.typing.user, bridge.typing.context = "owner", "context"
-        with patch("typing_indicator.KEEPALIVE_SECONDS", 0):
+        with patch("codex_wechat.typing_indicator.KEEPALIVE_SECONDS", 0):
             await asyncio.wait_for(bridge.typing._keepalive(), 1)
         bridge.require_wechat_rebind.assert_awaited_once()
         self.assertEqual(bridge.typing.ticket, "")
@@ -300,7 +300,7 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
             asset = media.snapshot(str(path), source, "auto")
             self.assertEqual(asset["kind"], "video")
             media.transfer = AsyncMock(return_value=(b"", "download-param"))
-            with patch("media.cipher", return_value=b"encrypted-video"):
+            with patch("codex_wechat.media.cipher", return_value=b"encrypted-video"):
                 item = await media.upload({"asset": asset, "user": "owner"})
             self.assertEqual(item["type"], 5)
             self.assertIn("video_item", item)

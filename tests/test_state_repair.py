@@ -4,10 +4,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import codex_wechat
-from commands import _session_lines
-from codex_wechat import BRIDGE_STATE_DEFAULTS, Bridge, load_bridge_state
-from storage import Store
+from codex_wechat import app as codex_wechat
+from codex_wechat.commands import _session_lines
+from codex_wechat.app import BRIDGE_STATE_DEFAULTS, Bridge, load_bridge_state
+from codex_wechat.storage import Store
 
 
 class LoadBridgeStateTests(unittest.TestCase):

@@ -11,11 +11,11 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
-import app_ipc
-from app_ipc import (AppSession, VERSIONS, app_inputs, apply_patches, ipc_path,
+from codex_wechat import app_ipc
+from codex_wechat.app_ipc import (AppSession, VERSIONS, app_inputs, apply_patches, ipc_path,
                      turns)
-from backend import CodexBackend
-from codex_transport import CodexRpcError
+from codex_wechat.backend import CodexBackend
+from codex_wechat.codex_transport import CodexRpcError
 
 
 def conversation():
@@ -279,14 +279,14 @@ class WindowsRouterTests(RouterTests):
         self.clients = set()
         self.failed = Mock()
         self.nested_response = False
-        self.enterContext(patch("app_ipc_windows.PIPE_PATH", str(self.path)))
+        self.enterContext(patch("codex_wechat.app_ipc_windows.PIPE_PATH", str(self.path)))
         core = Path(self.temp.name) / "resources" / "codex.exe"
         core.parent.mkdir(parents=True)
         core.write_text("", encoding="utf-8")
         (core.parent.parent / "ChatGPT.exe").write_text("", encoding="utf-8")
-        self.enterContext(patch("app_ipc_windows.discover_app_codex",
+        self.enterContext(patch("codex_wechat.app_ipc_windows.discover_app_codex",
                                 return_value=str(core)))
-        self.verify = self.enterContext(patch("app_ipc_windows.verify_server"))
+        self.verify = self.enterContext(patch("codex_wechat.app_ipc_windows.verify_server"))
         loop = asyncio.get_running_loop()
         def protocol():
             reader = asyncio.StreamReader(limit=16 * 1024 * 1024 + 4)
@@ -359,17 +359,17 @@ class WindowsVerifyServerTests(unittest.IsolatedAsyncioTestCase):
             process.Close()
 
     async def test_accepts_the_executable_that_serves_the_pipe(self):
-        from app_ipc_windows import verify_server
+        from codex_wechat.app_ipc_windows import verify_server
         verify_server(await self._connected_handle(), self._own_image())
 
     async def test_rejects_a_pipe_served_by_another_executable(self):
-        from app_ipc_windows import verify_server
+        from codex_wechat.app_ipc_windows import verify_server
         other = Path(os.environ["WINDIR"]) / "System32" / "cmd.exe"
         with self.assertRaisesRegex(ValueError, "不是当前已注册的 Codex App"):
             verify_server(await self._connected_handle(), other)
 
     async def test_missing_app_executable_is_reported_before_connecting(self):
-        import app_ipc_windows
+        from codex_wechat import app_ipc_windows
         with tempfile.TemporaryDirectory() as temp:
             core = Path(temp) / "resources" / "codex.exe"
             core.parent.mkdir(parents=True)
@@ -384,7 +384,7 @@ class WindowsVerifyServerTests(unittest.IsolatedAsyncioTestCase):
 @unittest.skipUnless(os.name == "nt", "Windows App endpoint selection")
 class WindowsEndpointTests(unittest.TestCase):
     def test_websocket_backend_can_follow_app_only_in_primary_home(self):
-        from app_ipc_windows import PIPE_PATH
+        from codex_wechat.app_ipc_windows import PIPE_PATH
         with tempfile.TemporaryDirectory() as primary, tempfile.TemporaryDirectory() as other:
             with patch.dict(os.environ, {"CODEX_HOME": primary}):
                 config = {"websocketUrl": "ws://127.0.0.1:1234", "env": {"CODEX_HOME": primary}}

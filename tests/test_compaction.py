@@ -2,8 +2,8 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from backend import CodexBackend
-from prompts import COMPACT_STARTED, COMPACT_FINISHED, COMPACT_INTERRUPTED
+from codex_wechat.backend import CodexBackend
+from codex_wechat.prompts import COMPACT_STARTED, COMPACT_FINISHED, COMPACT_INTERRUPTED
 
 
 class CompactionTests(unittest.IsolatedAsyncioTestCase):

@@ -2,9 +2,9 @@
 import unittest
 from types import SimpleNamespace
 
-from commands import command_get
-from media import MediaError
-from prompts import SEND_FILE_FAILED
+from codex_wechat.commands import command_get
+from codex_wechat.media import MediaError
+from codex_wechat.prompts import SEND_FILE_FAILED
 
 
 def prompt(name, values=None):

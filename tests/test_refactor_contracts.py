@@ -6,10 +6,10 @@ import tempfile
 import unittest
 from unittest.mock import patch, AsyncMock
 
-from backend import CodexBackend
-from command_specs import command_lane
-from prompts import ping_channel, prompt_text
-from usage import UsageCache
+from codex_wechat.backend import CodexBackend
+from codex_wechat.command_specs import command_lane
+from codex_wechat.prompts import ping_channel, prompt_text
+from codex_wechat.usage import UsageCache
 
 
 class StabilityTests(unittest.IsolatedAsyncioTestCase):
@@ -40,7 +40,7 @@ class StabilityTests(unittest.IsolatedAsyncioTestCase):
             path = Path(root) / "thread.jsonl"
             path.write_text("first")
             cache = UsageCache()
-            with patch("usage.stored_usage", side_effect=[{"total": 1}, {"total": 2}, None]) as read:
+            with patch("codex_wechat.usage.stored_usage", side_effect=[{"total": 1}, {"total": 2}, None]) as read:
                 self.assertEqual(cache.read(path, "thread"), {"total": 1})
                 self.assertEqual(cache.read(path, "thread"), {"total": 1})
                 self.assertEqual(read.call_count, 1)
@@ -54,8 +54,8 @@ class StabilityTests(unittest.IsolatedAsyncioTestCase):
 
 class CompletionStateTests(unittest.IsolatedAsyncioTestCase):
     async def test_completion_uses_finished_state_without_clearing_live_flags(self):
-        from codex_wechat import Bridge
-        from storage import Store
+        from codex_wechat.app import Bridge
+        from codex_wechat.storage import Store
         with tempfile.TemporaryDirectory() as root:
             store = Store(Path(root) / "state")
             try:
@@ -75,8 +75,8 @@ class CompletionStateTests(unittest.IsolatedAsyncioTestCase):
 
 class CommandRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_command_does_not_connect(self):
-        from commands import dispatch, HANDLERS
-        from command_specs import COMMANDS
+        from codex_wechat.commands import dispatch, HANDLERS
+        from codex_wechat.command_specs import COMMANDS
         self.assertEqual(set(HANDLERS), {spec.name for spec in COMMANDS if spec.route != "input"})
         bridge = SimpleNamespace(reply=lambda _: None, ensure_backend=AsyncMock(),
                                  prompt=prompt_text)

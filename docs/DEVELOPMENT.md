@@ -80,10 +80,10 @@ coverage 不是测试生成器，而是记录测试执行时哪些行和分支�
 `.venv/bin/python -m coverage html`，产物 `htmlcov/` 已被忽略且不会进入发行包。
 
 `pyproject.toml` 固定 ruff 的 Python 3.11 目标、行宽和规则集，并保存 coverage 的分支/排除
-配置；`pyrightconfig.json` 覆盖顶层模块与 `tests/`，固定基础检查级别和 `.venv`。不运行
+配置；`pyrightconfig.json` 覆盖 `codex_wechat/` 与 `tests/`，固定基础检查级别和 `.venv`。不运行
 `ruff format` 大面积改样式。
 
-Linux 上 `windows_service.py` 的 pywin32 导入和 `.venv` 未包含的 `cryptography` 会产生
+Linux 上 `codex_wechat/windows_service.py` 的 pywin32 导入和 `.venv` 未包含的 `cryptography` 会产生
 missing-import 警告；这些是平台/环境边界，不是代码错误。平台条件导入、第三方类型 stub、
 动态 dict 推断的误报用定点 `# pyright: ignore[...]`，不全局关闭检查。
 
@@ -132,9 +132,9 @@ $app = "$env:LOCALAPPDATA\codex-wechat\app"
 见 [COMPLEXITY](COMPLEXITY.md)：优先解决已观察到的边界问题，不按行数拆文件，不为跨平台
 强行统一平台适配层。
 
-安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；新增顶层本地导入
-会破坏该入口。`tests/test_release_layout.py` 会检查各平台 stable payload 的顶层本地
-导入闭包，新增 stable 模块或其依赖时必须同步清单。
+安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；运行期模块位于
+`codex_wechat/`，包内使用相对导入。`tests/test_release_layout.py` 会检查 stable payload
+是否包含完整包文件，并验证脱离源码树的导入。
 
 ## 审查与发布退出标准
 

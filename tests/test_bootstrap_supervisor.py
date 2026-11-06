@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import bootstrap_supervisor
+from codex_wechat import bootstrap_supervisor
 from unittest.mock import patch
 
 # `installer.release_identifier()` writes 16 hex digits; the pointer is validated
@@ -16,6 +16,29 @@ MISSING_RELEASE = "0123456789abcdef"
 
 
 class BootstrapSupervisorTests(unittest.TestCase):
+    def test_release_package_is_loaded_without_colliding_with_stable_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            loaded = []
+            for identifier, value in ((FIRST_RELEASE, "one"), (SECOND_RELEASE, "two")):
+                release = root / "releases" / identifier
+                package = release / "codex_wechat"
+                package.mkdir(parents=True)
+                (package / "__init__.py").write_text("", encoding="utf-8")
+                (package / "helper.py").write_text(
+                    f"VALUE = {value!r}\n", encoding="utf-8")
+                (package / "windows_service.py").write_text(
+                    "from .helper import VALUE\n"
+                    "def marker():\n"
+                    "    return VALUE\n",
+                    encoding="utf-8",
+                )
+                module = bootstrap_supervisor.load_supervisor(release)
+                self.assertTrue(module.__name__.startswith("_codex_wechat_release_"))
+                self.assertEqual(module.marker(), value)
+                loaded.append(module)
+            self.assertEqual([module.marker() for module in loaded], ["one", "two"])
+
     def test_missing_current_pointer_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "当前版本指针 current 缺失"):
@@ -25,8 +48,9 @@ class BootstrapSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             release = root / "releases" / FIRST_RELEASE
-            release.mkdir(parents=True)
-            (release / "windows_service.py").write_text("", encoding="utf-8")
+            package = release / "codex_wechat"
+            package.mkdir(parents=True)
+            (package / "windows_service.py").write_text("", encoding="utf-8")
             (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
             self.assertEqual(bootstrap_supervisor.active_release(root), release.resolve())
 
@@ -66,8 +90,9 @@ class BootstrapSupervisorTests(unittest.TestCase):
             (root / "current").unlink()
             outside_releases = root / "outside"
             release = outside_releases / FIRST_RELEASE
-            release.mkdir(parents=True)
-            (release / "windows_service.py").write_text("", encoding="utf-8")
+            package = release / "codex_wechat"
+            package.mkdir(parents=True)
+            (package / "windows_service.py").write_text("", encoding="utf-8")
             (root / "releases").symlink_to(outside_releases, target_is_directory=True)
             (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "releases 目录不能是符号链接"):
@@ -81,7 +106,9 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
             release = root / "releases" / identifier
             (release / ".venv" / "Scripts").mkdir(parents=True)
             (release / ".venv" / "Scripts" / "python.exe").write_text("", encoding="utf-8")
-            (release / "windows_service.py").write_text("", encoding="utf-8")
+            package = release / "codex_wechat"
+            package.mkdir()
+            (package / "windows_service.py").write_text("", encoding="utf-8")
         root.mkdir(exist_ok=True)
         (root / bootstrap_supervisor.DATA_ROOT_FILE).write_text(
             str(root) + "\n", encoding="utf-8")
