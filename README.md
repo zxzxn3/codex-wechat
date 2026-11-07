@@ -13,7 +13,7 @@
 
 ## 快速开始
 
-目前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 者内测试用。该 PAT 仅对该仓库只读且限时吊销。
+当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 者内测试用。该 PAT 仅对该仓库只读且限时吊销。
 入口通过 GitHub Contents API 取得 bootstrap，再由 bootstrap 认证克隆到临时目录并安装。
 
 Linux：
