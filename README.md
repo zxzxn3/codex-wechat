@@ -30,6 +30,7 @@ $env:CODEX_WECHAT_TOKEN='github_pat_11AM6ZKWA0WP4br2mc9wGX_Ld05mFa84qxbTkVk4Vwhf
 
 安装需要 Python 3.11+、Git、Codex 和 `curl`。
 撤销后新的安装和更新立即失效。PAT 只用于本次 API 请求和私有源码下载，不写入仓库配置或安装状态。
+交互式安装完成后会询问是否立即启动，直接回车即启动；输入 `n` 跳过。非交互安装不会自动启动。
 详细前提、更新和卸载见 [安装、更新与卸载](docs/INSTALL.md)。
 
 ## 第一次使用

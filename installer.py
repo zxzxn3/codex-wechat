@@ -150,15 +150,16 @@ def confirm(prompt: str) -> bool:
         try:
             answer = input(
                 styled("::", "1;34") + " " + styled(prompt, "1")
-                + " " + styled("[y/N]", "1") + " "
+                + " " + styled("[Y/n]", "1") + " "
             ).strip().casefold()
         except EOFError:
-            answer = ""
-        if answer in ("", "n", "no"):
+            print("未收到输入，已取消。")
+            return False
+        if answer in ("", "y", "yes"):
+            return True
+        if answer in ("n", "no"):
             print("已取消，没有继续修改。")
             return False
-        if answer in ("y", "yes"):
-            return True
         print("请输入 y 或 n。")
 
 
@@ -180,7 +181,7 @@ def introduction() -> bool:
     ), "33"))
     print()
     print(styled(textwrap.fill(
-        "接下来展示操作计划，确认后执行；不启用新自启、不启动服务、不安装附加组件。",
+        "接下来展示操作计划，确认后执行；不启用新自启、默认不自动启动服务、不安装附加组件。",
         width=width,
     ), "2"))
     print()
@@ -1369,8 +1370,64 @@ def _common_install(
         raise
     print(styled("==> 更新完成。" if update else "==> 安装完成。", "1;32"))
     declaration(source, "complete")
+    if (service_ready and not NON_INTERACTIVE
+            and sys.stdin.isatty() and sys.stdout.isatty()
+            and confirm_start()):
+        if start_installed(target, update=update):
+            return 0
     next_steps(target, update=update, identifier=identifier, service_ready=service_ready)
     return 0
+
+
+def confirm_start() -> bool:
+    """Offer the common post-install action without making it mandatory."""
+    if NON_INTERACTIVE:
+        return False
+    while True:
+        try:
+            answer = input("立即启动？[Y/n] ").strip().casefold()
+        except EOFError:
+            print("未收到输入，已跳过启动。")
+            return False
+        if answer in ("", "y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("请输入 y 或 n。")
+
+
+def service_start_command(target: Path, *, update: bool) -> list[str] | None:
+    action = "service-restart" if update else "service-start"
+    if IS_WINDOWS:
+        powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+        if not powershell:
+            return None
+        return [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(target / "codex-wechat.ps1"),
+            action,
+        ]
+    return [str(target / "codex-wechat"), action]
+
+
+def start_installed(target: Path, *, update: bool) -> bool:
+    command = service_start_command(target, update=update)
+    if command is None:
+        print("启动未完成：找不到 PowerShell；安装本身已完成。")
+        return False
+    try:
+        result = subprocess.run(command, cwd=target, check=False)
+    except OSError as error:
+        print(f"启动未完成：{error}；安装本身已完成。")
+        return False
+    if result.returncode:
+        print(f"启动未完成（退出码 {result.returncode}）；安装本身已完成。")
+        return False
+    return True
 
 
 def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bool = True) -> None:

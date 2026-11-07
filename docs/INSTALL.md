@@ -54,8 +54,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 `python3 installer.py install`，Windows 使用 `py -3 installer.py install`。源码包不应包含
 `.venv`、`.state`、`config.json`、`logs`、`workspace`、`releases` 等本机运行数据。
 
-安装器不会初始化微信账户、收集模型密钥、启动程序或默认开启登录自启。安装结束后的下一步以
-安装器输出为准；通常需要执行一次 `service-start` 并扫码。
+安装器不会初始化微信账户、收集模型密钥或默认开启登录自启，也不会在未经确认时启动程序。
+安装结束后的下一步以安装器输出为准；通常需要执行一次 `service-start` 并扫码。
+交互式安装成功后，安装器会额外询问是否立即启动；直接回车即启动，输入 `n` 跳过。
+`--non-interactive` 不会询问或自动启动。
 
 图片/文件回传所需的附件说明 skill 可从安装器的 `components` 入口单独安装，不影响主安装。
 

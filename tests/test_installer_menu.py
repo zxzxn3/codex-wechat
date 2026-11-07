@@ -77,6 +77,43 @@ class InstallerMenuTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '需要 --component'):
                 installer.main(['components', '--non-interactive'])
 
+    def test_start_command_uses_the_stable_platform_entry(self):
+        target = Path('/install/root')
+        with patch.object(installer, 'IS_WINDOWS', False):
+            self.assertEqual(
+                installer.service_start_command(target, update=False),
+                ['/install/root/codex-wechat', 'service-start'],
+            )
+            self.assertEqual(
+                installer.service_start_command(target, update=True),
+                ['/install/root/codex-wechat', 'service-restart'],
+            )
+
+    def test_start_command_bypasses_windows_execution_policy(self):
+        target = Path(r'C:\install\root')
+        with patch.object(installer, 'IS_WINDOWS', True), \
+                patch.object(installer.shutil, 'which', return_value='pwsh.exe'):
+            command = installer.service_start_command(target, update=False)
+        self.assertEqual(command[0], 'pwsh.exe')
+        self.assertIn('-ExecutionPolicy', command)
+        self.assertIn('Bypass', command)
+        self.assertEqual(command[-2:], [str(target / 'codex-wechat.ps1'), 'service-start'])
+
+    def test_start_confirmation_defaults_to_yes(self):
+        with patch.object(installer, 'NON_INTERACTIVE', False), \
+                patch('builtins.input', return_value=''):
+            self.assertTrue(installer.confirm_start())
+
+    def test_confirmation_defaults_to_yes(self):
+        with patch.object(installer, 'NON_INTERACTIVE', False), \
+                patch('builtins.input', return_value=''):
+            self.assertTrue(installer.confirm('执行安装？'))
+
+    def test_confirmation_eof_still_cancels(self):
+        with patch.object(installer, 'NON_INTERACTIVE', False), \
+                patch('builtins.input', side_effect=EOFError):
+            self.assertFalse(installer.confirm('执行安装？'))
+
     def test_declarations_are_read_from_single_assets_without_placeholders(self):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()) as out:
             root = Path(directory)
