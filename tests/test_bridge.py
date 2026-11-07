@@ -484,7 +484,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1. 微信一", text)
         self.assertIn("2. 微信二", text)
         self.assertIn("找到 2 个匹配会话", text)
-        self.assertIn("`/switch {编号}`", text)
+        self.assertIn("`/switch`", text)
         self.assertEqual(self.bridge.state["sessionChoices"], ["a", "b"])
 
     async def test_switch_empty_search_reports_no_match(self):
@@ -504,7 +504,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.thread.assert_not_awaited()
         self.assertEqual(len(self.bridge.state["sessionChoices"]), 10)
         self.assertIn("仅显示前 10 条", text.split("```")[-1])
-        self.assertIn("`/sessions 微信`", text.split("```")[-1])
+        self.assertIn("`/sessions` 微信", text.split("```")[-1])
 
     async def test_backend_arguments_and_built_in_labels_share_one_lowercase_form(self):
         self.bridge.state["context"] = "context"

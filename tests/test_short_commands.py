@@ -88,6 +88,43 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         await dispatch(self.bridge, "/help settings")
         self.assertEqual(self.bridge.state["outbox"][-1]["text"], SETTINGS_HELP)
 
+    def test_notices_take_command_references_from_the_registry(self):
+        # A notice that spells a command itself cannot follow a rename, so these
+        # interpolate `{<command>_cmd}` instead of naming the command.
+        from codex_wechat.command_specs import command_fields
+        from codex_wechat.prompts import DEFAULT_PROMPTS
+        notices = ("BUSY_CHANGE", "BUSY_RESTART", "STOP_UNCONFIRMED", "TASK_FAILED",
+                   "TURN_STALLED", "TURN_FAILED_CONTEXT", "TURN_FAILED_MODEL_NOT_FOUND",
+                   "TURN_FAILED_SANDBOX", "TURN_ENDED_UNEXPECTEDLY",
+                   "AUTO_ATTACHMENT_PATH_HINT", "SESSION_INDEX_INVALID",
+                   "SESSION_SEARCH_MULTIPLE", "SESSION_SEARCH_MORE", "CONTROL_TIMEOUT",
+                   "CONTROL_FAILED", "BACKEND_UNREADY", "REPLY_BUDGET_PAUSED",
+                   "FAILURE_COMPACT")
+        fields = command_fields()
+        for name in notices:
+            template = DEFAULT_PROMPTS[name]
+            with self.subTest(notice=name):
+                self.assertNotIn("`/", template)
+                self.assertTrue(any(f"{{{key}}}" in template for key in fields))
+
+    async def test_dispatch_and_standalone_backend_fill_command_references(self):
+        # Two render paths exist: the bridge (hot prompt overrides) and the
+        # backend's own default for standalone use. Both must fill the same fields.
+        from codex_wechat.backend import render_prompt
+        for name in ("TURN_FAILED_CONTEXT", "REPLY_BUDGET_PAUSED"):
+            with self.subTest(notice=name):
+                rendered = (self.bridge.prompt(name, {"count": 2}),
+                            render_prompt(name, {"count": 2}))
+                self.assertEqual(rendered[0], rendered[1])
+                self.assertNotIn("_cmd}", rendered[0])
+                self.assertIn("`/", rendered[0])
+
+    def test_control_lane_queues_are_bounded_by_the_shared_gate_only(self):
+        # Ingress refuses past PENDING_CONTROL_LIMIT, so a second per-lane cap could
+        # never be reached; it would only add a failure path nobody can trigger.
+        for queue in self.bridge.controls.values():
+            self.assertEqual(queue.maxsize, 0)
+
     async def test_model_alias_passes_arguments_to_canonical_handler(self):
         handler = AsyncMock()
         self.bridge.ensure_backend = AsyncMock()

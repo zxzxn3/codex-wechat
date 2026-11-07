@@ -27,11 +27,17 @@ from .questions import (
     question_answer,
     question_prompt,
 )
-from .prompts import (prompt_text)
+from .command_specs import command_fields
 from .platform_support import IS_WINDOWS
-from .prompts import (command_approval, file_approval)
+from .prompts import command_approval, file_approval, prompt_text
 
 from .codex_transport import CodexTransport, CodexRpcError, SharedDaemonUnavailable
+
+
+def render_prompt(name, values=None):
+    """Render a notice with the current command references (see command_fields)."""
+    return prompt_text(name, {**command_fields(), **(values or {})})
+
 
 PENDING_TOKEN_ALPHABET = "023456789abcdefghjkmnpqrstuvwxyz"
 PENDING_TOKEN_LENGTH = 3
@@ -71,13 +77,9 @@ TURN_ERROR_PROMPTS = {
 
 HTTP_ERROR_VARIANTS = (
     "httpConnectionFailed",
-    "http_connection_failed",
     "responseStreamConnectionFailed",
-    "response_stream_connection_failed",
     "responseStreamDisconnected",
-    "response_stream_disconnected",
     "responseTooManyFailedAttempts",
-    "response_too_many_failed_attempts",
 )
 
 
@@ -121,7 +123,7 @@ class CodexBackend:
         self.manual_compactions = set()
         self.compaction_notice = False
         self.refresh_config = lambda: None
-        self.prompt = prompt_text
+        self.prompt = render_prompt
         self.input_hint = lambda: OUTPUT_HINT
         self.on_limits = lambda payload: None
         self.selected_thread = None
@@ -568,8 +570,6 @@ class CodexBackend:
         if not isinstance(error, dict):
             return None
         info = error.get("codexErrorInfo")
-        if info is None:
-            info = error.get("codex_error_info")
         if isinstance(info, str) and info:
             return info
         if isinstance(info, dict):
@@ -577,7 +577,7 @@ class CodexBackend:
                 detail = info.get(name)
                 if not isinstance(detail, dict):
                     continue
-                status = detail.get("httpStatusCode", detail.get("http_status_code"))
+                status = detail.get("httpStatusCode")
                 if status == 402:
                     return "usageLimitExceeded"
                 if status == 429:
@@ -585,8 +585,6 @@ class CodexBackend:
                 if isinstance(status, int) and 500 <= status <= 599:
                     return "serverOverloaded"
                 return "httpConnectionFailed"
-            if "activeTurnNotSteerable" in info or "active_turn_not_steerable" in info:
-                return "activeTurnNotSteerable"
         if _insufficient_balance_message(error.get("message")):
             return "usageLimitExceeded"
         return None

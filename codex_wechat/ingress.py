@@ -77,9 +77,7 @@ class Ingress:
             attachments = [item for item in msg.get("item_list", [])
                            if item.get("type") in (2, 4, 5)]
             spec = REGISTRY.get(command)
-            # /discard must clear the backlog before the sender is woken.
-            defer_resume = bool(spec and spec.defers_resume and not attachments)
-            bridge.refresh_reply_budget(resume=not defer_resume)
+            bridge.refresh_reply_budget()
             quote = quote_context(msg, bridge.state["quoteCache"])
             text = quoted_prompt(body_text, quote)
             remember_quote(bridge.state, identity, message_summary(msg))
@@ -112,8 +110,6 @@ class Ingress:
                               status="queue_full", request_id=request_id,
                               command=received.get("command"))
                     bridge.reply(bridge.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
-                    if defer_resume:
-                        bridge.resume_deferred_delivery()
                 else:
                     received["controlId"] = request_id
                     control = {
@@ -165,8 +161,5 @@ class Ingress:
                       command=control["received"].get("command"))
             bridge.finish_control(control["id"])
             bridge.reply(bridge.prompt("CONTROL_QUEUE_FULL"), request_id=request_id)
-            control_spec = REGISTRY.get(control["received"].get("command"))
-            if control_spec and control_spec.defers_resume:
-                bridge.resume_deferred_delivery()
         bridge.wake.set()
         bridge.steer_wake.set()

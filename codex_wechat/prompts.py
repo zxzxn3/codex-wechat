@@ -25,8 +25,8 @@ MEDIA_USAGE = "{get}\n{getfile}"
 
 BLOCKED_NOTE = "等待桌面处理"
 
-BUSY_CHANGE = "未操作: 任务未结束。等待完成或 `/stop`。"
-BUSY_RESTART = "有尚未完成的任务\n使用 `/stop` 终止后重试。"
+BUSY_CHANGE = "未操作: 任务未结束。等待完成或 {stop_cmd}。"
+BUSY_RESTART = "有尚未完成的任务\n使用 {stop_cmd} 终止后重试。"
 RESTART_STARTED = "正在重启微信桥..."
 RESTART_READY = "微信桥已重启。"
 SERVICE_STOPPING = "微信桥正在停止。"
@@ -36,27 +36,27 @@ RESTART_NOT_SERVICE = "当前微信桥不是由用户服务启动。"
 STOP_REQUESTED = "已发送停止请求，正在等待当前任务结束。"
 STOP_DEFERRED = "已发送停止请求，正在等待当前任务结束。"
 STOP_IDLE = "当前没有运行中的任务。"
-STOP_UNCONFIRMED = "停止结果未确认，任务可能仍在运行；请查看 /status 或 Codex。"
+STOP_UNCONFIRMED = "停止结果未确认，任务可能仍在运行；请查看 {status_cmd} 或 Codex。"
 
 BACKEND_CONNECT_FAILED = "后端连接失败: {reason}\n正在重连，未提交的待办已保留。"
-TASK_FAILED = "消息未提交: 后端处理失败。查看 `/status`。"
+TASK_FAILED = "消息未提交: 后端处理失败。查看 {status_cmd}。"
 TURN_STALLED = (
     "本轮已中止: 长时间没有收到任何进展。\n"
-    "会话可能仍在桌面端运行；可用 `/status` 查看，再发消息会重新连接。"
+    "会话可能仍在桌面端运行；可用 {status_cmd} 查看，再发消息会重新连接。"
 )
 TURN_FAILED = "任务未完成: Agent 未能完成处理，可能是网络连接、服务异常或其它原因。"
 TURN_FAILED_USAGE_LIMIT = "任务未完成: 模型额度或 API 余额已用完。"
 TURN_FAILED_SESSION_BUDGET = "任务未完成: 本次会话预算已用完。"
-TURN_FAILED_CONTEXT = "任务未完成: 上下文已满，请 `/compact` 或 `/new` 后重试。"
+TURN_FAILED_CONTEXT = "任务未完成: 上下文已满，请 {compact_cmd} 或 {new_cmd} 后重试。"
 TURN_FAILED_RATE_LIMIT = "任务未完成: 请求过于频繁，请稍后重试。"
 TURN_FAILED_UNAUTHORIZED = "任务未完成: Codex 登录已失效，请在桌面端重新登录。"
-TURN_FAILED_MODEL_NOT_FOUND = "任务未完成: 当前模型不可用，请用 `/model` 切换。"
+TURN_FAILED_MODEL_NOT_FOUND = "任务未完成: 当前模型不可用，请用 {model_cmd} 切换。"
 TURN_FAILED_SERVICE_UNAVAILABLE = "任务未完成: 模型服务暂时不可用，请稍后重试。"
 TURN_FAILED_POLICY = "任务未完成: 请求被安全策略拦截，请在桌面端查看。"
 TURN_FAILED_TOO_MANY_DENIALS = "任务未完成: 审批被拒次数过多，请在桌面端检查。"
-TURN_FAILED_SANDBOX = "任务未完成: 沙箱执行失败，请查看 `/status` 或桌面端。"
+TURN_FAILED_SANDBOX = "任务未完成: 沙箱执行失败，请查看 {status_cmd} 或桌面端。"
 TURN_INTERRUPTED = "任务已中断。"
-TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
+TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 {status_cmd} 查看状态。"
 TURN_COMPLETED_EMPTY = "任务已完成，但没有文本结果。"
 UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
 QUEUED_STEER = "暂时无法追加，已转入排队。"
@@ -88,7 +88,7 @@ ATTACHMENT_SEND_FAILED = (
 )
 AUTO_ATTACHMENT_LIMIT = "附件未发送: 自动回传最多 {count} 个，超出的已跳过。"
 AUTO_ATTACHMENT_FAILED = "附件未发送: {reason}{hint}"
-AUTO_ATTACHMENT_PATH_HINT = "\n请先切换工作目录（`/cwd`）后再发送。"
+AUTO_ATTACHMENT_PATH_HINT = "\n请先切换工作目录（{cwd_cmd}）后再发送。"
 
 APPROVAL_ACCEPTED = "已同意"
 APPROVAL_DECLINED = "已拒绝"
@@ -106,7 +106,7 @@ COMMAND_FAILURE_LABELS = {
     "/sessions": "读取会话失败",
     "/switch": "未切换会话",
     "/new": "未新建会话",
-    "/compact": "压缩请求未确认，请先查看 `/status`，勿重复提交",
+    "/compact": "压缩请求未确认，请先查看 {status_cmd}，勿重复提交",
     "/model": "未切换模型",
     "/effort": "未切换强度",
     "/cwd": "未切换目录",
@@ -173,7 +173,7 @@ SESSION_WRITER_QUEUED = (
     "已排队: 会话正被另一个 Codex 客户端占用，暂时无法提交。\n"
     "在 App 或 CLI 中关闭该会话后会自动发送；最多等待 10 分钟。"
 )
-SESSION_INDEX_INVALID = "未切换会话: 编号无效\n请先发送 `/sessions`。"
+SESSION_INDEX_INVALID = "未切换会话: 编号无效\n请先发送 {sessions_cmd}。"
 SESSION_USAGE = "用法: {usage}"
 NEW_USAGE = "用法: {usage}"
 MODEL_INVALID = "未切换模型: 名称无效\n请使用 {command} 查看可用模型。"
@@ -228,8 +228,8 @@ SESSION_PAGE = "当前{page}/{total_pages}页"
 PAGE_INVALID = "页码必须大于 0"
 PAGE_RANGE = "页码超出范围: 1–{count}"
 SESSION_SEARCH_EMPTY = "没有匹配“{query}”的会话。"
-SESSION_SEARCH_MULTIPLE = "找到 {count} 个匹配会话；请用 `/switch {{编号}}` 选择。"
-SESSION_SEARCH_MORE = "仅显示前 {count} 条；`/sessions {query}` 查看全部。"
+SESSION_SEARCH_MULTIPLE = "找到 {count} 个匹配会话；请用 {switch_cmd} 加编号选择。"
+SESSION_SEARCH_MORE = "仅显示前 {count} 条；{sessions_cmd} {query} 查看全部。"
 SESSION_ID_PREFIX_MORE = "共匹配 {count} 个会话；仅显示前 {shown} 个，请继续输入更多 ID 字符缩小范围。"
 SESSION_LIST_FAILED = "会话列表读取未完成，请重试。"
 COMPACT_BLOCKED = "暂不能压缩: 当前会话等待处理。"
@@ -240,21 +240,21 @@ STOP_CLEARED = "\n已清空待办: {count}"
 ANSWER_ACCEPTED = "已回答。"
 ANSWER_EXPIRED = "问题已失效或编号无效。"
 ANSWER_FAILED = "回答投递结果未确认，请查看桌面；未自动重发。"
-REPLY_BUDGET_PAUSED = "还有 {count} 段待发，回复 `/` 继续，或 `/d` 清空。"
+REPLY_BUDGET_PAUSED = "还有 {count} 段待发，回复 {continue_cmd} 继续，或 {discard_cmd} 清空。"
 SEND_FILE_FAILED = "附件未发送: {reason}\n```\n{path}\n```\n请稍后重试。"
 REPLY_SEND_FAILED = "这条回复未能完整发送，已停止其余部分。请在桌面查看。"
 DISCARDED = "{count} 条消息被清空。"
 INPUT_RECOVERED = "上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。"
 INPUT_RESULT_INTERRUPTED = "任务已提交，但结果接收中断，未重新执行。"
 CONTROL_QUEUE_FULL = "指令等待过多，请稍后重试。"
-CONTROL_TIMEOUT = "控制请求未确认，请查看 `/status`；不会自动重发。"
-CONTROL_FAILED = "指令未完成，请查看 `/status` 后重试。"
+CONTROL_TIMEOUT = "控制请求未确认，请查看 {status_cmd}；不会自动重发。"
+CONTROL_FAILED = "指令未完成，请查看 {status_cmd} 后重试。"
 CONTROL_INTERRUPTED = "重启时有 {count} 条控制指令可能未完成，请重试。"
 GENERIC_FAILURE = "操作失败"
 COMMAND_USAGE = "用法: {usage}"
 HELP_USAGE = "用法: {usage}"
 INPUT_SUBMISSION_UNCERTAIN = "消息提交结果未确认，未自动重发。"
-BACKEND_UNREADY = "后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。"
+BACKEND_UNREADY = "后端尚未就绪，未提交的消息已保留；可用 {stop_cmd} 清空。"
 RESULT_PREPARE_FAILED = "结果准备失败，请在桌面查看该轮回答。"
 PREPARATION_STOPPED = "已停止，未启动模型轮次。"
 QUOTA_WARNING = "限额提醒: {backend}\n{content}"
@@ -295,7 +295,7 @@ HELP_CWD = '查看或切换目录'
 HELP_APPROVE = '同意审批'
 HELP_DENY = '拒绝审批'
 HELP_ANSWER = '回答原生提问'
-HELP_GET = '从电脑取回文件、图片或视频'
+HELP_GET = '取回当前工作目录内的文件、图片或视频'
 HELP_GETFILE = '作为文件回传'
 HELP_RESTART = '重启微信桥'
 HELP_CONTINUE = '继续发送因额度暂停的回复'
