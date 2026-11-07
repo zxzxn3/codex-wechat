@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from codex_wechat.app import Bridge
+from codex_wechat.command_specs import PENDING_CONTROL_LIMIT
 from codex_wechat.commands import command_restart
 from codex_wechat.storage import Store
 
@@ -100,6 +101,31 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        store.close()
+
+    async def test_the_ingress_gate_is_the_only_bound_on_queued_controls(self):
+        store = Store(self.root / "state")
+        bridge = Bridge(store, self.account, self.config)
+        bridge.state["context"] = "ctx"
+        full = [{
+            "id": f"control-{index}",
+            "text": "/help",
+            "received": {"controlId": f"control-{index}"},
+            "state": "queued",
+            "lane": "local",
+        } for index in range(PENDING_CONTROL_LIMIT)]
+        bridge.state["pendingControls"] = full
+        message = {
+            "message_id": "over-limit",
+            "from_user_id": "owner",
+            "message_type": 1,
+            "context_token": "ctx",
+            "item_list": [{"type": 1, "text_item": {"text": "/help"}}],
+        }
+        await bridge.receive({"msgs": [message]})
+        self.assertEqual(len(bridge.state["pendingControls"]), PENDING_CONTROL_LIMIT)
+        self.assertEqual(bridge.state["outbox"][-1]["text"],
+                         bridge.prompt("CONTROL_QUEUE_FULL"))
         store.close()
 
     async def test_cancelling_a_running_control_keeps_its_recovery_marker(self):
