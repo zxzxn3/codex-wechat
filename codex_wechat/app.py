@@ -71,8 +71,6 @@ def load_bridge_state(store):
     saved = store.load("bridge")
     if not isinstance(saved, dict):
         saved = {}
-    for key in ("staleOutbox", "deliveryStaleTotal", "deliveryPaused"):
-        saved.pop(key, None)
     return {**deepcopy(BRIDGE_STATE_DEFAULTS), **saved}
 
 
