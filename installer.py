@@ -181,6 +181,14 @@ def introduction() -> bool:
     ), "33"))
     print()
     print(styled(textwrap.fill(
+        "本项目当前为专有内测版本，仅授权个人进行非商业评估和测试。"
+        "安装即表示同意保密并遵守许可证：不得向第三方披露、复制、转交或"
+        "重新分发本项目、源码、安装包或访问凭据，不得用于商业用途或"
+        "未经授权的部署；完整条款见 LICENSE。",
+        width=width,
+    ), "1;31"))
+    print()
+    print(styled(textwrap.fill(
         "接下来展示操作计划，确认后执行；不启用新自启、默认不自动启动服务、不安装附加组件。",
         width=width,
     ), "2"))
