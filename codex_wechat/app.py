@@ -25,7 +25,7 @@ from .backend_session import BackendSession
 from .storage import Store
 from .wechat import WeChat, login
 from .commands import dispatch, notice, parse_control
-from .command_specs import CONTROL_LANES, REGISTRY, command_fields
+from .command_specs import CONTROL_LANES, PENDING_CONTROL_LIMIT, REGISTRY
 from .configuration import (ConfigLoader, ConfigurationError, HotSettings, Logs,
                            REPLY_BUDGET_CEILING, write_config)
 from .prompts import (prompt_text)
@@ -140,7 +140,9 @@ class Bridge:
                              next(iter(self.backend_configs)))
         if self.backend_name not in self.backend_configs:
             raise ValueError("保存的后端不存在于配置中：" + self.backend_name)
-        self.controls = {lane: asyncio.Queue() for lane in CONTROL_LANES}
+        self.controls = {
+            lane: asyncio.Queue(maxsize=PENDING_CONTROL_LIMIT) for lane in CONTROL_LANES
+        }
         self.connection_lock = asyncio.Lock()
         self.input_paused = False
         self.backend_recovering = False
@@ -228,20 +230,17 @@ class Bridge:
     def budget_exhausted(self):
         return self.budget_state().get("used", 0) >= self.reply_budget()
 
-    def refresh_reply_budget(self):
+    def refresh_reply_budget(self, *, resume=True):
         """Every accepted inbound message refreshes what we may send back."""
         self.state["inboundSeq"] = self.state.get("inboundSeq", 0) + 1
         self.state["replyBudget"] = {"seq": self.state["inboundSeq"], "used": 0}
         self.state.pop("budgetPromptSent", None)
-        self.resume_delivery()
+        if resume:
+            self.resume_delivery()
 
     @property
     def deferred_resume(self):
-        """True while an unfinished control must clear the outbox before sending.
-
-        The sender gate reads this, so whichever path wakes it first cannot send a
-        queued reply before the pending `/discard` has cleared the backlog.
-        """
+        """True while an unfinished control must clear the outbox before sending."""
         for control in self.state.get("pendingControls", []):
             if not isinstance(control, dict):
                 continue
@@ -250,6 +249,10 @@ class Bridge:
             if spec and spec.defers_resume:
                 return True
         return False
+
+    def resume_deferred_delivery(self):
+        """Resume after a command that had to clear the queue before waking sender."""
+        self.resume_delivery()
 
     def reload_config(self):
         changed = self.settings.reload(self.state)
@@ -273,7 +276,7 @@ class Bridge:
     def _render_prompt(self, name, values=None):
         # Render the accepted snapshot without recursively reading a failing config.
         fields = self.prompt_fields() if name in self.settings.hot.prompts else {}
-        return prompt_text(name, {**command_fields(), **fields, **(values or {})},
+        return prompt_text(name, {**fields, **(values or {})},
                            overrides=self.settings.hot.prompts)
 
     def save(self):
@@ -529,7 +532,10 @@ class Bridge:
                 **media,
                 "source": Source(**media["source"]),
             }
-        queue.put_nowait((control.get("text", ""), received))
+        try:
+            queue.put_nowait((control.get("text", ""), received))
+        except asyncio.QueueFull:
+            return False
         return True
 
     def mark_control_state(self, control_id, state):

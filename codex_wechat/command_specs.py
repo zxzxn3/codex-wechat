@@ -54,9 +54,8 @@ COMMANDS = (
             aliases=("/h",), help_usage="/help"),
 )
 CONTROL_LANES = tuple(dict.fromkeys(spec.lane for spec in COMMANDS if spec.route != "input"))
-# One gate for queued controls: ingress refuses beyond this total. Lane queues stay
-# unbounded because this limit already bounds them; a second per-lane cap would be
-# a second rule guarding the same thing, and could never be reached.
+# Ingress rejects new controls at this total; per-lane queues use the same cap
+# as a defensive bound for abnormal or restored state.
 PENDING_CONTROL_LIMIT = 100
 REGISTRY = {}
 for spec in COMMANDS:
@@ -93,19 +92,6 @@ def command_usage(name, *, help_form=False):
         return f"`{name}`"
     value = (spec.help_usage or spec.usage) if help_form else spec.usage
     return _command_reference(spec, value)
-
-
-def command_fields():
-    """Command references a notice interpolates as `{<command>_cmd}`.
-
-    One rule for every template: a notice never spells a command itself, so
-    renaming an alias cannot leave a hint pointing at a command that no longer
-    exists. The short form wins, matching the alias-first help lines. Usage lines
-    are a different surface and keep passing `command_usage()` as a value. Rendered
-    per call, so a reload cannot leave a stale reference.
-    """
-    return {f"{spec.name[1:]}_cmd": f"`{min((spec.name, *spec.aliases), key=len)}`"
-            for spec in COMMANDS}
 
 
 HELP = help_text()

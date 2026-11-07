@@ -103,7 +103,7 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(task, return_exceptions=True)
         store.close()
 
-    async def test_the_ingress_gate_is_the_only_bound_on_queued_controls(self):
+    async def test_the_ingress_gate_rejects_controls_at_the_limit(self):
         store = Store(self.root / "state")
         bridge = Bridge(store, self.account, self.config)
         bridge.state["context"] = "ctx"
@@ -154,7 +154,7 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.state["pendingControls"][0]["state"], "running")
         store.close()
 
-    async def test_restore_accepts_every_pending_control_in_one_lane(self):
+    async def test_restore_accepts_pending_controls_within_one_lane(self):
         store = Store(self.root / "state")
         bridge = Bridge(store, self.account, self.config)
         bridge.state["pendingControls"] = [{
@@ -167,6 +167,23 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
         bridge.restore_controls()
         self.assertEqual(bridge.controls["local"].qsize(), 21)
         self.assertEqual(len(bridge.state["pendingControls"]), 21)
+        store.close()
+
+    async def test_restore_drops_controls_beyond_the_lane_cap(self):
+        store = Store(self.root / "state")
+        bridge = Bridge(store, self.account, self.config)
+        bridge.state["context"] = "ctx"
+        bridge.state["pendingControls"] = [{
+            "id": f"control-{index}",
+            "text": "/help",
+            "received": {"controlId": f"control-{index}"},
+            "state": "queued",
+            "lane": "local",
+        } for index in range(PENDING_CONTROL_LIMIT + 1)]
+        bridge.restore_controls()
+        self.assertEqual(bridge.controls["local"].qsize(), PENDING_CONTROL_LIMIT)
+        self.assertEqual(len(bridge.state["pendingControls"]), PENDING_CONTROL_LIMIT)
+        self.assertIn("可能未完成", bridge.state["outbox"][-1]["text"])
         store.close()
 
     async def test_restart_keeps_a_recovery_marker_until_the_service_restarts(self):

@@ -54,6 +54,7 @@ class DiscardTests(unittest.IsolatedAsyncioTestCase):
         bridge.output.paused = True
         bridge.reply("one")
         bridge.reply("two")
+        bridge.refresh_reply_budget(resume=False)
 
         await dispatch(bridge, "/discard")
 

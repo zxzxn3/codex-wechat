@@ -11,7 +11,6 @@ from codex_wechat.backend import CodexBackend, WRITER_BUSY, WRITER_NATIVE, WRITE
 from codex_wechat.codex_transport import CodexRpcError
 from codex_wechat.commands import activate
 from codex_wechat.input_delivery import InputDelivery
-from codex_wechat.backend import render_prompt
 from codex_wechat.prompts import prompt_text
 from codex_wechat.storage import Store
 
@@ -203,10 +202,11 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
                         "error": {"message": "failure", "codexErrorInfo": code},
                     }}})
                 result = await backend.active["done"]
-                self.assertEqual(result.text, render_prompt(prompt_name))
+                self.assertEqual(result.text, prompt_text(prompt_name))
 
     async def test_http_error_objects_share_the_same_status_mapping(self):
         cases = (
+            ("http_connection_failed", "http_status_code", 402, "TURN_FAILED_USAGE_LIMIT"),
             ("httpConnectionFailed", "httpStatusCode", 402, "TURN_FAILED_USAGE_LIMIT"),
             ("responseStreamConnectionFailed", "httpStatusCode", 429, "TURN_FAILED_RATE_LIMIT"),
             ("responseStreamDisconnected", "httpStatusCode", 503, "TURN_FAILED_SERVICE_UNAVAILABLE"),
@@ -228,7 +228,7 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
                         "id": "turn", "status": "failed", "error": error,
                     }}})
                 result = await backend.active["done"]
-                self.assertEqual(result.text, render_prompt(prompt_name))
+                self.assertEqual(result.text, prompt_text(prompt_name))
 
     async def test_insufficient_balance_message_still_uses_the_usage_limit_prompt(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

@@ -47,10 +47,7 @@ reasoning 近似，时间戳缺失或时长不大于零时显示 N/A，不承诺
 `TurnError.codexErrorInfo` 也允许对象变体：httpConnectionFailed、
 responseStreamConnectionFailed、responseStreamDisconnected、responseTooManyFailedAttempts
 均带可空 httpStatusCode，activeTurnNotSteerable 带 turnKind。桥接只对这四类 HTTP/流错误
-取状态码，其余对象（含 activeTurnNotSteerable）与字符串码一律回落通用失败提示。
-`deepseek` 后端实测出现过 HTTP 402（余额/额度用尽，操作者 2026-11-07 报告，未留存原始应答），
-因此状态码映射同时按 402→额度、429→频率、5xx→服务不可用 归类；纯文本错误体再按余额措辞
-兜底。任一路径都不改变提示语以外的行为，无法识别时回落通用失败提示。
+共用状态码映射；字段解析同时容忍 camelCase 与 snake_case 拼写，未知对象回落通用提示。
 CLI 0.166.0 的公开schema确认 agentMessage 可带 `delivery=async` 与结构化 `questions`
 （`title`、字符串 `options`）；本机 App 26.1027.51404 用
 `<send_user_message_question_reply>` 包裹逐题答案并通过当前轮次补充输入提交。

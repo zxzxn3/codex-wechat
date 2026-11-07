@@ -1049,4 +1049,4 @@ async def dispatch(bridge, text, *, received=None):
             print(f"{command}失败：{str(error) if isinstance(error, CodexRpcError) else type(error).__name__}", file=sys.stderr, flush=True)
         finally:
             if spec and spec.defers_resume:
-                bridge.resume_delivery()
+                bridge.resume_deferred_delivery()

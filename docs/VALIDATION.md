@@ -6,7 +6,7 @@ Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据
 
 | 范围 | 当前证据 | 状态 |
 |---|---|---|
-| 离线单测 | `python -m unittest discover -s tests`：Linux 937 项、916 通过、21 跳过、0 失败（2026-11-07 历史树）；Windows 当前提交 `0a5fa30` 实测 941 项、920 通过、21 跳过、0 失败，`ruff check .` 通过（2026-11-07，含提示文案改为从命令表取引用、控制队列收敛为单道闸门的改动）；更早的 Windows 894 项报告无提交号，不再作为证据；覆盖 `codex_wechat/` 包化后的 stable payload/import 烟测、动态 release 包加载、数据根跨实现契约矩阵、Bridge 状态不变量与保存边界故障注入、平台用户目录回退和服务状态矩阵；套件把诊断写入临时 sink，不污染数据根下的 `logs/bridge.jsonl` | 已验证 |
+| 离线单测 | `python -m unittest discover -s tests`：Linux 当前工作树 939 项、918 通过、21 跳过、0 失败（2026-11-07）；Windows 在 `0a5fa30` 实测 941 项、920 通过、21 跳过、0 失败，`ruff check .` 通过（2026-11-07 历史报告，当前工作树未在 Windows 复测）；更早的 Windows 894 项报告无提交号，不再作为证据；覆盖 `codex_wechat/` 包化后的 stable payload/import 烟测、动态 release 包加载、数据根跨实现契约矩阵、Bridge 状态不变量与保存边界故障注入、平台用户目录回退和服务状态矩阵；套件把诊断写入临时 sink，不污染数据根下的 `logs/bridge.jsonl` | 已验证 |
 | 静态检查 | ruff、shellcheck、`py_compile`、pyright（0 errors、5 个环境导入 warning） | 已验证 |
 | Windows 服务基础生命周期 | PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、通知 | 历史证据，无当前提交号；不作为当前 HEAD 证据 |
 | Windows App IPC | writer 冲突连接、身份核对、无 App / App 已持有 / App 后启动三种命名管道状态 | 历史证据，无当前提交号；仍受 App 版本影响 |
