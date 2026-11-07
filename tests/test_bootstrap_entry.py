@@ -208,6 +208,11 @@ class BootstrapEntryTests(unittest.TestCase):
             self.assertIn("CODEX_WECHAT_TOKEN='github_pat_", text)
             self.assertIn("org.gnome.system.proxy.http", text)
             self.assertIn("$env:CODEX_WECHAT_TOKEN='github_pat_", text)
+            # Windows PowerShell 5.1 returns System.Byte[] for the raw Content API
+            # media type, so the command must decode before running the bootstrap.
+            self.assertIn("-is [byte[]]", text)
+            self.assertIn("[Text.Encoding]::UTF8.GetString", text)
+            self.assertNotIn("Invoke-Expression ((Invoke-WebRequest", text)
             self.assertNotIn("HTTPS_PROXY='http://127.0.0.1:7897'", text)
             self.assertNotIn("-Proxy 'http://127.0.0.1:7897'", text)
             self.assertNotIn("read -rsp", text)
