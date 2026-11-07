@@ -73,6 +73,13 @@ Windows：
 codex-wechat service-start
 ```
 
+若没有生成 `%USERPROFILE%\.local\bin\codex-wechat.cmd`，用完整路径并显式绕过当前进程的
+PowerShell 执行策略：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start
+```
+
 未绑定时，`service-start` 在当前终端显示二维码；扫码后后台服务启动，终端可以关闭。
 若服务注册被跳过，使用前台 `start`，保持终端运行。微信默认只处理扫码账号的私聊，群聊
 不会响应。

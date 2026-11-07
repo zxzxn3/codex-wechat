@@ -38,6 +38,17 @@ class NextStepsHintTests(unittest.TestCase):
         self.assertIn("首次运行", text)
         self.assertIn("service-start", text)
 
+    def test_windows_fallback_uses_execution_policy_bypass(self):
+        with patch.object(
+            installer, "windows_command_state",
+            return_value=(Path("target/codex-wechat.cmd"), "not-on-path", ""),
+        ):
+            text = self.output(True)
+        self.assertIn(
+            "powershell -NoProfile -ExecutionPolicy Bypass -File",
+            text,
+        )
+
     def test_linux_install_reports_when_service_registration_was_unavailable(self):
         text = self.output(False, service_ready=False)
         self.assertIn("后台服务未注册", text)

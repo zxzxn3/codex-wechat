@@ -52,7 +52,7 @@ codex-wechat service-start
 
 Windows 的短命令入口是 `%USERPROFILE%\.local\bin\codex-wechat.cmd`。只有该目录已存在且在
 用户 PATH 中时安装器才会创建它；否则使用
-`& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start`。
+`powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start`。
 入口细节见 [COMMANDS](docs/COMMANDS.md)。
 
 ## 常用命令
@@ -171,7 +171,7 @@ Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本�
 codex-wechat rebind
 ```
 
-Windows 使用 `.\codex-wechat.ps1 rebind`；已有提交工作时要加
+Windows 使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\codex-wechat.ps1 rebind`；已有提交工作时要加
 `--stop-active` / `-StopActive`。同微信号保留交付和偏好；bot 变化时重置协议上下文；换微信
 号时隔离旧交付。
 

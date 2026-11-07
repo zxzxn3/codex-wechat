@@ -16,7 +16,7 @@ codex-wechat service-start
 否则使用稳定入口：
 
 ```powershell
-& "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start
 ```
 
 未绑定时会在当前终端显示二维码，扫码后由后台服务继续启动。没有可用服务注册时，使用
@@ -34,8 +34,9 @@ codex-wechat <args>
 ```
 
 只有 `%USERPROFILE%\.local\bin` 已存在且在用户 PATH 中时，安装器才创建 `.cmd`；不会修改
-PATH。未创建时使用完整 `codex-wechat.ps1` 路径，行为相同。`.ps1` 不在 `PATHEXT` 中且受
-执行策略限制，因此不能作为 cmd.exe 的短入口。
+PATH。未创建时使用完整 `codex-wechat.ps1` 路径，并通过上面的
+`powershell -ExecutionPolicy Bypass -File ...` 形式执行，行为相同。`.ps1` 不在 `PATHEXT`
+中且受执行策略限制，因此不能作为 cmd.exe 的短入口。
 
 ## 权限和安全
 

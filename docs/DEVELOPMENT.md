@@ -119,7 +119,7 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 ```powershell
 $app = "$env:LOCALAPPDATA\codex-wechat\app"
 & "$app\.bootstrap-venv\Scripts\python.exe" installer.py update --source . --dir $app --non-interactive
-& "$app\codex-wechat.ps1" service-restart
+powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" service-restart
 ```
 
 注意：在克隆目录里直接跑 `.\codex-wechat.ps1 update` 会把这个克隆当成安装根，于是要求一个

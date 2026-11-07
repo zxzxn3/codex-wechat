@@ -1382,8 +1382,11 @@ def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bo
         if windows_command_state(target)[1] == "ready":
             command = "codex-wechat"
         else:
-            entry = str(target / "codex-wechat.ps1").replace("'", "''")
-            command = f"& '{entry}'"
+            entry = str(target / "codex-wechat.ps1").replace('"', '""')
+            command = (
+                f'powershell -NoProfile -ExecutionPolicy Bypass '
+                f'-File "{entry}"'
+            )
         if update:
             print(f"1. 重启后台服务: {command} service-restart")
             print("2. 在微信发送 /status 确认连接。")
