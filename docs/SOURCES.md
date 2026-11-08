@@ -6,8 +6,8 @@
 
 | 范围 | 依据 |
 | --- | --- |
-| Codex 协议 | [官方 App Server](https://learn.chatgpt.com/docs/app-server)、[CLI 参数](https://learn.chatgpt.com/docs/cli/reference)；普通 CLI 本机版本 0.167.0，当前运行的 app-server daemon 是 0.166.0，二者不是同一版本 |
-| 原生后台 | [0.166.0 daemon](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/lib.rs)、[Windows 实现](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/backend/windows.rs)；原生负责锁、脱离启动和后台发现，不由桥接模拟 |
+| Codex 协议 | [官方 App Server](https://learn.chatgpt.com/docs/app-server)、[CLI 参数](https://learn.chatgpt.com/docs/cli/reference)；普通 CLI 与本机运行的两个 app-server daemon 均为 0.167.0 |
+| 原生后台 | [0.167.0 daemon](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/app-server-daemon/src/lib.rs)、[Windows 实现](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/app-server-daemon/src/backend/windows.rs)；原生负责锁、脱离启动和后台发现，不由桥接模拟 |
 | App 接入 | 本机 Linux 重打包 App 26.1027.51404，内置 CLI 0.166.0-alpha.5.1；app.asar 中 .vite/build/early-bootstrap-824-3c24dda6dba622ec.js 的连接选择：CODEX_APP_SERVER_WS_URL、CODEX_APP_SERVER_FORCE_CLI |
 | Windows App | 交接记录 App 26.1027.3384.0 / CLI 0.166.0-alpha.5.1；[对应 App Server 源码](https://github.com/openai/codex/blob/rust-v0.166.0-alpha.5.1/codex-rs/app-server/src/lib.rs)；Windows 实测覆盖见 [VALIDATION](VALIDATION.md) |
 | 微信 | [Tencent openclaw-weixin 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)及项目此前使用的2.4.10实现；认证、媒体参数以该协议为准 |
@@ -40,6 +40,8 @@ Windows IPC 适配另核对本机 App 26.1027.6604.0 的 early-bootstrap-824：W
 
 item/completed 提供完整 agentMessage；commentary/partial_answer 可即时转发，final_answer
 在轮次收口，reasoning/工具输出不混入聊天。原生请求仅回答本连接收到的部分。
+0.167.0 的 `thread/settings/update` 明确作用于后续回合；TUI 的默认 `Shift+Up`/`Shift+Down`
+（以及 `Alt+.`/`Alt+,`）只调整活动 thread 的推理强度，不会中断正在运行的回合。
 0.166.0 schema 的 item/started、item/completed 外层分别提供 startedAtMs、completedAtMs，
 thread/tokenUsage/updated 同时带 turnId 和 outputTokens/reasoningOutputTokens。模板中的
 final_answer 起止时间与 tokens_per_second 来自这些字段；可见输出 token 按 output 减

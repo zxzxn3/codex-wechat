@@ -3,7 +3,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.command_specs import PENDING_CONTROL_LIMIT
@@ -201,7 +201,8 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
             bridge.save()
             raise KeyboardInterrupt
 
-        with patch.object(bridge, "restart_service", restart_then_interrupt):
+        with patch.object(bridge, "ensure_service_restart_owner", AsyncMock()), \
+                patch.object(bridge, "restart_service", restart_then_interrupt):
             with self.assertRaises(KeyboardInterrupt):
                 await command_restart(
                     bridge, "/restart", "",

@@ -1040,6 +1040,31 @@ class CodexBackend:
                 self.models_checked_at = time.monotonic()
                 return data
 
+    async def update_settings(self, thread_id, *, model=None, effort=None, cwd=None):
+        """Update future-turn settings without disturbing the active turn."""
+        resumed = (self.selected_thread != thread_id
+                   or self.writer_state(thread_id) in (WRITER_RELEASED, WRITER_BUSY))
+        if resumed:
+            await self.thread(thread_id)
+        params = {"threadId": thread_id}
+        if model is not None:
+            params["model"] = model
+        if effort is not None:
+            params["effort"] = effort
+        if cwd is not None:
+            params["cwd"] = cwd
+        try:
+            await self.rpc("thread/settings/update", params)
+            if model is not None:
+                self.info["model"] = model
+            if effort is not None:
+                self.info["effort"] = effort
+            if cwd is not None:
+                self.info["cwd"] = cwd
+        finally:
+            if resumed:
+                await self.release_thread(thread_id, follow=True)
+
     async def input_items(self, text, attachments=None, *, hint=True):
         inputs = [{"type": "text", "text": text}] if text else []
         if attachments:
@@ -1201,6 +1226,20 @@ class CodexBackend:
                 self.active = None
                 self.pending.clear()
             self.stop_requested = False
+
+    async def detach_active(self):
+        """Detach the live turn locally; the server may continue it silently."""
+        current = self.active
+        if current is None:
+            return False
+        self.active = None
+        self.pending.clear()
+        self.stop_requested = False
+        if not current["done"].done():
+            current["done"].set_result(TurnResult(
+                current["source"], current.get("turn"), "",
+                current["cwd"], "discarded"))
+        return True
 
     async def stop(self):
         if not self.active:

@@ -287,7 +287,8 @@ class Bridge:
     def make_backend(self, name):
         backend = self.backend_factory(self.backend_configs[name],
             str(Path(self.config.get("cwd", data_root() / "workspace")).expanduser().resolve()),
-            lambda text: self.reply(text) if getattr(self, "backend", None) is backend else None)
+            lambda text: self.reply(text, source=backend.source())
+            if getattr(self, "backend", None) is backend else None)
         backend.on_activity = self.backend_activity
         backend.on_connection = lambda connected, error=None: self.backend_connection(
             backend, connected, error)
@@ -462,8 +463,8 @@ class Bridge:
         return self.output.enqueue(entries, persist=persist, request_id=request_id,
                                    request_ids=request_ids)
 
-    def reply(self, text, *, persist=True, request_id=None):
-        return self.output.reply(text, persist=persist, request_id=request_id)
+    def reply(self, text, *, persist=True, request_id=None, source=None):
+        return self.output.reply(text, persist=persist, request_id=request_id, source=source)
 
     @property
     def delivery_paused(self):
@@ -508,6 +509,12 @@ class Bridge:
 
     def recover_inputs(self):
         return self.inputs.recover_inputs()
+
+    def discard_pending_inputs(self, reason):
+        return self.inputs.discard_pending(reason)
+
+    def discard_session_output(self, backend, thread_id, *, reason="switch"):
+        return self.output.discard_source(backend, thread_id, reason=reason)
 
     def reject_input(self, request_id, kind, status):
         log_event("input.rejected", component="input", request_id=request_id,
@@ -604,6 +611,11 @@ class Bridge:
     async def control(self, text, *, received=None):
         await dispatch(self, text, received=received)
 
+    async def ensure_service_restart_owner(self):
+        try:
+            await service_control.require_service_owner()
+        except ValueError:
+            raise UserFacingError(self.prompt("RESTART_NOT_SERVICE")) from None
 
     async def restart_service(self):
         if not can_restart(self):
@@ -612,10 +624,7 @@ class Bridge:
         # queued work must not make a disconnected bridge impossible to restart.
         self.restarting = True
         try:
-            try:
-                await service_control.require_service_owner()
-            except ValueError:
-                raise UserFacingError(self.prompt("RESTART_NOT_SERVICE")) from None
+            await self.ensure_service_restart_owner()
             self.reply(self.prompt("RESTART_STARTED"))
             # Queued replies live in the saved outbox, so anything still pending is
             # sent by the restarted bridge. Waiting for a drain only blocks restart

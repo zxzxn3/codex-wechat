@@ -291,6 +291,7 @@ async def set_shared_daemon(bridge, enabled):
     if not can_change_session(bridge):
         # Switching mode restarts the backend, which would abort a live turn.
         raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
+    require_idle(bridge)
     try:
         if path is None:
             raise OSError("没有可写入的配置文件")
@@ -603,7 +604,7 @@ async def command_cwd_view(bridge, command, argument, received=None):
 
 
 def session_control(handler):
-    """Keep the existing session mutation barrier around each command handler."""
+    """Serialize session mutations; a live turn is discarded by each handler."""
     @wraps(handler)
     async def guarded(bridge, command, argument, received=None):
         if command == "/compact" and argument:
@@ -622,8 +623,38 @@ def session_control(handler):
     return guarded
 
 
+def _has_switchable_work(bridge):
+    return bool(bridge.running or bridge.active_turn()
+                or bridge.state.get("currentInput") or bridge.state["inbox"])
+
+
+def require_idle(bridge):
+    if _has_switchable_work(bridge):
+        raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
+
+
+def _switch_suffix(bridge, discarded):
+    return "\n" + bridge.prompt("SWITCH_DISCARDED") if discarded else ""
+
+
+async def _discard_for_target_change(bridge):
+    """Abandon the old target before selecting a replacement."""
+    thread_id = bridge.state.get("thread")
+    inputs = bridge.discard_pending_inputs("switch")
+    active = bool(bridge.backend.active)
+    if bridge.backend.active:
+        await bridge.backend.detach_active()
+    outputs = bridge.discard_session_output(
+        bridge.backend_name, thread_id, reason="switch")
+    if thread_id:
+        await bridge.backend.release_thread(thread_id)
+    bridge.running = False
+    return bool(inputs or outputs or active)
+
+
 @session_control
 async def _change_backend(bridge, command, argument, received=None):
+    require_idle(bridge)
     previous = bridge.backend_configs.get(bridge.backend_name)
     reload_backend_definitions(bridge)
     target = next((name for name in bridge.backend_configs
@@ -636,8 +667,13 @@ async def _change_backend(bridge, command, argument, received=None):
 
 @session_control
 async def command_new(bridge, command, argument, received=None):
+    backend = bridge.backend_name
+    thread_id = bridge.state.get("thread")
+    discarded = await _discard_for_target_change(bridge)
     await activate(bridge)
-    bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED")))
+    bridge.discard_session_output(backend, thread_id, reason="switch")
+    bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED"))
+                 + _switch_suffix(bridge, discarded))
     return
 
 
@@ -674,13 +710,23 @@ async def command_switch(bridge, command, argument, received=None):
         target = await _search_session_target(bridge, argument)
         if target is None:
             return
+    if target == bridge.state.get("thread"):
+        bridge.reply(info(bridge, bridge.prompt("CURRENT_SESSION")))
+        return
+    backend = bridge.backend_name
+    thread_id = bridge.state.get("thread")
+    discarded = await _discard_for_target_change(bridge)
     desktop = await activate(bridge, target)
-    bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop else bridge.prompt("SESSION_SWITCHED")))
+    bridge.discard_session_output(backend, thread_id, reason="switch")
+    bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop
+                      else bridge.prompt("SESSION_SWITCHED"))
+                 + _switch_suffix(bridge, discarded))
     return
 
 
 @session_control
 async def command_compact(bridge, command, argument, received=None):
+    require_idle(bridge)
     await ensure_session(bridge)
     if bridge.backend.blocked:
         raise UserFacingError(bridge.prompt("COMPACT_BLOCKED"))
@@ -761,7 +807,10 @@ async def _change_cwd(bridge, command, argument, received=None):
 
 
 async def _apply_settings(bridge, command, overrides):
-    await activate(bridge, bridge.state["thread"], overrides)
+    active = bridge.active_turn()
+    if active and not active.get("owned"):
+        raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
+    await bridge.backend.update_settings(bridge.state["thread"], **overrides)
     details = bridge.backend.info
     bridge.reply(setting_summary(model=details.get("model"), effort=details.get("effort"),
                                  cwd=details.get("cwd") or bridge.backend.cwd,

@@ -156,6 +156,22 @@ class InputDelivery:
             bridge.state.pop("currentInput")
         bridge.save()
 
+    def discard_pending(self, reason):
+        """Abandon the live and queued inputs; their output belongs to the old target."""
+        bridge = self.bridge
+        current = bridge.state.pop("currentInput", None)
+        jobs = ([current] if current else []) + bridge.state["inbox"]
+        if not jobs:
+            return 0
+        bridge.state["inbox"] = []
+        for job in jobs:
+            job["discarded"] = reason
+            bridge.record_input(job, InputPhase.CANCELLED)
+        bridge.save()
+        bridge.wake.set()
+        log_event("input.discarded", component="input", count=len(jobs), reason=reason)
+        return len(jobs)
+
     async def _prepare_attachments(self, job):
         if "preparedAttachments" in job:
             return False
@@ -229,6 +245,10 @@ class InputDelivery:
                 if bridge.restarting or bridge.wechat_paused:
                     self.defer_restart(job)
                     continue
+                if job.get("discarded"):
+                    bridge.state.pop("currentInput", None)
+                    bridge.save()
+                    continue
                 bridge.acknowledge(job)
                 if await self._prepare_attachments(job):
                     log_event("input.prepared", component="input", count=len(job["preparedAttachments"]),
@@ -239,6 +259,10 @@ class InputDelivery:
                 if bridge.restarting or bridge.wechat_paused:
                     self.defer_restart(job)
                     continue
+                if job.get("discarded"):
+                    bridge.state.pop("currentInput", None)
+                    bridge.save()
+                    continue
                 bridge.steer_wake.set()
                 thread_id = bridge.state["thread"]
                 answer = await backend.run(thread_id, job["text"],
@@ -248,6 +272,13 @@ class InputDelivery:
                 if job.get("restartDeferred") or job.get("authDeferred"):
                     if not bridge.stopping:
                         self.defer_restart(job)
+                    continue
+                if job.get("discarded") or (answer is not None
+                                            and answer.status == "discarded"):
+                    bridge.state.pop("currentInput", None)
+                    bridge.save()
+                    log_event("input.discarded", component="input",
+                              phase=job.get("phase"), request_id=job.get("requestId"))
                     continue
                 if answer is not None:
                     bridge.last_turn_seconds = time.perf_counter() - started
@@ -265,6 +296,12 @@ class InputDelivery:
             except asyncio.CancelledError:
                 raise
             except DeferTurn:
+                if job.get("discarded"):
+                    bridge.state.pop("currentInput", None)
+                    bridge.save()
+                    log_event("input.discarded", component="input",
+                              phase=job.get("phase"), request_id=job.get("requestId"))
+                    continue
                 if not bridge.stopping:
                     job.update(mode="queue", phase=InputPhase.PREPARING)
                     bridge.state["inbox"].insert(0, job)
@@ -275,6 +312,12 @@ class InputDelivery:
                 bridge.state.pop("currentInput", None)
                 bridge.save()
             except Exception as error:
+                if job.get("discarded"):
+                    bridge.state.pop("currentInput", None)
+                    bridge.save()
+                    log_event("input.discarded", component="input",
+                              phase=job.get("phase"), request_id=job.get("requestId"))
+                    continue
                 conflict = writer_conflict(error)
                 if conflict and not bridge.stopping and self.queue_writer_conflict(bridge, job):
                     continue
@@ -316,6 +359,10 @@ class InputDelivery:
                     bridge.save()
                     log_event("input.cancelled", component="input", phase=job.get("phase"),
                               request_id=job.get("requestId"))
+                elif job.get("discarded") and bridge.state.get("currentInput") is job:
+                    bridge.record_input(job, InputPhase.CANCELLED)
+                    bridge.state.pop("currentInput", None)
+                    bridge.save()
                 bridge.running = False
                 bridge.wake.set()
 

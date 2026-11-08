@@ -36,7 +36,7 @@ class CommandSplitTests(unittest.IsolatedAsyncioTestCase):
             for alias in spec.aliases:
                 self.assertIs(REGISTRY[alias], spec, alias)
 
-    async def test_session_mutations_share_the_existing_busy_gate(self):
+    async def test_session_mutations_do_not_race_input_preparation(self):
         self.bridge.running = True
         original = dict(self.bridge.state)
         for command, argument in (
@@ -50,11 +50,6 @@ class CommandSplitTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.bridge.state["thread"], original["thread"])
                 self.assertEqual(self.bridge.state["inbox"], original["inbox"])
                 self.assertEqual(self.bridge.state["outbox"], original["outbox"])
-        self.bridge.running = False
-        self.bridge.state["inbox"] = [{"id": "queued"}]
-        with self.assertRaises(UserFacingError) as raised:
-            await handle(self.bridge, "/switch", "target")
-        self.assertEqual(str(raised.exception), self.bridge.prompt("BUSY_CHANGE"))
 
     async def test_usage_checks_stay_before_the_busy_gate(self):
         self.bridge.running = True

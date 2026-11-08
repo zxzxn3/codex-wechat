@@ -31,18 +31,23 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     def assertGate(self, predicate, expected, name):
         self.assertEqual(predicate(self.bridge), expected, name)
 
-    async def test_session_changes_require_a_fully_idle_bridge(self):
+    async def test_session_changes_allow_a_live_turn_but_not_preparation(self):
         self.assertGate(can_change_session, True, "idle")
-        for flag in ("restarting", "running", "steering"):
+        for flag in ("restarting", "steering"):
             setattr(self.bridge, flag, True)
             self.assertGate(can_change_session, False, flag)
             setattr(self.bridge, flag, False)
+        self.bridge.running = True
+        self.assertGate(can_change_session, False, "running without active turn")
         self.bridge.backend.active = self.bridge.backend.new_turn(
             "thread", "turn", owned=False)
-        self.assertGate(can_change_session, False, "active turn")
+        self.assertGate(can_change_session, True, "desktop active turn")
+        self.bridge.backend.active["owned"] = True
+        self.assertGate(can_change_session, True, "owned active turn")
         self.bridge.backend.active = None
+        self.bridge.running = False
         self.bridge.state["inbox"] = [{"id": "queued", "mode": "queue"}]
-        self.assertGate(can_change_session, False, "inbox")
+        self.assertGate(can_change_session, True, "inbox")
         self.bridge.state["inbox"] = []
         async with self.bridge.session_lock:
             self.assertGate(can_change_session, False, "session lock")

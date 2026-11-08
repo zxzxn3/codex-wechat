@@ -7,8 +7,9 @@ from .records import InputPhase
 
 
 def can_change_session(bridge):
-    return not (bridge.restarting or bridge.running or bridge.steering or bridge.active_turn()
-                or bridge.state["inbox"] or bridge.session_lock.locked())
+    """Session changes may discard the live turn, but never race preparation."""
+    return not (bridge.restarting or bridge.steering or bridge.session_lock.locked()
+                or (bridge.running and not bridge.active_turn()))
 
 
 def can_restart(bridge):

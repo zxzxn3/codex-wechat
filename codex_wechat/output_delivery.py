@@ -74,12 +74,12 @@ class OutputDelivery:
             bridge.save()
         bridge.send_wake.set()
 
-    def reply(self, text, *, persist=True, request_id=None):
+    def reply(self, text, *, persist=True, request_id=None, source=None):
         bridge = self.bridge
         context = bridge.state.get("context")
         if context or bridge.state.get("wechatContextPending"):
             bridge.enqueue(bridge.text_entries(text, group=str(uuid.uuid4()), context=context,
-                                               request_id=request_id),
+                                               source=source, request_id=request_id),
                          persist=persist, request_id=request_id)
 
     def deliver_message(self, message):
@@ -245,13 +245,13 @@ class OutputDelivery:
         self.paused = False
         self.bridge.send_wake.set()
 
-    def discard_outbox(self, *, reason="user", persist=True):
-        """Clear pending output without disturbing a send already in flight."""
+    def _discard_entries(self, discard, *, reason, persist=True):
         bridge = self.bridge
         kept = []
         removed = []
         for entry in bridge.state.get("outbox", []):
-            if self._in_flight_id and entry.get("id") == self._in_flight_id:
+            if ((self._in_flight_id and entry.get("id") == self._in_flight_id)
+                    or not discard(entry)):
                 kept.append(entry)
             else:
                 removed.append(entry)
@@ -268,6 +268,19 @@ class OutputDelivery:
         if persist:
             bridge.save()
         return len(removed)
+
+    def discard_outbox(self, *, reason="user", persist=True):
+        """Clear pending output without disturbing a send already in flight."""
+        return self._discard_entries(lambda entry: True, reason=reason, persist=persist)
+
+    def discard_source(self, backend, thread_id, *, reason="switch", persist=True):
+        """Drop queued output from one backend/thread after a target change."""
+        def from_old_target(entry):
+            source = entry.get("source")
+            return (isinstance(source, dict) and source.get("backend") == backend
+                    and (thread_id is None or source.get("thread") == thread_id))
+
+        return self._discard_entries(from_old_target, reason=reason, persist=persist)
 
     def budget_notice_entries(self):
         """The one notice that asks the user for the next inbound message."""
