@@ -9,7 +9,9 @@
 </p>
 
 <p align="center">
-  通过微信继续本机 Codex 的会话、工具、审批和文件。不是另一个云端 Agent，也不复制第二份模型凭据。
+  <strong>继续同一份本机 Codex 工作</strong>：离开电脑后，仍然可以
+  <strong>补充要求</strong>、<strong>处理审批</strong>、<strong>取回结果和文件</strong>。
+  不另起云端 Agent，也不复制第二份模型凭据。
 </p>
 
 <p align="center">
@@ -25,10 +27,6 @@
 
 > **内测中**：当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 的用户测试。
 > 下方内测安装命令包含临时 PAT，公开发布前会移除。
-
-<p align="center">
-  <img src="assets/code-churn-12h-split.svg" alt="每 12 小时代码增加与删除" width="720">
-</p>
 
 ## 快速开始
 
@@ -77,6 +75,12 @@ codex-wechat status
 未绑定时终端会显示二维码，使用微信扫码并确认授权。微信只处理扫码账号的私聊，群聊不会
 响应；发送 `/help` 查看命令。Windows 如果没有生成短入口，使用安装器给出的完整
 `codex-wechat.ps1` 路径。
+
+<p align="center">
+  <img src="assets/code-churn-12h-split.svg" alt="每 12 小时代码增加与删除" width="720">
+  <br>
+  <sub>每 12 小时代码变更；绿色为新增，红色为删除，右下角为源码/测试行数与 Git 工时估算。</sub>
+</p>
 
 ## 它解决什么问题
 
@@ -130,7 +134,7 @@ codex-wechat 把微信变成这台电脑上 Codex 的远程入口。你在微信
 > 2026-11-09 按公开源码口径。`●` 直接实现，`◐` 部分或间接，空白表示未实现或当前未确认。
 > 只比较与本项目核心路线相关的能力，不是功能总分，也不代表各平台均已实机验收。
 
-| 能力 | codex-wechat | CLI-WeChat-Bridge | CodexBridge | Kites |
+| 能力 | codex-wechat | [CLI-WeChat-Bridge](https://github.com/UNLINEARITY/CLI-WeChat-Bridge) | [CodexBridge](https://github.com/Gan-Xing/CodexBridge) | [Kites](https://github.com/kites262/codex-wechat) |
 | --- | :---: | :---: | :---: | :---: |
 | 接管已有 Codex CLI 会话 | ● | ● |  | ● |
 | 跟随 Codex App 活会话 | ● |  |  | ◐ |
@@ -144,8 +148,8 @@ codex-wechat 把微信变成这台电脑上 Codex 的远程入口。你在微信
 | Web 控制台 / Mission Control |  |  | ● |  |
 
 其它路线的强项也很明确：CLI-WeChat-Bridge 覆盖多 IM，CodexBridge 提供更宽的控制台与任务
-编排，Kites（`kites262/codex-wechat`）保持更小的核心实现。外部项目会变化，具体能力以对方
-当前文档和源码为准。平台行只列各项目当前公开文档明确支持的系统。
+编排，Kites 保持更小的核心实现。外部项目会变化，具体能力以对方当前文档和源码为准。平台行
+只列各项目当前公开文档明确支持的系统。
 
 <details>
 <summary>其它相邻项目</summary>
