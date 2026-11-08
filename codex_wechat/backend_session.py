@@ -45,6 +45,7 @@ class BackendSession:
                             await bridge.ensure_backend()
                             if bridge.state["thread"]:
                                 await ensure_session(bridge)
+                            await self.reconcile_external_active()
                         finally:
                             bridge.backend_recovering = False
                     bridge.input_paused = False
@@ -67,3 +68,16 @@ class BackendSession:
                 await bridge.backend.refresh_usage()
                 await bridge.backend.rate_limits()
             await asyncio.sleep(delay)
+
+    async def reconcile_external_active(self):
+        """Poll an adopted desktop turn, which has no event stream to end it."""
+        bridge = self.bridge
+        backend = bridge.backend
+        active = backend.active
+        if active is None or active.get("owned") or backend.app is not None:
+            return
+        try:
+            await backend.refresh_runtime()
+        except (OSError, RuntimeError, KeyError, TypeError, ValueError) as error:
+            log_event("backend.runtime_refresh_failed", level="warning",
+                      component="backend", **error_fields(error))

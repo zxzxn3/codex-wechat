@@ -45,6 +45,26 @@ class BackendSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.close.await_count, 2)
         bridge.backend_connection.assert_not_called()
 
+    async def test_external_active_turn_is_reconciled(self):
+        backend = type("FakeBackend", (), {
+            "active": {"owned": False},
+            "app": None,
+            "refresh_runtime": AsyncMock(),
+        })()
+        bridge = self.bridge(backend)
+        await BackendSession(bridge).reconcile_external_active()
+        backend.refresh_runtime.assert_awaited_once()
+
+    async def test_owned_turn_is_not_polled(self):
+        backend = type("FakeBackend", (), {
+            "active": {"owned": True},
+            "app": None,
+            "refresh_runtime": AsyncMock(),
+        })()
+        bridge = self.bridge(backend)
+        await BackendSession(bridge).reconcile_external_active()
+        backend.refresh_runtime.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,4 +29,5 @@ def can_prepare_input(bridge):
 def can_steer_input(bridge):
     return bool((bridge.running or bridge.active_turn()) and bridge.state["inbox"]
                 and not bridge.stopping and not bridge.restarting and not bridge.wechat_paused
+                and not bridge.session_lock.locked()
                 and not bridge.state.get("wechatContextPending"))

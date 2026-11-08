@@ -5,7 +5,7 @@ from copy import deepcopy
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.backend import (
@@ -13,7 +13,7 @@ from codex_wechat.backend import (
 )
 from codex_wechat.commands import _replace_target, handle
 from codex_wechat.errors import UserFacingError
-from codex_wechat.lifecycle import can_change_session
+from codex_wechat.lifecycle import can_change_session, can_steer_input
 from codex_wechat.records import InputPhase, Source, TurnResult
 from codex_wechat.storage import Store
 from codex_wechat.codex_transport import CodexRpcError
@@ -585,6 +585,23 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         self.add_running_turn()
         self.assertTrue(can_change_session(bridge))
 
+    async def test_steering_waits_for_the_session_switch_lock(self):
+        bridge = self.bridge
+        bridge.running = True
+        bridge.state["inbox"] = [self.job("steer")]
+        self.assertTrue(can_steer_input(bridge))
+        async with bridge.session_lock:
+            self.assertFalse(can_steer_input(bridge))
+
+    async def test_old_inflight_failure_does_not_notify_the_new_session(self):
+        bridge = self.bridge
+        entry = {"id": "old", "text": "old", "context": "context",
+                 "source": asdict(self.source("old"))}
+        bridge.state["outbox"] = [entry]
+        bridge.fail_output(entry)
+        self.assertEqual(bridge.state["outbox"], [])
+        self.assertEqual(len(bridge.state["failedOutbox"]), 1)
+
     async def test_worker_drops_a_discarded_turn_without_replying(self):
         bridge = self.bridge
         bridge.media.incoming = AsyncMock(return_value=[])
@@ -753,6 +770,32 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+    async def test_preparation_failure_does_not_restore_a_discarded_job(self):
+        bridge = self.bridge
+        bridge.media.incoming = AsyncMock(return_value=[])
+        bridge.state["processingNotice"] = ""
+        job = self.job("old", InputPhase.PREPARING)
+        job["discarded"] = "switch"
+        bridge.state["inbox"] = [job]
+
+        async def fail(_bridge):
+            raise RuntimeError("prepare failed")
+
+        with patch("codex_wechat.input_delivery.ensure_session", fail):
+            task = asyncio.create_task(bridge.worker())
+            try:
+                for _ in range(100):
+                    if (not bridge.running and not bridge.state["inbox"]
+                            and "currentInput" not in bridge.state):
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(bridge.state["inbox"], [])
+                self.assertNotIn("currentInput", bridge.state)
+                self.assertFalse(bridge.input_paused)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 if __name__ == "__main__":

@@ -237,10 +237,11 @@ class InputDelivery:
                 except Exception:
                     # Preparation has not submitted anything. Leave the exact job
                     # available for the connection supervisor, rather than dropping it.
-                    if not bridge.stopping:
+                    if not bridge.stopping and not job.get("discarded"):
                         bridge.state["inbox"].insert(0, job)
                     bridge.state.pop("currentInput", None)
-                    bridge.input_paused = True
+                    if not job.get("discarded"):
+                        bridge.input_paused = True
                     bridge.save()
                     raise
                 if bridge.stopping:
