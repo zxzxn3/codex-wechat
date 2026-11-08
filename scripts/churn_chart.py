@@ -195,7 +195,8 @@ def render_svg(commits: list[Commit], source_lines: int, test_lines: int) -> str
     hours = estimate_hours(commits)
     stats = (
         f"{format_count(source_lines)} source · "
-        f"{format_count(test_lines)} tests · ~{hours:.0f}h dev"
+        f"{format_count(test_lines)} tests · ~{hours:.0f}h dev · "
+        f"{len(commits)} commits"
     )
     description = (
         "绿色柱为新增行，红色柱为删除行；每 12 小时聚合，"

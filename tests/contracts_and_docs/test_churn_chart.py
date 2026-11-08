@@ -31,6 +31,6 @@ class ChurnChartTests(unittest.TestCase):
     def test_render_includes_metrics_and_svg_dimensions(self):
         svg = render_svg([commit(0, 10, 4), commit(1, 20, 8)], 14843, 16573)
         self.assertIn('width="1440" height="360"', svg)
-        self.assertIn("14.8K source · 16.6K tests · ~1h dev", svg)
+        self.assertIn("14.8K source · 16.6K tests · ~1h dev · 2 commits", svg)
         self.assertIn('fill="#3fb950"', svg)
         self.assertIn('fill="#f85149"', svg)
