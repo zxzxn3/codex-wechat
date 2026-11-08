@@ -43,6 +43,7 @@ Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应
 | 短名 | 等价命令 |
 |---|---|
 | `/s` | `/status` |
+| `/v` | `/version` |
 | `/n` | `/new` |
 | `/c` | `/compact` |
 | `/q` | `/queue` |
@@ -59,7 +60,10 @@ Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应
 | `/h` | `/help` |
 
 短别名与完整命令走同一张命令表，平台之间没有差异；默认 `/help` 只显示常用项，
-`/help all` 显示完整命令面。
+`/help all` 显示完整命令面（例如 `/version` 只在 `/help all` 中展示）。
+
+`/version` 显示微信桥产品版本、当前 release ID 和 Codex 后端版本；它是本地命令，
+后端未连接时也可用。
 
 不再存在：
 

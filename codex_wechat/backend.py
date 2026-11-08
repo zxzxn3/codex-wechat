@@ -195,10 +195,15 @@ class CodexBackend:
 
     def note_transport_version(self):
         """Log the server build once per connect; initialize has answered by now."""
-        version = getattr(self.transport, "server_version", "")
+        version = self.server_version
         if version and version != getattr(self, "noted_server_version", None):
             self.noted_server_version = version
             log_event("backend.version", component="backend", backend_version=version)
+
+    @property
+    def server_version(self):
+        transport = getattr(self, "transport", None)
+        return getattr(transport, "server_version", "") if transport else ""
 
     async def rpc(self, method, params):
         if self.app and method != "thread/resume" and params.get("threadId") == self.app.thread_id:

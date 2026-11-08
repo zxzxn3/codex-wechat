@@ -238,7 +238,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for command in ("/status", "/backend {名称}", "`/settings` 查看设置"):
             self.assertIn(command, HELP)
         for command in ("/approve", "/deny", "/answer", "/get", "/getfile",
-                        "/cwd", "/switch", "/ping"):
+                        "/cwd", "/switch", "/ping", "/version"):
             self.assertNotIn(f"`{command} ", HELP)
             self.assertNotIn(f"`{command}`", HELP)
             self.assertTrue(f"`{command} " in HELP_ALL or f"`{command}`" in HELP_ALL)

@@ -39,7 +39,7 @@ class PromptCatalogueTests(unittest.TestCase):
         self.assertIn('`/s` `/status` Live status', custom)
         self.assertIn('`/sessions [页码|搜索词]`', custom)
         for command in ("/approve", "/deny", "/answer", "/get", "/getfile",
-                        "/cwd", "/switch", "/ping"):
+                        "/cwd", "/switch", "/ping", "/version"):
             self.assertNotIn(f"`{command} ", HELP)
             self.assertNotIn(f"`{command}`", HELP)
             self.assertTrue(f"`{command} " in HELP_ALL or f"`{command}`" in HELP_ALL)

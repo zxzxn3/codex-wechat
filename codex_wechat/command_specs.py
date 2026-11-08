@@ -23,6 +23,8 @@ class Command:
 
 COMMANDS = (
     Command("/status", "/status", HELP_DESCRIPTIONS['/status'], lane="local", aliases=("/s",)),
+    Command("/version", "/version", HELP_DESCRIPTIONS['/version'], lane="local",
+            aliases=("/v",), default_help=False),
     Command("/settings", "/settings [autostart|shared] true|false | ack|finish [text {模板}|fields]",
             HELP_DESCRIPTIONS['/settings'], "managed", "local", section="设置",
             help_usage="/settings"),

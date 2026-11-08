@@ -9,6 +9,7 @@ from codex_wechat.command_specs import REGISTRY, command_lane, HELP, HELP_ALL
 from codex_wechat.commands import dispatch
 from codex_wechat.prompts import SETTINGS_HELP
 from codex_wechat.storage import Store
+from codex_wechat.version import release_id
 
 
 class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -24,6 +25,7 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_aliases_and_protected_commands_share_one_registry(self):
         for short, full in (("/s", "/status"), ("/q", "/queue"), ("/m", "/model"),
+                            ("/v", "/version"),
                             ("/e", "/effort"), ("/p", "/ping"), ("/h", "/help"),
                             ("/a", "/answer"), ("/n", "/new"), ("/c", "/compact"),
                             ("/u", "/unqueue"), ("/b", "/backend"), ("/r", "/restart"),
@@ -39,6 +41,9 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("`/settings` 查看设置", HELP)
         self.assertIn("`/help settings` 查看设置说明", HELP)
         self.assertIn("`/d` `/discard` 清空待发送消息", HELP)
+        self.assertNotIn("`/v`", HELP)
+        self.assertNotIn("`/version`", HELP)
+        self.assertIn("`/v` `/version`", HELP_ALL)
         self.assertNotIn("`/help [all]`", HELP)
         self.assertIn("`/deny {编号}` 拒绝审批", HELP_ALL)
         self.assertNotIn("`/d` `/deny`", HELP_ALL)
@@ -50,6 +55,38 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         await dispatch(self.bridge, "/s invalid")
         self.assertIn("用法", self.bridge.state["outbox"][-1]["text"])
         self.bridge.ensure_backend.assert_not_called()
+
+    async def test_version_is_local_and_reports_release_and_backend(self):
+        from types import SimpleNamespace
+
+        self.bridge.ensure_backend = AsyncMock()
+        self.bridge.backend.transport = SimpleNamespace(server_version="codex_cli_rs/0.167.0")
+        with patch("codex_wechat.commands.release_id", return_value="fixture-release"), \
+                patch("codex_wechat.commands.APP_VERSION", "9.9.9"):
+            await dispatch(self.bridge, "/v")
+        text = self.bridge.state["outbox"][-1]["text"]
+        self.assertIn("微信桥: 9.9.9", text)
+        self.assertIn("发布: fixture-release", text)
+        self.assertIn("Codex: codex_cli_rs/0.167.0", text)
+        self.bridge.ensure_backend.assert_not_called()
+
+        await dispatch(self.bridge, "/version extra")
+        self.assertIn("用法", self.bridge.state["outbox"][-1]["text"])
+
+        self.bridge.backend.transport = None
+        with patch("codex_wechat.commands.release_id", return_value=""):
+            await dispatch(self.bridge, "/version")
+        text = self.bridge.state["outbox"][-1]["text"]
+        self.assertIn("发布: 开发版", text)
+        self.assertIn("Codex: 未连接", text)
+
+    def test_release_id_reads_manifest_and_ignores_invalid_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            self.assertEqual(release_id(temp), "")
+            Path(temp, ".release.json").write_text('{"id": "fixture-release"}', encoding="utf-8")
+            self.assertEqual(release_id(temp), "fixture-release")
+            Path(temp, ".release.json").write_text("{invalid", encoding="utf-8")
+            self.assertEqual(release_id(temp), "")
 
     async def test_help_all_lists_the_complete_catalogue_and_rejects_other_arguments(self):
         self.bridge.ensure_backend = AsyncMock()
