@@ -1,5 +1,6 @@
 # Exclude runtime data; project source is managed by this repository.
 !*
+/copyright/
 .venv/
 .bootstrap-venv/
 .state/
