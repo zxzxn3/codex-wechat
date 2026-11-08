@@ -1,5 +1,7 @@
 # 命令面决策记录
 
+返回 [决策索引](README.md)。
+
 更新时间：2026-11-07。本文只记录已作出的产品选择及其理由；当前可执行行为以
 [COMMANDS](../COMMANDS.md) 和 [PLATFORM-DIFFERENCES](../PLATFORM-DIFFERENCES.md) 为准。
 

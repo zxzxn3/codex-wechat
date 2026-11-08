@@ -19,6 +19,7 @@
 | 要查什么 | 先读 |
 | --- | --- |
 | 模块职责、后台/App/CLI 所有权、认证与重绑边界 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| 稳定术语、命名约定和易混概念 | [CONTEXT](docs/CONTEXT.md) |
 | 公开命令、参数、平台入口和微信短别名 | [COMMANDS](docs/COMMANDS.md) |
 | 由代码生成的命令别名、完整命令和数值设置范围 | [REFERENCE.generated](docs/REFERENCE.generated.md) |
 | 安装、更新、卸载、目录和数据根 | [INSTALL](docs/INSTALL.md) |
@@ -34,7 +35,7 @@
 | 分发方式、私有入口和内测 PAT 边界 | [DISTRIBUTION](docs/DISTRIBUTION.md) |
 | 性能采样和暂不实施的恢复增强 | [PERFORMANCE](docs/PERFORMANCE.md) |
 | 维护成本与重构取舍 | [COMPLEXITY](docs/COMPLEXITY.md) |
-| 已作出的命令、投递和权限决策 | [决策记录](docs/decisions/COMMANDS-DECISIONS.md) |
+| 已作出的命令、投递和权限决策 | [决策索引](docs/decisions/README.md) |
 
 ## 快速开始
 

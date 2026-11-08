@@ -7,27 +7,27 @@
 ## 职责
 
 - codex_connection：唯一连接意图和校验；native_codex：CLI/App 可执行入口发现。
-- backend_runtime：后台准备与所有权；codex_transport：字节连接、JSON-RPC和关闭；backend：原生会话/轮次/事件。
+- backend_runtime：后台准备与所有权；codex_transport：字节连接、JSON-RPC 和关闭；backend：原生会话/轮次/事件。
 - app_ipc：App 的有界帧、持有者发现、会话快照/增量和 follower 请求适配；app_ipc_windows 只负责本机管道连接与身份核对。
 - desktop：内部 CLI 接入和共享后台准备；不启动 App、不改写桌面入口，也不作为公开命令。
-- wechat / media：微信和CDN协议；wechat_auth / rebind：认证状态、身份与重绑编排。
+- wechat / media：微信和 CDN 协议；wechat_auth / rebind：认证状态、身份与重绑编排。
 - ingress：微信入站过滤、去重、引用归一化和命令路由；不复制 Bridge 状态。
 - backend_session：连接建立和后台恢复循环；不承载微信或交付策略。
-- input_delivery / output_delivery：输入提交和有序输出；Bridge是组合根和持久化入口。
+- input_delivery / output_delivery：输入提交和有序输出；Bridge 是组合根和持久化入口。
 - lifecycle：按操作维护会话变更、重启、输入准备和 steer 的准入条件；调用方仍持有锁及提交屏障。
 - commands / command_specs / prompts / configuration：唯一命令目录、展示快照和配置；不重复业务状态。
 - diagnostics 写入安全事件，log_viewer 读取和跟随日志；命令行入口只负责调用。
 - platform_ui / platform_support / service_adapter：二维码、通知、平台路径与原生服务操作。
-- subprocess_io / storage：有界子进程收尾、私有JSON与原生单实例锁。
+- subprocess_io / storage：有界子进程收尾、私有 JSON 与原生单实例锁。
 - installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。安装器必须是单文件可运行，
   运行期代码集中在 `codex_wechat/`，根目录只保留安装器、supervisor 薄入口和平台入口脚本；
   stable payload 与包内导入由测试校验。release 目录清理并入安装器，active-release 标记
   保留正在运行的版本。Windows Mutex/Job Object 使用 pywin32 封装原生 API。
-  每个版本建独立虚拟环境，但依赖安装复用本机 pip 缓存（`PIP_NO_CACHE_DIR=1` 可恢复旧行为）；
+  每个版本建独立虚拟环境；pip 默认复用本机缓存，设置 `PIP_NO_CACHE_DIR=1` 可禁用缓存；
   重复更新因此不再重下同版本 wheel，缓存未命中时才联网。
 
 共享后台与微信服务是两种所有权：前者可以被 App/CLI 继续使用，后者只管理桥接。
-连接失败不删除写入锁、不抢停桌面、不静默另开独立写入后台。App 的共享WS仅回环，
+连接失败不删除写入锁、不抢停桌面、不静默另开独立写入后台。App 的共享 WS 仅回环，
 原生daemon优先；平台缺口不通过伪造跨平台实现隐藏。`active-release` 只由取得 bridge
 状态锁并完成启动的 `start` 进程写入；只读 `status`/`logs` 不改变运行版本标记。
 backend 的事件入口保留来源过滤、早到事件缓冲和轮次检查；用量、设置、消息及轮次收口

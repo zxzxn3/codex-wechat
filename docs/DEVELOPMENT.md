@@ -52,7 +52,7 @@ Remove-Item -LiteralPath $archive, $src -Recurse -Force -ErrorAction SilentlyCon
 Windows、真实微信/CDN、App/daemon 联调不属于离线测试；mock 通过不能写成真实平台或端到端通过。
 相关文档入口、版本和已确认约束应在派发测试时一并交接。
 
-指定测试会话从固定源码副本执行。全部状态、配置、进程与RPC均使用临时目录或模拟，
+指定测试会话从固定源码副本执行。全部状态、配置、进程与 RPC 均使用临时目录或模拟，
 不接入生产账户、服务、模型和微信。除测试通过外，独立核对
 [SUPPORT-MATRIX](SUPPORT-MATRIX.md) 中的两侧能力；文档、源码、离线结果与实机证据分别报告，
 无法验证的组合不写成通过。协议来源见 [SOURCES](SOURCES.md)。
