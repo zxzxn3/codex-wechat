@@ -195,7 +195,7 @@ thread，没有远程聚焦接口。
 
 | | Linux | Windows |
 | --- | --- | --- |
-| 状态 | 当前树有完整离线回归 | 当前版本仍需实机复测 |
+| 状态 | 当前树有完整离线回归 | 当前版本已实机复测 |
 | 后台 | systemd 用户服务 | Scheduled Task + supervisor |
 | 服务日志 | `journalctl --user -u codex-wechat` | `logs/service.log`，按 5 MiB 轮转 |
 | App IPC | 私有 Unix socket | 本机命名管道，只跟随主 `CODEX_HOME` |
