@@ -170,6 +170,29 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         await backend.finish_prepared(prepared)
         app.activate.assert_called_once()
 
+    async def test_finish_prepared_discovers_an_active_adopted_target(self):
+        backend = self.bridge.backend
+        backend.selected_thread = "target"
+        backend.shared = True
+        backend.active = None
+        self.bridge.backend_started = True
+        backend.transport.reader = Mock()
+        backend.transport.reader.done.return_value = False
+        backend.transport.proc = Mock(returncode=None)
+
+        async def rpc(method, params):
+            if method == "thread/read":
+                return {"thread": {"id": "target", "status": {"type": "active"}}}
+            if method == "thread/turns/list":
+                return {"data": [{"id": "target-turn", "status": "inProgress"}]}
+            return {}
+
+        backend.rpc = rpc
+        await backend.finish_prepared({"thread_id": "target", "adopt": True})
+
+        self.assertEqual(backend.active["turn"], "target-turn")
+        self.assertEqual(self.bridge.prompt_fields()["status"], "运行中")
+
     async def test_releasing_old_writer_is_not_blocked_by_target_follower(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
         backend.transport.reader = Mock()

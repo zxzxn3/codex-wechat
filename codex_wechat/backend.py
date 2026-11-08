@@ -947,8 +947,12 @@ class CodexBackend:
         if app is not None:
             self.activate_follower(app)
         try:
+            await self.refresh_runtime()
+        except (OSError, RuntimeError, KeyError, TypeError, ValueError):
+            pass
+        try:
             await self.refresh_usage()
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, KeyError, TypeError, ValueError):
             pass
 
     async def abandon_prepared(self, prepared):
