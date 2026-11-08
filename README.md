@@ -149,9 +149,9 @@ codex-wechat 把微信变成这台电脑上 Codex 的远程入口。你在微信
 | 投递确认与静默丢包隔离 | ● | ◐ | ◐ |  |
 | 热配置、提示与智能切片 | ● | ◐ | ◐ |  |
 | 多后端 / 多 CLI | ◐ | ● | ◐ |  |
-| 平台支持 | <kbd>Linux</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> <kbd>macOS</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> <kbd>macOS</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> |
 | 多渠道入口（企业微信 / Telegram 等） |  | ● |  |  |
 | Web 控制台 / Mission Control |  |  | ● |  |
+| 平台支持 | <kbd>Linux</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> <kbd>macOS</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> <kbd>macOS</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> |
 
 其它路线的强项也很明确：CLI-WeChat-Bridge 覆盖多 IM，CodexBridge 提供更宽的控制台与任务
 编排，Kites 保持更小的核心实现。外部项目会变化，具体能力以对方当前文档和源码为准。平台行
