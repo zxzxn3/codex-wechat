@@ -143,7 +143,7 @@ codex-wechat 把微信变成这台电脑上 Codex 的远程入口。你在微信
 | 忙时 steer / queue / unqueue | ● | ◐ |  |  |
 | 微信媒体双向收发 | ● | ◐ | ◐ |  |
 | 投递确认与静默丢包恢复 | ● | ◐ | ◐ | ◐ |
-| 平台支持 | <kbd>Linux</kbd> · <kbd>Windows</kbd> | <kbd>Linux</kbd> · <kbd>macOS</kbd> · <kbd>Windows</kbd> | <kbd>Linux</kbd> · <kbd>macOS</kbd> · <kbd>Windows</kbd> | <kbd>Linux</kbd> |
+| 平台支持 | <kbd>Linux</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> <kbd>macOS</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> <kbd>macOS</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> |
 | 多渠道入口（企业微信 / Telegram 等） |  | ● |  |  |
 | Web 控制台 / Mission Control |  |  | ● |  |
 
