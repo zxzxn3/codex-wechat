@@ -26,6 +26,10 @@
 > **内测中**：当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 的用户测试。
 > 下方内测安装命令包含临时 PAT，公开发布前会移除。
 
+<p align="center">
+  <img src="assets/code-churn-12h-split.svg" alt="每 12 小时代码增加与删除" width="720">
+</p>
+
 ## 快速开始
 
 前提：Python 3.11+、Git、Codex、`curl` 和微信客户端。Linux 可选 `qrencode`；没有时会使用

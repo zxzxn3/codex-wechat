@@ -122,6 +122,10 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
   `AGENTS.md` 使用 Codex 或 Copilot 的原生 `Co-authored-by` 身份，并用 `AI-Model` 记录
   有可靠依据的实际模型；不再使用旧的自定义 footer。
 
+README 的 12 小时活动图由 `scripts/churn_chart.py` 从完整 Git 历史和仓库中的 Python 文件生成。
+`.github/workflows/update-activity-chart.yml` 每天定时或手动运行，仅在 SVG 内容变化时提交。
+图表以 2 小时无提交作为会话断点，统计值会随仓库历史更新；不要手工编辑生成的 SVG。
+
 改完安装器或入口脚本后，用本地克隆装一遍再验服务：
 
 ```powershell
