@@ -28,6 +28,10 @@
 > **内测中**：当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 的用户测试。
 > 下方内测安装命令包含临时 PAT，公开发布前会移除。
 
+<p align="center">
+  <img src="assets/code-churn-12h-split.svg" alt="每 12 小时代码增加与删除" width="720">
+</p>
+
 ## 快速开始
 
 前提：Python 3.11+、Git、Codex、`curl` 和微信客户端。Linux 可选 `qrencode`；没有时会使用
@@ -75,12 +79,6 @@ codex-wechat status
 未绑定时终端会显示二维码，使用微信扫码并确认授权。微信只处理扫码账号的私聊，群聊不会
 响应；发送 `/help` 查看命令。Windows 如果没有生成短入口，使用安装器给出的完整
 `codex-wechat.ps1` 路径。
-
-<p align="center">
-  <img src="assets/code-churn-12h-split.svg" alt="每 12 小时代码增加与删除" width="720">
-  <br>
-  <sub>每 12 小时代码变更；绿色为新增，红色为删除，右下角为源码/测试行数与 Git 工时估算。</sub>
-</p>
 
 ## 它解决什么问题
 
