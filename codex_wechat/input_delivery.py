@@ -401,13 +401,17 @@ class InputDelivery:
                               mode=job.get("mode", "steer"),
                               request_id=job.get("requestId"))
                     await self._prepare_attachments(job)
-                    if bridge.stopping or not any(item is job for item in bridge.state["inbox"]):
+                    if (bridge.stopping or bridge.session_lock.locked()
+                            or job.get("discarded")
+                            or not any(item is job for item in bridge.state["inbox"])):
                         break
                     if backend.pending or backend.blocked:
                         continue
                     accepted = await backend.steer(thread_id, turn_id, job["text"],
                         attachments=job["preparedAttachments"], client_id=job["clientId"],
                         dispatch=functools.partial(bridge.dispatch_input, job, backend=backend))
+                    if job.get("discarded"):
+                        break
                     if accepted:
                         bridge.state["inbox"] = [item for item in bridge.state["inbox"] if item is not job]
                         bridge.save()
@@ -432,6 +436,8 @@ class InputDelivery:
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
+                    if job.get("discarded"):
+                        break
                     uncertain = job.get("phase") == InputPhase.DISPATCHING
                     bridge.record_input(job, InputPhase.UNCERTAIN if uncertain else InputPhase.FAILED)
                     bridge.state["inbox"] = [item for item in bridge.state["inbox"] if item is not job]

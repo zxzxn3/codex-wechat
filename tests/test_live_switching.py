@@ -593,6 +593,35 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         async with bridge.session_lock:
             self.assertFalse(can_steer_input(bridge))
 
+    async def test_steering_accepted_after_discard_is_not_acknowledged(self):
+        bridge = self.bridge
+        bridge.media.incoming = AsyncMock(return_value=[])
+        bridge.state["processingNotice"] = ""
+        job = self.job("steer")
+        bridge.state["inbox"] = [job]
+        bridge.backend.active = bridge.backend.new_turn("current", "turn", owned=True)
+        bridge.typing.start = AsyncMock(return_value=True)
+        bridge.typing.stop = AsyncMock()
+        bridge.reply = Mock()
+
+        async def steer(*_args, **_kwargs):
+            job["discarded"] = "switch"
+            return True
+
+        bridge.backend.steer = steer
+        task = asyncio.create_task(bridge.steering_worker())
+        try:
+            bridge.steer_wake.set()
+            for _ in range(100):
+                if job.get("discarded"):
+                    break
+                await asyncio.sleep(0.01)
+            self.assertEqual(job.get("discarded"), "switch")
+            bridge.reply.assert_not_called()
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def test_old_inflight_failure_does_not_notify_the_new_session(self):
         bridge = self.bridge
         entry = {"id": "old", "text": "old", "context": "context",
