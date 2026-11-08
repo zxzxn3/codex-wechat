@@ -127,21 +127,35 @@ codex-wechat 把微信变成这台电脑上 Codex 的远程入口。你在微信
 
 ## 与其它项目的能力矩阵
 
-> 2026-11-09 按公开源码口径。`●` 直接实现，`◐` 部分或间接，`—` 当前未确认。
+> 2026-11-09 按公开源码口径。`●` 直接实现，`◐` 部分或间接，空白表示未实现或当前未确认。
 > 只比较与本项目核心路线相关的能力，不是功能总分，也不代表各平台均已实机验收。
 
 | 能力 | codex-wechat | CLI-WeChat-Bridge | CodexBridge | Kites |
 | --- | :---: | :---: | :---: | :---: |
-| 接管已有 Codex CLI 会话 | ● | ● | — | ● |
-| 跟随 Codex App 活会话 | ● | — | — | ◐ |
-| 微信媒体双向收发 | ● | ◐ | ◐ | — |
-| 忙时 steer / queue | ● | ◐ | — | — |
-| 运行中切换会话与设置 | ● | — | — | — |
-| Windows 原生服务生命周期 | ● | — | ● | — |
+| 接管已有 Codex CLI 会话 | ● | ● |  | ● |
+| 跟随 Codex App 活会话 | ● |  |  | ◐ |
+| 会话、模型、目录与压缩控制 | ● | ● | ● | ◐ |
+| 运行中切换会话与隔离旧回合 | ● |  |  |  |
+| 忙时 steer / queue / unqueue | ● | ◐ |  |  |
+| 微信媒体双向收发 | ● | ◐ | ◐ |  |
+| 投递确认与静默丢包恢复 | ● | ◐ | ◐ | ◐ |
+| 平台支持 | <kbd>Linux</kbd> · <kbd>Windows</kbd> | <kbd>Linux</kbd> · <kbd>macOS</kbd> · <kbd>Windows</kbd> | <kbd>Linux</kbd> · <kbd>macOS</kbd> · <kbd>Windows</kbd> | <kbd>Linux</kbd> |
+| 多渠道入口（企业微信 / Telegram 等） |  | ● |  |  |
+| Web 控制台 / Mission Control |  |  | ● |  |
 
 其它路线的强项也很明确：CLI-WeChat-Bridge 覆盖多 IM，CodexBridge 提供更宽的控制台与任务
 编排，Kites（`kites262/codex-wechat`）保持更小的核心实现。外部项目会变化，具体能力以对方
-当前文档和源码为准。
+当前文档和源码为准。平台行只列各项目当前公开文档明确支持的系统。
+
+<details>
+<summary>其它相邻项目</summary>
+
+- **WeChat ACP**：通用 ACP 接入方向。
+- **weixin-codex-bridge**：桌面自动化与桥接方向。
+- **Claude-to-IM Skill**：多 IM skill 方向。
+- **WeClaw**：应用侧方向；源码未公开，不纳入逐项符号比较。
+
+</details>
 
 ### 它不是哪一类工具
 
