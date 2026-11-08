@@ -2,6 +2,10 @@
   <img src="assets/branding/codex-wechat-pixel-mascots.png" alt="codex-wechat" width="360">
 </p>
 
+<p align="center">
+  <img src="assets/branding/codex-wechat-wechat-contact.jpg" alt="codex-wechat 微信联系人" width="640">
+</p>
+
 <h1 align="center">codex-wechat</h1>
 
 <p align="center">
@@ -26,7 +30,7 @@
 </p>
 
 <p align="center">
-  <sub>第三方独立项目，与 OpenAI、腾讯及其关联方没有隶属、合作、授权或背书关系。相关名称与商标归各自权利人所有。</sub>
+  <sub>codex-wechat 是第三方独立项目，与 OpenAI、腾讯及其关联方没有隶属、合作、授权或背书关系。相关名称与商标归各自权利人所有。</sub>
 </p>
 
 > **内测中**：当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 的用户测试。
