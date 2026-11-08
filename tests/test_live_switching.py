@@ -771,6 +771,22 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.state["outbox"], [])
         self.assertTrue(bridge.outbox_drained.is_set())
 
+    async def test_switch_clears_stale_session_and_model_choices(self):
+        bridge = self.bridge
+        bridge.state["sessionChoices"] = ["old-session"]
+        bridge.model_choices = [{"model": "old-model"}]
+        target = "00000000-0000-0000-0000-000000000001"
+        bridge.backend.release_thread = AsyncMock(return_value=True)
+
+        await _replace_target(bridge, {
+            "thread_id": target,
+            "result": {"thread": {"id": target}},
+            "adopt": False,
+        })
+
+        self.assertNotIn("sessionChoices", bridge.state)
+        self.assertEqual(bridge.model_choices, [])
+
     async def test_worker_does_not_requeue_a_discarded_deferred_turn(self):
         bridge = self.bridge
         bridge.media.incoming = AsyncMock(return_value=[])

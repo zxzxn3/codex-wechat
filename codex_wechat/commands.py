@@ -678,6 +678,7 @@ async def _replace_target(bridge, prepared):
             reason, state=staged, persist=False)
         outputs = bridge.discard_session_output(
             backend_name, thread_id, reason=reason, state=staged, persist=False)
+        staged.pop("sessionChoices", None)
         staged["thread"] = selected
         bridge.save(staged)
     except BaseException:
@@ -687,6 +688,7 @@ async def _replace_target(bridge, prepared):
     active = bool(bridge.backend.active)
     bridge.state.clear()
     bridge.state.update(staged)
+    bridge.model_choices = []
     bridge.loaded = True
     # Carry the discard into the objects the worker holds, or its requeue and
     # failure paths would treat a discarded job as live work for the new target.
