@@ -6,6 +6,7 @@ pending contains UI approval data.
 """
 import asyncio
 from collections import deque
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -235,6 +236,33 @@ class CodexBackend:
         """True when the next turn must take the writer back for this thread."""
         return self.writer_state(thread_id) in (WRITER_RELEASED, WRITER_BUSY)
 
+    def selection_snapshot(self):
+        """Capture local selection state for a failed target change."""
+        return {
+            "selected_thread": self.selected_thread,
+            "info": deepcopy(self.info),
+            "active": self.active,
+            "pending": dict(self.pending),
+            "app": self.app,
+            "writer_states": dict(self.writer_states),
+            "blocked": self.blocked,
+            "selection_epoch": self.selection_epoch,
+            "runtime_generation": self.runtime_generation,
+            "attach_error": self.attach_error,
+        }
+
+    def restore_selection(self, snapshot):
+        self.selected_thread = snapshot["selected_thread"]
+        self.info = snapshot["info"]
+        self.active = snapshot["active"]
+        self.pending = snapshot["pending"]
+        self.app = snapshot["app"]
+        self.writer_states = snapshot["writer_states"]
+        self.blocked = snapshot["blocked"]
+        self.selection_epoch = snapshot["selection_epoch"]
+        self.runtime_generation = snapshot["runtime_generation"]
+        self.attach_error = snapshot["attach_error"]
+
     async def attach_follower(self, thread_id, options, *, activate=True):
         """Attach to the App's copy of a thread and make it the selection.
 
@@ -361,6 +389,14 @@ class CodexBackend:
 
     async def server_request(self, msg):
         params = msg.get("params", {})
+        request_thread = params.get("threadId")
+        if request_thread and self.selected_thread and request_thread != self.selected_thread:
+            # A detached selection must not inject interaction requests into the
+            # replacement session. Shared daemons own foreign requests elsewhere.
+            if not self.shared:
+                await self.write({"id": msg["id"], "error": {
+                    "code": -32601, "message": "This bridge does not support this request"}})
+            return
         if self.shared and params.get("threadId") != self.selected_thread:
             # Other desktop sessions keep their own request owner.
             return
@@ -772,7 +808,7 @@ class CodexBackend:
             self.on_limits(result)
         return self.account_limits
 
-    async def thread(self, thread_id=None, overrides=None):
+    def _thread_options(self, thread_id=None, overrides=None):
         # Existing sessions keep their own settings; new sessions use configured defaults.
         options = {} if thread_id else {"cwd": self.cwd, **self.config.get("threadOptions", {})}
         overrides = dict(overrides or {})
@@ -780,6 +816,57 @@ class CodexBackend:
         options.update(overrides)
         if effort is not None:
             options["config"] = {**options.get("config", {}), "model_reasoning_effort": effort}
+        return options
+
+    async def _select_thread_result(self, result, *, app=None, refresh=True,
+                                    preserve_active=False, defer_cleanup=False):
+        thread = result["thread"]
+        previous = self.info if self.info.get("id") == thread["id"] else {}
+        self.info = {"id": thread["id"], "name": thread.get("name"), "path": thread.get("path"),
+                     "model": result.get("model", thread.get("model")),
+                     "provider": result.get("modelProvider",
+                                           thread.get("modelProvider")),
+                     "effort": result.get("reasoningEffort", thread.get("reasoningEffort")),
+                     "cwd": result.get("cwd", thread.get("cwd", self.cwd)),
+                     "approval": result.get("approvalPolicy"),
+                     "reviewer": result.get("approvalsReviewer"),
+                     "sandbox": result.get("sandbox"),
+                     "profile": result.get("activePermissionProfile"),
+                     "collaboration": result.get(
+                         "collaborationMode", previous.get("collaboration")),
+                     "usage": self.usage_by_thread.get(thread["id"], previous.get("usage"))}
+        if self.selected_thread != thread["id"]:
+            self.selection_epoch += 1
+            if not preserve_active:
+                self.active = None
+                self.pending.clear()
+        self.selected_thread = thread["id"]
+        if app is None:
+            # Native writer path: any follower from the previous selection is gone.
+            previous_app, self.app = self.app, None
+            if previous_app and not defer_cleanup:
+                await previous_app.close()
+            self.set_writer(WRITER_NATIVE, thread["id"])
+        else:
+            previous_app, self.app = self.app, app
+            if previous_app and previous_app is not app and not defer_cleanup:
+                await previous_app.close()
+            self.set_writer(WRITER_FOLLOWED, thread["id"])
+        status = thread.get("status")
+        if isinstance(status, dict):
+            self.blocked = bool(status.get("activeFlags")) or status.get("type") == "systemError"
+        if refresh:
+            await self.refresh_runtime()
+        if app is not None and not defer_cleanup:
+            # Requests are queued by activate(). Establish the selected runtime
+            # turn first so a pending approval is not rejected as unsupported.
+            self.activate_follower(app)
+        if refresh:
+            await self.refresh_usage()
+        return thread["id"]
+
+    async def thread(self, thread_id=None, overrides=None):
+        options = self._thread_options(thread_id, overrides)
         app = None
         if thread_id and self.app and self.app.thread_id == thread_id and self.app.connected:
             await self.app.settings(options)
@@ -800,39 +887,79 @@ class CodexBackend:
                 result = app.thread_result()
         else:
             result = await self.rpc("thread/start", options)
-        thread = result["thread"]
-        previous = self.info if self.info.get("id") == thread["id"] else {}
-        self.info = {"id": thread["id"], "name": thread.get("name"), "path": thread.get("path"),
-                     "model": result.get("model", thread.get("model")),
-                     "provider": result.get("modelProvider",
-                                           thread.get("modelProvider")),
-                     "effort": result.get("reasoningEffort", thread.get("reasoningEffort")),
-                     "cwd": result.get("cwd", thread.get("cwd", self.cwd)),
-                     "approval": result.get("approvalPolicy"),
-                     "reviewer": result.get("approvalsReviewer"),
-                     "sandbox": result.get("sandbox"),
-                     "profile": result.get("activePermissionProfile"),
-                     "collaboration": result.get(
-                         "collaborationMode", previous.get("collaboration")),
-                     "usage": self.usage_by_thread.get(thread["id"], previous.get("usage"))}
-        if self.selected_thread != thread["id"]:
-            self.selection_epoch += 1
-            self.active = None
-            self.pending.clear()
-        self.selected_thread = thread["id"]
-        if app is None:
-            # Native writer path: any follower from the previous selection is gone.
-            previous_app, self.app = self.app, None
-            if previous_app:
-                await previous_app.close()
-            self.set_writer(WRITER_NATIVE, thread["id"])
-        await self.refresh_runtime()
+        return await self._select_thread_result(result, app=app)
+
+    async def prepare_thread(self, thread_id=None, overrides=None, *, thread=None):
+        """Prepare a target without changing this connection's selection."""
+        options = self._thread_options(thread_id, overrides)
+        if thread_id:
+            try:
+                result = await self.rpc("thread/resume", {
+                    **options, "threadId": thread_id, "excludeTurns": True})
+            except CodexRpcError as error:
+                if error.code != -32600 or "already has an active writer" not in error.reason:
+                    raise
+                app = await self.attach_app(thread_id, options)
+                if app is not None:
+                    result = app.thread_result()
+                    return {"thread_id": thread_id, "thread": thread or result["thread"],
+                            "result": result, "app": app, "adopt": False}
+                return {"thread_id": thread_id, "thread": thread or {}, "adopt": True}
+            return {"thread_id": result["thread"]["id"], "result": result, "adopt": False}
+        result = await self.rpc("thread/start", options)
+        return {"thread_id": result["thread"]["id"], "result": result, "adopt": False}
+
+    async def commit_prepared(self, prepared, *, preserve_active=False,
+                              defer_cleanup=False):
+        previous_app = self.app
+        if prepared.get("adopt"):
+            selected = await self.adopt_thread(
+                prepared["thread_id"], prepared.get("thread"),
+                preserve_active=preserve_active)
+            status = (prepared.get("thread") or {}).get("status")
+            if isinstance(status, dict):
+                self.blocked = (bool(status.get("activeFlags"))
+                                or status.get("type") == "systemError")
+            if defer_cleanup:
+                prepared["previous_app"] = previous_app
+                self.app = None
+            return selected
+        selected = await self._select_thread_result(
+            prepared["result"], app=prepared.get("app"),
+            refresh=False, preserve_active=preserve_active,
+            defer_cleanup=defer_cleanup)
+        if defer_cleanup:
+            prepared["previous_app"] = previous_app
+        return selected
+
+    async def finish_prepared(self, prepared):
+        """Close the replaced App follower and activate the prepared one."""
+        previous_app = prepared.get("previous_app")
+        if previous_app is not None and previous_app is not self.app:
+            await previous_app.close()
+        app = prepared.get("app")
         if app is not None:
-            # Requests are queued by activate(). Establish the selected runtime
-            # turn first so a pending approval is not rejected as unsupported.
             self.activate_follower(app)
-        await self.refresh_usage()
-        return result["thread"]["id"]
+        try:
+            await self.refresh_usage()
+        except (OSError, RuntimeError):
+            pass
+
+    async def abandon_prepared(self, prepared):
+        app = prepared.get("app")
+        if app is not None:
+            await app.close()
+            return
+        thread_id = prepared.get("thread_id")
+        if thread_id:
+            # A native prepare may have resumed or created a thread before the
+            # local commit failed. Unsubscribe on a best-effort basis; a failed
+            # /new may still leave an empty thread because the protocol has no
+            # delete operation.
+            try:
+                await self.release_thread(thread_id)
+            except (CodexRpcError, OSError, RuntimeError):
+                pass
 
     async def compact(self, thread_id):
         source = (self.selection_epoch, thread_id)
@@ -919,11 +1046,17 @@ class CodexBackend:
         turns. Leaving a thread must still release it, or the daemon would keep
         every session this bridge ever selected locked for the App.
         """
-        if not thread_id or not self.connected or self.active is not None or self.app is not None:
+        if (not thread_id or not self.connected
+                or (self.active is not None
+                    and self.active.get("thread") == thread_id)
+                or (self.app is not None and self.app.thread_id == thread_id)):
             if thread_id:
                 self.writer_event("backend.writer_kept", thread=thread_id,
-                                  status=("followed" if self.app is not None else
-                                          "busy" if self.active is not None else "offline"))
+                                  status=("followed" if self.app is not None
+                                          and self.app.thread_id == thread_id else
+                                          "busy" if self.active is not None
+                                          and self.active.get("thread") == thread_id
+                                          else "offline"))
             return False
         if self.shared and follow:
             # Another client may still own the thread we just adopted; keep that
@@ -999,7 +1132,7 @@ class CodexBackend:
         result = await self.rpc("thread/read", {"threadId": thread_id})
         return result["thread"]
 
-    async def adopt_thread(self, thread_id, thread=None):
+    async def adopt_thread(self, thread_id, thread=None, *, preserve_active=False):
         """Take a thread as the selection without holding or following its writer.
 
         Used when the desktop owns it and its IPC cannot be followed: the bridge
@@ -1021,8 +1154,9 @@ class CodexBackend:
                      "usage": self.usage_by_thread.get(thread_id, previous.get("usage"))}
         if self.selected_thread != thread_id:
             self.selection_epoch += 1
-            self.active = None
-            self.pending.clear()
+            if not preserve_active:
+                self.active = None
+                self.pending.clear()
         self.selected_thread = thread_id
         self.set_writer(WRITER_BUSY, thread_id)
         return thread_id
@@ -1042,6 +1176,22 @@ class CodexBackend:
 
     async def update_settings(self, thread_id, *, model=None, effort=None, cwd=None):
         """Update future-turn settings without disturbing the active turn."""
+        if self.app and self.app.thread_id == thread_id and self.app.connected:
+            options = {}
+            if model is not None:
+                options["model"] = model
+            if effort is not None:
+                options["config"] = {"model_reasoning_effort": effort}
+            if cwd is not None:
+                options["cwd"] = cwd
+            await self.app.settings(options)
+            if model is not None:
+                self.info["model"] = model
+            if effort is not None:
+                self.info["effort"] = effort
+            if cwd is not None:
+                self.info["cwd"] = cwd
+            return
         resumed = (self.selected_thread != thread_id
                    or self.writer_state(thread_id) in (WRITER_RELEASED, WRITER_BUSY))
         if resumed:

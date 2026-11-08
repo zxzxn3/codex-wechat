@@ -1,6 +1,7 @@
 """WeChat conversation controls; lists come from the current backend."""
 from functools import wraps
 from .lifecycle import can_change_session
+from copy import deepcopy
 from pathlib import Path
 import asyncio
 import json
@@ -69,6 +70,28 @@ async def adopt(bridge, thread_id, overrides, thread):
         if not writer_conflict(error):
             raise
         return await bridge.backend.adopt_thread(thread_id, thread)
+
+
+async def _prepare_activation(bridge, thread_id=None, overrides=None):
+    """Validate and prepare a target; never touch the current selection."""
+    saved = dict(overrides or {})
+    desktop = False
+    thread = None
+    if thread_id:
+        thread = await bridge.backend.read_thread(thread_id)
+        status = thread.get("status", {}).get("type")
+        if status == "systemError":
+            raise UserFacingError(bridge.prompt("SESSION_TARGET_BLOCKED"))
+        if status == "active":
+            desktop = True
+            if not bridge.backend.shared:
+                raise UserFacingError(bridge.prompt("SESSION_TARGET_ACTIVE"))
+            if overrides:
+                raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
+            saved = {}
+    prepared = await bridge.backend.prepare_thread(thread_id, saved, thread=thread)
+    prepared["desktop"] = desktop
+    return prepared
 
 
 async def activate(bridge, thread_id=None, overrides=None):
@@ -637,17 +660,37 @@ def _switch_suffix(bridge, discarded):
     return "\n" + bridge.prompt("SWITCH_DISCARDED") if discarded else ""
 
 
-async def _discard_for_target_change(bridge):
-    """Abandon the old target before selecting a replacement."""
+async def _replace_target(bridge, prepared):
+    """Commit a prepared target, or leave the old state untouched on failure."""
+    backend_name = bridge.backend_name
     thread_id = bridge.state.get("thread")
-    inputs = bridge.discard_pending_inputs("switch")
+    backend_state = bridge.backend.selection_snapshot()
+    try:
+        selected = await bridge.backend.commit_prepared(
+            prepared, preserve_active=True, defer_cleanup=True)
+        staged = deepcopy(bridge.state)
+        inputs = bridge.discard_pending_inputs(
+            "switch", state=staged, persist=False)
+        outputs = bridge.discard_session_output(
+            backend_name, thread_id, reason="switch", state=staged, persist=False)
+        staged["thread"] = selected
+        bridge.save(staged)
+    except BaseException:
+        bridge.backend.restore_selection(backend_state)
+        await bridge.backend.abandon_prepared(prepared)
+        raise
     active = bool(bridge.backend.active)
+    bridge.state.clear()
+    bridge.state.update(staged)
+    bridge.loaded = True
     if bridge.backend.active:
         await bridge.backend.detach_active()
-    outputs = bridge.discard_session_output(
-        bridge.backend_name, thread_id, reason="switch")
+    await bridge.backend.finish_prepared(prepared)
     if thread_id:
         await bridge.backend.release_thread(thread_id)
+    selected = bridge.state["thread"]
+    if bridge.backend.writer_state(selected) in (None, WRITER_NATIVE):
+        await bridge.backend.release_thread(selected, follow=True)
     bridge.running = False
     return bool(inputs or outputs or active)
 
@@ -667,11 +710,8 @@ async def _change_backend(bridge, command, argument, received=None):
 
 @session_control
 async def command_new(bridge, command, argument, received=None):
-    backend = bridge.backend_name
-    thread_id = bridge.state.get("thread")
-    discarded = await _discard_for_target_change(bridge)
-    await activate(bridge)
-    bridge.discard_session_output(backend, thread_id, reason="switch")
+    prepared = await _prepare_activation(bridge)
+    discarded = await _replace_target(bridge, prepared)
     bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED"))
                  + _switch_suffix(bridge, discarded))
     return
@@ -713,11 +753,9 @@ async def command_switch(bridge, command, argument, received=None):
     if target == bridge.state.get("thread"):
         bridge.reply(info(bridge, bridge.prompt("CURRENT_SESSION")))
         return
-    backend = bridge.backend_name
-    thread_id = bridge.state.get("thread")
-    discarded = await _discard_for_target_change(bridge)
-    desktop = await activate(bridge, target)
-    bridge.discard_session_output(backend, thread_id, reason="switch")
+    prepared = await _prepare_activation(bridge, target)
+    discarded = await _replace_target(bridge, prepared)
+    desktop = bool(prepared.get("desktop"))
     bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop
                       else bridge.prompt("SESSION_SWITCHED"))
                  + _switch_suffix(bridge, discarded))

@@ -56,7 +56,8 @@ CLI 0.166.0 的公开schema确认 agentMessage 可带 `delivery=async` 与结构
 该包装和字段组合是版本相关客户端约定，未作为稳定公开协议承诺；桥接不从Agent正文
 推断题目。连接/会话/轮次变化或桌面已提交答案时，内存中的未答提示失效。
 clientUserMessageId、原生queue、settings字段存在不构成持久幂等、跨客户端所有权或工具隔离保证；
-未证明等价前不替换微信交付层。现有显式设置仍使用已采用的resume覆盖，不做隐式重放。
+未证明等价前不替换微信交付层。显式设置使用 `thread/settings/update` 作用于后续回合，不再依赖
+resume 覆盖，也不做隐式重放。
 
 Token优先原生事件，JSONL token_count仅是有界回退，不是稳定API；限额重置使用返回的
 resetsAt Unix秒，不从窗口长度推算。压缩使用 contextCompaction item 生命周期，事件本身

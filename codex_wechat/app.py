@@ -279,10 +279,11 @@ class Bridge:
         return prompt_text(name, {**fields, **(values or {})},
                            overrides=self.settings.hot.prompts)
 
-    def save(self):
-        self.state["backendName"] = self.backend_name
-        self.state.setdefault("backendSessions", {})[self.backend_name] = snapshot(self.state)
-        self.store.save("bridge", self.state)
+    def save(self, state=None):
+        target = self.state if state is None else state
+        target["backendName"] = self.backend_name
+        target.setdefault("backendSessions", {})[self.backend_name] = snapshot(target)
+        self.store.save("bridge", target)
 
     def make_backend(self, name):
         backend = self.backend_factory(self.backend_configs[name],
@@ -510,11 +511,13 @@ class Bridge:
     def recover_inputs(self):
         return self.inputs.recover_inputs()
 
-    def discard_pending_inputs(self, reason):
-        return self.inputs.discard_pending(reason)
+    def discard_pending_inputs(self, reason, *, state=None, persist=True):
+        return self.inputs.discard_pending(reason, state=state, persist=persist)
 
-    def discard_session_output(self, backend, thread_id, *, reason="switch"):
-        return self.output.discard_source(backend, thread_id, reason=reason)
+    def discard_session_output(self, backend, thread_id, *, reason="switch",
+                               state=None, persist=True):
+        return self.output.discard_source(
+            backend, thread_id, reason=reason, state=state, persist=persist)
 
     def reject_input(self, request_id, kind, status):
         log_event("input.rejected", component="input", request_id=request_id,

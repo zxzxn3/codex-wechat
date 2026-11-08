@@ -115,10 +115,11 @@ class InputDelivery:
                   request_id=job.get("requestId"))
         return True
 
-    def record_input(self, job, phase):
+    def record_input(self, job, phase, *, state=None):
         bridge = self.bridge
         job["phase"] = phase
-        bridge.state["inputRecords"] = (bridge.state.get("inputRecords", []) + [dict(job)])[-20:]
+        target = bridge.state if state is None else state
+        target["inputRecords"] = (target.get("inputRecords", []) + [dict(job)])[-20:]
 
     def recover_inputs(self):
         bridge = self.bridge
@@ -156,18 +157,20 @@ class InputDelivery:
             bridge.state.pop("currentInput")
         bridge.save()
 
-    def discard_pending(self, reason):
+    def discard_pending(self, reason, *, state=None, persist=True):
         """Abandon the live and queued inputs; their output belongs to the old target."""
         bridge = self.bridge
-        current = bridge.state.pop("currentInput", None)
-        jobs = ([current] if current else []) + bridge.state["inbox"]
+        target = bridge.state if state is None else state
+        current = target.pop("currentInput", None)
+        jobs = ([current] if current else []) + target["inbox"]
         if not jobs:
             return 0
-        bridge.state["inbox"] = []
+        target["inbox"] = []
         for job in jobs:
             job["discarded"] = reason
-            bridge.record_input(job, InputPhase.CANCELLED)
-        bridge.save()
+            self.record_input(job, InputPhase.CANCELLED, state=target)
+        if persist and state is None:
+            bridge.save()
         bridge.wake.set()
         log_event("input.discarded", component="input", count=len(jobs), reason=reason)
         return len(jobs)
@@ -282,7 +285,8 @@ class InputDelivery:
                     continue
                 if answer is not None:
                     bridge.last_turn_seconds = time.perf_counter() - started
-                    await bridge.deliver_answer(answer, request_id=job.get("requestId"))
+                    await bridge.deliver_answer(
+                        answer, request_id=job.get("requestId"), require_current=True)
                     log_event("input.completed", component="input",
                               duration_ms=(time.perf_counter() - started) * 1000,
                               queued=len(bridge.state["inbox"]),

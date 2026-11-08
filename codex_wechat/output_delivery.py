@@ -245,11 +245,12 @@ class OutputDelivery:
         self.paused = False
         self.bridge.send_wake.set()
 
-    def _discard_entries(self, discard, *, reason, persist=True):
+    def _discard_entries(self, discard, *, reason, state=None, persist=True):
         bridge = self.bridge
+        target = bridge.state if state is None else state
         kept = []
         removed = []
-        for entry in bridge.state.get("outbox", []):
+        for entry in target.get("outbox", []):
             if ((self._in_flight_id and entry.get("id") == self._in_flight_id)
                     or not discard(entry)):
                 kept.append(entry)
@@ -257,10 +258,10 @@ class OutputDelivery:
                 removed.append(entry)
         if not removed:
             return 0
-        bridge.state["outbox"] = kept
+        target["outbox"] = kept
         for entry in removed:
             self._queued_at.pop(entry.get("id"), None)
-        if not kept:
+        if not kept and state is None:
             bridge.outbox_drained.set()
         log_event("output.discarded", level="info", component="output",
                   count=len(removed), reason=reason,
@@ -273,14 +274,15 @@ class OutputDelivery:
         """Clear pending output without disturbing a send already in flight."""
         return self._discard_entries(lambda entry: True, reason=reason, persist=persist)
 
-    def discard_source(self, backend, thread_id, *, reason="switch", persist=True):
+    def discard_source(self, backend, thread_id, *, reason="switch", state=None, persist=True):
         """Drop queued output from one backend/thread after a target change."""
         def from_old_target(entry):
             source = entry.get("source")
             return (isinstance(source, dict) and source.get("backend") == backend
                     and (thread_id is None or source.get("thread") == thread_id))
 
-        return self._discard_entries(from_old_target, reason=reason, persist=persist)
+        return self._discard_entries(
+            from_old_target, reason=reason, state=state, persist=persist)
 
     def budget_notice_entries(self):
         """The one notice that asks the user for the next inbound message."""

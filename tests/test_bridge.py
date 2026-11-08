@@ -391,9 +391,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             "data": [{"id": "target", "name": "微信重构"}]})
         self.bridge.backend.read_thread = AsyncMock(return_value={
             "id": "target", "status": {"type": "inactive"}})
-        self.bridge.backend.thread = AsyncMock(return_value="target")
+        self.bridge.backend.prepare_thread = AsyncMock(return_value={
+            "thread_id": "target",
+            "result": {"thread": {"id": "target"}},
+            "adopt": False,
+            "desktop": False,
+        })
         await handle(self.bridge, "/switch", "重构")
-        self.bridge.backend.thread.assert_awaited_once_with("target", {})
+        self.bridge.backend.prepare_thread.assert_awaited_once_with(
+            "target", {}, thread={"id": "target", "status": {"type": "inactive"}})
         self.assertEqual(self.bridge.state["thread"], "target")
         self.assertEqual(self.bridge.state["outbox"][-1]["text"].splitlines()[0],
                          "已切换会话")
@@ -407,9 +413,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                       "name": "其他会话"}]})
         self.bridge.backend.read_thread = AsyncMock(return_value={
             "id": target, "status": {"type": "inactive"}})
-        self.bridge.backend.thread = AsyncMock(return_value=target)
+        self.bridge.backend.prepare_thread = AsyncMock(return_value={
+            "thread_id": target,
+            "result": {"thread": {"id": target}},
+            "adopt": False,
+            "desktop": False,
+        })
         await handle(self.bridge, "/switch", "01a13162")
-        self.bridge.backend.thread.assert_awaited_once_with(target, {})
+        self.bridge.backend.prepare_thread.assert_awaited_once()
         self.assertEqual(self.bridge.state["thread"], target)
 
     async def test_switch_accepts_a_numeric_id_prefix(self):
@@ -421,9 +432,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                       "name": "其他会话"}]})
         self.bridge.backend.read_thread = AsyncMock(return_value={
             "id": target, "status": {"type": "inactive"}})
-        self.bridge.backend.thread = AsyncMock(return_value=target)
+        self.bridge.backend.prepare_thread = AsyncMock(return_value={
+            "thread_id": target,
+            "result": {"thread": {"id": target}},
+            "adopt": False,
+            "desktop": False,
+        })
         await handle(self.bridge, "/switch", "1234")
-        self.bridge.backend.thread.assert_awaited_once_with(target, {})
+        self.bridge.backend.prepare_thread.assert_awaited_once()
         self.assertEqual(self.bridge.state["thread"], target)
 
     async def test_switch_ambiguous_id_prefix_lists_choices(self):
@@ -433,9 +449,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.list_threads = AsyncMock(return_value={
             "data": [{"id": first, "name": "会话一"},
                      {"id": second, "name": "会话二"}]})
-        self.bridge.backend.thread = AsyncMock()
+        self.bridge.backend.prepare_thread = AsyncMock()
         await handle(self.bridge, "/switch", "01a1")
-        self.bridge.backend.thread.assert_not_awaited()
+        self.bridge.backend.prepare_thread.assert_not_awaited()
         text = self.bridge.state["outbox"][-1]["text"]
         self.assertIn("1. 会话一", text)
         self.assertIn("2. 会话二", text)
@@ -448,9 +464,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.list_threads = AsyncMock(return_value={
             "data": [{"id": identity, "name": f"会话 {i}"}
                      for i, identity in enumerate(ids)]})
-        self.bridge.backend.thread = AsyncMock()
+        self.bridge.backend.prepare_thread = AsyncMock()
         await handle(self.bridge, "/switch", "01a1")
-        self.bridge.backend.thread.assert_not_awaited()
+        self.bridge.backend.prepare_thread.assert_not_awaited()
         text = self.bridge.state["outbox"][-1]["text"]
         self.assertEqual(len(self.bridge.state["sessionChoices"]), 10)
         self.assertIn("共匹配 11 个会话", text)
@@ -469,17 +485,22 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.list_threads = threads
         self.bridge.backend.read_thread = AsyncMock(return_value={
             "id": target, "status": {"type": "inactive"}})
-        self.bridge.backend.thread = AsyncMock(return_value=target)
+        self.bridge.backend.prepare_thread = AsyncMock(return_value={
+            "thread_id": target,
+            "result": {"thread": {"id": target}},
+            "adopt": False,
+            "desktop": False,
+        })
         await handle(self.bridge, "/switch", "dead")
-        self.bridge.backend.thread.assert_awaited_once_with(target, {})
+        self.bridge.backend.prepare_thread.assert_awaited_once()
 
     async def test_switch_ambiguous_search_lists_choices_without_activating(self):
         self.bridge.state.update(context="context", thread="current")
         self.bridge.backend.list_threads = AsyncMock(return_value={"data": [
             {"id": "a", "name": "微信一"}, {"id": "b", "name": "微信二"}]})
-        self.bridge.backend.thread = AsyncMock()
+        self.bridge.backend.prepare_thread = AsyncMock()
         await handle(self.bridge, "/switch", "微信")
-        self.bridge.backend.thread.assert_not_awaited()
+        self.bridge.backend.prepare_thread.assert_not_awaited()
         text = self.bridge.state["outbox"][-1]["text"]
         self.assertIn("1. 微信一", text)
         self.assertIn("2. 微信二", text)
@@ -498,10 +519,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.state.update(context="context", thread="current")
         self.bridge.backend.list_threads = AsyncMock(return_value={"data": [
             {"id": str(i), "name": f"微信 {i}"} for i in range(11)]})
-        self.bridge.backend.thread = AsyncMock()
+        self.bridge.backend.prepare_thread = AsyncMock()
         await handle(self.bridge, "/switch", "微信")
         text = self.bridge.state["outbox"][-1]["text"]
-        self.bridge.backend.thread.assert_not_awaited()
+        self.bridge.backend.prepare_thread.assert_not_awaited()
         self.assertEqual(len(self.bridge.state["sessionChoices"]), 10)
         self.assertIn("仅显示前 10 条", text.split("```")[-1])
         self.assertIn("`/sessions 微信`", text.split("```")[-1])
