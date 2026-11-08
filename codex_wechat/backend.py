@@ -394,7 +394,9 @@ class CodexBackend:
             # A detached selection must not inject interaction requests into the
             # replacement session. Shared daemons own foreign requests elsewhere.
             if not self.shared:
-                await self.write({"id": msg["id"], "error": {
+                # Reply on the transport that delivered this request. self.write()
+                # may route the response to the current App follower instead.
+                await self.transport.write({"id": msg["id"], "error": {
                     "code": -32601, "message": "This bridge does not support this request"}})
             return
         if self.shared and params.get("threadId") != self.selected_thread:
@@ -907,7 +909,8 @@ class CodexBackend:
                 return {"thread_id": thread_id, "thread": thread or {}, "adopt": True}
             return {"thread_id": result["thread"]["id"], "result": result, "adopt": False}
         result = await self.rpc("thread/start", options)
-        return {"thread_id": result["thread"]["id"], "result": result, "adopt": False}
+        return {"thread_id": result["thread"]["id"], "result": result, "adopt": False,
+                "created": True}
 
     async def commit_prepared(self, prepared, *, preserve_active=False,
                               defer_cleanup=False):
@@ -953,11 +956,13 @@ class CodexBackend:
         thread_id = prepared.get("thread_id")
         if thread_id:
             # A native prepare may have resumed or created a thread before the
-            # local commit failed. Unsubscribe on a best-effort basis; a failed
-            # /new may still leave an empty thread because the protocol has no
-            # delete operation.
+            # local commit failed. Only a thread created by /new may be deleted;
+            # an existing session is released without destroying its history.
             try:
-                await self.release_thread(thread_id)
+                if prepared.get("created"):
+                    await self.rpc("thread/delete", {"threadId": thread_id})
+                else:
+                    await self.release_thread(thread_id)
             except (CodexRpcError, OSError, RuntimeError):
                 pass
 

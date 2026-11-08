@@ -40,6 +40,8 @@ Windows IPC 适配另核对本机 App 26.1027.6604.0 的 early-bootstrap-824：W
 
 item/completed 提供完整 agentMessage；commentary/partial_answer 可即时转发，final_answer
 在轮次收口，reasoning/工具输出不混入聊天。原生请求仅回答本连接收到的部分。
+0.167.0 的 schema 包含 `thread/delete` 与 `ThreadDeleteParams {threadId}`；桥只在本轮
+`/new` 创建线程后本地提交失败时用它清理新建会话，不对已有会话调用删除。
 0.167.0 的 `thread/settings/update` 明确作用于后续回合；TUI 的默认 `Shift+Up`/`Shift+Down`
 （以及 `Alt+.`/`Alt+,`）只调整活动 thread 的推理强度，不会中断正在运行的回合。
 0.166.0 schema 的 item/started、item/completed 外层分别提供 startedAtMs、completedAtMs，

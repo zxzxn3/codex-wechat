@@ -368,26 +368,52 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(bridge.state["inbox"][0], original_queued)
         bridge.backend.release_thread.assert_awaited_once_with("target")
 
-    async def test_new_save_failure_cleans_prepared_thread(self):
+    async def test_new_save_failure_deletes_the_created_thread(self):
         bridge = self.bridge
         self.add_running_turn()
-        bridge.state["outbox"] = [
-            {"id": "old-output", "text": "old", "source": asdict(self.source())}]
-        bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": "new-thread",
-            "result": {"thread": {"id": "new-thread"}},
-            "adopt": False,
-            "desktop": False,
-        })
-        bridge.backend.release_thread = AsyncMock(return_value=True)
+        calls = []
+
+        async def rpc(method, params):
+            calls.append((method, params))
+            if method == "thread/start":
+                return {"thread": {"id": "new-thread"}}
+            return {}
+
+        bridge.backend.rpc = rpc
         bridge.save = Mock(side_effect=OSError("disk full"))
 
         with self.assertRaises(OSError):
             await handle(bridge, "/new", "")
 
-        bridge.backend.release_thread.assert_awaited_once_with("new-thread")
+        self.assertIn(("thread/delete", {"threadId": "new-thread"}), calls)
+        self.assertNotIn("thread/unsubscribe", [method for method, _ in calls])
         self.assertEqual(bridge.state["thread"], "current")
-        self.assertEqual([entry["id"] for entry in bridge.state["outbox"]], ["old-output"])
+
+    async def test_switch_save_failure_unsubscribes_without_deleting(self):
+        bridge = self.bridge
+        self.add_running_turn()
+        calls = []
+
+        async def rpc(method, params):
+            calls.append((method, params))
+            if method == "thread/read":
+                return {"thread": {"id": "target", "status": {"type": "idle"}}}
+            if method == "thread/resume":
+                return {"thread": {"id": "target"}}
+            return {}
+
+        bridge.backend.rpc = rpc
+        bridge.backend.transport.reader = Mock()
+        bridge.backend.transport.reader.done.return_value = False
+        bridge.backend.transport.proc = Mock(returncode=None)
+        bridge.save = Mock(side_effect=OSError("disk full"))
+
+        with self.assertRaises(OSError):
+            await handle(bridge, "/switch", "00000000-0000-0000-0000-000000000001")
+
+        self.assertIn(("thread/unsubscribe", {"threadId": "target"}), calls)
+        self.assertNotIn("thread/delete", [method for method, _ in calls])
+        self.assertEqual(bridge.state["thread"], "current")
 
     async def test_new_target_prepare_failure_keeps_the_old_target(self):
         bridge = self.bridge
@@ -414,7 +440,11 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         backend = CodexBackend({}, "/tmp", notices.append)
         backend.selected_thread = "new"
         backend.shared = False
-        backend.write = AsyncMock()
+        app = AsyncMock()
+        app.thread_id = "new"
+        app.connected = True
+        backend.app = app
+        backend.transport.write = AsyncMock()
 
         await backend.server_request({
             "id": 7,
@@ -423,13 +453,14 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         })
 
         self.assertEqual(notices, [])
-        backend.write.assert_awaited_once_with({
+        backend.transport.write.assert_awaited_once_with({
             "id": 7,
             "error": {
                 "code": -32601,
                 "message": "This bridge does not support this request",
             },
         })
+        app.respond.assert_not_awaited()
 
     async def test_model_change_updates_only_future_turns(self):
         bridge = self.bridge

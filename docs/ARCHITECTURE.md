@@ -77,8 +77,9 @@ preparing可恢复，dispatching结果未知、accepted均不自动重发。clie
 后退出本轮。已进入发送 API 的一条无法撤回。`/model`、`/effort` 和 `/cwd` 使用
 `thread/settings/update` 只修改后续回合；当前回合、当前输入和已在途输出都不受影响。
 目标的读取、resume 或新会话创建在不可逆 discard 之前完成；目标准备失败时旧输入、输出和
-当前回合保持不变。`/new` 在服务端已经创建线程后若本地提交失败，会尽力释放订阅，但协议没有
-删除线程的接口，因此可能留下一个不可见的空 thread。
+当前回合保持不变。`/new` 在服务端已经创建线程后若本地提交失败，会尽力调用
+`thread/delete` 删除这个新建的空 thread；`/switch` 只释放已有目标线程的订阅，绝不删除
+用户原有会话。真实服务端的删除行为仍待平台验收。
 `/backend`、`/compact`、`/restart` 和 `/settings shared` 仍要求空闲，因为它们会关闭连接、
 修改当前会话或重启服务，不能保证旧回合静默继续。
 
