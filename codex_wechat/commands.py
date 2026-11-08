@@ -312,8 +312,9 @@ async def set_shared_daemon(bridge, enabled):
     path = bridge.settings.path
     name = bridge.backend_name
     if not can_change_session(bridge):
-        # Switching mode restarts the backend, which would abort a live turn.
         raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
+    # This one still needs a fully idle bridge: switching mode closes the
+    # connection and restarts the backend, so a live turn cannot be left running.
     require_idle(bridge)
     try:
         if path is None:
@@ -665,6 +666,7 @@ async def _replace_target(bridge, prepared):
     backend_name = bridge.backend_name
     thread_id = bridge.state.get("thread")
     backend_state = bridge.backend.selection_snapshot()
+    reason = "switch"
     try:
         selected = await bridge.backend.commit_prepared(
             prepared, preserve_active=True, defer_cleanup=True)
@@ -673,9 +675,9 @@ async def _replace_target(bridge, prepared):
         live_jobs = [bridge.state.get("currentInput"), *bridge.state.get("inbox", [])]
         staged = deepcopy(bridge.state)
         inputs = bridge.discard_pending_inputs(
-            "switch", state=staged, persist=False)
+            reason, state=staged, persist=False)
         outputs = bridge.discard_session_output(
-            backend_name, thread_id, reason="switch", state=staged, persist=False)
+            backend_name, thread_id, reason=reason, state=staged, persist=False)
         staged["thread"] = selected
         bridge.save(staged)
     except BaseException:
@@ -690,7 +692,7 @@ async def _replace_target(bridge, prepared):
     # failure paths would treat a discarded job as live work for the new target.
     for job in live_jobs:
         if isinstance(job, dict):
-            job["discarded"] = "switch"
+            job["discarded"] = reason
     bridge.output.sync_drained()
     if bridge.backend.active:
         await bridge.backend.detach_active()
