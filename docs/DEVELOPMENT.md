@@ -118,8 +118,9 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
   Windows PowerShell 5.1 对无 BOM 的脚本按 ANSI 解码，去掉 BOM 会让整份文件解析失败
   （表现为一串无关的 "字符串缺少终止符"）。`windows/task-service.ps1` 是纯 ASCII，不需要
   BOM；用 .NET 的 `WriteAllText(..., UTF8Encoding($false))` 之类写回时特别容易漏掉这一点。
-- 本项目是独立 Git 仓库；提交按主题拆分，默认使用英文 Conventional Commits。cfg 相关提交
-  才使用中文并附 `Committed-by` footer。
+- 本项目是独立 Git 仓库；提交按主题拆分，默认使用英文 Conventional Commits。AI 参与按
+  `AGENTS.md` 使用 Codex 或 Copilot 的原生 `Co-authored-by` 身份，并用 `AI-Model` 记录
+  有可靠依据的实际模型；不再使用旧的自定义 footer。
 
 改完安装器或入口脚本后，用本地克隆装一遍再验服务：
 

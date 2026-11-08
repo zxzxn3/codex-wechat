@@ -59,6 +59,11 @@ $errors = $null
 
 ## 提交与命令
 
+- AI 参与提交采用两层署名：GPT、DeepSeek 等经 Codex 运行的模型统一使用
+  `Co-authored-by: Codex <codex@openai.com>`，并用 `AI-Model` 记录实际模型；确属 Codex
+  但无法确认模型时不写 `AI-Model`。Copilot 保留其官方 co-author，并用 `AI-Model`
+  记录底层模型。模型未知时不得猜测。
+
 - `git commit -m "多行消息"` 在本机 PowerShell 会被拆散成多个参数。用消息文件：
 
   ```powershell
