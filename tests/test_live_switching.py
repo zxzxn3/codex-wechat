@@ -11,7 +11,7 @@ from codex_wechat.app import Bridge
 from codex_wechat.backend import (
     CodexBackend, DeferTurn, WRITER_FOLLOWED, WRITER_NATIVE, WRITER_RELEASED,
 )
-from codex_wechat.commands import handle
+from codex_wechat.commands import _replace_target, handle
 from codex_wechat.errors import UserFacingError
 from codex_wechat.lifecycle import can_change_session
 from codex_wechat.records import InputPhase, Source, TurnResult
@@ -632,6 +632,56 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current["done"].result().status, "discarded")
         self.assertEqual(live.get("discarded"), "switch")
         self.assertEqual(queued.get("discarded"), "switch")
+
+    async def test_switch_discard_reaches_live_worker_and_drain_event(self):
+        bridge = self.bridge
+        bridge.media.incoming = AsyncMock(return_value=[])
+        bridge.deliver_answer = AsyncMock()
+        bridge.state["processingNotice"] = ""
+        live = self.job("live", InputPhase.PREPARING)
+        bridge.state["inbox"] = [live]
+        bridge.state["outbox"] = [
+            {"id": "old-output", "text": "old", "source": asdict(self.source())}]
+        bridge.outbox_drained.clear()
+        run_started = asyncio.Event()
+        finish_run = asyncio.Event()
+        target = "00000000-0000-0000-0000-000000000001"
+
+        async def run(*_args, **_kwargs):
+            bridge.backend.active = bridge.backend.new_turn(
+                "current", "turn", owned=True)
+            run_started.set()
+            await finish_run.wait()
+            raise DeferTurn("desktop turn changed")
+
+        bridge.backend.run = run
+        bridge.backend.release_thread = AsyncMock(return_value=True)
+        prepared = {
+            "thread_id": target,
+            "result": {"thread": {"id": target}},
+            "adopt": False,
+        }
+
+        task = asyncio.create_task(bridge.worker())
+        try:
+            await asyncio.wait_for(run_started.wait(), 1)
+            await _replace_target(bridge, prepared)
+            finish_run.set()
+            for _ in range(100):
+                if not bridge.running and not bridge.state["inbox"]:
+                    break
+                await asyncio.sleep(0.01)
+
+            self.assertEqual(bridge.state["outbox"], [])
+            self.assertTrue(bridge.outbox_drained.is_set())
+            self.assertEqual(bridge.state["inbox"], [])
+            self.assertNotIn("currentInput", bridge.state)
+            self.assertEqual(live.get("discarded"), "switch")
+            self.assertFalse(bridge.running)
+            bridge.deliver_answer.assert_not_awaited()
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def test_staged_discard_realigns_the_drained_event(self):
         # A staged discard cannot update the event itself, so the switch must
