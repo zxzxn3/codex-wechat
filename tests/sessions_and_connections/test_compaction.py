@@ -1,8 +1,11 @@
 """Synthetic native events only; never request a real compaction."""
+import asyncio
+from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 from codex_wechat.backend import CodexBackend
+from codex_wechat.commands import command_compact
 from codex_wechat.prompts import COMPACT_STARTED, COMPACT_FINISHED, COMPACT_INTERRUPTED
 
 
@@ -50,3 +53,26 @@ class CompactionTests(unittest.IsolatedAsyncioTestCase):
                             "turn": {"id": "turn", "status": "failed"}}})
         self.event("item/completed")
         self.assertEqual(self.notices, [COMPACT_STARTED, COMPACT_INTERRUPTED])
+
+
+class CompactCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_command_leaves_feedback_to_compaction_events(self):
+        compact = AsyncMock()
+        bridge = SimpleNamespace(
+            state={"thread": "selected", "inbox": []},
+            running=False,
+            restarting=False,
+            steering=False,
+            active_turn=lambda: None,
+            ensure_session=AsyncMock(),
+            backend=SimpleNamespace(blocked=False, compact=compact),
+            reply=Mock(),
+            prompt=lambda name: name,
+            session_lock=asyncio.Lock(),
+        )
+
+        with patch("codex_wechat.commands.ensure_session", AsyncMock()):
+            await command_compact(bridge, "/compact", "")
+
+        compact.assert_awaited_once_with("selected")
+        bridge.reply.assert_not_called()

@@ -76,7 +76,6 @@ async def adopt(bridge, thread_id, overrides, thread):
 async def _prepare_activation(bridge, thread_id=None, overrides=None):
     """Validate and prepare a target; never touch the current selection."""
     saved = dict(overrides or {})
-    desktop = False
     thread = None
     if thread_id:
         thread = await bridge.backend.read_thread(thread_id)
@@ -84,14 +83,12 @@ async def _prepare_activation(bridge, thread_id=None, overrides=None):
         if status == "systemError":
             raise UserFacingError(bridge.prompt("SESSION_TARGET_BLOCKED"))
         if status == "active":
-            desktop = True
             if not bridge.backend.shared:
                 raise UserFacingError(bridge.prompt("SESSION_TARGET_ACTIVE"))
             if overrides:
                 raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
             saved = {}
     prepared = await bridge.backend.prepare_thread(thread_id, saved, thread=thread)
-    prepared["desktop"] = desktop
     return prepared
 
 
@@ -134,9 +131,7 @@ async def ensure_session(bridge):
     if not bridge.loaded:
         had_thread = bool(bridge.state["thread"])
         desktop = await activate(bridge, bridge.state["thread"])
-        if desktop:
-            action = bridge.prompt("SESSION_DESKTOP")
-        elif had_thread:
+        if desktop or had_thread:
             action = bridge.prompt("SESSION_RESTORED")
         else:
             action = bridge.prompt("SESSION_CREATED")
@@ -658,10 +653,6 @@ def require_idle(bridge):
         raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
 
 
-def _switch_suffix(bridge, discarded):
-    return "\n" + bridge.prompt("SWITCH_DISCARDED") if discarded else ""
-
-
 async def _replace_target(bridge, prepared):
     """Commit a prepared target, or leave the old state untouched on failure."""
     backend_name = bridge.backend_name
@@ -675,9 +666,8 @@ async def _replace_target(bridge, prepared):
         # below only marks their staged copies, so remember the originals.
         live_jobs = [bridge.state.get("currentInput"), *bridge.state.get("inbox", [])]
         staged = deepcopy(bridge.state)
-        inputs = bridge.discard_pending_inputs(
-            reason, state=staged, persist=False)
-        outputs = bridge.discard_session_output(
+        bridge.discard_pending_inputs(reason, state=staged, persist=False)
+        bridge.discard_session_output(
             backend_name, thread_id, reason=reason, state=staged, persist=False)
         staged.pop("sessionChoices", None)
         staged["thread"] = selected
@@ -686,7 +676,6 @@ async def _replace_target(bridge, prepared):
         bridge.backend.restore_selection(backend_state)
         await bridge.backend.abandon_prepared(prepared)
         raise
-    active = bool(bridge.backend.active)
     bridge.state.clear()
     bridge.state.update(staged)
     bridge.model_choices = []
@@ -706,7 +695,6 @@ async def _replace_target(bridge, prepared):
     if bridge.backend.writer_state(selected) in (None, WRITER_NATIVE):
         await bridge.backend.release_thread(selected, follow=True)
     bridge.running = False
-    return bool(inputs or outputs or active)
 
 
 @session_control
@@ -725,9 +713,8 @@ async def _change_backend(bridge, command, argument, received=None):
 @session_control
 async def command_new(bridge, command, argument, received=None):
     prepared = await _prepare_activation(bridge)
-    discarded = await _replace_target(bridge, prepared)
-    bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED"))
-                 + _switch_suffix(bridge, discarded))
+    await _replace_target(bridge, prepared)
+    bridge.reply(info(bridge, bridge.prompt("SESSION_CREATED")))
     return
 
 
@@ -768,11 +755,8 @@ async def command_switch(bridge, command, argument, received=None):
         bridge.reply(info(bridge, bridge.prompt("CURRENT_SESSION")))
         return
     prepared = await _prepare_activation(bridge, target)
-    discarded = await _replace_target(bridge, prepared)
-    desktop = bool(prepared.get("desktop"))
-    bridge.reply(info(bridge, bridge.prompt("SESSION_DESKTOP") if desktop
-                      else bridge.prompt("SESSION_SWITCHED"))
-                 + _switch_suffix(bridge, discarded))
+    await _replace_target(bridge, prepared)
+    bridge.reply(info(bridge, bridge.prompt("SESSION_SWITCHED")))
     return
 
 
@@ -783,7 +767,6 @@ async def command_compact(bridge, command, argument, received=None):
     if bridge.backend.blocked:
         raise UserFacingError(bridge.prompt("COMPACT_BLOCKED"))
     await bridge.backend.compact(bridge.state["thread"])
-    bridge.reply(bridge.prompt("COMPACT_REQUESTED"))
     return
 
 
@@ -1022,7 +1005,7 @@ async def command_stop(bridge, command, argument, received=None):
         if stopped:
             bridge.reply(bridge.prompt("STOP_REQUESTED") + cleared_note)
         elif bridge.running or bridge.active_turn():
-            bridge.reply(bridge.prompt("STOP_DEFERRED") + cleared_note)
+            bridge.reply(bridge.prompt("STOP_REQUESTED") + cleared_note)
         else:
             bridge.reply(bridge.prompt("STOP_IDLE") + cleared_note)
     except (TimeoutError, RuntimeError, OSError):

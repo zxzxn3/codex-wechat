@@ -9,6 +9,7 @@ README 用于项目介绍和公开推广；本文是 agent、维护者和测试�
 | --- | --- |
 | 模块职责、后台/App/CLI 所有权、认证与重绑边界 | [ARCHITECTURE](ARCHITECTURE.md) |
 | 稳定术语、命名约定和易混概念 | [CONTEXT](CONTEXT.md) |
+| 用户可见文案、隐式约定和提示边界 | [USER-MESSAGES](USER-MESSAGES.md) |
 | 公开命令、参数、平台入口和微信短别名 | [COMMANDS](COMMANDS.md) |
 | 由代码生成的命令别名、完整命令和数值设置范围 | [REFERENCE.generated](REFERENCE.generated.md) |
 | 安装、更新、卸载、目录和数据根 | [INSTALL](INSTALL.md) |

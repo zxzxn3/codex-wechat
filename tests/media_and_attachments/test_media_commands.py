@@ -14,7 +14,7 @@ from codex_wechat.storage import Store
 
 def prompt(name, values=None):
     if name == "ATTACHMENT_QUEUED":
-        return "附件已排队"
+        return "正在发送附件…"
     return SEND_FILE_FAILED.format(**values)
 
 
@@ -42,7 +42,7 @@ class GetOrderingTests(unittest.IsolatedAsyncioTestCase):
         await command_get(bridge(calls, snapshot=asset), "/get", "/tmp/a b.txt")
         self.assertEqual([call[0] for call in calls], ["prepare", "reply", "asset"])
         self.assertEqual(calls[0][1], "/tmp/a b.txt")
-        self.assertEqual(calls[1][1], "附件已排队")
+        self.assertEqual(calls[1][1], "正在发送附件…")
         self.assertEqual(calls[2][1], asset)
 
     async def test_a_local_failure_answers_without_a_receipt(self):

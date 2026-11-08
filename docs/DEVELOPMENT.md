@@ -110,7 +110,8 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 
 - 改持久状态：同步恢复逻辑和恢复测试；首次公开发布后，再维护跨版本迁移与旧格式 fixture。
 - 改协议字段：同步 SOURCES、ARCHITECTURE、诊断事件和失败边界。
-- 改提示或配置：保持 `prompts.py` 默认目录和英文 snake_case 字段；无效配置整组保留旧值。
+- 改提示或配置：先读 [USER-MESSAGES](USER-MESSAGES.md)，保持 `prompts.py` 默认目录和
+  英文 snake_case 字段；无效配置整组保留旧值。
 - 改 Windows/服务/安装：至少做静态入口检查；有实机时再跑真实回归。
 - 改 `*.ps1`：`codex-wechat.ps1`、`codex-desktop.ps1`、`install.ps1` 与 `uninstall.ps1`
   含中文，必须保持 **UTF-8 with BOM**。

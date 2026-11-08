@@ -264,8 +264,9 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("other-output", [entry["id"] for entry in bridge.state["outbox"]])
         self.assertEqual([job["phase"] for job in bridge.state["inputRecords"]],
                          [InputPhase.CANCELLED, InputPhase.CANCELLED])
-        self.assertTrue(bridge.state["outbox"][-1]["text"].endswith(
-            "已丢弃切换前的运行结果和待处理消息。"))
+        text = bridge.state["outbox"][-1]["text"]
+        self.assertIn("已切换会话", text)
+        self.assertNotIn("已丢弃切换前的运行结果和待处理消息。", text)
 
     async def test_new_session_detaches_the_live_turn(self):
         bridge = self.bridge
@@ -282,8 +283,9 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(current["done"].result().status, "discarded")
         self.assertEqual(bridge.state["thread"], "new-thread")
-        self.assertTrue(bridge.state["outbox"][-1]["text"].endswith(
-            "已丢弃切换前的运行结果和待处理消息。"))
+        text = bridge.state["outbox"][-1]["text"]
+        self.assertIn("已新建会话", text)
+        self.assertNotIn("已丢弃切换前的运行结果和待处理消息。", text)
 
     async def test_switch_target_validation_failure_keeps_the_old_target(self):
         bridge = self.bridge

@@ -93,7 +93,8 @@ class SharedSettingTests(unittest.IsolatedAsyncioTestCase):
         bridge.backend.set_writer(WRITER_BUSY, "thread-1")
         with patch("codex_wechat.commands.switch", self.reconnect(False)):
             await dispatch(bridge, "/settings shared false")
-        self.assertIn("下一条消息会自动接管", bridge.state["outbox"][-1]["text"])
+        self.assertIn(bridge.prompt("SETTINGS_SHARED_BUSY"),
+                      bridge.state["outbox"][-1]["text"])
 
     async def test_shared_summary_reports_the_unavailable_reason(self):
         bridge = self.bridge()
