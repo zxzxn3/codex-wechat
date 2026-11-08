@@ -37,13 +37,13 @@ class DocumentationContractTests(unittest.TestCase):
                      if line.startswith("$env:CODEX_WECHAT_TOKEN=")),
             )
         self.assertEqual(commands["README.md"], commands["docs/INSTALL.md"])
-        self.assertIn("## Agent 文档索引", texts["README.md"])
+        self.assertIn("[文档索引](docs/INDEX.md)", texts["README.md"])
 
-    def test_readme_agent_index_links_exist(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        index = readme.split("## Agent 文档索引", 1)[1].split("\n## ", 1)[0]
+    def test_documentation_index_links_exist(self):
+        index_path = ROOT / "docs" / "INDEX.md"
+        index = index_path.read_text(encoding="utf-8")
         targets = re.findall(r"\[[^]]+\]\(([^)#]+)", index)
         self.assertGreater(len(targets), 10)
         for target in targets:
             with self.subTest(target=target):
-                self.assertTrue((ROOT / target).is_file())
+                self.assertTrue((index_path.parent / target).is_file())

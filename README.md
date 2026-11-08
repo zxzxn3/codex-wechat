@@ -1,227 +1,232 @@
-# codex-wechat
-
-通过微信使用本机 Codex，会话、模型、工具和认证沿用 Codex。Linux 和 Windows 共用程序，
-后台服务分别使用 systemd 用户服务与 Windows Scheduled Task。普通 Codex、App 内置 CLI 和
-自定义启动入口使用相同的 App Server 接口；DeepSeek 是可选后端，不是安装前提。
-
-本项目为第三方独立开发，与 OpenAI、腾讯公司（微信）及其关联方没有隶属、合作或背书关系，
-也未获其授权；相关名称与商标归各自权利人所有。
-
 <p align="center">
-  <img src="assets/branding/codex-wechat-pixel-mascots.png" alt="codex-wechat pixel mascots" width="320">
+  <img src="assets/branding/codex-wechat-pixel-mascots.png" alt="codex-wechat" width="360">
 </p>
 
-## Agent 文档索引
+<h1 align="center">codex-wechat</h1>
 
-代码是实现事实的来源；文档用于解释当前契约、操作方式和已验证边界。先按任务定位文档，
-再只读取相关章节。
+<p align="center">
+  <strong>电脑上的 Codex，微信里接着说。</strong>
+</p>
 
-| 要查什么 | 先读 |
+<p align="center">
+  通过微信继续本机 Codex 的会话、工具、审批和文件。不是另一个云端 Agent，也不复制第二份模型凭据。
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-private%20beta-f36d49?style=flat-square" alt="Private beta">
+  <img src="https://img.shields.io/badge/python-3.11%2B-3157ff?style=flat-square" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-72c945?style=flat-square" alt="Linux and Windows">
+  <img src="https://img.shields.io/badge/license-Proprietary%20Beta-6d7167?style=flat-square" alt="Proprietary Beta">
+</p>
+
+<p align="center">
+  <sub>第三方独立项目，与 OpenAI、腾讯及其关联方没有隶属、合作、授权或背书关系。相关名称与商标归各自权利人所有。</sub>
+</p>
+
+> **内测中**：当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 的用户测试。
+> 下方内测安装命令包含临时 PAT，公开发布前会移除。
+
+## 它解决什么问题
+
+普通微信机器人从零开始理解你、重新准备环境，最后给你一段回答。codex-wechat 连接的是
+你电脑上已有的 Codex 会话：同一个 thread、同一份工作目录、同一套工具和权限。你在电脑上
+开始任务，临时出门后用手机补充要求、回答问题或查看结果，回来再继续。
+
+Codex 仍然是会话、模型、工具、审批和权限的权威；codex-wechat 只负责把微信变成远程输入口，
+并把结果带回正确的位置。
+
+## 主要能力
+
+| 能力 | 说明 |
 | --- | --- |
-| 模块职责、后台/App/CLI 所有权、认证与重绑边界 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
-| 稳定术语、命名约定和易混概念 | [CONTEXT](docs/CONTEXT.md) |
-| 公开命令、参数、平台入口和微信短别名 | [COMMANDS](docs/COMMANDS.md) |
-| 由代码生成的命令别名、完整命令和数值设置范围 | [REFERENCE.generated](docs/REFERENCE.generated.md) |
-| 安装、更新、卸载、目录和数据根 | [INSTALL](docs/INSTALL.md) |
-| 热配置、提示模板、资源清理和后台回落 | [CONFIGURATION](docs/CONFIGURATION.md) |
-| 输入提交、会话切换、outbox、发送确认、额度和恢复 | [DELIVERY](docs/DELIVERY.md) |
-| 日志字段、脱敏、微信轮询、连接池和网络计时 | [DIAGNOSTICS](docs/DIAGNOSTICS.md) |
-| 当前支持面、能力边界和实验性项 | [SUPPORT-MATRIX](docs/SUPPORT-MATRIX.md) |
-| 实机覆盖、历史局限和剩余缺口 | [VALIDATION](docs/VALIDATION.md) |
-| Linux/Windows 行为差异、二维码和桌面通知 | [PLATFORM-DIFFERENCES](docs/PLATFORM-DIFFERENCES.md) |
-| Windows 操作、IPC、共享 daemon 和故障排查 | [WINDOWS](docs/WINDOWS.md) |
-| Codex/App/微信协议、版本和外部依据 | [SOURCES](docs/SOURCES.md) |
-| 测试隔离、静态检查、依赖和发布退出标准 | [DEVELOPMENT](docs/DEVELOPMENT.md)、[AGENTS](AGENTS.md) |
-| 分发方式、私有入口和内测 PAT 边界 | [DISTRIBUTION](docs/DISTRIBUTION.md) |
-| 性能采样和暂不实施的恢复增强 | [PERFORMANCE](docs/PERFORMANCE.md) |
-| 维护成本与重构取舍 | [COMPLEXITY](docs/COMPLEXITY.md) |
-| 已作出的命令、投递和权限决策 | [决策索引](docs/decisions/README.md) |
+| 同一份工作 | 连接本机 Codex 的 thread/turn，不复制上下文、账户或历史 |
+| 手机控制面 | 会话切换、新建、模型、强度、目录、压缩、审批、停止和重启 |
+| 运行中切换 | `/switch`、`/new` 可 detach 旧回合；`/model`、`/effort`、`/cwd` 从下一回合生效 |
+| 微信原生 I/O | 文本、语音转写、图片、视频、文件和引用消息；结果可回传微信 |
+| 投递可靠性 | 无消息 ID 即暂停出站并保留队列；`/discard` 主动清空；回复预算可控 |
+| 多后端 | 内置 `codex` 与 `deepseek` 后端，同一个 App Server 接口 |
+| 跨平台 | Linux systemd 用户服务；Windows Scheduled Task |
+| 本地优先 | 文件、工具、审批和模型认证继续由本机 Codex 处理 |
+
+## 适合的场景
+
+- 出门前留下一个长任务，路上继续追问或补充要求。
+- 用手机发报错截图、设计稿、文档或素材，让 Codex 直接处理。
+- 当前任务还在跑时，把下一件事放进队列，或撤回尚未开始的排队消息。
+- 在多个项目或会话之间切换，不必回到电脑前。
+- Codex 需要审批、选择方案或回答问题时，直接拿手机处理。
+- 生成的图片、视频或文件直接回传微信，不必打开电脑查看。
+
+## 能力对比
+
+> 对比口径：2026-11-09，按当前仓库能力。这里是类别对比，不是“功能总冠军”排名；
+> 外部项目会变化，具体能力以对方文档和源码为准。
+
+### 普通微信机器人 vs codex-wechat
+
+| | 普通微信机器人 | codex-wechat |
+| --- | --- | --- |
+| 上下文 | 每次重新准备环境和背景 | 继续电脑上已有的 Codex 会话 |
+| 桌面与手机 | 通常是两段独立对话 | 同一份任务进展与结果 |
+| 文件与权限 | 另一套配置 | 工作目录、工具和权限留在本机 |
+| 适合 | 问一句、答一句 | 把正在做的事往前推 |
+
+### 结构性定位
+
+| 维度 | codex-wechat | 本地会话桥 | 多渠道 Agent 网关 | ACP/Desktop 自动化 |
+| --- | --- | --- | --- | --- |
+| 与本机 Codex 会话 | 原生 thread/writer，继续同一会话 | 共享本机 daemon/thread | 通常是平台侧新任务 | 取决于实现 |
+| 运行中切换 | `/switch`、`/new` detach；`/model`、`/effort`、`/cwd` 下一回合生效 | 视实现 | 视实现 | 视实现 |
+| 审批与提问 | 原生审批/提问转发到微信 | 可能有 | 视实现 | 可能有 |
+| 微信原生 I/O | 文本、语音转写、图片、视频、文件、引用 | 视实现 | 多渠道 | 通常无 |
+| 部署 | Linux systemd / Windows Task | 本机 | 云或容器 | 本机/桌面 |
+| 定位 | 个人 Codex 远程控制面 | 终端/手机同步 | 平台化多 Agent | 通用自动化 |
+
+codex-wechat 只做 Codex + 微信私聊，不承诺企业微信、Telegram、飞书、Discord 或通用多 Agent；
+不提供 macOS 版本，也不把 WSL 当成原生平台验收。App IPC 只跟随已经打开的 thread，没有
+远程聚焦接口。
+
+## 它怎么接上
+
+```text
+微信客户端  <--->  codex-wechat  <--->  Codex App Server
+                        |
+                        +-- 本机文件、工具、审批、权限
+```
+
+- 桥接是 Codex App Server 的 JSON-RPC 客户端，使用原生 thread、turn 和审批接口。
+- App 已打开目标会话时，桥接通过本机 IPC follower 跟随，不抢 writer、不关闭 App。
+- Linux 使用同 `CODEX_HOME` 的私有 Unix socket；Windows 使用本机命名管道并核对身份。
+- 会话切换会请求旧 thread 的 `thread/unsubscribe`，交还 Bridge 持有的写入者。
+
+架构、所有权和恢复边界见 [ARCHITECTURE](docs/ARCHITECTURE.md) 与
+[DELIVERY](docs/DELIVERY.md)。
+
+## 开发活动
+
+![codex-wechat 开发活动](assets/dev-activity.svg)
+
+当前快照约 362 次提交、5.1 万行新增、1.3 万行删除（含仓库初始导入）。图表由
+[`scripts/dev_chart.py`](scripts/dev_chart.py) 从本仓库 git 历史生成；仓库公开后也可以换成
+GitHub 活动图或其他公开统计服务。
 
 ## 快速开始
 
-当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 者内测试用。安装需要
-Python 3.11+、Git、Codex 和 `curl`。PAT 直接写在命令中，会进入 shell 历史。
+前提：Python 3.11+、Git、Codex、`curl` 和微信客户端。Linux 可选 `qrencode`；没有时会使用
+轻量 Python 回退。完整前提和卸载说明见 [INSTALL](docs/INSTALL.md)。
 
-Linux：
+### 内测安装（私有仓库，含临时 PAT）
+
+> 下面是内测用的一行安装命令。真实 PAT 只用于私有仓库，公开发布前会移除并由仓库所有者
+> 单独分发。
+
+<details>
+<summary>Linux 一行安装</summary>
 
 ```bash
 env CODEX_WECHAT_TOKEN='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' bash -o pipefail -c 'if [[ -z ${HTTPS_PROXY:-} && -z ${https_proxy:-} ]] && command -v gsettings >/dev/null; then mode=$(gsettings get org.gnome.system.proxy mode 2>/dev/null || true); mode=${mode#?}; mode=${mode%?}; if [[ $mode == manual ]]; then host=$(gsettings get org.gnome.system.proxy.http host 2>/dev/null || true); host=${host#?}; host=${host%?}; port=$(gsettings get org.gnome.system.proxy.http port 2>/dev/null || true); if [[ -n $host && $port =~ ^[0-9]+$ && $port -gt 0 ]]; then export HTTPS_PROXY="http://$host:$port" HTTP_PROXY="http://$host:$port"; fi; fi; fi; curl -fsSL -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
 ```
 
-Windows PowerShell：
+</details>
+
+<details>
+<summary>Windows 一行安装</summary>
 
 ```powershell
 $env:CODEX_WECHAT_TOKEN='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'; $r = Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main'; $body = $r.Content; if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }; & ([scriptblock]::Create($body))
 ```
 
-入口通过 GitHub Contents API 取得 bootstrap，再由 bootstrap 认证克隆到临时目录并安装。
-更新、卸载、数据目录和完整前提见 [安装、更新与卸载](docs/INSTALL.md)。
-安装后发送 `/help` 查看微信命令。
+</details>
 
-## 第一次使用
+### 第一次启动
 
 Linux：
 
 ```bash
-~/.local/share/codex-wechat/codex-wechat service-start
+codex-wechat service-start
+codex-wechat status
 ```
 
 Windows：
 
 ```powershell
 codex-wechat service-start
-```
-
-未绑定时会在当前终端显示二维码，扫码后后台服务继续启动。若安装器提示服务未注册，改用
-前台 `start` 并保持终端运行。微信只处理扫码账号的私聊，群聊不会响应；发送 `/help`
-查看命令。
-
-Windows 的短命令入口是 `%USERPROFILE%\.local\bin\codex-wechat.cmd`。只有该目录已存在且在
-用户 PATH 中时安装器才会创建它；否则使用
-`powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start`。
-入口细节见 [COMMANDS](docs/COMMANDS.md)。
-
-## 常用命令
-
-```text
 codex-wechat status
-codex-wechat service-start
-codex-wechat service-restart
-codex-wechat stop
-codex-wechat autostart true|false
-codex-wechat logs [--follow] [--service]
-codex-wechat uninstall [--purge-data]
 ```
 
-无参数运行默认执行 `status`。`service-restart` 等待服务稳定运行后返回；`stop` 只停止后台
-服务，前台桥接使用 `Ctrl+C`。Windows 的 `--follow`、`--service`、`--purge-data` 分别写作
-`-Follow`、`-Service`、`-PurgeData`。完整命令表见 [COMMANDS](docs/COMMANDS.md)。
+未绑定时终端会显示二维码，使用微信扫码并确认授权。微信只处理扫码账号的私聊，群聊不会
+响应；发送 `/help` 查看命令。Windows 如果没有生成短入口，使用安装器给出的完整
+`codex-wechat.ps1` 路径。
 
-后台服务运行时不能在前台执行 `start`；前台桥接持锁时不能执行 `service-start`。除只读
-`status` / `logs` 和显式 `uninstall` 外，root/管理员终端会被拒绝。容器或一次性 CI 可设置
-`CODEX_WECHAT_ALLOW_ROOT=1`。
+## 安全与信任
 
-## 微信里的基本行为
+- **账户不被复制**：继续使用本机 Codex 的认证和配置，桥接不保存第二份模型凭据。
+- **工作留在本机**：文件、工具、项目目录和权限仍由本机 Codex 处理。
+- **不做假成功**：消息没有明确回执时标记“投递未知”，暂停出站，不悄悄重复执行。
+- **只开放私人入口**：默认只处理绑定账号的私聊，不响应群聊，不自动变成公共机器人。
+- **审批仍然有效**：原生审批和提问只在当前连接实际收到请求时回应，桌面已处理的请求不会重放。
 
-- 普通消息默认 steer；`/queue {prompt}` 等空闲后独立执行，不阻挡后续 steer；`/unqueue`
-  撤回最后一条仍在等待的 queue。
-- `/sessions` 支持翻页和按标题检索；`/switch` 支持 4–32 位会话 ID 前缀、编号和标题，
-  多个匹配时显示候选。
-- `/switch`、`/new` 可在运行中执行：旧回合继续在后台运行但静默，旧来源未发送输出和待处理
-  输入会作废；`/model`、`/effort`、`/cwd` 可在运行中修改，并从下一回合生效。
-- 图片、视频和文件可直接从手机发送；附件 skill 可从安装器的 `components` 入口单独安装；
-  `/get` 只能取回当前会话工作目录内的文件，其他位置请先用 `/cwd` 切换。带转写文本的微信语音可直接作为输入。
-- 引用文字和局部引用会作为上下文交给 Agent；`/ping` 只测微信链路和供应商建连，不调用模型。
-- 中途完整回复直接发往微信，不发送逐字增量、推理或工具流水；中断、重启和失败恢复遵循
-  [DELIVERY](docs/DELIVERY.md) 的提交边界。
-- `/stop` 清空待办并中断当前共享轮次，不能撤销已经发生的操作；`/restart` 保留确定未提交
-  的输入。
-- `/discard`（短名 `/d`）清空当前待发送 outbox；正在发送的一条可能仍会到达，清空后会追加数量确认。
-- 原生提问与审批只在当前连接实际收到请求时回应；桌面已处理的请求不会被手机重放。
-- 已知限制：按住语音转文字、松开自动发送时，手机可能显示已发送但桥接收不到；改用
-  “点击语音转文字，文字进入输入框后手动发送”已确认可用。
+## 平台与边界
 
-## Codex CLI 与 App
+| | Linux | Windows |
+| --- | --- | --- |
+| 状态 | 当前树有完整离线回归 | 当前版本仍需实机复测 |
+| 后台 | systemd 用户服务 | Scheduled Task + supervisor |
+| 服务日志 | `journalctl --user -u codex-wechat` | `logs/service.log`，按 5 MiB 轮转 |
+| App IPC | 私有 Unix socket | 本机命名管道，只跟随主 `CODEX_HOME` |
+| 自启 | systemd enable/disable | 计划任务登录触发器 |
 
-桥接只在真正运行时持有会话写者，回合结束会交还；空闲时 App 可以打开同一会话，下一条微信
-消息会重新获取写者。遇到 App 的 active writer 时，桥接通过 App IPC 跟随，不抢锁、不关闭
-App。App 必须先打开目标会话；反向接入尚未实现。
+当前明确不提供：macOS 版本、群聊、企业微信/Telegram/飞书/Discord、多租户客服、通用多 Agent
+平台、App 反向聚焦未打开会话。App IPC 依赖 Codex App 版本，属于实验性适配面。
 
-Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本机命名管道，并核对
-服务进程用户和已注册 App；Windows 只跟随主 `CODEX_HOME`。详细边界见
-[ARCHITECTURE](docs/ARCHITECTURE.md) 和 [SOURCES](docs/SOURCES.md)。
+## FAQ
 
-只用 CLI 与微信双向收发时，在微信发送：
+**会另开一个 Codex，消耗另一份上下文吗？**
 
-```text
-/settings shared true
-```
+不会按这个目标设计。它尝试接入本机已有 Codex 会话；App 已打开时会跟随当前会话，而不是复制
+聊天记录。
 
-该开关默认 Windows 为 `false`、Linux 为 `true`；开启后 Codex App 打开桥接当前会话可能显示
-锁定。选择原则：
+**手机和电脑可以同时看同一个任务吗？**
 
-- Windows App 为主：保持 `false`
-- Windows Codex CLI 为主：改为 `true`
-- Linux Codex CLI 为主：保持 `true`
-- Linux App 为主：改为 `false`
+可以围绕同一会话工作。桌面和微信看到的进展、结果和工作目录来自同一个 Codex 任务。
 
-普通 CLI 直接运行 `codex` 或对应 backend 的 launcher，例如 `codex-deepseek`。`codex-wechat`
-不提供 CLI 包装命令；桥接和 CLI 通过同一 Codex daemon/`CODEX_HOME` 协同。
-`codex-desktop` / `codex-desktop.ps1` 只作为内部共享后台适配器保留，不是公开命令。
+**需要把 Codex 密码或 API Key 给微信吗？**
 
-## 源码结构
+不需要。认证继续由本机 Codex 管理，codex-wechat 不另存一份模型凭据。
 
-运行期 Python 代码位于 `codex_wechat/`，包内使用相对导入；根目录只保留单文件
-`installer.py`、Windows supervisor 薄入口 `bootstrap_supervisor.py`，以及安装、bootstrap
-和公开命令的平台入口脚本。安装器会把整个包复制到 stable payload，并从
-`codex_wechat.app` 启动桥接。开发与验证命令见 [DEVELOPMENT](docs/DEVELOPMENT.md)。
+**电脑关机后还能用吗？**
 
-## 配置
+不能。电脑需要开机并保持后台服务运行，因为真正执行任务的是你的电脑。
 
-运行配置是 `config.json`，示例见 [config.example.json](config.example.json)。配置按文件变化
-热加载；无效配置保留上一组有效值并提示一次，不中断当前回合。`media.maxMiB` 例外：修改文件后
-需重启服务，或使用 `/settings media.maxMiB` 立即应用。
+**支持 Codex App 和命令行吗？**
 
-后端定义位于 `backends.<名字>`，进程启动和每次 `/backend` 前重新读取，支持 `label`、
-`command`、`env`、`sharedDaemon`、`useSystemProxy` 和 `threadOptions`。`label` 是显示名，按原文
-输出；内置定义用的就是小写的 `codex` / `deepseek`，与 `/backend` 接受的名称一致。修改当前后端
-后再次执行 `/backend` 会重连；`/settings` 只处理热配置，不重读后端定义。新建会话才应用
-`threadOptions`，已有会话保留自己的设置。
+支持围绕原生 Codex 会话工作。App 已打开目标会话时可跟随；仅使用 CLI 也能共享本机 Codex
+daemon。
 
-常用微信设置：
+**会不会重复发送，或者告诉我“已完成”但其实没收到？**
 
-```text
-/settings
-/settings ack <template>
-/settings finish <template>
-/settings sourceHint <text>
-/settings autostart true|false
-/settings shared true|false
-/settings compactionNotice true|false
-/settings slicing.smart true|false
-/settings connectionIdleSeconds 0-3600
-/settings media.maxMiB 1-100
-/settings slicing.targetChars <number>
-/settings logs.keep 1-100
-/help settings
-```
+系统把发送确认和投递未知分开处理。没有明确回执时不会把它伪装成成功。
 
-`/settings ack fields` 和 `/settings finish fields` 列出同一组模板字段。最终回答相关字段
-表示最近一次完成轮次的数据；没有时间戳或该轮 token 用量时显示 `N/A`。更多提示、切片、
-限额和代理配置见 [CONFIGURATION](docs/CONFIGURATION.md)。
+**适合当团队客服机器人吗？**
 
-## 绑定失效与日志
+不适合。它是给个人在微信里继续本机 Codex 工作用的，不是多渠道客服或通用 Agent 平台。
 
-确定认证失效后，桥接暂停微信收发和新输入提交，保留待办、发件箱和正在运行的 Agent 结果，
-通过系统通知提示重绑：
+## 文档与开发
 
-```bash
-codex-wechat rebind
-```
+README 用于项目介绍；agent、维护者和测试者从 [文档索引](docs/INDEX.md) 开始。
 
-Windows 使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\codex-wechat.ps1 rebind`；已有提交工作时要加
-`--stop-active` / `-StopActive`。同微信号保留交付和偏好；bot 变化时重置协议上下文；换微信
-号时隔离旧交付。
+- 安装、更新、卸载：[INSTALL](docs/INSTALL.md)
+- 微信命令和短别名：[COMMANDS](docs/COMMANDS.md)、[生成参考](docs/REFERENCE.generated.md)
+- 架构、配置、交付、诊断：[ARCHITECTURE](docs/ARCHITECTURE.md)、[CONFIGURATION](docs/CONFIGURATION.md)、[DELIVERY](docs/DELIVERY.md)、[DIAGNOSTICS](docs/DIAGNOSTICS.md)
+- 支持面与验证证据：[SUPPORT-MATRIX](docs/SUPPORT-MATRIX.md)、[VALIDATION](docs/VALIDATION.md)
+- 决策记录：[决策索引](docs/decisions/README.md)
+- 开发检查：`scripts/check.sh`；测试与静态检查约定见 [DEVELOPMENT](docs/DEVELOPMENT.md) 和 [AGENTS](AGENTS.md)
 
-日志默认写入数据目录的 `logs/bridge.jsonl`，按 5 MiB 轮转并保留 3 份备份；可用
-`/settings logs.keep 1-100` 调整保留份数：
+## License
 
-```bash
-codex-wechat logs [--follow] [--service]
-```
+本项目采用 [Proprietary Beta License](LICENSE)，不是开源软件。仅授权仓库所有者直接许可的
+个人在自控设备上进行非商业评估和测试；不得转售、再分发、商用或创建衍生作品。正式发布前
+请以 `LICENSE` 原文为准。
 
-`--service` 才读取平台服务控制台（Linux `journalctl`，Windows `service.log`）；它不是脱敏
-结构化日志。Windows 的 `service.log` 同样按 5 MiB 轮转，并与 `bridge.jsonl` 共用
-`logs.keep`；Linux 控制台日志的保留由 journald 管理。字段、脱敏边界和延迟阶段见
-[DIAGNOSTICS](docs/DIAGNOSTICS.md)。
-
-## 许可证
-
-本项目是专有内测软件，**禁止再分发和商业使用**。仅授权个人进行非商业评估和测试；完整
-条款见 [LICENSE](LICENSE)。
-
-配置、账户、交付状态和日志只保存在本机；运行期凭据不写入配置、仓库状态或微信。安装命令中的
-内测 PAT 只用于本次私有源码请求，不写入仓库配置或安装状态。自动回传和 `/get`
-都只读取当前会话工作目录内的普通文件，并拒绝微信桥自身状态。这个 cwd 范围是
-**保守近似，不是 Codex sandbox 等价边界**：桥不知道 agent 的 deny-read、permission profile
-或外部 sandbox 规则，因此在某些配置下仍可能读取 agent 被拒绝的 cwd 内文件。
+“Codex”“OpenAI”“微信”“WeChat”“Tencent”等名称与商标归各自权利人所有。本项目是第三方
+独立开发，与 OpenAI、腾讯及其关联方没有隶属、合作、授权或背书关系。

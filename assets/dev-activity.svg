@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="520" viewBox="0 0 1100 520" role="img" aria-labelledby="title desc">
+<title id="title">codex-wechat 开发活动</title>
+<desc id="desc">按日统计的提交数、代码新增和删除行数，数据来自 git 历史。</desc>
+<style>
+  text { font-family: "Noto Sans CJK SC", "Source Han Sans CN", "Avenir Next", sans-serif; }
+  .title { font-size: 27px; font-weight: 700; fill: #151713; }
+  .subtitle { font-size: 13px; fill: #6d7167; }
+  .section { font-size: 13px; font-weight: 700; fill: #2b2f27; }
+  .axis { font-size: 11px; fill: #6d7167; }
+  .value { font-size: 10px; fill: #2b2f27; }
+  .card-label { font-size: 11px; fill: #6d7167; }
+  .card-value { font-size: 24px; font-weight: 700; }
+  .grid { stroke: #e7e1d4; stroke-width: 1; }
+  .legend { font-size: 11px; fill: #6d7167; }
+  .foot { font-size: 11px; fill: #6d7167; }
+</style>
+<rect width="1100" height="520" fill="#f7f2e7"/>
+<rect x="24" y="20" width="1052" height="480" rx="24" fill="#fffdf8" stroke="#e7e1d4"/>
+<text x="48" y="62" class="title">开发活动</text>
+<text x="48" y="86" class="subtitle">codex-wechat · 2026-11-02 – 2026-11-09 · 来自本仓库 git 历史</text>
+<rect x="520" y="42" width="190" height="66" rx="16" fill="#fffdf8" stroke="#e3ddcf"/><text x="538" y="66" class="card-label">提交</text><text x="538" y="94" class="card-value" fill="#72c945">362</text>
+<rect x="720" y="42" width="190" height="66" rx="16" fill="#fffdf8" stroke="#e3ddcf"/><text x="738" y="66" class="card-label">新增行</text><text x="738" y="94" class="card-value" fill="#3157ff">51,330</text>
+<rect x="920" y="42" width="190" height="66" rx="16" fill="#fffdf8" stroke="#e3ddcf"/><text x="938" y="66" class="card-label">删除行</text><text x="938" y="94" class="card-value" fill="#f36d49">13,036</text>
+<text x="78" y="144" class="section">每日提交</text>
+<line x1="78" x2="1026" y1="156.0" y2="156.0" class="grid"/><line x1="78" x2="1026" y1="202.0" y2="202.0" class="grid"/><line x1="78" x2="1026" y1="248.0" y2="248.0" class="grid"/><line x1="78" x2="1026" y1="344.0" y2="344.0" class="grid"/><line x1="78" x2="1026" y1="386.0" y2="386.0" class="grid"/><line x1="78" x2="1026" y1="428.0" y2="428.0" class="grid"/><rect x="104.1" y="220.1" width="66.4" height="27.9" rx="6" fill="#72c945"/><text x="137.2" y="215.1" text-anchor="middle" class="value">30</text><rect x="222.6" y="235.9" width="66.4" height="12.1" rx="6" fill="#72c945"/><text x="255.8" y="230.9" text-anchor="middle" class="value">13</text><rect x="341.1" y="156.0" width="66.4" height="92.0" rx="6" fill="#72c945"/><text x="374.2" y="151.0" text-anchor="middle" class="value">99</text><rect x="459.6" y="179.2" width="66.4" height="68.8" rx="6" fill="#72c945"/><text x="492.8" y="174.2" text-anchor="middle" class="value">74</text><rect x="578.1" y="158.8" width="66.4" height="89.2" rx="6" fill="#72c945"/><text x="611.2" y="153.8" text-anchor="middle" class="value">96</text><rect x="696.6" y="216.4" width="66.4" height="31.6" rx="6" fill="#72c945"/><text x="729.8" y="211.4" text-anchor="middle" class="value">34</text><rect x="815.1" y="247.1" width="66.4" height="0.9" rx="6" fill="#72c945"/><text x="848.2" y="242.1" text-anchor="middle" class="value">1</text><rect x="933.6" y="234.1" width="66.4" height="13.9" rx="6" fill="#72c945"/><text x="966.8" y="229.1" text-anchor="middle" class="value">15</text>
+<text x="78" y="322" class="section">每日代码变动</text>
+<rect x="830" y="298" width="10" height="10" rx="3" fill="#3157ff"/>
+<text x="846" y="307" class="legend">新增</text>
+<rect x="910" y="298" width="10" height="10" rx="3" fill="#f36d49"/>
+<text x="926" y="307" class="legend">删除</text>
+<rect x="118.3" y="344.0" width="37.9" height="84.0" rx="6" fill="#3157ff"/><text x="137.2" y="339.0" text-anchor="middle" class="value">17,976</text><rect x="236.8" y="400.2" width="37.9" height="27.8" rx="6" fill="#3157ff"/><text x="255.8" y="395.2" text-anchor="middle" class="value">5,942</text><rect x="355.3" y="407.6" width="37.9" height="20.4" rx="6" fill="#3157ff"/><text x="374.2" y="402.6" text-anchor="middle" class="value">4,372</text><rect x="473.8" y="377.4" width="37.9" height="50.6" rx="6" fill="#3157ff"/><text x="492.8" y="372.4" text-anchor="middle" class="value">10,818</text><rect x="592.3" y="399.7" width="37.9" height="28.3" rx="6" fill="#3157ff"/><text x="611.2" y="394.7" text-anchor="middle" class="value">6,051</text><rect x="710.8" y="415.0" width="37.9" height="13.0" rx="6" fill="#3157ff"/><text x="729.8" y="410.0" text-anchor="middle" class="value">2,780</text><rect x="829.3" y="425.6" width="37.9" height="2.4" rx="6" fill="#3157ff"/><text x="848.2" y="420.6" text-anchor="middle" class="value">515</text><rect x="947.8" y="414.6" width="37.9" height="13.4" rx="6" fill="#3157ff"/><text x="966.8" y="409.6" text-anchor="middle" class="value">2,876</text><rect x="146.7" y="421.5" width="37.9" height="6.5" rx="6" fill="#f36d49"/><rect x="265.2" y="421.0" width="37.9" height="7.0" rx="6" fill="#f36d49"/><rect x="383.7" y="421.6" width="37.9" height="6.4" rx="6" fill="#f36d49"/><rect x="502.2" y="409.5" width="37.9" height="18.5" rx="6" fill="#f36d49"/><rect x="620.7" y="420.7" width="37.9" height="7.3" rx="6" fill="#f36d49"/><rect x="739.2" y="420.8" width="37.9" height="7.2" rx="6" fill="#f36d49"/><rect x="857.7" y="427.8" width="37.9" height="0.2" rx="6" fill="#f36d49"/><rect x="976.2" y="420.2" width="37.9" height="7.8" rx="6" fill="#f36d49"/><text x="137.2" y="456" text-anchor="middle" class="axis">11-02</text><text x="255.8" y="456" text-anchor="middle" class="axis">11-03</text><text x="374.2" y="456" text-anchor="middle" class="axis">11-04</text><text x="492.8" y="456" text-anchor="middle" class="axis">11-05</text><text x="611.2" y="456" text-anchor="middle" class="axis">11-06</text><text x="729.8" y="456" text-anchor="middle" class="axis">11-07</text><text x="848.2" y="456" text-anchor="middle" class="axis">11-08</text><text x="966.8" y="456" text-anchor="middle" class="axis">11-09</text>
+<text x="48" y="496" class="foot">图表由 scripts/dev_chart.py 生成；含仓库初始导入，数字随提交历史变化。</text>
+</svg>
