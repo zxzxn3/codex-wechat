@@ -5,7 +5,7 @@
 `python -m codex_wechat`；原生计划任务操作只存在于内部 helper
 `windows/task-service.ps1`，不是用户命令。
 
-产品决策和已移除项见 [COMMANDS-DECISIONS](COMMANDS-DECISIONS.md)。
+产品决策和已移除项见 [COMMANDS-DECISIONS](decisions/COMMANDS-DECISIONS.md)。
 
 ## 入口
 
@@ -40,24 +40,8 @@ Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应
 
 ### 微信短别名
 
-| 短名 | 等价命令 |
-|---|---|
-| `/s` | `/status` |
-| `/v` | `/version` |
-| `/n` | `/new` |
-| `/c` | `/compact` |
-| `/q` | `/queue` |
-| `/u` | `/unqueue` |
-| `/p` | `/ping` |
-| `/b` | `/backend` |
-| `/m` | `/model` |
-| `/e` | `/effort` |
-| `/a` | `/approve` |
-| `/d` | `/discard` |
-| `/g` | `/get` |
-| `/r` | `/restart` |
-| `/` | `/continue` |
-| `/h` | `/help` |
+短别名和完整命令用途由代码自动生成在
+[命令与设置参考](REFERENCE.generated.md#微信命令短别名)，避免手工表格与命令目录漂移。
 
 短别名与完整命令走同一张命令表，平台之间没有差异；默认 `/help` 只显示常用项，
 `/help all` 显示完整命令面（例如 `/version` 只在 `/help all` 中展示）。

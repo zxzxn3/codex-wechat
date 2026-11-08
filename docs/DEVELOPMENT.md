@@ -1,9 +1,10 @@
 # 开发与检查
 
-本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，能力边界见
-[CAPABILITIES](CAPABILITIES.md)，支持面见 [SUPPORT-MATRIX](SUPPORT-MATRIX.md)，命令词表与
-平台差异见 [COMMANDS](COMMANDS.md)，外部依据见 [SOURCES](SOURCES.md)。跨平台协作约定与
-已踩过的坑（Windows 编码、`.ps1` BOM、提交姿势、测试隔离）见仓库根的 [AGENTS](../AGENTS.md)。
+本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md) 及其关联的
+[CONFIGURATION](CONFIGURATION.md)、[DELIVERY](DELIVERY.md)、[DIAGNOSTICS](DIAGNOSTICS.md)，
+能力边界和支持面见 [SUPPORT-MATRIX](SUPPORT-MATRIX.md)，命令词表与平台差异见
+[COMMANDS](COMMANDS.md)，外部依据见 [SOURCES](SOURCES.md)。跨平台协作约定与已踩过的坑
+（Windows 编码、`.ps1` BOM、提交姿势、测试隔离）见仓库根的 [AGENTS](../AGENTS.md)。
 
 ## 兼容策略
 
@@ -26,7 +27,7 @@ CODEX_WECHAT_INSTALL_ROOT="$src" CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" \
 PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests -v
 ```
 
-诊断日志默认写在 `data_root()/logs/bridge.jsonl`。`tests/test_support.py` 在导入时把
+诊断日志默认写在 `data_root()/logs/bridge.jsonl`。`tests/support/helpers.py` 在导入时把
 `diagnostics` 指向临时 sink，并在每次 `reset()` 后重新套用，所以直接跑测试不会把夹具事件
 写进已安装实例正在使用的日志；上面的隔离目录仍然推荐，因为它同时挡住其它副作用。这里把源码
 导出到没有 `.data-root` 的临时根，避免源码树本身是安装根时与新的 fail-closed 冲突。
@@ -50,6 +51,11 @@ Remove-Item -LiteralPath $archive, $src -Recurse -Force -ErrorAction SilentlyCon
 
 Windows、真实微信/CDN、App/daemon 联调不属于离线测试；mock 通过不能写成真实平台或端到端通过。
 相关文档入口、版本和已确认约束应在派发测试时一并交接。
+
+指定测试会话从固定源码副本执行。全部状态、配置、进程与RPC均使用临时目录或模拟，
+不接入生产账户、服务、模型和微信。除测试通过外，独立核对
+[SUPPORT-MATRIX](SUPPORT-MATRIX.md) 中的两侧能力；文档、源码、离线结果与实机证据分别报告，
+无法验证的组合不写成通过。协议来源见 [SOURCES](SOURCES.md)。
 
 ## 静态检查、覆盖率与依赖审计
 
@@ -133,7 +139,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 强行统一平台适配层。
 
 安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；运行期模块位于
-`codex_wechat/`，包内使用相对导入。`tests/test_release_layout.py` 会检查 stable payload
+`codex_wechat/`，包内使用相对导入。
+`tests/install_and_release/test_release_layout.py` 会检查 stable payload
 是否包含完整包文件，并验证脱离源码树的导入。
 
 ## 审查与发布退出标准

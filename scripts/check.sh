@@ -37,6 +37,7 @@ fi
 
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m coverage erase
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m coverage run -m unittest discover -s tests
+.venv/bin/python scripts/reference_docs.py --check
 .venv/bin/python -m coverage report --sort=cover
 
 if ((audit)); then

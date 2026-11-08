@@ -102,8 +102,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 运行时准备，最后才切换 `current`。项目不提供安装回滚命令。
 
 每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
-release 通过 `current` / `active-release` 保留。详细阶段边界见 [ARCHITECTURE](ARCHITECTURE.md)
-的安装段落。
+release 通过 `current` / `active-release` 保留。详细阶段边界见
+[CONFIGURATION](CONFIGURATION.md#安装与服务边界)。
 
 ## 卸载
 
@@ -150,4 +150,4 @@ Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` �
 
 `current`、`active-release`、`releases/`、`.state/`、`logs/`、`workspace/`、`shared/` 和
 `config.json` 各有独立职责，不复制供应商凭据或会话历史。配置与提示的细节见
-[ARCHITECTURE](ARCHITECTURE.md#配置与资源)。
+[CONFIGURATION](CONFIGURATION.md)。

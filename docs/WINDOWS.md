@@ -130,7 +130,7 @@ codex-wechat logs -Service
 不要原样外传。
 
 排查网络时先看 `dns_ms`、`curl_total_ms`、`timeout_stage` 和 `proxy_used`；字段定义见
-[ARCHITECTURE](ARCHITECTURE.md#诊断与隐私)。本机网络问题、历史验收和 WMI 组合缺口见
+[DIAGNOSTICS](DIAGNOSTICS.md)。本机网络问题、历史验收和 WMI 组合缺口见
 [VALIDATION](VALIDATION.md)。
 
 ## 常见失败

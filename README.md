@@ -11,10 +11,35 @@
   <img src="assets/branding/codex-wechat-pixel-mascots.png" alt="codex-wechat pixel mascots" width="320">
 </p>
 
+## Agent 文档索引
+
+代码是实现事实的来源；文档用于解释当前契约、操作方式和已验证边界。先按任务定位文档，
+再只读取相关章节。
+
+| 要查什么 | 先读 |
+| --- | --- |
+| 模块职责、后台/App/CLI 所有权、认证与重绑边界 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| 公开命令、参数、平台入口和微信短别名 | [COMMANDS](docs/COMMANDS.md) |
+| 由代码生成的命令别名、完整命令和数值设置范围 | [REFERENCE.generated](docs/REFERENCE.generated.md) |
+| 安装、更新、卸载、目录和数据根 | [INSTALL](docs/INSTALL.md) |
+| 热配置、提示模板、资源清理和后台回落 | [CONFIGURATION](docs/CONFIGURATION.md) |
+| 输入提交、会话切换、outbox、发送确认、额度和恢复 | [DELIVERY](docs/DELIVERY.md) |
+| 日志字段、脱敏、微信轮询、连接池和网络计时 | [DIAGNOSTICS](docs/DIAGNOSTICS.md) |
+| 当前支持面、能力边界和实验性项 | [SUPPORT-MATRIX](docs/SUPPORT-MATRIX.md) |
+| 实机覆盖、历史局限和剩余缺口 | [VALIDATION](docs/VALIDATION.md) |
+| Linux/Windows 行为差异、二维码和桌面通知 | [PLATFORM-DIFFERENCES](docs/PLATFORM-DIFFERENCES.md) |
+| Windows 操作、IPC、共享 daemon 和故障排查 | [WINDOWS](docs/WINDOWS.md) |
+| Codex/App/微信协议、版本和外部依据 | [SOURCES](docs/SOURCES.md) |
+| 测试隔离、静态检查、依赖和发布退出标准 | [DEVELOPMENT](docs/DEVELOPMENT.md)、[AGENTS](AGENTS.md) |
+| 分发方式、私有入口和内测 PAT 边界 | [DISTRIBUTION](docs/DISTRIBUTION.md) |
+| 性能采样和暂不实施的恢复增强 | [PERFORMANCE](docs/PERFORMANCE.md) |
+| 维护成本与重构取舍 | [COMPLEXITY](docs/COMPLEXITY.md) |
+| 已作出的命令、投递和权限决策 | [决策记录](docs/decisions/COMMANDS-DECISIONS.md) |
+
 ## 快速开始
 
-当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 者内测试用。该 PAT 仅对该仓库只读且限时吊销。
-入口通过 GitHub Contents API 取得 bootstrap，再由 bootstrap 认证克隆到临时目录并安装。
+当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 者内测试用。安装需要
+Python 3.11+、Git、Codex 和 `curl`。PAT 直接写在命令中，会进入 shell 历史。
 
 Linux：
 
@@ -28,10 +53,9 @@ Windows PowerShell：
 $env:CODEX_WECHAT_TOKEN='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'; $r = Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main'; $body = $r.Content; if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }; & ([scriptblock]::Create($body))
 ```
 
-安装需要 Python 3.11+、Git、Codex 和 `curl`。
-撤销后新的安装和更新立即失效。PAT 只用于本次 API 请求和私有源码下载，不写入仓库配置或安装状态。
-交互式安装完成后会询问是否立即启动，直接回车即启动；输入 `n` 跳过。非交互安装不会自动启动。
-详细前提、更新和卸载见 [安装、更新与卸载](docs/INSTALL.md)。
+入口通过 GitHub Contents API 取得 bootstrap，再由 bootstrap 认证克隆到临时目录并安装。
+更新、卸载、数据目录和完整前提见 [安装、更新与卸载](docs/INSTALL.md)。
+安装后发送 `/help` 查看微信命令。
 
 ## 第一次使用
 
@@ -88,7 +112,7 @@ codex-wechat uninstall [--purge-data]
   `/get` 只能取回当前会话工作目录内的文件，其他位置请先用 `/cwd` 切换。带转写文本的微信语音可直接作为输入。
 - 引用文字和局部引用会作为上下文交给 Agent；`/ping` 只测微信链路和供应商建连，不调用模型。
 - 中途完整回复直接发往微信，不发送逐字增量、推理或工具流水；中断、重启和失败恢复遵循
-  [ARCHITECTURE](docs/ARCHITECTURE.md) 的提交边界。
+  [DELIVERY](docs/DELIVERY.md) 的提交边界。
 - `/stop` 清空待办并中断当前共享轮次，不能撤销已经发生的操作；`/restart` 保留确定未提交
   的输入。
 - `/discard`（短名 `/d`）清空当前待发送 outbox；正在发送的一条可能仍会到达，清空后会追加数量确认。
@@ -163,7 +187,7 @@ Linux App IPC 使用同 `CODEX_HOME` 的私有 Unix socket。Windows 使用本�
 
 `/settings ack fields` 和 `/settings finish fields` 列出同一组模板字段。最终回答相关字段
 表示最近一次完成轮次的数据；没有时间戳或该轮 token 用量时显示 `N/A`。更多提示、切片、
-限额和代理配置见 [ARCHITECTURE](docs/ARCHITECTURE.md#配置与资源)。
+限额和代理配置见 [CONFIGURATION](docs/CONFIGURATION.md)。
 
 ## 绑定失效与日志
 
@@ -188,21 +212,7 @@ codex-wechat logs [--follow] [--service]
 `--service` 才读取平台服务控制台（Linux `journalctl`，Windows `service.log`）；它不是脱敏
 结构化日志。Windows 的 `service.log` 同样按 5 MiB 轮转，并与 `bridge.jsonl` 共用
 `logs.keep`；Linux 控制台日志的保留由 journald 管理。字段、脱敏边界和延迟阶段见
-[ARCHITECTURE](docs/ARCHITECTURE.md#诊断与隐私)。
-
-## 文档导航
-
-- [安装、更新与卸载](docs/INSTALL.md)
-- [命令面](docs/COMMANDS.md)
-- [支持矩阵](docs/SUPPORT-MATRIX.md)
-- [平台差异](docs/PLATFORM-DIFFERENCES.md)
-- [架构与恢复边界](docs/ARCHITECTURE.md)
-- [Windows 操作与故障排查](docs/WINDOWS.md)
-- [验证状态](docs/VALIDATION.md)
-- [外部依据](docs/SOURCES.md)
-- [开发与检查](docs/DEVELOPMENT.md)
-- [性能采样](docs/PERFORMANCE.md)
-- [复杂度与取舍](docs/COMPLEXITY.md)
+[DIAGNOSTICS](docs/DIAGNOSTICS.md)。
 
 ## 许可证
 

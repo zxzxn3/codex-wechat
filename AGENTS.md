@@ -73,17 +73,17 @@ $errors = $null
 ## 测试
 
 - 单个文件：`python -m unittest discover -s tests -p "test_x.py"`。
-  两种跑法都要能过：`discover -s tests` 与 `-m unittest tests.test_x`（`tests/__init__.py`
-  只是包标记）。
-- 诊断日志已被隔离：`tests/test_support.py` 在导入时把 `diagnostics` 指向临时 sink，并在每次
+  两种跑法都要能过：`discover -s tests` 与
+  `-m unittest tests.<主题目录>.test_x`（`tests/__init__.py` 只是包标记）。
+- 诊断日志已被隔离：`tests/support/helpers.py` 在导入时把 `diagnostics` 指向临时 sink，并在每次
   `reset()` 后重新套用。**不要**在模块级再调 `diagnostics.reset()` 之后不加回指，
   否则夹具事件会写进开发者真实的 `logs/bridge.jsonl`——那份文件是事故证据。
 - 跨平台夹具不要硬编码 `/tmp` 或某个平台的默认目录：用 `tempfile`，需要模拟 Linux 分支时用
-  `test_support.xdg_user_data_dir`。
+  `tests.support.helpers.xdg_user_data_dir`。
 - 卸载/安装这类破坏性路径用 mock 与临时目录验证，**不要**在真机上跑真实卸载来"看看输出"。
 
 ## 文档
 
-- 行为变更要同时更新 `docs/` 对应页（架构、命令、安装、验证四类最常用），并在 `VALIDATION.md`
-  里区分"已实机验证"与"仅离线单测"。
+- 行为变更要同时更新 `docs/` 对应页（架构、命令、安装、配置、交付、诊断和验证最常用），
+  并在 `VALIDATION.md` 里区分"已实机验证"与"仅离线单测"。
 - 已实测的数字（测试数、耗时、日志行数）写进文档时要注明日期与平台。

@@ -1,0 +1,453 @@
+"""Structured diagnostics stay bounded and never record message content."""
+import asyncio
+import json
+import os
+from pathlib import Path
+from contextlib import redirect_stdout
+from io import StringIO
+import tempfile
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from codex_wechat import diagnostics
+from codex_wechat.app import Bridge
+from codex_wechat.log_viewer import _log_files, _read_log_updates, _tail_lines, show_logs
+from codex_wechat.commands import dispatch
+from codex_wechat.storage import Store
+from codex_wechat.wechat import WeChat
+from tests.support.http_fixtures import exchange
+from tests.support.helpers import isolate_diagnostics
+
+
+class CodedError(RuntimeError):
+    code = -32603
+
+
+class IsolationTests(unittest.TestCase):
+    def test_reset_does_not_restore_the_real_data_root_log(self):
+        # A module-level reset() must not send the next fixture's events into the
+        # developer's own bridge.jsonl, which is read as incident evidence.
+        diagnostics.reset()
+        self.assertEqual(Path(diagnostics.log_path()).resolve(),
+                         Path(isolate_diagnostics()).resolve())
+
+
+class DiagnosticsTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "logs" / "bridge.jsonl"
+        diagnostics.configure(path=self.path, level="debug", max_bytes=5 * 1024 * 1024)
+
+    def tearDown(self):
+        diagnostics.reset()
+        self.temp.cleanup()
+
+    def records(self):
+        if not self.path.exists():
+            return []
+        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+
+    def test_jsonl_record_has_only_declared_metadata(self):
+        diagnostics.log_event("input.received", component="input", kind="input",
+                              chars=12, count=2, ok=True, status="preparing")
+        records = self.records()
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["event"], "input.received")
+        self.assertEqual(record["component"], "input")
+        self.assertEqual(record["chars"], 12)
+        self.assertTrue(record["ok"])
+        self.assertTrue(record["ts"].endswith("Z"))
+        self.assertNotIn("timezone", record)
+        self.assertFalse(self.path.read_text(encoding="utf-8").endswith("\n\n"))
+        if os.name != "nt":
+            self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    def test_message_prompt_credentials_and_paths_never_reach_log(self):
+        sentinels = (
+            "PROMPT_SENTINEL_7f935",
+            "TOKEN_SENTINEL_7f935",
+            "CONTEXT_SENTINEL_7f935",
+            "AUTH_SENTINEL_7f935",
+            "PATH_SENTINEL_7f935",
+            "FILE_SENTINEL_7f935",
+        )
+        diagnostics.log_event(
+            "input.received", component="input",
+            text=sentinels[0], prompt=sentinels[0], token=sentinels[1],
+            context_token=sentinels[2], Authorization=sentinels[3],
+            file_name=sentinels[5], absolute_path="/home/private/" + sentinels[4],
+            status="secret " + sentinels[0],
+            endpoint="https://example.invalid/?token=" + sentinels[1])
+        diagnostics.log_event(
+            "startup.failed", component="startup",
+            **diagnostics.error_fields(RuntimeError(
+                "prompt=" + sentinels[0] + " token=" + sentinels[1])))
+        data = self.path.read_text(encoding="utf-8")
+        for sentinel in sentinels:
+            self.assertNotIn(sentinel, data)
+        self.assertNotIn("/home/private/", data)
+
+    def test_backend_version_rejects_absolute_paths(self):
+        diagnostics.log_event(
+            "backend.version", component="backend",
+            backend_version="/srv/customer/acme/private")
+        records = self.records()
+        self.assertEqual(len(records), 1)
+        self.assertNotIn("backend_version", records[0])
+
+    def test_reason_redacts_paths_without_dropping_safe_values(self):
+        for value in ("/srv/customer/acme/private", "err:/srv/x", "file:///srv/x",
+                      "HTTP/2"):
+            diagnostics.log_event(
+                "backend.app_attach_failed", component="backend", reason=value)
+        diagnostics.log_event(
+            "output.send_paused", component="output",
+            reason="not_acknowledged")
+        records = self.records()
+        self.assertTrue(all(record["reason"] == diagnostics.REDACTED_REASON
+                            for record in records[:-1]))
+        self.assertEqual(records[-1]["reason"], "not_acknowledged")
+
+    def test_request_id_correlates_events_and_unknown_fields_are_dropped(self):
+        with diagnostics.request_context("req-abc123"):
+            diagnostics.log_event("input.prepare", component="input", count=1,
+                                  text="PROMPT_SENTINEL")
+            diagnostics.log_event("input.completed", component="input", duration_ms=1.23456)
+        records = self.records()
+        self.assertEqual([record["request_id"] for record in records],
+                         ["req-abc123", "req-abc123"])
+        self.assertEqual(records[1]["duration_ms"], 1.235)
+        self.assertNotIn("text", records[0])
+
+    def test_invalid_event_and_field_types_are_ignored(self):
+        diagnostics.log_event("bad event name", component="input")
+        diagnostics.log_event("test.types", count=True, ok="yes", attempt=float("nan"),
+                              parts=2.5, status="not a slug")
+        records = self.records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["parts"], 2.5)
+        for field in ("count", "ok", "attempt", "status"):
+            self.assertNotIn(field, records[0])
+
+    def test_rotation_is_bounded(self):
+        diagnostics.configure(path=self.path, max_bytes=350)
+        for index in range(30):
+            diagnostics.log_event("test.rotation", count=index, job_id=f"job-{index}")
+        for number in range(1, diagnostics.backup_count() + 1):
+            self.assertTrue(self.path.with_name(f"{self.path.name}.{number}").exists())
+        self.assertFalse(self.path.with_name(
+            f"{self.path.name}.{diagnostics.backup_count() + 1}").exists())
+
+    def test_lowering_the_kept_count_releases_the_extra_files(self):
+        # Otherwise a smaller logs.keep could never shrink what is already there.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for number in range(1, 6):
+            self.path.with_name(f"{self.path.name}.{number}").write_text("{}")
+        diagnostics.configure(path=self.path, backups=2)
+        remaining = sorted(p.name for p in self.path.parent.glob(f"{self.path.name}.*"))
+        self.assertEqual(remaining, [f"{self.path.name}.1", f"{self.path.name}.2"])
+
+    def test_reapplying_the_same_kept_count_still_prunes_stale_files(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for number in range(1, 7):
+            self.path.with_name(f"{self.path.name}.{number}").write_text("{}")
+        diagnostics.configure(path=self.path, backups=3)
+        remaining = sorted(p.name for p in self.path.parent.glob(f"{self.path.name}.*"))
+        self.assertEqual(remaining, [f"{self.path.name}.{number}" for number in range(1, 4)])
+
+    def test_same_path_and_keep_does_not_rescan_on_every_reload(self):
+        diagnostics.configure(path=self.path, backups=3)
+        with patch.object(diagnostics, "_prune_rotations") as prune:
+            diagnostics.configure(path=self.path, backups=3)
+            diagnostics.configure(path=self.path, backups=3)
+        prune.assert_not_called()
+
+    def test_the_kept_file_count_is_configurable(self):
+        diagnostics.configure(path=self.path, max_bytes=200, backups=5)
+        for index in range(60):
+            diagnostics.log_event("test.rotation", count=index, job_id=f"job-{index}")
+        for number in range(1, 6):
+            self.assertTrue(self.path.with_name(f"{self.path.name}.{number}").exists())
+        self.assertFalse(self.path.with_name(f"{self.path.name}.6").exists())
+
+    def test_log_write_failure_is_silent(self):
+        with patch("codex_wechat.diagnostics.os.open", side_effect=OSError("disk full")):
+            diagnostics.log_event("test.write_failed", component="bridge")
+
+    def test_busy_process_lock_drops_diagnostic_without_writing(self):
+        with patch("codex_wechat.storage._lock_descriptor", side_effect=BlockingIOError()):
+            diagnostics.log_event("test.lock_busy", component="bridge")
+        self.assertFalse(self.path.exists())
+        diagnostics.log_event("test.lock_available", component="bridge")
+        self.assertEqual([record["event"] for record in self.records()],
+                         ["test.lock_available"])
+
+    def test_endpoint_schema_rejects_paths_and_unknown_routes(self):
+        for endpoint in ("/etc/passwd", r"C:\private\file.txt", "report.txt",
+                         "ilink/bot/private_file", "ilink/bot/getconfig?token=secret"):
+            diagnostics.log_event("test.endpoint", endpoint=endpoint)
+        self.assertTrue(all("endpoint" not in record for record in self.records()))
+
+    def test_follow_reads_rotated_tail_once_and_replacement_from_start(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("first\n", encoding="utf-8", newline="\n")
+        positions = {}
+        with redirect_stdout(StringIO()):
+            _read_log_updates([self.path], positions, initial=True)
+        with self.path.open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write("before rotation\n")
+        backup = self.path.with_name(self.path.name + ".1")
+        self.path.replace(backup)
+        self.path.write_text("replacement longer than the original file\n",
+                             encoding="utf-8", newline="\n")
+        output = StringIO()
+        with redirect_stdout(output):
+            _read_log_updates([self.path, backup], positions)
+            _read_log_updates([self.path, backup], positions)
+        self.assertNotIn("first\n", output.getvalue())
+        self.assertEqual(output.getvalue().count("before rotation\n"), 1)
+        self.assertEqual(output.getvalue().count("replacement longer than the original file\n"), 1)
+
+    def test_follow_does_not_skip_append_while_initial_tail_is_printed(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("old\n", encoding="utf-8", newline="\n")
+        positions = {}
+        def print_and_append(*args, **kwargs):
+            if args == ("old",):
+                with self.path.open("a", encoding="utf-8", newline="\n") as stream:
+                    stream.write("raced append\n")
+        with patch("codex_wechat.log_viewer.print", side_effect=print_and_append):
+            _read_log_updates([self.path], positions, initial=True)
+        output = StringIO()
+        with redirect_stdout(output):
+            _read_log_updates([self.path], positions)
+        self.assertEqual(output.getvalue(), "raced append\n")
+
+    def test_error_fields_exclude_exception_message(self):
+        fields = diagnostics.error_fields(CodedError("PROMPT_SENTINEL_7f935"))
+        self.assertEqual(fields, {"error_type": "CodedError", "error_code": "-32603"})
+        self.assertNotIn("PROMPT_SENTINEL_7f935", json.dumps(fields))
+
+    def test_log_files_include_bridge_and_service_rotations(self):
+        diagnostics.log_event("bridge.start", component="bridge")
+        for number in range(1, diagnostics.BACKUP_COUNT + 1):
+            self.path.with_name(f"{self.path.name}.{number}").write_text("", encoding="utf-8")
+        (self.path.parent / "service.log").write_text("console\n", encoding="utf-8")
+        for number in range(1, diagnostics.BACKUP_COUNT + 1):
+            (self.path.parent / f"service.log.{number}").write_text(
+                "old console\n", encoding="utf-8")
+        names = [path.name for path in _log_files(include_service=True)]
+        self.assertEqual(names, ["bridge.jsonl", "bridge.jsonl.1", "bridge.jsonl.2",
+                                 "bridge.jsonl.3", "service.log", "service.log.1",
+                                 "service.log.2", "service.log.3"])
+        self.assertEqual([path.name for path in _log_files()],
+                         ["bridge.jsonl", "bridge.jsonl.1", "bridge.jsonl.2",
+                          "bridge.jsonl.3"])
+
+    def test_logs_command_shows_service_output_only_when_requested(self):
+        diagnostics.log_event("bridge.start", component="bridge")
+        (self.path.parent / "service.log").write_text("supervisor started\n", encoding="utf-8")
+        output = StringIO()
+        with redirect_stdout(output):
+            show_logs()
+        text = output.getvalue()
+        self.assertIn('"event":"bridge.start"', text)
+        self.assertNotIn("supervisor started", text)
+        output = StringIO()
+        with redirect_stdout(output):
+            show_logs(include_service=True)
+        self.assertIn("supervisor started", output.getvalue())
+
+    def test_tail_reads_only_the_bounded_tail(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("old\n" * 1000 + "recent\n", encoding="utf-8")
+        self.assertEqual(_tail_lines(self.path, limit=1), ["recent"])
+
+    def test_windows_logs_command_uses_the_shared_viewer(self):
+        script = (Path(__file__).parents[2] / "codex-wechat.ps1").read_text(encoding="utf-8")
+        self.assertIn("@('-m', 'codex_wechat', $Command", script)
+        self.assertIn("--follow", script)
+        self.assertIn("--service", script)
+        self.assertNotIn("Get-Content -LiteralPath $BridgeLog", script)
+
+    def test_linux_service_logs_use_journald(self):
+        diagnostics.log_event("bridge.start", component="bridge")
+        output = StringIO()
+        result = SimpleNamespace(stdout="systemd service output\n", returncode=0)
+        with patch("codex_wechat.log_viewer.IS_WINDOWS", False), \
+                patch("codex_wechat.log_viewer.shutil.which", return_value="/usr/bin/journalctl"), \
+                patch("codex_wechat.log_viewer.subprocess.run", return_value=result) as run, \
+                redirect_stdout(output):
+            show_logs(include_service=True)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:4], [
+            "/usr/bin/journalctl", "--user", "-u", "codex-wechat.service",
+        ])
+        self.assertIn("systemd service output", output.getvalue())
+
+
+class DiagnosticsIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp.name) / "data" / "logs" / "bridge.jsonl"
+        diagnostics.configure(path=self.path, level="debug")
+        self.store = Store(str(Path(self.temp.name) / "state"))
+
+    def tearDown(self):
+        self.store.lock.close()
+        diagnostics.reset()
+        self.temp.cleanup()
+
+    def records(self):
+        if not self.path.exists():
+            return []
+        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+
+    async def test_received_prompt_is_represented_by_counts_only(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        sentinel = "PROMPT_SENTINEL_7f935"
+        message = {"message_id": "1", "from_user_id": "owner", "message_type": 1,
+                   "context_token": "CONTEXT_SENTINEL_7f935",
+                   "item_list": [{"type": 1, "text_item": {"text": sentinel}}]}
+        await bridge.receive({"msgs": [message]})
+        record = next(item for item in self.records() if item["event"] == "input.received")
+        self.assertEqual(record["chars"], len(sentinel))
+        data = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(sentinel, data)
+        self.assertNotIn("CONTEXT_SENTINEL_7f935", data)
+        self.assertIn("request_id", record)
+
+    async def test_output_uses_the_input_request_id(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        bridge.state["context"] = "context"
+        with diagnostics.request_context("req-output"):
+            await bridge.deliver_answer("answer")
+        record = next(item for item in self.records()
+                      if item["event"] == "output.enqueued")
+        self.assertEqual(record["request_id"], "req-output")
+        self.assertEqual(bridge.state["outbox"][0]["requestId"], "req-output")
+
+    async def test_native_progress_links_primary_and_steered_inputs_without_contextvar(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        bridge.state.update(context="context", thread="thread")
+        backend = bridge.backend
+        backend.selected_thread = "thread"
+        backend.active = backend.new_turn("thread", "turn", owned=False)
+        for identity in ("req-original", "req-steered"):
+            bridge.dispatch_input({"requestId": identity}, "accepted", "turn", backend)
+        backend.event({"method": "item/completed", "params": {
+            "threadId": "thread", "turnId": "turn", "item": {
+                "type": "agentMessage", "id": "progress", "phase": "commentary", "text": "working"}}})
+        entry = bridge.state["outbox"][0]
+        self.assertEqual(entry["requestId"], "req-original")
+        linked = {record["request_id"] for record in self.records()
+                  if record["event"] in ("output.enqueued", "output.related")
+                  and record.get("job_id") == entry["group"]}
+        self.assertEqual(linked, {"req-original", "req-steered"})
+
+    async def test_rejected_input_and_control_outcomes_are_logged(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        message = {"message_id": "queue-empty", "from_user_id": "owner",
+                   "message_type": 1, "context_token": "ctx",
+                   "item_list": [{"type": 1, "text_item": {"text": "/queue"}}]}
+        await bridge.receive({"msgs": [message]})
+        rejected = next(item for item in self.records()
+                        if item["event"] == "input.rejected")
+        self.assertEqual(rejected["status"], "missing_argument")
+        await dispatch(bridge, "/help", received={"request_id": "req-help"})
+        await dispatch(bridge, "/not-a-command", received={"request_id": "req-unknown"})
+        records = self.records()
+        self.assertTrue(any(item["event"] == "control.completed" and
+                            item["request_id"] == "req-help" for item in records))
+        self.assertTrue(any(item["event"] == "control.rejected" and
+                            item["request_id"] == "req-unknown" for item in records))
+
+    async def test_backend_disconnect_is_logged(self):
+        bridge = Bridge(self.store, {"user": "owner"}, {})
+        bridge.backend.connection_lost(RuntimeError("disconnect"))
+        record = next(item for item in self.records()
+                      if item["event"] == "backend.disconnected")
+        self.assertEqual(record["error_type"], "RuntimeError")
+        self.assertFalse(record["connected"])
+
+    async def test_wechat_logs_endpoint_without_query_or_credentials(self):
+        token = "TOKEN_SENTINEL_7f935"
+        client = WeChat({"token": token, "base_url": "https://ilinkai.weixin.qq.com"})
+        with exchange():
+            await client.request("ilink/bot/getconfig?token=" + token)
+        record = next(item for item in self.records() if item["event"] == "wechat.request")
+        self.assertEqual(record["endpoint"], "ilink/bot/getconfig")
+        self.assertTrue(record["ok"])
+        self.assertEqual(record["http_status"], 200)
+        data = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(token, data)
+        self.assertNotIn("?token=", data)
+
+    async def test_successful_poll_is_debug_only(self):
+        client = WeChat({"token": "token",
+                         "base_url": "https://ilinkai.weixin.qq.com"})
+        with exchange():
+            diagnostics.configure(level="info")
+            await client.request("ilink/bot/getupdates")
+            self.assertFalse(any(item["event"] == "wechat.request"
+                                 for item in self.records()))
+            diagnostics.configure(level="debug")
+            await client.request("ilink/bot/getupdates")
+        self.assertTrue(any(item["event"] == "wechat.request"
+                            for item in self.records()))
+
+    async def test_typing_success_is_debug_but_failures_and_messages_stay_visible(self):
+        client = WeChat({"token": "fixture"})
+        diagnostics.configure(level="info")
+        with exchange():
+            await client.request("ilink/bot/getconfig")
+            await client.request("ilink/bot/sendtyping")
+            self.assertEqual(self.records(), [])
+            await client.request("ilink/bot/sendmessage")
+        # A fast successful send is routine: output.sent already records the result.
+        self.assertEqual(self.records(), [])
+        with exchange(), patch("codex_wechat.wechat.SLOW_REQUEST_SECONDS", 0):
+            await client.request("ilink/bot/sendmessage")
+        self.assertEqual(self.records()[-1]["endpoint"], "ilink/bot/sendmessage")
+        self.assertEqual(self.records()[-1]["level"], "info")
+        with exchange(b'{"ret":-2,"errmsg":"prepare failed"}\n200'):
+            with self.assertRaises(RuntimeError):
+                await client.request("ilink/bot/sendtyping")
+        self.assertEqual(self.records()[-1]["level"], "warning")
+        self.assertEqual(self.records()[-1]["api_error_kind"], "prepare_failed")
+        diagnostics.configure(level="debug")
+        with exchange():
+            await client.request("ilink/bot/sendtyping")
+        self.assertEqual(self.records()[-1]["level"], "debug")
+
+    async def test_typing_lifecycle_successes_are_debug_only(self):
+        channel = SimpleNamespace(typing_ticket=AsyncMock(return_value="ticket"),
+                                  set_typing=AsyncMock())
+        bridge = Bridge(self.store, {"user": "owner", "token": "fixture"}, {}, channel=channel)
+        diagnostics.configure(level="info")
+        await bridge.typing.start("owner", "context")
+        await asyncio.sleep(0)
+        await bridge.typing.stop()
+        self.assertFalse(any(r["event"].startswith("wechat.typing_") for r in self.records()))
+        diagnostics.configure(level="debug")
+        await bridge.typing.start("owner", "context")
+        await asyncio.sleep(0)
+        await bridge.typing.stop()
+        events = [r["event"] for r in self.records() if r["event"].startswith("wechat.typing_")]
+        self.assertEqual(events, ["wechat.typing_started", "wechat.typing_stopped"])
+
+    async def test_successful_slow_poll_is_debug_only(self):
+        client = WeChat({"token": "token",
+                         "base_url": "https://ilinkai.weixin.qq.com"})
+        with exchange(), \
+             patch("codex_wechat.wechat.time.perf_counter", side_effect=[0, 18]):
+            diagnostics.configure(level="info")
+            await client.request("ilink/bot/getupdates")
+        self.assertFalse(any(item["event"] == "wechat.request"
+                             for item in self.records()))
+
+
+if __name__ == "__main__":
+    unittest.main()

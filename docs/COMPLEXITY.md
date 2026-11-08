@@ -1,6 +1,7 @@
 # 复杂度与取舍
 
-以下是按职责边界的维护成本判断，不是工时预算或代码占比。能力范围见 [CAPABILITIES](CAPABILITIES.md)，运行契约见 [ARCHITECTURE](ARCHITECTURE.md)。
+以下是按职责边界的维护成本判断，不是工时预算或代码占比。能力范围见
+[SUPPORT-MATRIX](SUPPORT-MATRIX.md)，运行契约见 [ARCHITECTURE](ARCHITECTURE.md)。
 
 | 部分 | 成本 | 主要负担 |
 | --- | --- | --- |
