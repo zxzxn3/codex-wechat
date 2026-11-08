@@ -1,5 +1,8 @@
 """Release-pointer contracts for the stable Windows supervisor bootstrap."""
-from test_support import requires_symlinks
+try:
+    from .test_support import requires_symlinks
+except ImportError:  # ``discover -s tests`` imports this module as a top-level name.
+    from test_support import requires_symlinks
 import os
 from pathlib import Path
 import tempfile

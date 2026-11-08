@@ -6,7 +6,7 @@
 
 | 范围 | 依据 |
 | --- | --- |
-| Codex 协议 | [官方 App Server](https://learn.chatgpt.com/docs/app-server)、[CLI 参数](https://learn.chatgpt.com/docs/cli/reference)；普通 CLI 与本机运行的两个 app-server daemon 均为 0.167.0 |
+| Codex 协议 | [官方 App Server](https://learn.chatgpt.com/docs/app-server)、[CLI 参数](https://learn.chatgpt.com/docs/cli/reference)；Linux 开发机上普通 CLI 与运行中的两个 app-server daemon 均为 0.167.0；Windows 验收机实测 CLI/app-server 为 0.166.0，本节依赖的 `thread/settings/update` 与 `thread/delete` 在该版本同样可用 |
 | 原生后台 | [0.167.0 daemon](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/app-server-daemon/src/lib.rs)、[Windows 实现](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/app-server-daemon/src/backend/windows.rs)；原生负责锁、脱离启动和后台发现，不由桥接模拟 |
 | App 接入 | 本机 Linux 重打包 App 26.1027.51404，内置 CLI 0.166.0-alpha.5.1；app.asar 中 .vite/build/early-bootstrap-824-3c24dda6dba622ec.js 的连接选择：CODEX_APP_SERVER_WS_URL、CODEX_APP_SERVER_FORCE_CLI |
 | Windows App | 交接记录 App 26.1027.3384.0 / CLI 0.166.0-alpha.5.1；[对应 App Server 源码](https://github.com/openai/codex/blob/rust-v0.166.0-alpha.5.1/codex-rs/app-server/src/lib.rs)；Windows 实测覆盖见 [VALIDATION](VALIDATION.md) |
@@ -42,8 +42,13 @@ item/completed 提供完整 agentMessage；commentary/partial_answer 可即时�
 在轮次收口，reasoning/工具输出不混入聊天。原生请求仅回答本连接收到的部分。
 0.167.0 的 schema 包含 `thread/delete` 与 `ThreadDeleteParams {threadId}`；桥只在本轮
 `/new` 创建线程后本地提交失败时用它清理新建会话，不对已有会话调用删除。
+Windows 验收机的 0.166.0 也提供该方法（对未知 thread 返回业务错误而非 -32601），删除的实际
+效果仍未在真实服务端验证。
 0.167.0 的 `thread/settings/update` 明确作用于后续回合；TUI 的默认 `Shift+Up`/`Shift+Down`
 （以及 `Alt+.`/`Alt+,`）只调整活动 thread 的推理强度，不会中断正在运行的回合。
+Windows 验收机在 0.166.0 上实测：`{model, effort}` 与 `{cwd}` 都返回空结果并写回
+`thread/read` 的 latest 字段；该 RPC 声明 `experimentalApi` 能力才可用，桥的 initialize 已带上；
+服务端不校验取值（未知字段和无效模型同样返回成功），因此模型和强度必须先按原生目录校验。
 0.166.0 schema 的 item/started、item/completed 外层分别提供 startedAtMs、completedAtMs，
 thread/tokenUsage/updated 同时带 turnId 和 outputTokens/reasoningOutputTokens。模板中的
 final_answer 起止时间与 tokens_per_second 来自这些字段；可见输出 token 按 output 减

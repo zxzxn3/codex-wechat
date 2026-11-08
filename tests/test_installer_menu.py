@@ -1,5 +1,8 @@
 """User-approved installer flow; all mutations stay inside temporary fixtures."""
-from test_support import requires_symlinks
+try:
+    from .test_support import requires_symlinks
+except ImportError:  # ``discover -s tests`` imports this module as a top-level name.
+    from test_support import requires_symlinks
 import contextlib
 import io
 from pathlib import Path
@@ -88,13 +91,16 @@ class InstallerMenuTests(unittest.TestCase):
     def test_start_command_uses_the_stable_platform_entry(self):
         target = Path('/install/root')
         with patch.object(installer, 'IS_WINDOWS', False):
+            # Build the expectation from the same Path so the test does not
+            # assume POSIX separators on Windows.
+            entry = str(target / 'codex-wechat')
             self.assertEqual(
                 installer.service_start_command(target, update=False),
-                ['/install/root/codex-wechat', 'service-start'],
+                [entry, 'service-start'],
             )
             self.assertEqual(
                 installer.service_start_command(target, update=True),
-                ['/install/root/codex-wechat', 'service-restart'],
+                [entry, 'service-restart'],
             )
 
     def test_start_command_bypasses_windows_execution_policy(self):

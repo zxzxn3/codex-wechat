@@ -668,6 +668,9 @@ async def _replace_target(bridge, prepared):
     try:
         selected = await bridge.backend.commit_prepared(
             prepared, preserve_active=True, defer_cleanup=True)
+        # The worker keeps the job objects that are live right now; the discard
+        # below only marks their staged copies, so remember the originals.
+        live_jobs = [bridge.state.get("currentInput"), *bridge.state.get("inbox", [])]
         staged = deepcopy(bridge.state)
         inputs = bridge.discard_pending_inputs(
             "switch", state=staged, persist=False)
@@ -683,6 +686,12 @@ async def _replace_target(bridge, prepared):
     bridge.state.clear()
     bridge.state.update(staged)
     bridge.loaded = True
+    # Carry the discard into the objects the worker holds, or its requeue and
+    # failure paths would treat a discarded job as live work for the new target.
+    for job in live_jobs:
+        if isinstance(job, dict):
+            job["discarded"] = "switch"
+    bridge.output.sync_drained()
     if bridge.backend.active:
         await bridge.backend.detach_active()
     await bridge.backend.finish_prepared(prepared)

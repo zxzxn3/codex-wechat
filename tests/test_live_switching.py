@@ -1,6 +1,7 @@
 """Detach target changes and future-turn setting updates."""
 import asyncio
 from dataclasses import asdict
+from copy import deepcopy
 import tempfile
 import unittest
 from pathlib import Path
@@ -605,6 +606,51 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+    async def test_switch_marks_the_live_job_objects_not_only_the_staged_copy(self):
+        # The discard is staged into a deepcopy so a failed save leaves memory
+        # untouched, but the worker keeps the original job objects: they must
+        # carry the same flag or its requeue and failure paths revive them.
+        bridge = self.bridge
+        current = self.add_running_turn()
+        live = self.job("live")
+        queued = self.job("queued", InputPhase.PREPARING)
+        bridge.state["currentInput"] = live
+        bridge.state["inbox"] = [queued]
+        bridge.backend.read_thread = AsyncMock(
+            return_value={"status": {"type": "idle"}})
+        target = "00000000-0000-0000-0000-000000000001"
+        bridge.backend.prepare_thread = AsyncMock(return_value={
+            "thread_id": target,
+            "result": {"thread": {"id": target}},
+            "adopt": False,
+        })
+        bridge.backend.release_thread = AsyncMock(return_value=True)
+
+        await handle(bridge, "/switch", target)
+
+        self.assertEqual(current["done"].result().status, "discarded")
+        self.assertEqual(live.get("discarded"), "switch")
+        self.assertEqual(queued.get("discarded"), "switch")
+
+    async def test_staged_discard_realigns_the_drained_event(self):
+        # A staged discard cannot update the event itself, so the switch must
+        # re-align it once the copied state is live; otherwise an empty outbox
+        # keeps reporting "not drained" to the restart grace wait.
+        bridge = self.bridge
+        bridge.state["outbox"] = [
+            {"id": "old", "text": "old", "source": asdict(self.source())}]
+        bridge.outbox_drained.clear()
+        staged = deepcopy(bridge.state)
+
+        bridge.output.discard_source(
+            bridge.backend_name, "current", state=staged, persist=False)
+        bridge.state.clear()
+        bridge.state.update(staged)
+        bridge.output.sync_drained()
+
+        self.assertEqual(bridge.state["outbox"], [])
+        self.assertTrue(bridge.outbox_drained.is_set())
 
     async def test_worker_does_not_requeue_a_discarded_deferred_turn(self):
         bridge = self.bridge

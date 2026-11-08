@@ -284,6 +284,14 @@ class OutputDelivery:
         return self._discard_entries(
             from_old_target, reason=reason, state=state, persist=persist)
 
+    def sync_drained(self):
+        """Re-align the drained event after a discard staged into a copied state."""
+        bridge = self.bridge
+        if bridge.state.get("outbox"):
+            bridge.outbox_drained.clear()
+        else:
+            bridge.outbox_drained.set()
+
     def budget_notice_entries(self):
         """The one notice that asks the user for the next inbound message."""
         bridge = self.bridge

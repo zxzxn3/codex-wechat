@@ -1,5 +1,8 @@
 """Offline contracts for immutable release installation without rollback."""
-from test_support import requires_symlinks, xdg_user_data_dir
+try:
+    from .test_support import requires_symlinks, xdg_user_data_dir
+except ImportError:  # ``discover -s tests`` imports this module as a top-level name.
+    from test_support import requires_symlinks, xdg_user_data_dir
 import contextlib
 import io
 import os

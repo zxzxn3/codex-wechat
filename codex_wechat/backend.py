@@ -349,7 +349,10 @@ class CodexBackend:
 
     async def app_request(self, candidate, request):
         if self.app is candidate:
-            await self.server_request(request)
+            # The App owns this request on its own IPC channel, where a JSON-RPC
+            # rejection cannot be expressed; a foreign selection just stops being
+            # notified, exactly as in shared mode.
+            await self.server_request(request, app_origin=True)
 
     @property
     def proc(self):
@@ -387,13 +390,13 @@ class CodexBackend:
                 self.recent_tokens.append(token)
                 return token
 
-    async def server_request(self, msg):
+    async def server_request(self, msg, *, app_origin=False):
         params = msg.get("params", {})
         request_thread = params.get("threadId")
         if request_thread and self.selected_thread and request_thread != self.selected_thread:
             # A detached selection must not inject interaction requests into the
             # replacement session. Shared daemons own foreign requests elsewhere.
-            if not self.shared:
+            if not self.shared and not app_origin:
                 # Reply on the transport that delivered this request. self.write()
                 # may route the response to the current App follower instead.
                 await self.transport.write({"id": msg["id"], "error": {

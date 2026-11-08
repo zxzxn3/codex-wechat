@@ -74,7 +74,8 @@ preparing可恢复，dispatching结果未知、accepted均不自动重发。clie
 
 `/switch` 和 `/new` 允许在回合运行时执行：旧回合只在本地 detach，继续在后台运行但不再
 交付；旧来源尚未发送的输出、当前输入和排队输入会作废，worker 收到合成的 discarded 结果
-后退出本轮。已进入发送 API 的一条无法撤回。`/model`、`/effort` 和 `/cwd` 使用
+后退出本轮。已进入发送 API 的一条无法撤回。等待审批或原生提问的回合在被 detach 时不会作答，
+它因此在服务端停到自己的超时为止，而不是继续跑完。`/model`、`/effort` 和 `/cwd` 使用
 `thread/settings/update` 只修改后续回合；当前回合、当前输入和已在途输出都不受影响。
 目标的读取、resume 或新会话创建在不可逆 discard 之前完成；目标准备失败时旧输入、输出和
 当前回合保持不变。`/new` 在服务端已经创建线程后若本地提交失败，会尽力调用
