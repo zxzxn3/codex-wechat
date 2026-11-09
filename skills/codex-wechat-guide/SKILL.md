@@ -31,19 +31,21 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 
 第一次回答时输出本节。
 
-你先会三件事就够了：
+你先会四件事就够了：
 
 1. 直接发普通微信消息就能开始任务，不需要先发命令。
-2. `/status` 查看当前状态。
-3. `/stop` 停止并清空排队。
+2. `/status`（可简写 `/s`）查看当前状态。
+3. `/stop` 停止并清空排队（没有短命令）。
+4. `/help all`（可简写 `/h all`）查看完整命令。
 
 例：
 
 ```text
-你：帮我看看当前目录有什么文件
-桥：IN < ...
-     （回答）
-     OUT > ...
+你：帮我看看当前目录
+桥：（回答）
+
+你：/s
+桥：（状态面板）
 ```
 
 本节要点：发消息、看状态、停止。
@@ -51,10 +53,10 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 
 ## 第二节：会话
 
-- `/sessions` 列出带编号的会话。
-- `/switch 1` 切到第 1 个；编号只对应最近一次列表。
+- `/sessions` 列出带编号的会话（没有短命令）。
+- `/switch 1` 切到第 1 个（没有短命令）；编号只对应最近一次列表。
 - 也可以 `/switch 关键词` 或 `/switch <ID 前缀>`。
-- `/new` 新建会话；`/compact` 压缩当前上下文。
+- `/new`（可简写 `/n`）新建会话；`/compact`（可简写 `/c`）压缩当前上下文。
 
 例：
 
@@ -71,19 +73,19 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 
 ## 第三节：模型与设置
 
-- `/model` 看编号列表，`/model 1` 选第 1 个。
-- `/effort` 看可选档位，`/effort high` 选一个。
-- `/cwd` 看目录，`/cwd ~/project` 切换。
-- `/backend` 看后端，`/backend codex` 切换。
-- `/settings` 看设置；例如 `/settings autostart true`。
+- `/model`（可简写 `/m`）看编号列表，`/model 1` 选第 1 个。
+- `/effort`（可简写 `/e`）看可选档位，`/effort high` 选一个。
+- `/cwd` 看目录（没有短命令），`/cwd ~/project` 切换。
+- `/backend`（可简写 `/b`）看后端，`/backend codex` 切换。
+- `/settings` 看设置（没有短命令）；例如 `/settings autostart true`。
 
 例：
 
 ```text
-你：/model
+你：/m
 桥：1. deepseek-flash
     2. deepseek-v4-pro
-你：/model 2
+你：/m 2
 桥：模型: deepseek-v4-pro (High)
 ```
 
@@ -93,14 +95,14 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 ## 第四节：任务控制
 
 - 任务运行中直接发消息会并入当前任务。
-- 想明确排到当前任务结束后：`/queue 吃饭了吗`。
-- `/unqueue` 撤回最后一条；`/discard` 清空未发送回复；`/stop` 停止并清空。
-- `/compact` 压缩当前上下文。
+- 想明确排到当前任务结束后：`/queue 吃饭了吗`（可简写 `/q 吃饭了吗`）。
+- `/unqueue`（可简写 `/u`）撤回最后一条；`/discard`（可简写 `/d`）清空未发送回复。
+- `/stop` 停止并清空（没有短命令）；`/restart`（可简写 `/r`）重启微信桥。
 
 例：
 
 ```text
-你：/queue 吃饭了吗
+你：/q 吃饭了吗
 桥：已排队: 1 条
 ...
 桥：（当前任务结束后执行）
@@ -111,9 +113,9 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 
 ## 第五节：审批与提问
 
-- 审批提示会显示真实的 `/approve <审批码>` 和 `/deny <审批码>`；照抄整行。
+- 审批提示会显示真实的 `/approve <审批码>` 和 `/deny <审批码>`（没有短命令）；照抄整行。
 - 审批码是短随机码，不是编号。
-- 提问提示会显示 `/answer <问题码> 选项或文字`；可以回选项编号，也可以填文字。
+- 提问提示会显示 `/answer <问题码> 选项或文字`（可简写 `/a <问题码> 选项或文字`）；可以回选项编号，也可以填文字。
 - 不要在码外面加花括号。
 
 例：
@@ -126,16 +128,17 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 桥：已同意
 ```
 
-本节要点：复制提示里的命令，不要自己拼审批码。
+本节要点：复制提示里的命令，不要自己拼审批码；`/answer` 可简写为 `/a`。
 回复“下一节”学习附件与错误，或直接问“怎么回答提问”。
 
 ## 第六节：附件与错误
 
-- `/get ./file.png` 取回图片或文件；`/getfile ./file.zip` 强制按文件发送。
+- `/get ./file.png` 取回图片或文件（可简写 `/g ./file.png`）；`/getfile ./file.zip` 强制按文件发送（没有短命令）。
 - 只能取当前工作目录内的文件；需要时先 `/cwd ~/project`。
 - 用法里的 `{}`、`[]` 是占位符：发送 `/switch 1`，不要 `/switch {1}`。
 - 回复里以 `例：` 开头的行可以直接照抄。
 - 完整命令发 `/help all`；设置说明发 `/help settings`。
+- 其它短命令：`/v` = `/version`，`/p` = `/ping`，`/` = `/continue`。
 
 例：
 
