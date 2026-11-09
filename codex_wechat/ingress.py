@@ -95,7 +95,7 @@ class Ingress:
                       command=spec.name if spec and kind in ("command", "queued") else None)
             if queued and not text and not attachments:
                 bridge.reject_input(request_id, kind, "missing_argument")
-                bridge.reply(bridge.prompt("COMMAND_USAGE", {
+                bridge.reply(bridge.prompt("QUEUE_USAGE", {
                     "usage": command_usage("/queue")}),
                              request_id=request_id)
             elif len(attachments) > MAX_ATTACHMENTS:

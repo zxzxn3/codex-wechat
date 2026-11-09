@@ -819,7 +819,8 @@ async def _change_effort(bridge, command, argument, received=None):
          if value.casefold() == argument.casefold()), None)
     if selected_effort is None:
         raise UserFacingError(bridge.prompt("EFFORT_INVALID", {
-            "choices": " | ".join(effort_label(value) for value in choices) or "无"}))
+            "choices": " | ".join(effort_label(value) for value in choices) or "无",
+            "example": choices[0] if choices else "档位"}))
     await _apply_settings(bridge, command, {"effort": selected_effort})
 
 
@@ -1079,8 +1080,12 @@ def parse_control(text):
 
 
 def validate(spec, argument, *, text=prompt_text):
-    if (spec.usage == spec.name and argument) or (spec.required and not argument):
+    if spec.usage == spec.name and argument:
         raise UserFacingError(text("COMMAND_USAGE", {
+            "usage": command_usage(spec.name)}))
+    if spec.required and not argument:
+        prompt = "SESSION_USAGE" if spec.name == "/switch" else "COMMAND_USAGE"
+        raise UserFacingError(text(prompt, {
             "usage": command_usage(spec.name)}))
     if spec.name == "/sessions":
         if argument == "next":

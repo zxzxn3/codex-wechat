@@ -512,9 +512,23 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_switch_empty_search_reports_no_match(self):
         self.bridge.state.update(context="context", thread="current")
         self.bridge.backend.list_threads = AsyncMock(return_value={"data": []})
+        for argument in ("不存在", "{4}"):
+            with self.subTest(argument=argument):
+                with self.assertRaises(UserFacingError) as raised:
+                    await handle(self.bridge, "/switch", argument)
+                self.assertIn("没有匹配", str(raised.exception))
+                self.assertIn("例：`/switch 1`", str(raised.exception))
+
+    async def test_switch_usage_errors_include_an_example(self):
+        self.bridge.state.update(context="context", thread="current")
         with self.assertRaises(UserFacingError) as raised:
-            await handle(self.bridge, "/switch", "不存在")
-        self.assertIn("没有匹配", str(raised.exception))
+            await handle(self.bridge, "/switch", "")
+        self.assertIn("例：`/switch 1`", str(raised.exception))
+
+        self.bridge.state["sessionChoices"] = ["only"]
+        with self.assertRaises(UserFacingError) as raised:
+            await handle(self.bridge, "/switch", "2")
+        self.assertIn("例：`/switch 1`", str(raised.exception))
 
     async def test_switch_truncated_matches_offer_search_outside_panel(self):
         self.bridge.state.update(context="context", thread="current")

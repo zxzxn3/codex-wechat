@@ -117,7 +117,8 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
         await dispatch(self.bridge, "/get")
         self.assertEqual(
             self.bridge.state["outbox"][-1]["text"],
-            "`/g` `/get {路径}`\n`/getfile {路径}`",
+            "`/g` `/get {路径}`\n`/getfile {路径}`\n"
+            "例：`/get ./file.png`、`/getfile ./file.zip`",
         )
 
         await dispatch(self.bridge, "/s invalid")

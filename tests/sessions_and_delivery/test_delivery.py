@@ -47,6 +47,8 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         saved = self.store.load("bridge")
         self.assertEqual([(job["text"], job["mode"]) for job in saved["inbox"]],
                          [("/stop is literal text", "queue"), ("correction", "steer")])
+        self.assertTrue(any("例：`/queue 吃饭了吗`" in entry["text"]
+                            for entry in saved["outbox"]))
         self.assertTrue(all(queue.empty() for queue in b.controls.values()))
         self.assertEqual(saved["cursor"], "cursor")
         await b.receive({"msgs": [message("q", "/queue duplicate")]})
