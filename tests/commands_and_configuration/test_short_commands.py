@@ -142,7 +142,9 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
                 {"type": 1, "text_item": {"text": "/q /stop is literal"}}]}]})
         jobs = self.store.load("bridge")["inbox"]
         self.assertEqual([(job["text"], job["mode"]) for job in jobs], [("/stop is literal", "queue")])
-        self.assertEqual(self.bridge.state["outbox"][-1]["text"], "已排队: 1 条")
+        self.assertEqual(
+            self.bridge.state["outbox"][-1]["text"],
+            "已排队: 1 条\n用 `/u` 撤回")
         self.assertTrue(all(lane.empty() for lane in self.bridge.controls.values()))
 
     async def test_queue_confirmation_plural_counts_only_waiting_tasks(self):
@@ -153,7 +155,7 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
                 "message_id": f"queued-{number}", "from_user_id": "owner",
                 "message_type": 1, "context_token": "context", "item_list": [
                     {"type": 1, "text_item": {"text": f"/queue work {number}"}}]}]})
-            expected = f"已排队: {number} 条"
+            expected = f"已排队: {number} 条\n用 `/u` 撤回"
             self.assertEqual(self.bridge.state["outbox"][-1]["text"], expected)
         self.assertEqual(len(self.bridge.state["inbox"]), 2)
 

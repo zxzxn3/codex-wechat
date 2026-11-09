@@ -105,6 +105,7 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 ```text
 你：/q 吃饭了吗
 桥：已排队: 1 条
+    用 `/u` 撤回
 ...
 桥：（当前任务结束后执行）
 ```

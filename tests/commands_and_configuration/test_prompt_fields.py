@@ -104,7 +104,7 @@ class PromptFieldsTests(unittest.IsolatedAsyncioTestCase):
 
     def test_local_snake_case_arguments_are_rendered_once(self):
         self.assertEqual(prompt_text('QUEUE_CONFIRMED', {'count': 2, 'unit': '{model}'}),
-                         '已排队: 2 {model}')
+                         '已排队: 2 {model}\n用 `/u` 撤回')
 
     def test_unavailable_values_use_short_english_placeholder(self):
         self.assertEqual(VALUE_UNAVAILABLE, "N/A")

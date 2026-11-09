@@ -96,7 +96,7 @@ class HotPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bridge.state['outbox'][-1]['text'], '1 pending model-x')
         self.write({})
         self.assertEqual(self.bridge.prompt('QUEUE_CONFIRMED', {'count': 2, 'unit': '条'}),
-                         '已排队: 2 条')
+                         '已排队: 2 条\n用 `/u` 撤回')
 
     async def test_invalid_file_retains_the_whole_previous_hot_snapshot(self):
         self.bridge.state['processingNotice'] = 'wechat override'
