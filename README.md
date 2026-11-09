@@ -9,7 +9,12 @@
 <h1 align="center">codex-wechat</h1>
 
 <p align="center">
-  <strong>电脑上的 Codex，微信里接着说。</strong>
+  <strong>在你吃饭的时候，在微信里继续吃你的饭</strong>
+</p>
+
+<p align="center">
+  <strong>注：DeepSeek 需要额外方法接入 Codex，Linux 用户可见
+  <a href="https://github.com/zxzxn3/codex-deepseek">codex-deepseek</a></strong>
 </p>
 
 <p align="center">
@@ -30,7 +35,7 @@
 </p>
 
 <p align="center">
-  <sub>codex-wechat 是第三方独立项目，与 OpenAI、腾讯及其关联方没有隶属、合作、授权或背书关系。相关名称与商标归各自权利人所有。</sub>
+  <sub>codex-wechat 是第三方独立项目，与 OpenAI、DeepSeek、腾讯及其关联方没有隶属、合作、授权或背书关系。相关名称与商标归各自权利人所有。</sub>
 </p>
 
 > **内测中**：当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 的用户测试。
@@ -266,5 +271,5 @@ README 用于项目介绍；agent、维护者和测试者从 [文档索引](docs
 个人在自控设备上进行非商业评估和测试；不得转售、再分发、商用或创建衍生作品。正式发布前
 请以 `LICENSE` 原文为准。
 
-“Codex”“OpenAI”“微信”“WeChat”“Tencent”等名称与商标归各自权利人所有。本项目是第三方
-独立开发，与 OpenAI、腾讯及其关联方没有隶属、合作、授权或背书关系。
+“Codex”“OpenAI”“DeepSeek”“微信”“WeChat”“Tencent”等名称与商标归各自权利人所有。
+本项目是第三方独立开发，与 OpenAI、DeepSeek、腾讯及其关联方没有隶属、合作、授权或背书关系。
