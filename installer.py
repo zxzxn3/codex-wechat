@@ -45,6 +45,7 @@ DEPENDENCIES = (
 )
 COMPONENTS = {
     "wechat-attachments": ("微信附件说明 skill", Path("skills/wechat-attachments/SKILL.md")),
+    "codex-wechat-guide": ("微信使用说明 skill", Path("skills/codex-wechat-guide/SKILL.md")),
 }
 RELEASE_FORMAT = 1
 CURRENT_FILE = "current"

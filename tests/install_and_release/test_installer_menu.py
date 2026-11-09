@@ -80,6 +80,20 @@ class InstallerMenuTests(unittest.TestCase):
                     installer.component_install(source, 'wechat-attachments', target)
             self.assertFalse((target/'wechat-attachments').exists())
 
+    def test_guide_component_installs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root/'source'
+            text = source/installer.COMPONENTS['codex-wechat-guide'][1]
+            text.parent.mkdir(parents=True)
+            text.write_text('guide skill')
+            target = root/'skills'
+            with patch('builtins.input', return_value='y'):
+                installer.component_install(source, 'codex-wechat-guide', target)
+            self.assertEqual(
+                (target/'codex-wechat-guide/SKILL.md').read_text(),
+                'guide skill')
+
     def test_noninteractive_components_require_explicit_selection(self):
         with patch('builtins.input', side_effect=AssertionError('prompt')):
             with self.assertRaisesRegex(ValueError, '需要 --component'):
