@@ -57,6 +57,10 @@ PACKAGE_ROOT = Path("codex_wechat")
 # A directory handle held for a moment - by a scanner or a just-exited process -
 # blocks the rename that makes a release deletable; one retry covers it.
 PRUNE_RETRY_SECONDS = 0.2
+# The same transient handle can block publishing a freshly prepared staging
+# tree. Windows reports the rename as access denied, so retry with backoff.
+STAGING_REPLACE_ATTEMPTS = 6
+STAGING_REPLACE_RETRY_SECONDS = 0.25
 LOCK_FILE = ".install-lock"
 MANIFEST_FILE = ".release.json"
 UPDATE_SOURCE_FILE = ".update-source.json"
@@ -872,6 +876,28 @@ def _staging_directory(parent: Path, prefix: str) -> Path:
     raise ValueError(f"无法在 {parent} 创建暂存目录")
 
 
+def _publish_staging(staging: Path, final: Path) -> bool:
+    """Rename a prepared staging tree into place.
+
+    Windows reports ERROR_ACCESS_DENIED both when a scanner or a just-exited
+    dependency process still holds the staging tree and when another installer
+    has already published the same content. Only the latter is a benign race.
+    """
+    for attempt in range(STAGING_REPLACE_ATTEMPTS):
+        try:
+            os.replace(staging, final)
+            return True
+        except PermissionError as error:
+            if final.is_dir():
+                return False
+            if attempt + 1 == STAGING_REPLACE_ATTEMPTS:
+                raise ValueError(
+                    f"无法启用新版本 {final.name}：暂存目录仍被占用或没有访问权限；"
+                    "请稍后重试（Windows 上可暂时关闭安全软件扫描）。") from error
+            time.sleep(STAGING_REPLACE_RETRY_SECONDS * (2 ** attempt))
+    raise AssertionError("unreachable")
+
+
 def install_release(
     target: Path,
     identifier: str,
@@ -893,11 +919,15 @@ def install_release(
         prepare_runtime(staging)
         if release_identifier(project_files(staging)) != identifier:
             raise ValueError("暂存版本校验失败")
-        os.replace(staging, final)
+        if not _publish_staging(staging, final):
+            if not release_matches(target, identifier, files):
+                raise ValueError(f"现有版本内容与标识不一致: {final}")
+            return final, False
         return final, True
     finally:
         if staging.exists():
-            shutil.rmtree(staging)
+            # A failed cleanup must not hide why publishing failed.
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def _package_files(source: Path) -> tuple[Path, ...]:

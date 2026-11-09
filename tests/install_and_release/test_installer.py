@@ -4,6 +4,7 @@ import contextlib
 import io
 import os
 from pathlib import Path
+import shutil
 import stat
 import sys
 import tempfile
@@ -386,6 +387,69 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.prune_releases(self.target, keep=()), ["aaa111"])
         self.assertEqual(len(attempts), 2)
         self.assertFalse((releases / "aaa111").exists())
+
+    def test_transiently_held_staging_tree_is_retried(self):
+        files = installer.project_files(self.source)
+        identifier = installer.release_identifier(files)
+        final = self.target / installer.RELEASES_DIR / identifier
+        real_replace = os.replace
+        attempts = []
+
+        def flaky_replace(source, destination):
+            if Path(source).name.startswith(".staging-"):
+                attempts.append(Path(source))
+                if len(attempts) == 1:
+                    raise PermissionError(5, "access denied")
+            return real_replace(source, destination)
+
+        with patch("installer.os.replace", side_effect=flaky_replace), \
+                patch.object(installer, "STAGING_REPLACE_RETRY_SECONDS", 0):
+            release, created = installer.install_release(
+                self.target, identifier, files)
+        self.assertTrue(created)
+        self.assertEqual(release, final)
+        self.assertEqual(len(attempts), 2)
+        self.assertTrue(installer.release_matches(self.target, identifier, files))
+
+    def test_staging_rename_that_stays_locked_is_reported_and_cleaned(self):
+        files = installer.project_files(self.source)
+        identifier = installer.release_identifier(files)
+        final = self.target / installer.RELEASES_DIR / identifier
+        real_replace = os.replace
+
+        def locked_replace(source, destination):
+            if Path(source).name.startswith(".staging-"):
+                raise PermissionError(5, "access denied")
+            return real_replace(source, destination)
+
+        with patch("installer.os.replace", side_effect=locked_replace), \
+                patch.object(installer, "STAGING_REPLACE_RETRY_SECONDS", 0), \
+                patch.object(installer, "STAGING_REPLACE_ATTEMPTS", 2):
+            with self.assertRaisesRegex(ValueError, "暂存目录仍被占用"):
+                installer.install_release(self.target, identifier, files)
+        self.assertFalse(final.exists())
+        self.assertEqual(list((self.target / installer.RELEASES_DIR).glob(
+            ".staging-*")), [])
+
+    def test_release_published_by_another_installer_is_reused(self):
+        files = installer.project_files(self.source)
+        identifier = installer.release_identifier(files)
+        final = self.target / installer.RELEASES_DIR / identifier
+        real_replace = os.replace
+
+        def competing_replace(source, destination):
+            if Path(source).name.startswith(".staging-"):
+                shutil.copytree(source, destination)
+                raise PermissionError(5, "access denied")
+            return real_replace(source, destination)
+
+        with patch("installer.os.replace", side_effect=competing_replace), \
+                patch.object(installer, "STAGING_REPLACE_RETRY_SECONDS", 0):
+            release, created = installer.install_release(
+                self.target, identifier, files)
+        self.assertFalse(created)
+        self.assertEqual(release, final)
+        self.assertTrue(installer.release_matches(self.target, identifier, files))
 
     def test_rollback_is_not_an_installer_operation(self):
         with self.assertRaises(SystemExit):
