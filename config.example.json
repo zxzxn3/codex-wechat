@@ -1,5 +1,5 @@
 {
-  "sourceHint": "[User from WeChat.]",
+  "sourceHint": "[User from WeChat. Keep replies mobile-friendly.]",
   "connectionIdleSeconds": 60,
   "prompts": {},
   "processingNotice": "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`",

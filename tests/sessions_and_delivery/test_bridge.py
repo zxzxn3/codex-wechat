@@ -115,7 +115,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(texts[1].startswith("`OUT > "))
 
     async def test_output_hint_is_concise_origin_marker(self):
-        self.assertEqual(OUTPUT_HINT, "\n\n[User from WeChat.]")
+        self.assertEqual(
+            OUTPUT_HINT,
+            "\n\n[User from WeChat. Keep replies mobile-friendly.]")
 
     async def test_stdio_backend_final_only_and_resume(self):
         fake_server = Path(__file__).resolve().parents[1] / "support" / "fake_server.py"

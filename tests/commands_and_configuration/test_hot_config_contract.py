@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from codex_wechat.configuration import (
-    ConfigLoader, DEFAULT_COMPLETION_TEMPLATE, HOT_CONFIG_KEYS, HotSettings,
+    ConfigLoader, DEFAULT_COMPLETION_TEMPLATE, DEFAULT_SOURCE_HINT, HOT_CONFIG_KEYS, HotSettings,
     completion_template, processing_template,
 )
 
@@ -34,6 +34,7 @@ class HotConfigContractTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[2] / "config.example.json"
         config = json.loads(path.read_text(encoding="utf-8"))
         settings = HotSettings.from_config(config)
+        self.assertEqual(settings.source_hint, DEFAULT_SOURCE_HINT)
         self.assertTrue(settings.notifications.compaction)
         self.assertEqual(settings.notifications.quota_thresholds, {
             "primary": (50, 25, 10, 5, 1),

@@ -8,7 +8,7 @@ from .prompts import validate_prompt_overrides
 from .diagnostics import error_fields, log_event
 from .log_rotation import DEFAULT_KEEP, KEEP_MAX, KEEP_MIN, normalize_keep
 
-DEFAULT_SOURCE_HINT = "[User from WeChat.]"
+DEFAULT_SOURCE_HINT = "[User from WeChat. Keep replies mobile-friendly.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
                    "compactionNotice", "quotaWarningThresholds", "prompts", "connectionIdleSeconds",
                    "sending", "logs")
