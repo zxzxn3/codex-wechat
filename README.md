@@ -6,6 +6,12 @@
   <img src="assets/branding/codex-wechat-wechat-contact.jpg" alt="codex-wechat 微信联系人" width="640">
 </p>
 
+<p align="center">
+  <sub>品牌形象由 GPT 基于 Bilibili 来源图生成；原角色上善无形、二创 ZipZipPipe，相关素材按
+  <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>
+  使用；详见<a href="assets/branding/README.md">素材说明</a>。</sub>
+</p>
+
 <h1 align="center">codex-wechat</h1>
 
 <p align="center">
@@ -27,7 +33,7 @@
   <img src="https://img.shields.io/badge/status-private%20beta-f36d49?style=flat-square" alt="Private beta">
   <img src="https://img.shields.io/badge/python-3.11%2B-3157ff?style=flat-square" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-72c945?style=flat-square" alt="Linux and Windows">
-  <img src="https://img.shields.io/badge/license-Proprietary%20Beta-6d7167?style=flat-square" alt="Proprietary Beta">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-3157ff?style=flat-square" alt="Apache-2.0">
 </p>
 
 <p align="center">
@@ -267,9 +273,9 @@ README 用于项目介绍；agent、维护者和测试者从 [文档索引](docs
 
 ## License
 
-本项目采用 [Proprietary Beta License](LICENSE)，不是开源软件。仅授权仓库所有者直接许可的
-个人在自控设备上进行非商业评估和测试；不得转售、再分发、商用或创建衍生作品。正式发布前
-请以 `LICENSE` 原文为准。
+项目源代码和文档采用 [Apache License 2.0](LICENSE)。归属声明见 [NOTICE](NOTICE)，项目名称、
+Logo 和角色形象的品牌使用边界见 [TRADEMARKS](TRADEMARKS.md)。`assets/branding/` 中的品牌
+图片不适用 Apache-2.0，来源与单独限制见 [品牌素材说明](assets/branding/README.md)。
 
 “Codex”“OpenAI”“DeepSeek”“微信”“WeChat”“Tencent”等名称与商标归各自权利人所有。
 本项目是第三方独立开发，与 OpenAI、DeepSeek、腾讯及其关联方没有隶属、合作、授权或背书关系。

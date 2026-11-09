@@ -23,6 +23,7 @@ README 用于项目介绍和公开推广；本文是 agent、维护者和测试�
 | Codex/App/微信协议、版本和外部依据 | [SOURCES](SOURCES.md) |
 | 测试隔离、静态检查、依赖和发布退出标准 | [DEVELOPMENT](DEVELOPMENT.md)、[AGENTS](../AGENTS.md) |
 | 分发方式、私有入口和内测 PAT 边界 | [DISTRIBUTION](DISTRIBUTION.md) |
+| 开源前密钥、许可证和公开仓库检查 | [OPEN-SOURCE-CHECKLIST](OPEN-SOURCE-CHECKLIST.md) |
 | 性能采样和暂不实施的恢复增强 | [PERFORMANCE](PERFORMANCE.md) |
 | 维护成本与重构取舍 | [COMPLEXITY](COMPLEXITY.md) |
 | 已作出的命令、投递和权限决策 | [决策索引](decisions/README.md) |
