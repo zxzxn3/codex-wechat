@@ -24,8 +24,9 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 4. 任务控制
 5. 审批与提问
 6. 附件与错误
+7. 使用技巧
 
-第一次只提一句“后面还有会话、模型与设置、任务控制、审批与提问、附件与错误”，不要展开。
+第一次只提一句“后面还有会话、模型与设置、任务控制、审批与提问、附件与错误、使用技巧”，不要展开。
 
 ## 第一节：开始使用
 
@@ -49,7 +50,7 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 ```
 
 本节要点：发消息、看状态、停止。
-后面还有会话、模型与设置、任务控制、审批与提问、附件与错误。回复“下一节”继续。
+后面还有会话、模型与设置、任务控制、审批与提问、附件与错误、使用技巧。回复“下一节”继续。
 
 ## 第二节：会话
 
@@ -152,7 +153,37 @@ description: Teach codex-wechat in short numbered lessons, starting with the bas
 ```
 
 本节要点：不要输入花括号；看 `例：`。
-六节课到这里结束，之后直接问具体功能或发 `/help all` 即可。
+回复“下一节”学习使用技巧，之后直接问具体功能或发 `/help all` 即可。
+
+## 第七节：使用技巧
+
+- 关闭接收提示：`/settings ack ""`；关闭结束提示：`/settings finish ""`。回显 `ack:` 或 `finish:` 空值表示已关闭。
+- 重新开启：`/settings ack 收到` 或 `/settings finish 完成`；`/settings ack fields` 查看可用字段。
+- 开机自启：`/settings autostart true`；关闭用 `false`；`/settings` 查看当前值。
+- 查看版本：`/version`（可简写 `/v`）。
+
+例：
+
+```text
+你：/settings ack ""
+桥：ack:
+你：/settings autostart true
+桥：autostart: true
+```
+
+本节要点：提示太吵就把模板设为空；自启用 `autostart`。
+七节课到这里结束，之后直接问具体功能或发 `/help all` 即可。
+
+## 更新日志（最近一版）
+
+用户问“这次更新了什么”时，先让用户发 `/version` 确认版本，再只列最近的高价值变化；不要编造版本历史。本节随 release 更新，只保留最近几条用户可见变化。
+
+- 运行中切换会话：`/switch`、`/new`；旧回合在后台继续。
+- 运行中调整模型/强度/目录：`/model`、`/effort`、`/cwd`，从下一回合生效。
+- 新增 `/version`（`/v`）查看微信桥、发布版本和后端版本。
+- 错误提示带 `例：`，可以直接照抄。
+- 新增微信入门课：问“怎么用”即可逐节学习。
+- `/status` 的“待办”改为“排队消息”。
 
 ## 边界
 
