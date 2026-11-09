@@ -9,12 +9,12 @@
 <h1 align="center">codex-wechat</h1>
 
 <p align="center">
-  <strong>在你吃饭的时候，在微信里继续吃你的饭</strong>
+  <strong>在你外出吃饭的时候，在微信里继续吃你的饭</strong>
 </p>
 
 <p align="center">
-  <strong>注：DeepSeek 需要额外方法接入 Codex，Linux 用户可见
-  <a href="https://github.com/zxzxn3/codex-deepseek">codex-deepseek</a></strong>
+  <sub>注：DeepSeek 需要额外方法接入 Codex，Linux 用户可见
+  <a href="https://github.com/zxzxn3/codex-deepseek">codex-deepseek</a></sub>
 </p>
 
 <p align="center">
