@@ -39,7 +39,7 @@ STOP_IDLE = "当前没有运行中的任务。"
 STOP_UNCONFIRMED = "停止结果未确认，任务可能仍在运行；请查看 /status 或 Codex。"
 
 BACKEND_CONNECT_FAILED = "后端连接失败: {reason}\n正在重连。"
-TASK_FAILED = "消息未提交: 后端处理失败。查看 `/status`。"
+TASK_FAILED = "消息未发送: 后端处理失败。查看 `/status`。"
 TURN_STALLED = (
     "本轮已中止: 长时间没有收到任何进展。\n"
     "会话可能仍在桌面端运行；可用 `/status` 查看，再发消息会重新连接。"
@@ -58,7 +58,7 @@ TURN_FAILED_SANDBOX = "任务未完成: 沙箱执行失败，请查看 `/status`
 TURN_INTERRUPTED = "任务已中断。"
 TURN_ENDED_UNEXPECTEDLY = "任务未正常完成。\n使用 `/status` 查看状态。"
 TURN_COMPLETED_EMPTY = "任务已完成，但没有文本结果。"
-UNCERTAIN_STEER = "补充消息提交未确认，未重发。请在桌面查看。"
+UNCERTAIN_STEER = "补充消息发送未确认，未重发。请在桌面查看。"
 QUEUED_STEER = "当前任务运行中，已排队。"
 QUEUE_CONFIRMED = "已排队: {count} {unit}"
 UNQUEUE_CANCELLED = "已撤回，剩余 {count} {unit}。"
@@ -161,11 +161,11 @@ SESSION_TARGET_BLOCKED = (
 )
 SESSION_TARGET_ACTIVE = "未切换会话: 目标会话正在桌面端运行，请等待结束后重试。"
 SESSION_WRITER_BUSY = (
-    "未提交: 会话正被另一个 Codex 客户端占用。\n"
+    "未发送: 会话正被另一个 Codex 客户端占用。\n"
     "请在 App 或 CLI 中关闭该会话，或稍后重试。"
 )
 SESSION_WRITER_QUEUED = (
-    "已排队: 会话正被另一个 Codex 客户端占用，暂时无法提交。\n"
+    "已排队: 会话正被另一个 Codex 客户端占用，暂时无法发送。\n"
     "在 App 或 CLI 中关闭该会话后会自动发送；最多等待 10 分钟。"
 )
 SESSION_INDEX_INVALID = "未切换会话: 编号无效\n例：`/switch 1`；请先发送 `/sessions`。"
@@ -194,7 +194,7 @@ LABEL_SERVICE = "服务"
 LABEL_TOKENS = "Token"
 LABEL_CONTEXT = "上下文"
 LABEL_LIMITS = "限额"
-LABEL_QUEUED = "待办"
+LABEL_QUEUED = "排队消息"
 LABEL_APPROVALS = "审批"
 LABEL_SEND_FAILURES = "发送失败"
 LABEL_SHARED = "共享后台"
@@ -229,7 +229,7 @@ SESSION_LIST_FAILED = "会话列表读取未完成，请重试。"
 COMPACT_BLOCKED = "暂不能压缩: 当前会话等待处理。"
 AUTOSTART_FAILED = "自启设置未确认，请在电脑检查本项目的服务安装。"
 RESTART_REJECTED = "拒绝重启: {reason}"
-STOP_CLEARED = "\n已清空待办: {count}"
+STOP_CLEARED = "\n已清空排队消息: {count}"
 ANSWER_ACCEPTED = "已回答。"
 ANSWER_EXPIRED = "问题已失效或编号无效。"
 ANSWER_FAILED = "回答投递结果未确认，请查看桌面；未自动重发。"
@@ -237,8 +237,8 @@ REPLY_BUDGET_PAUSED = "还有 {count} 段待发，回复 `/` 继续，或 `/d` �
 SEND_FILE_FAILED = "附件未发送: {reason}\n```\n{path}\n```\n请稍后重试。"
 REPLY_SEND_FAILED = "这条回复未能完整发送，已停止其余部分。请在桌面查看。"
 DISCARDED = "{count} 条消息被清空。"
-INPUT_RECOVERED = "上次有任务已提交或提交结果未确认，未自动重发。未提交的待办已保留。"
-INPUT_RESULT_INTERRUPTED = "任务已提交，但结果接收中断，未重新执行。"
+INPUT_RECOVERED = "上次消息可能已处理，但没收到结果；未自动重发，其他消息仍保留。"
+INPUT_RESULT_INTERRUPTED = "任务已发送，但结果接收中断，未重新执行。"
 CONTROL_QUEUE_FULL = "指令等待过多，请稍后重试。"
 CONTROL_TIMEOUT = "控制请求未确认，请查看 `/status`；不会自动重发。"
 CONTROL_FAILED = "指令未完成，请查看 `/status` 后重试。"
@@ -247,8 +247,8 @@ GENERIC_FAILURE = "操作失败"
 COMMAND_USAGE = "用法: {usage}"
 QUEUE_USAGE = "用法: {usage}\n例：`/queue 吃饭了吗`"
 HELP_USAGE = "用法: {usage}\n例：`/help all`"
-INPUT_SUBMISSION_UNCERTAIN = "消息提交结果未确认，未自动重发。"
-BACKEND_UNREADY = "后端尚未就绪，未提交的消息已保留；可用 `/stop` 清空。"
+INPUT_SUBMISSION_UNCERTAIN = "消息发送结果未确认，未自动重发。"
+BACKEND_UNREADY = "后端尚未就绪，未发送的消息已保留；可用 `/stop` 清空。"
 RESULT_PREPARE_FAILED = "结果准备失败，请在桌面查看该轮回答。"
 PREPARATION_STOPPED = "已停止，未启动模型轮次。"
 QUOTA_WARNING = "限额提醒: {backend}\n{content}"
@@ -276,11 +276,11 @@ HELP_STATUS = '当前状态'
 HELP_VERSION = '查看微信桥版本'
 HELP_SETTINGS = '查看设置'
 HELP_SESSIONS = '列出、搜索或翻页会话'
-HELP_NEW = '新建'
+HELP_NEW = '新建会话'
 HELP_COMPACT = '压缩当前会话上下文'
 HELP_QUEUE = '排队到当前任务结束后执行'
 HELP_UNQUEUE = '撤回最后一条尚未开始的排队消息'
-HELP_STOP = '停止并清空待办'
+HELP_STOP = '停止并清空排队消息'
 HELP_PING = '微信与供应商网络延迟'
 HELP_SWITCH = '按编号、ID前缀或搜索词切换会话'
 HELP_BACKEND = '查看或切换后端'

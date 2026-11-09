@@ -228,7 +228,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                    "total": {"totalTokens": 34567, "inputTokens": 30000, "outputTokens": 4567},
                    "modelContextWindow": 200000},
             rate_limits={"rateLimits": {"primary": {"usedPercent": 10, "windowDurationMins": 300}}})
-        for expected in ("状态: 运行中", "待办: 2", "后端: Codex", "模型: example (High)",
+        for expected in ("状态: 运行中", "排队消息: 2", "后端: Codex", "模型: example (High)",
                          "权限: 工作区可写", "协作: 默认", "服务: 本地后台",
                          "Token: 34.6K total\n       30K input + 4.6K output",
                          "上下文: 剩余 94% (12.3K / 200K)", "限额: 5小时剩余 90%"):
