@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 from codex_wechat import app as codex_wechat
 from codex_wechat.prompts import SERVICE_STOPPING
+from codex_wechat.records import Delivered
 from codex_wechat.service_adapter import ServiceState
 from codex_wechat.storage import Store
 from tests.support.helpers import runtime_paths_at
@@ -88,11 +89,14 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
             state_dir = root / ".state"
             store = Store(state_dir, lock=False)
             store.save("account", {"user": "owner", "token": "secret"})
-            store.save("bridge", {"context": "context"})
+            store.save("bridge", {"version": 1, "context": "context"})
+            client = SimpleNamespace(
+                send=AsyncMock(return_value=Delivered("message-id")),
+                close=AsyncMock(),
+            )
             config = root / "config.json"
             config.write_text('{"prompts":{"SERVICE_STOPPING":"bye"}}',
                               encoding="utf-8")
-            client = SimpleNamespace(send=AsyncMock(return_value={}), close=AsyncMock())
             with patch.object(codex_wechat, "WeChat", return_value=client):
                 await codex_wechat.send_stop_notification(state_dir, config)
         entry = client.send.await_args.args[0]
@@ -122,7 +126,7 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
             state_dir = root / ".state"
             store = Store(state_dir, lock=False)
             store.save("account", {"user": "owner", "token": "secret"})
-            store.save("bridge", {"context": "context"})
+            store.save("bridge", {"version": 1, "context": "context"})
             client = SimpleNamespace(
                 send=AsyncMock(side_effect=RuntimeError("send failed")),
                 close=AsyncMock())

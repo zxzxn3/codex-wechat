@@ -57,6 +57,9 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
         ids = [entry.get("id") for entry in state["outbox"]]
         self.assertTrue(all(isinstance(identity, str) and identity for identity in ids))
         self.assertEqual(len(ids), len(set(ids)))
+        self.assertTrue(all(type(entry.get("replySeq")) is int
+                            and entry["replySeq"] >= 0
+                            for entry in state["outbox"]))
 
         control_ids = [control.get("id") for control in state["pendingControls"]]
         self.assertTrue(all(isinstance(identity, str) and identity
@@ -175,7 +178,7 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(snapshot=snapshot):
                 store = Store(self.base / ("input-" + snapshot))
                 job = self.job("job")
-                saved = {"context": "context", "inbox": []}
+                saved = {"version": 1, "context": "context", "inbox": []}
                 if snapshot == "inbox":
                     saved["inbox"] = [job]
                 else:

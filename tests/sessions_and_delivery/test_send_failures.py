@@ -427,7 +427,10 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
     def test_status_flags_unconfirmed_delivery_after_repeated_failures(self):
         from codex_wechat.app import status_payload
         for failures, expected in ((0, "ok"), (2, "ok"), (3, "unconfirmed")):
-            self.store.save("bridge", {"consecutiveSendFailures": failures})
+            self.store.save("bridge", {
+                "version": 1,
+                "consecutiveSendFailures": failures,
+            })
             self.assertEqual(status_payload(self.store)["delivery"], expected)
 
     def test_a_past_unknown_delivery_does_not_pin_delivery_to_unconfirmed(self):
@@ -435,6 +438,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         # happened". A recovered channel must read as ok again.
         from codex_wechat.app import status_payload
         self.store.save("bridge", {
+            "version": 1,
             "deliveryUnknownTotal": 1,
             "failedOutbox": [{"status": "delivery_unknown"}],
             "consecutiveSendFailures": 0,
@@ -444,6 +448,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["delivery_unknown"], 1)
         self.assertEqual(payload["delivery_unknown_retained"], 1)
         self.store.save("bridge", {
+            "version": 1,
             "deliveryUnknownTotal": 25,
             "failedOutbox": [{"status": "delivery_unknown"}] * 20,
         })

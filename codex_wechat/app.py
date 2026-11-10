@@ -16,7 +16,7 @@ from . import service_adapter
 from . import service_control
 from . import wechat_auth
 from .backend import CodexBackend
-from .records import Source
+from .records import Delivered, Source
 from .output_delivery import DELIVERY_DEGRADED_THRESHOLD, OutputDelivery
 from .input_delivery import InputDelivery
 from .ingress import Ingress
@@ -969,7 +969,10 @@ async def send_stop_notification(state_dir, config_path):
     try:
         client = WeChat(account)
         try:
-            await client.send(entry)
+            outcome = await client.send(entry)
+            if not isinstance(outcome, Delivered):
+                print(f"关闭通知未确认：{type(outcome).__name__}",
+                      file=sys.stderr, flush=True)
         finally:
             await client.close()
     except Exception as error:

@@ -16,7 +16,7 @@ from codex_wechat.configuration import ConfigurationError
 from codex_wechat.storage import Store
 from codex_wechat.wechat import LoginResult
 from tests.support.fakes import FakeServiceAdapter
-from tests.support.helpers import runtime_paths_at
+from tests.support.helpers import outbox_entry, runtime_paths_at
 
 
 class RebindTests(unittest.IsolatedAsyncioTestCase):
@@ -31,6 +31,7 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     def seed(self, bridge, account=None):
+        bridge.setdefault("version", 1)
         store = Store(self.state_dir)
         try:
             if account is not None:
@@ -60,7 +61,7 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
         self.seed({
             "cursor": "cursor",
             "inbox": [{"id": "queued"}],
-            "outbox": [{"id": "unsent"}],
+            "outbox": [outbox_entry("unsent", text="unsent")],
         }, account)
 
         async def login(store, **kwargs):
@@ -75,7 +76,7 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved_account["token"], "new")
         self.assertEqual(bridge["cursor"], "cursor")
         self.assertEqual(bridge["inbox"], [{"id": "queued"}])
-        self.assertEqual(bridge["outbox"], [{"id": "unsent"}])
+        self.assertEqual(bridge["outbox"], [outbox_entry("unsent", text="unsent")])
         self.assertEqual(bridge["wechatAuth"]["state"], wechat_auth.AUTH_VALID)
         self.assertEqual(adapter.calls, ["status", "status", "stop", "start"])
 
@@ -87,7 +88,8 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
             "context": "old-context",
             "currentInput": {"id": "current"},
             "inbox": [{"id": "queued"}],
-            "outbox": [{"id": "unsent"}],
+            "outbox": [outbox_entry(
+                "unsent", user="old-user", context="old-context", text="unsent")],
             "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED},
         }, old_account)
 
@@ -198,6 +200,7 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     def seed(self, bridge, account=None):
+        bridge.setdefault("version", 1)
         store = Store(self.state_dir)
         try:
             if account is not None:
@@ -239,7 +242,8 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
                 login.assert_not_awaited()
 
     async def test_queued_inbox_alone_does_not_block_rebind(self):
-        self.seed({"inbox": [{"id": "queued"}], "outbox": [{"id": "unsent"}]},
+        self.seed({"inbox": [{"id": "queued"}],
+                   "outbox": [outbox_entry("unsent", text="unsent")]},
                   {"token": "t", "user": "u", "bot": "b"})
 
         async def login(store, **kwargs):
@@ -249,12 +253,13 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
         await self.run_rebind(adapter, login)
         bridge = self.load("bridge")
         self.assertEqual(bridge["inbox"], [{"id": "queued"}])
-        self.assertEqual(bridge["outbox"], [{"id": "unsent"}])
+        self.assertEqual(bridge["outbox"], [outbox_entry("unsent", text="unsent")])
         self.assertEqual(adapter.calls, ["status", "status"])
 
     async def test_failure_keeps_credentials_and_bridge_state(self):
         account = {"token": "t", "user": "u", "bot": "b"}
-        bridge = {"cursor": "c", "inbox": [{"id": "i"}], "outbox": [{"id": "o"}],
+        bridge = {"cursor": "c", "inbox": [{"id": "i"}],
+                  "outbox": [outbox_entry("o", text="queued")],
                   "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}}
         self.seed(bridge, account)
         adapter = FakeServiceAdapter(running=True)
@@ -287,7 +292,7 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_user_bot_change_preserves_delivery_and_clears_pending(self):
         old = {"token": "old", "user": "u", "bot": "b1"}
         self.seed({"cursor": "c", "inbox": [{"id": "i"}],
-                   "outbox": [{"id": "o"}],
+                   "outbox": [outbox_entry("o", text="queued")],
                    "thread": "thread-keep",
                    "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}}, old)
         new = {"token": "new", "user": "u", "bot": "b2"}
@@ -305,7 +310,9 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge["thread"], "thread-keep")
         self.assertEqual(bridge["wechatAuth"]["state"], wechat_auth.AUTH_VALID)
         self.assertEqual(bridge["inbox"], [{"id": "i"}])
-        self.assertEqual(bridge["outbox"], [{"id": "o", "context": ""}])
+        self.assertEqual(bridge["outbox"], [
+            {**outbox_entry("o", text="queued"), "context": ""}
+        ])
         self.assertEqual(bridge["cursor"], "")
         self.assertTrue(bridge["wechatContextPending"])
         self.assertEqual(self.load("account"), new)
@@ -314,7 +321,10 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
 class StartupPendingTests(unittest.IsolatedAsyncioTestCase):
     async def test_pending_rebind_blocks_start_and_points_at_rebind_command(self):
         account = {"token": "t", "user": "u", "bot": "b"}
-        state = {"bindingPending": {"target": {"user": "u", "bot": "b2"}}}
+        state = {
+            "version": 1,
+            "bindingPending": {"target": {"user": "u", "bot": "b2"}},
+        }
         store = Mock(load=Mock(
             side_effect=lambda name, default=None: account if name == "account" else state))
         with patch("codex_wechat.app.login", AsyncMock()) as login:

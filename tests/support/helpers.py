@@ -23,6 +23,20 @@ def runtime_paths_at(root, *, config_file=None, state_dir=None):
     )
 
 
+def outbox_entry(identity="message", *, user="owner", context="context",
+                 text="message", reply_seq=0):
+    """A minimally complete persisted outbound entry."""
+    return {
+        "id": identity,
+        "group": identity,
+        "role": "body",
+        "user": user,
+        "context": context,
+        "text": text,
+        "replySeq": reply_seq,
+    }
+
+
 def write_installation_layout(
     install_root,
     *,

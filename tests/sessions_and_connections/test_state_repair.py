@@ -19,7 +19,11 @@ class LoadBridgeStateTests(unittest.TestCase):
     def test_partial_file_is_repaired_without_losing_saved_values(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory), lock=False)
-            store.save("bridge", {"wechatAuth": {"state": "valid"}, "seen": ["a"]})
+            store.save("bridge", {
+                "version": 1,
+                "wechatAuth": {"state": "valid"},
+                "seen": ["a"],
+            })
             state = load_bridge_state(store)
         self.assertEqual(state["wechatAuth"], {"state": "valid"})
         self.assertEqual(state["seen"], ["a"])
@@ -54,7 +58,7 @@ class LoadBridgeStateTests(unittest.TestCase):
             root = Path(directory)
             store = Store(root, lock=False)
             path = root / "bridge.json"
-            raw = '{"inbox": null}\n'
+            raw = '{"version": 1, "inbox": null}\n'
             path.write_text(raw, encoding="utf-8")
             payload = codex_wechat.status_payload(store)
             self.assertEqual(path.read_text(encoding="utf-8"), raw)
@@ -81,15 +85,15 @@ class LoadBridgeStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = Store(root, lock=False)
-            store.save("bridge", {"pendingControls": {}})
+            store.save("bridge", {"version": 1, "pendingControls": {}})
             state = load_bridge_state(store)
         self.assertEqual(state["pendingControls"], [])
         self.assertEqual(state["stateRecovery"]["kind"], "invalid_shape")
 
     def test_invalid_backend_session_and_budget_types_are_quarantined(self):
         cases = (
-            {"backendSessions": {"codex": {"thread": []}}},
-            {"replyBudget": {"seq": 1, "used": "many"}},
+            {"version": 1, "backendSessions": {"codex": {"thread": []}}},
+            {"version": 1, "replyBudget": {"seq": 1, "used": "many"}},
         )
         for saved in cases:
             with self.subTest(saved=saved), tempfile.TemporaryDirectory() as directory:
@@ -97,6 +101,56 @@ class LoadBridgeStateTests(unittest.TestCase):
                 store.save("bridge", saved)
                 state = load_bridge_state(store)
                 self.assertEqual(state["stateRecovery"]["kind"], "invalid_shape")
+
+    def test_unversioned_state_is_not_migrated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = Store(root, lock=False)
+            store.save("bridge", {"thread": "old"})
+            state = load_bridge_state(store)
+        self.assertIsNone(state["thread"])
+        self.assertEqual(state["stateRecovery"]["kind"], "invalid_shape")
+        self.assertIn("version", state["stateRecovery"]["detail"])
+
+    def test_version_zero_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = Store(root, lock=False)
+            path = root / "bridge.json"
+            raw = '{"version": 0, "thread": "old"}\n'
+            path.write_text(raw, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unsupported_version"):
+                load_bridge_state(store)
+            self.assertEqual(path.read_text(encoding="utf-8"), raw)
+            self.assertEqual(list(root.glob("bridge.corrupt-*.json")), [])
+
+    def test_structurally_invalid_outbox_is_quarantined(self):
+        cases = (
+            {"outbox": [{}]},
+            {
+                "outbox": [{
+                    "id": "m",
+                    "user": "u",
+                    "context": "context",
+                    "text": "message",
+                }]
+            },
+        )
+        for invalid in cases:
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                store = Store(Path(directory), lock=False)
+                store.save("bridge", {"version": 1, **invalid})
+                state = load_bridge_state(store)
+                self.assertEqual(state["outbox"], [])
+                self.assertEqual(state["stateRecovery"]["kind"], "invalid_shape")
+
+    def test_boolean_binding_pending_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory), lock=False)
+            store.save("bridge", {"version": 1, "bindingPending": True})
+            state = load_bridge_state(store)
+        self.assertNotIn("bindingPending", state)
+        self.assertEqual(state["stateRecovery"]["kind"], "invalid_shape")
 
     def test_future_version_fails_closed_without_moving_the_file(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -126,7 +180,7 @@ class BridgeRepairTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         store = Store(Path(directory.name), lock=False)
         if saved is not None:
-            store.save("bridge", saved)
+            store.save("bridge", {"version": 1, **saved})
         with patch.object(codex_wechat, "WeChat"):
             bridge = Bridge(store, {"user": "u", "token": "t"}, {})
         return bridge

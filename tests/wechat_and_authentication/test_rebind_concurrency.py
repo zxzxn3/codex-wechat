@@ -10,7 +10,7 @@ from codex_wechat import wechat_auth
 from codex_wechat.storage import Store
 from codex_wechat.wechat import LoginResult
 from tests.support.fakes import FakeServiceAdapter
-from tests.support.helpers import runtime_paths_at
+from tests.support.helpers import outbox_entry, runtime_paths_at
 
 
 class ScanRaceTests(unittest.IsolatedAsyncioTestCase):
@@ -25,6 +25,7 @@ class ScanRaceTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     def seed(self, bridge, account):
+        bridge.setdefault("version", 1)
         store = Store(self.state_dir)
         try:
             store.save("account", account)
@@ -113,7 +114,8 @@ class ScanRaceTests(unittest.IsolatedAsyncioTestCase):
             try:
                 state = running.load("bridge")
                 state["inbox"].append({"id": "during-scan"})
-                state["outbox"].append({"id": "reply-during-scan", "context": "old"})
+                state["outbox"].append(outbox_entry(
+                    "reply-during-scan", context="old", text="queued"))
                 running.save("bridge", state)
             finally:
                 running.close()
@@ -136,7 +138,7 @@ class ScanFailureTests(unittest.IsolatedAsyncioTestCase):
         self.config = self.root / "config.json"
         self.config.write_text("{}", encoding="utf-8")
         self.old = {"token": "old", "user": "u", "bot": "b1"}
-        self.bridge = {"cursor": "c", "inbox": [{"id": "q"}], "outbox": [],
+        self.bridge = {"version": 1, "cursor": "c", "inbox": [{"id": "q"}], "outbox": [],
                        "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}}
         store = Store(self.state_dir)
         try:
@@ -248,7 +250,10 @@ class BindedRedirectTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_binded_redirect_after_failure_revalidates_local_token(self):
         self.store.save("account", {"token": "t", "user": "u", "bot": "b"})
-        self.store.save("bridge", {"wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}})
+        self.store.save("bridge", {
+            "version": 1,
+            "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED},
+        })
         client = self.Client(["binded_redirect"], getconfig=RuntimeError("expired"))
         with self.assertRaisesRegex(RuntimeError, "expired"):
             await self.login(client)
@@ -266,7 +271,10 @@ class LockReleaseTests(unittest.IsolatedAsyncioTestCase):
             store = Store(state_dir)
             try:
                 store.save("account", account)
-                store.save("bridge", {"wechatAuth": {"state": wechat_auth.AUTH_REQUIRED}})
+                store.save("bridge", {
+                    "version": 1,
+                    "wechatAuth": {"state": wechat_auth.AUTH_REQUIRED},
+                })
             finally:
                 store.close()
 

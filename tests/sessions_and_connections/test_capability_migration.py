@@ -73,7 +73,10 @@ class RuntimeCapabilities(unittest.IsolatedAsyncioTestCase):
             store = Store(temp)
             try:
                 store.save('account', {'bot': 'b', 'user': 'u', 'token': 'fixture'})
-                store.save('bridge', {'bindingPending': {'target': {'bot': 'b', 'user': 'u'}}})
+                store.save('bridge', {
+                    'version': 1,
+                    'bindingPending': {'target': {'bot': 'b', 'user': 'u'}},
+                })
                 with self.assertRaisesRegex(ConfigurationError, '重新绑定'):
                     await startup_account(store)
             finally:

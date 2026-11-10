@@ -56,6 +56,7 @@ class OutputDelivery:
                 entry.setdefault("requestId", request_id)
         for index, entry in enumerate(entries, 1):
             entry.update(part=index, parts=len(entries))
+            entry.setdefault("replySeq", bridge.state.get("inboundSeq", 0))
             self._queued_at[entry["id"]] = queued_at
         bridge.state["outbox"].extend(entries)
         if entries:
@@ -236,6 +237,7 @@ class OutputDelivery:
                                         request_id=entry.get("requestId"))
             for note in notes:
                 note["failureNotice"] = True
+                note["replySeq"] = entry.get("replySeq", bridge.state.get("inboundSeq", 0))
                 self._queued_at[note["id"]] = time.perf_counter()
             bridge.state["outbox"][0:0] = notes
         bridge.save()
@@ -303,6 +305,7 @@ class OutputDelivery:
             group=str(uuid.uuid4()), context=bridge.state.get("context", ""), role="notice")
         for entry in entries:
             entry["budgetNotice"] = True
+            entry["replySeq"] = bridge.state.get("inboundSeq", 0)
             self._queued_at[entry["id"]] = time.perf_counter()
         return entries
 
@@ -315,6 +318,9 @@ class OutputDelivery:
         slack exactly while the channel was dropping messages.
         """
         if entry.get("budgetNotice"):
+            return
+        reply_seq = entry.get("replySeq")
+        if type(reply_seq) is int and reply_seq != self.bridge.state.get("inboundSeq", 0):
             return
         self.bridge.spend_reply_budget()
 
@@ -382,7 +388,8 @@ class OutputDelivery:
             self.charge_reply(entry)
             entry["attempts"] = entry.get("attempts", 0) + 1
             bridge.state["deliveryUnknownTotal"] += 1
-            self.paused = True
+            if entry.get("replySeq") == bridge.state.get("inboundSeq", 0):
+                self.paused = True
             log_event("output.delivery_unknown", level="warning", component="output",
                       role=entry.get("role", "body"), attempt=entry["attempts"],
                       error_type="AcceptedUnknown", error_code=outcome.ret,
@@ -408,9 +415,10 @@ class OutputDelivery:
                       queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
                       request_id=entry.get("requestId"))
             if outcome.kind in CONTEXT_REJECTION_KINDS:
-                log_event("output.waiting_context", level="warning", component="output",
-                          status="pending", queued=len(bridge.state["outbox"]))
-                bridge.state["wechatContextPending"] = True
+                if entry.get("context") == bridge.state.get("context"):
+                    log_event("output.waiting_context", level="warning", component="output",
+                              status="pending", queued=len(bridge.state["outbox"]))
+                    bridge.state["wechatContextPending"] = True
             bridge.fail_output(entry)
             self._in_flight_id = None
             return

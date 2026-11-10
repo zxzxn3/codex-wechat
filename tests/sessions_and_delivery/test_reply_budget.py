@@ -99,6 +99,53 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
+    async def test_inbound_during_send_does_not_charge_the_new_budget(self):
+        bridge = self.bridge
+        bridge.reply("old")
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def send(_):
+            entered.set()
+            await release.wait()
+            return Delivered("message-id")
+
+        bridge.channel.send = send
+        task = asyncio.create_task(bridge.sender())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            bridge.refresh_reply_budget()
+            release.set()
+            await asyncio.wait_for(bridge.outbox_drained.wait(), 1)
+            self.assertEqual(bridge.budget_state()["seq"], 1)
+            self.assertEqual(bridge.budget_state()["used"], 0)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_stale_unknown_delivery_does_not_repause_after_new_inbound(self):
+        bridge = self.bridge
+        bridge.reply("old")
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def send(_):
+            entered.set()
+            await release.wait()
+            return AcceptedUnknown(0)
+
+        bridge.channel.send = send
+        with patch("codex_wechat.output_delivery.log_event"):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+                bridge.refresh_reply_budget()
+                release.set()
+                self.assertTrue(await self.wait_for(
+                    lambda: bridge.state["deliveryUnknownTotal"] == 1))
+                self.assertFalse(bridge.output.paused)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
     async def test_a_request_that_never_arrived_does_not_spend_the_budget(self):
         bridge = self.bridge
         bridge.reply("retried")

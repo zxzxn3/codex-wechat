@@ -1,6 +1,6 @@
 """Cross-platform control of the installed background service.
 
-Authentication and data migration stay in the shared Python layer. This module
+Authentication and durable state transitions stay in the shared Python layer. This module
 only reports service state and requests native start/stop operations.
 """
 import asyncio

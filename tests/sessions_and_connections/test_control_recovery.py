@@ -59,6 +59,7 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_running_control_is_reported_instead_of_replayed(self):
         store = Store(self.root / "state")
         store.save("bridge", {
+            "version": 1,
             "context": "ctx",
             "pendingControls": [{
                 "id": "running-control",
@@ -220,6 +221,7 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_an_unconfirmed_restart_is_reported_instead_of_replayed(self):
         store = Store(self.root / "state")
         store.save("bridge", {
+            "version": 1,
             "context": "ctx",
             "pendingControls": [{
                 "id": "restart-control",
@@ -238,6 +240,7 @@ class ControlRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_interrupted_notice_and_cleanup_share_one_save(self):
         store = Store(self.root / "state")
         store.save("bridge", {
+            "version": 1,
             "context": "ctx",
             "pendingControls": [
                 {

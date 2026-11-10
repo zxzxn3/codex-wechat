@@ -100,6 +100,94 @@ def _expect_mapping_of_dicts(state, key, path):
         )
 
 
+def _entry_error(path, field, expected, value):
+    raise BridgeStateError(
+        "invalid_shape",
+        f"{field} 必须是{expected}，实际为 {type(value).__name__}",
+        path,
+    )
+
+
+def _expect_outbox_entries(state, path):
+    if "outbox" not in state:
+        return
+    for index, entry in enumerate(state["outbox"]):
+        prefix = f"outbox[{index}]"
+        for field in ("id", "user"):
+            if not isinstance(entry.get(field), str) or not entry[field]:
+                _entry_error(path, f"{prefix}.{field}", "非空字符串", entry.get(field))
+        if "context" not in entry or not isinstance(entry["context"], (str, type(None))):
+            _entry_error(
+                path,
+                f"{prefix}.context",
+                "字符串或 null",
+                entry.get("context"),
+            )
+        if "replySeq" not in entry:
+            raise BridgeStateError(
+                "invalid_shape",
+                f"{prefix}.replySeq 缺失",
+                path,
+            )
+        if not _is_int(entry["replySeq"]) or entry["replySeq"] < 0:
+            _entry_error(path, f"{prefix}.replySeq", "非负整数", entry["replySeq"])
+
+        payload = False
+        if "text" in entry:
+            if not isinstance(entry["text"], str):
+                _entry_error(path, f"{prefix}.text", "字符串", entry["text"])
+            payload = True
+        if "item" in entry:
+            if not isinstance(entry["item"], dict):
+                _entry_error(path, f"{prefix}.item", "对象", entry["item"])
+            payload = True
+        if "asset" in entry:
+            asset = entry["asset"]
+            if not isinstance(asset, dict):
+                _entry_error(path, f"{prefix}.asset", "对象", asset)
+            for field in ("path", "name", "kind"):
+                if not isinstance(asset.get(field), str) or not asset[field]:
+                    _entry_error(
+                        path,
+                        f"{prefix}.asset.{field}",
+                        "非空字符串",
+                        asset.get(field),
+                    )
+            if asset["kind"] not in ("image", "video", "file"):
+                _entry_error(
+                    path,
+                    f"{prefix}.asset.kind",
+                    " image、video 或 file",
+                    asset["kind"],
+                )
+            payload = True
+        if not payload:
+            raise BridgeStateError(
+                "invalid_shape",
+                f"{prefix} 缺少 text、item 或 asset",
+                path,
+            )
+
+
+def _expect_binding_pending(state, path):
+    if "bindingPending" not in state or state["bindingPending"] is None:
+        return
+    pending = state["bindingPending"]
+    if not isinstance(pending, dict):
+        _entry_error(path, "bindingPending", "对象或 null", pending)
+    target = pending.get("target")
+    if not isinstance(target, dict):
+        _entry_error(path, "bindingPending.target", "对象", target)
+    for field in ("bot", "user"):
+        if not isinstance(target.get(field), str) or not target[field]:
+            _entry_error(
+                path,
+                f"bindingPending.target.{field}",
+                "非空字符串",
+                target.get(field),
+            )
+
+
 def _expect_nonnegative_int(state, key, path):
     if key in state and (not _is_int(state[key]) or state[key] < 0):
         raise BridgeStateError(
@@ -114,6 +202,7 @@ def _validate_state(state, path):
     _expect(state, "thread", (str, type(None)), "字符串或 null", path)
     _expect_list_of(state, "inbox", dict, path)
     _expect_list_of(state, "outbox", dict, path)
+    _expect_outbox_entries(state, path)
     _expect_list_of(state, "seen", str, path)
     _expect(state, "running", bool, "布尔值", path)
     _expect_nonnegative_int(state, "inboundSeq", path)
@@ -150,8 +239,15 @@ def _validate_state(state, path):
     _expect(state, "quoteCache", dict, "对象", path)
     _expect(state, "wechatAuth", dict, "对象", path)
     _expect(state, "wechatIdentity", dict, "对象", path)
-    _expect(state, "bindingPending", (bool, dict), "布尔值或对象", path)
+    _expect_binding_pending(state, path)
     _expect(state, "wechatContextPending", bool, "布尔值", path)
+    if (not state.get("wechatContextPending")
+            and any(not entry.get("context") for entry in state["outbox"])):
+        raise BridgeStateError(
+            "invalid_shape",
+            "outbox.context 只有在 wechatContextPending 时才能为空",
+            path,
+        )
     _expect(state, "restartRequested", bool, "布尔值", path)
     _expect(state, "budgetPromptSent", bool, "布尔值", path)
     _expect_nonnegative_int(state, "consecutiveSendFailures", path)
@@ -170,27 +266,28 @@ def _validate_state(state, path):
 
 
 def normalize_bridge_state(saved, path):
-    """Migrate an unversioned state dict into the current in-memory schema."""
+    """Validate a current-version state dict without migrating older formats."""
     if not isinstance(saved, dict):
         raise BridgeStateError(
             "invalid_shape",
             f"顶层必须是对象，实际为 {type(saved).__name__}",
             path,
         )
-    version = saved.get("version")
-    if "version" in saved:
-        if not _is_int(version):
-            raise BridgeStateError(
-                "invalid_shape",
-                f"version 必须是整数，实际为 {type(version).__name__}",
-                path,
-            )
-        if version not in (0, STATE_VERSION):
-            raise BridgeStateError(
-                "unsupported_version",
-                f"仅支持 0/{STATE_VERSION}，实际为 {version!r}",
-                path,
-            )
+    if "version" not in saved:
+        raise BridgeStateError("invalid_shape", "version 缺失", path)
+    version = saved["version"]
+    if not _is_int(version):
+        raise BridgeStateError(
+            "invalid_shape",
+            f"version 必须是整数，实际为 {type(version).__name__}",
+            path,
+        )
+    if version != STATE_VERSION:
+        raise BridgeStateError(
+            "unsupported_version",
+            f"仅支持 {STATE_VERSION}，实际为 {version!r}",
+            path,
+        )
     state = {**_default_state(), **deepcopy(saved), "version": STATE_VERSION}
     _validate_state(state, path)
     return state
@@ -238,7 +335,7 @@ def _quarantine(store, error):
 
 
 def load_bridge_state(store, *, recover=True):
-    """Load v1 state; when writable, quarantine unreadable legacy data."""
+    """Load v1 state; when writable, quarantine unreadable state."""
     path = _state_path(store)
     has_store_path = _has_store_path(store)
     if has_store_path and (path.is_symlink() or (path.exists() and not path.is_file())):
