@@ -227,7 +227,7 @@ class PlatformTests(unittest.TestCase):
                 patch("codex_wechat.storage.msvcrt", SimpleNamespace(locking=Mock(), LK_NBLCK=2), create=True):
             store = Store(Path(directory) / "中文状态")
             try:
-                store.save("bridge", {"text": "鲸鱼娘", "queue": []})
+                store.save("bridge", {"version": 1, "text": "鲸鱼娘", "queue": []})
                 self.assertEqual(store.load("bridge")["text"], "鲸鱼娘")
                 self.assertEqual(store.lock.tell(), 0)
             finally:
@@ -592,6 +592,36 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.selected_thread, "thread-1")
         # Without activate() the follower never publishes state changes.
         candidate.activate.assert_called_once_with()
+
+    async def test_follow_app_does_not_overwrite_a_concurrent_selection_commit(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.transport.proc = SimpleNamespace(returncode=None)
+        backend.transport.reader = SimpleNamespace(done=lambda: False)
+        backend.selected_thread = "old"
+        backend.set_writer(WRITER_RELEASED, "old")
+        backend.app_available = lambda: True
+        entered, release = asyncio.Event(), asyncio.Event()
+        candidate = SimpleNamespace(thread_id="old", enabled=False,
+                                    activate=Mock(), close=AsyncMock())
+
+        async def attach(thread_id, options):
+            entered.set()
+            await release.wait()
+            return candidate
+
+        backend.attach_app = attach
+        task = asyncio.create_task(backend.follow_app("old"))
+        await entered.wait()
+        backend.selected_thread = "target"
+        backend.selection_epoch += 1
+        release.set()
+
+        self.assertFalse(await task)
+        self.assertEqual(backend.selected_thread, "target")
+        self.assertIsNone(backend.app)
+        self.assertEqual(backend.writer_state("old"), WRITER_RELEASED)
+        candidate.activate.assert_not_called()
+        candidate.close.assert_awaited_once_with()
 
     async def test_attach_failure_never_escapes_following(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)

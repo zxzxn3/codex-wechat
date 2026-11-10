@@ -21,7 +21,7 @@ from .backend_turns import answer_text, build_result, new_turn as make_turn, tur
 from .records import AgentMessage, Source, TurnResult
 from .media import OUTPUT_HINT
 from .diagnostics import error_reason, log_event
-from .errors import ErrorAction, disposition
+from .errors import ErrorAction, disposition, writer_conflict
 from .usage import UsageCache
 from .questions import (
     ASYNC_QUESTION_METHOD,
@@ -324,18 +324,23 @@ class CodexBackend:
         self.attach_error = snapshot.attach_error
 
     async def attach_follower(self, thread_id, options, *, activate=True):
-        """Attach to the App's copy of a thread and make it the selection.
-
-        Both entry points use this (a resume writer conflict and a thread we
-        handed back), so session setup and event publishing cannot drift apart.
-        Callers that select a runtime turn first pass activate=False.
-        """
+        """Attach an App follower only if the selection did not change meanwhile."""
+        expected_connection = self.connection_id
+        expected_epoch = self.selection_epoch
+        expected_thread = self.selected_thread
+        expected_app = self.app
+        expected_active = self.active
         app = await self.attach_app(thread_id, options)
         if app is None:
             return None
+        if (self.connection_id != expected_connection
+                or self.selection_epoch != expected_epoch
+                or self.selected_thread != expected_thread
+                or self.app is not expected_app
+                or self.active is not expected_active):
+            await app.close()
+            return None
         previous_app, self.app = self.app, app
-        if previous_app and previous_app is not app:
-            await previous_app.close()
         if self.selected_thread != thread_id:
             self.selection_epoch += 1
             self.active = None
@@ -345,6 +350,8 @@ class CodexBackend:
         self.set_writer(WRITER_FOLLOWED, thread_id)
         if activate:
             self.activate_follower(app)
+        if previous_app and previous_app is not app:
+            await previous_app.close()
         return app
 
     @staticmethod
@@ -910,7 +917,7 @@ class CodexBackend:
                 result = await self.rpc("thread/resume", {
                     **options, "threadId": thread_id, "excludeTurns": True})
             except CodexRpcError as error:
-                if error.code != -32600 or "already has an active writer" not in error.reason:
+                if not writer_conflict(error):
                     raise
                 app = await self.attach_app(thread_id, options)
                 if app is not None:
