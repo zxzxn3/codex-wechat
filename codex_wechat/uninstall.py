@@ -6,8 +6,9 @@ import shutil
 import sys
 
 from . import service_adapter
-from .platform_support import (DATA_ROOT_FILE, INSTALL_ROOT, IS_WINDOWS,
-                               runtime_paths, xdg_config_home)
+from .platform_support import (CONFIG_ROOT_FILE, DATA_ROOT_FILE, INSTALL_ROOT,
+                               IS_WINDOWS, STATE_ROOT_FILE, runtime_paths,
+                               xdg_config_home)
 from .service_control import UNIT, systemctl
 from .storage import Store
 
@@ -43,11 +44,12 @@ def _remove_unit_dropin() -> None:
         pass
 
 
-def _remove_data_root_marker() -> None:
-    try:
-        (INSTALL_ROOT / DATA_ROOT_FILE).unlink()
-    except FileNotFoundError:
-        pass
+def _remove_runtime_root_markers() -> None:
+    for filename in (DATA_ROOT_FILE, CONFIG_ROOT_FILE, STATE_ROOT_FILE):
+        try:
+            (INSTALL_ROOT / filename).unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _remove_path(path: Path) -> None:
@@ -57,6 +59,10 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path)
     elif path.exists():
         path.unlink()
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return first == second or first.is_relative_to(second) or second.is_relative_to(first)
 
 
 async def _linux_service_removal() -> None:
@@ -116,15 +122,33 @@ def _linux_command_removal() -> None:
         print(f"保留不是本安装创建的命令入口: {link}")
 
 
-def _purge_linux_data(paths=None) -> None:
-    paths = runtime_paths() if paths is None else paths
-    targets = (paths.config_file, paths.state_dir, paths.workspace_dir)
+def _validated_purge_targets(paths):
+    targets = (
+        ("配置", paths.config_file),
+        ("状态", paths.state_dir),
+        ("工作区", paths.workspace_dir),
+    )
     home = Path.home().resolve()
-    for path in targets:
+    install = INSTALL_ROOT.resolve()
+    expected_workspace = (paths.data_root / "workspace").resolve()
+    for role, path in targets:
         target = Path(path).expanduser().resolve()
         if target in {Path(target.anchor), home} or home.is_relative_to(target):
             raise ValueError(f"拒绝删除范围过大的数据目录: {target}")
-    for path in targets:
+        if role == "工作区":
+            if target != expected_workspace:
+                raise ValueError(f"工作区路径不在预期数据根内: {target}")
+            if target == install or install.is_relative_to(target):
+                raise ValueError(f"拒绝删除包含程序安装目录的工作区: {target}")
+        elif _paths_overlap(target, install):
+            raise ValueError(f"拒绝删除与程序安装目录重叠的{role}路径: {target}")
+    return targets
+
+
+def _purge_linux_data(paths=None) -> None:
+    paths = runtime_paths() if paths is None else paths
+    targets = _validated_purge_targets(paths)
+    for _, path in targets:
         _remove_path(path)
     try:
         paths.config_file.parent.rmdir()
@@ -158,14 +182,18 @@ async def uninstall(*, purge: bool = False) -> None:
             and not os.environ.get("CODEX_WECHAT_DATA_ROOT")):
         raise RuntimeError("缺少数据根标记；拒绝在没有显式数据根时清理数据")
     paths = runtime_paths()
+    if purge:
+        # All destructive targets are validated before service or command
+        # removal, so a bad XDG/install-root overlap leaves the install intact.
+        _validated_purge_targets(paths)
     await _linux_service_removal()
     _require_no_bridge(paths.state_dir)
     _linux_command_removal()
     if purge:
         _purge_linux_data(paths)
-        # Only a purge forgets the root: the marker is the single pointer back to
-        # data that a data-preserving uninstall deliberately keeps.
-        _remove_data_root_marker()
+        # Only a purge forgets the roots. A data-preserving uninstall keeps the
+        # markers so the next installation resolves the same directories.
+        _remove_runtime_root_markers()
     # Actions report above; this summary names what is left, in one order shared
     # with the Windows helper: program files, data, how to keep using it, then the
     # decision about removing the rest. The uninstaller runs out of the install
