@@ -174,7 +174,9 @@ Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是�
 
 不带 purge 的卸载会保留 `.runtime-roots` 和旧路径标记：安装树仍在（卸载只移除服务与入口），
 所以重新运行安装器会解析为 update，并继续使用原来的根。想让重装改判到平台默认目录，删除
-这些标记或显式设置 `CODEX_WECHAT_DATA_ROOT` 即可。
+这些标记或显式设置 `CODEX_WECHAT_DATA_ROOT` 即可。Linux 已安装实例也可以用
+`codex-wechat update --reconfigure-roots` 显式切换；Windows 当前不支持在已安装实例上自动
+切换数据根，需备份后全新安装。
 
 ## 目录和配置
 
@@ -212,6 +214,11 @@ codex-wechat update --reconfigure-roots
 Windows 保持原布局：程序位于 `%LOCALAPPDATA%\codex-wechat\app`，用户数据根为
 `%LOCALAPPDATA%\codex-wechat`，配置、状态、工作区、日志和共享后台仍位于该数据根。
 Windows purge 还会拒绝数据根本身及其已有父链中的任何重解析点。
+
+若 `bridge.json` 无法解析或字段类型无效，正常启动会先把它移动到
+`bridge.corrupt-*.json`，再以空状态启动。只读的 `codex-wechat status` 不会修改文件，而是
+返回 `state=recovery_required` 和具体诊断；先检查该输出及隔离文件，再决定是否恢复其中的
+未发送消息。更高 schema 版本的文件不会被自动移动或覆盖。
 
 Windows 继续只使用 `.data-root`；Linux 使用原子运行时根清单并兼容三个旧标记。当前版本不迁移 Linux 旧布局；
 旧版统一数据根中的配置和状态不会被新版本读取。

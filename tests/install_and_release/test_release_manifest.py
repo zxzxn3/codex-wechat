@@ -1,10 +1,13 @@
 """Old release identity is independent of a newer source packaging policy."""
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 import installer
+
 
 class ReleaseManifestTests(unittest.TestCase):
     def setUp(self):
@@ -44,3 +47,56 @@ class ReleaseManifestTests(unittest.TestCase):
         manifest["files"].insert(0,"../outside")
         path.write_text(json.dumps(manifest),encoding="utf-8")
         self.assertFalse(installer.release_matches(self.target,self.identifier))
+
+
+class GitSourceBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is unavailable")
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.source = Path(self.temporary.name) / "source"
+        self.source.mkdir()
+        self.git("init", "--quiet")
+
+    def git(self, *arguments):
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=self.source,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def test_git_source_uses_head_and_excludes_untracked_files(self):
+        tracked = self.source / "tracked.py"
+        tracked.write_text("TRACKED = True\n", encoding="utf-8")
+        self.git("add", "tracked.py")
+        self.git(
+            "-c", "user.name=Test",
+            "-c", "user.email=test@example.invalid",
+            "commit", "--quiet", "-m", "fixture",
+        )
+        untracked = self.source / "tools/not-in-release.py"
+        untracked.parent.mkdir()
+        untracked.write_text("UNTRACKED = True\n", encoding="utf-8")
+        files = installer.project_files(self.source, require_complete=False)
+        self.assertIn(Path("tracked.py"), files)
+        self.assertNotIn(Path("tools/not-in-release.py"), files)
+
+    def test_git_source_rejects_uncommitted_tracked_changes(self):
+        tracked = self.source / "tracked.py"
+        tracked.write_text("TRACKED = True\n", encoding="utf-8")
+        self.git("add", "tracked.py")
+        self.git(
+            "-c", "user.name=Test",
+            "-c", "user.email=test@example.invalid",
+            "commit", "--quiet", "-m", "fixture",
+        )
+        tracked.write_text("TRACKED = False\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "未提交"):
+            installer.project_files(self.source, require_complete=False)

@@ -7,14 +7,16 @@ import ast
 from contextlib import contextmanager
 import hashlib
 import importlib.util
+import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import textwrap
 import time
@@ -39,6 +41,7 @@ QR_FALLBACK_REQUIREMENTS = Path("requirements-qr.txt")
 # Generous: pip on a slow mirror may legitimately take minutes, but a hung
 # command must not block the installer forever.
 INSTALL_COMMAND_TIMEOUT_SECONDS = 900
+GIT_ARCHIVE_TIMEOUT_SECONDS = 120
 DEPENDENCIES = (
     ("Codex runtime", "codex.exe" if IS_WINDOWS else "codex", None, "微信模型任务", "warn"),
     ("curl", "curl.exe" if IS_WINDOWS else "curl", (8, 4), "网络测速", "warn"),
@@ -103,6 +106,10 @@ PRIVATE_NAMES = {
 @contextmanager
 def _root_configuration_mode(enabled):
     global RECONFIGURE_ROOTS
+    if enabled and IS_WINDOWS:
+        raise ValueError(
+            "--reconfigure-roots 仅支持 Linux；Windows 已安装数据根不能自动切换"
+        )
     previous = RECONFIGURE_ROOTS
     RECONFIGURE_ROOTS = enabled
     try:
@@ -119,6 +126,7 @@ REQUIRED_FILES = {
     PACKAGE_ROOT / "app.py",
     PACKAGE_ROOT / "bootstrap_supervisor.py",
     PACKAGE_ROOT / "platform_support.py",
+    PACKAGE_ROOT / "state.py",
     PACKAGE_ROOT / "windows_service.py",
     Path("config.default.json"),
     Path("install.sh"),
@@ -362,6 +370,11 @@ def configured_data_root(target: Path) -> Path:
     saved = saved_data_root(target)
     if saved is not None and not RECONFIGURE_ROOTS:
         if override and Path(override).expanduser().resolve() != saved.resolve():
+            if IS_WINDOWS:
+                raise ValueError(
+                    "Windows 已安装数据根不能通过更新自动切换；"
+                    "请清除 CODEX_WECHAT_DATA_ROOT，备份数据后执行全新安装"
+                )
             raise ValueError(
                 "CODEX_WECHAT_DATA_ROOT 与已保存的数据根不一致；"
                 "如确需切换，请同时使用 --reconfigure-roots"
@@ -638,14 +651,8 @@ def _private(relative: Path) -> bool:
     return relative.suffix.casefold() in (".pyc", ".pyo")
 
 
-def project_files(source: Path, *, require_complete=True) -> dict[Path, tuple[bytes, int]]:
-    """Read distributable files without following private or public symlinks."""
-    source = source.expanduser()
-    if source.is_symlink():
-        raise ValueError(f"源码目录不能是符号链接: {source}")
-    source = source.resolve()
-    if not source.is_dir():
-        raise ValueError(f"源码目录不存在: {source}")
+def _worktree_files(source: Path) -> dict[Path, tuple[bytes, int]]:
+    """Read a source snapshot that has no Git checkout metadata."""
     files: dict[Path, tuple[bytes, int]] = {}
     for current, directories, names in os.walk(source, followlinks=False):
         current_path = Path(current)
@@ -669,6 +676,72 @@ def project_files(source: Path, *, require_complete=True) -> dict[Path, tuple[by
             if not path.is_file():
                 raise ValueError(f"源码中不是普通文件: {relative}")
             files[relative] = (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+    return files
+
+
+def _git_archive_files(source: Path) -> dict[Path, tuple[bytes, int]]:
+    """Read exactly HEAD, so untracked worktree files cannot enter a release."""
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=source,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"无法运行 Git 检查源码: {error}") from error
+    if status.returncode:
+        raise ValueError(f"无法读取源码 Git 状态: {status.stderr.strip() or status.returncode}")
+    if status.stdout.strip():
+        raise ValueError("源码有未提交的已跟踪修改；请先提交，再构建 release")
+    try:
+        archive = subprocess.run(
+            ["git", "archive", "--format=tar", "HEAD"],
+            cwd=source,
+            capture_output=True,
+            timeout=GIT_ARCHIVE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"无法运行 Git 构建源码快照: {error}") from error
+    if archive.returncode:
+        detail = archive.stderr.decode("utf-8", "replace").strip()
+        raise ValueError(f"无法读取源码 Git 提交: {detail or archive.returncode}")
+    files: dict[Path, tuple[bytes, int]] = {}
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as bundle:
+        for member in bundle.getmembers():
+            raw_name = member.name.rstrip("/")
+            posix = PurePosixPath(raw_name)
+            if (not raw_name or posix.is_absolute() or ".." in posix.parts
+                    or "\\" in raw_name or ":" in raw_name):
+                raise ValueError(f"Git 源码包含不安全路径: {member.name}")
+            relative = Path(*posix.parts)
+            if member.isdir() or _private(relative):
+                continue
+            if not member.isfile():
+                raise ValueError(f"Git 源码中不是普通文件: {relative}")
+            if relative in files:
+                raise ValueError(f"Git 源码包含重复路径: {relative}")
+            stream = bundle.extractfile(member)
+            if stream is None:
+                raise ValueError(f"无法读取 Git 源码文件: {relative}")
+            files[relative] = (stream.read(), member.mode & 0o777)
+    return files
+
+
+def project_files(source: Path, *, require_complete=True) -> dict[Path, tuple[bytes, int]]:
+    """Read distributable files without following private or public symlinks."""
+    source = source.expanduser()
+    if source.is_symlink():
+        raise ValueError(f"源码目录不能是符号链接: {source}")
+    source = source.resolve()
+    if not source.is_dir():
+        raise ValueError(f"源码目录不存在: {source}")
+    files = _git_archive_files(source) if (source / ".git").exists() else _worktree_files(source)
     missing = sorted(str(path) for path in REQUIRED_FILES if path not in files)
     if missing and require_complete:
         raise ValueError("源码缺少必要文件: " + ", ".join(missing))
@@ -1649,7 +1722,8 @@ def _common_install_with_roots(
         check_runtime_root_layout(target)
         preflight_command_link(target)
         current = read_pointer(target, CURRENT_FILE)
-        if current == identifier and release_matches(target, identifier, files) and stable_files_match(source, target):
+        if (current == identifier and release_matches(target, identifier, files)
+                and stable_files_match(release_path(target, identifier), target)):
             # A previous install may have skipped the Windows shim because the
             # directory was not on PATH yet. Re-running the same version must
             # still repair the entry point.
@@ -1722,7 +1796,7 @@ def _common_install_with_roots(
             phase("更新入口与当前版本...")
             with _linux_root_change_guard(target, update=update) as changed:
                 root_change_applied = changed
-                install_bootstrap(source, target)
+                install_bootstrap(release, target)
                 install_command_link(target)
                 activate_release(target, identifier)
                 # Publish all path markers only after the current pointer is committed:
@@ -1737,7 +1811,7 @@ def _common_install_with_roots(
                     _restore_marker_snapshot(target, marker_snapshot)
                     raise
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
-            check_user_access(target, identifier, source)
+            check_user_access(target, identifier, release)
             try:
                 pruned = prune_releases(target, keep=(identifier, current))
             except OSError as error:
@@ -2193,7 +2267,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--reconfigure-roots",
         action="store_true",
-        help="显式按当前 XDG/数据根环境切换运行时根；切换前停止后台服务",
+        help="仅 Linux：显式按当前 XDG/数据根环境切换运行时根；切换前停止后台服务",
     )
     return result
 
@@ -2215,6 +2289,10 @@ def _elevated() -> bool:
 def main(argv: list[str] | None = None) -> int:
     global NON_INTERACTIVE
     options = parser().parse_args(argv)
+    if options.reconfigure_roots and IS_WINDOWS:
+        raise ValueError(
+            "--reconfigure-roots 仅支持 Linux；Windows 已安装数据根不能自动切换"
+        )
     if _elevated() and os.environ.get("CODEX_WECHAT_ALLOW_ROOT") != "1":
         raise ValueError("请以普通用户身份运行，不要使用 root/sudo 或管理员终端。")
     if options.command == "bootstrap" and not options.repo:

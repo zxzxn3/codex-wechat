@@ -206,9 +206,15 @@ def data_root(install_root: Path | None = None):
     if override and saved is not None:
         requested = Path(override).expanduser().absolute()
         if requested.resolve() != saved.resolve():
+            if IS_WINDOWS:
+                raise ValueError(
+                    "CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；"
+                    "Windows 已安装数据根不能自动切换，请清除环境变量"
+                )
             raise ValueError(
                 "CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；"
-                "请清除环境变量，或重新运行安装器更新数据根"
+                "请清除环境变量；如需切换已安装根，请设置目标环境后运行 "
+                "codex-wechat update --reconfigure-roots"
             )
         return requested
     if override:

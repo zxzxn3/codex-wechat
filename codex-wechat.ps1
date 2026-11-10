@@ -79,7 +79,7 @@ if ($SavedDataRoot) {
         $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot
     } elseif (-not $InstallerCommand -and
             [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT) -ne $SavedDataRoot) {
-        throw 'CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；请清除环境变量，或重新运行安装器更新数据根'
+        throw 'CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；Windows 已安装数据根不能自动切换，请清除环境变量'
     }
 }
 $InstalledCurrent = Join-Path $InstallRoot 'current'

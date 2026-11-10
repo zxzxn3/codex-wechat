@@ -29,7 +29,7 @@ if [ ! -e "$RUNTIME_ROOTS_FILE" ] &&
         requested_data_root=$(realpath -m -- "$CODEX_WECHAT_DATA_ROOT")
         saved_data_root=$(realpath -m -- "$saved_data_root")
         if [ "$requested_data_root" != "$saved_data_root" ]; then
-            echo "codex-wechat: CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；请清除环境变量，或重新运行安装器更新数据根" >&2
+            echo "codex-wechat: CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；请清除环境变量，或运行 codex-wechat update --reconfigure-roots 显式切换" >&2
             exit 78
         fi
     else

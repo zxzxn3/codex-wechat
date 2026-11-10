@@ -35,8 +35,8 @@ Windows `.cmd` 是薄启动器，内部调用 stable `codex-wechat.ps1`，最终
 
 Linux 用 `.runtime-roots` 原子保存数据、配置和状态三个根，并兼容三个旧标记；公开入口和
 systemd 服务读取同一组路径。Windows 继续由 `.data-root` 唯一解析数据根。安装后修改数据根或
-XDG 根必须使用 `--reconfigure-roots` 显式切换；普通更新沿用已保存的根。Windows 数据根可由
-`CODEX_WECHAT_DATA_ROOT` 指定。
+XDG 根在 Linux 必须使用 `--reconfigure-roots` 显式切换；普通更新沿用已保存的根。Windows
+只在首次安装时接受 `CODEX_WECHAT_DATA_ROOT`，已安装实例不能自动切换数据根。
 
 ## Windows 操作
 

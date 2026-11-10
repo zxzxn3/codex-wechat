@@ -135,6 +135,17 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.target / "config.json").exists())
         self.assertFalse((self.target / ".state").exists())
 
+    def test_stable_entries_are_copied_from_the_release_snapshot(self):
+        with patch("builtins.input", return_value="y"), \
+                patch.object(
+                    installer,
+                    "install_bootstrap",
+                    wraps=installer.install_bootstrap,
+                ) as install_bootstrap:
+            self.assertEqual(installer.install(self.source, self.target), 0)
+        source = install_bootstrap.call_args.args[0]
+        self.assertEqual(source, installer.release_path(self.target, self.current()))
+
     def test_windows_bootstrap_creates_nested_stable_directories(self):
         self.target.mkdir()
         with patch.object(installer, "IS_WINDOWS", True):
@@ -241,6 +252,16 @@ class InstallerTests(unittest.TestCase):
              patch.object(installer, "install", side_effect=AssertionError("installed")):
             with self.assertRaisesRegex(ValueError, "普通用户"):
                 installer.main(["install", "--dir", str(self.target), "--non-interactive"])
+
+    def test_main_rejects_root_reconfiguration_on_windows(self):
+        with patch.object(installer, "IS_WINDOWS", True), \
+                patch.object(installer, "_elevated", return_value=False), \
+                patch.object(installer, "install", side_effect=AssertionError("installed")):
+            with self.assertRaisesRegex(ValueError, "仅支持 Linux"):
+                installer.main([
+                    "update", "--dir", str(self.target),
+                    "--reconfigure-roots", "--non-interactive",
+                ])
 
     def test_root_override_allows_disposable_containers(self):
         with patch.object(installer, "_elevated", return_value=True), \
@@ -1002,6 +1023,21 @@ class DataRootMarkerTests(unittest.TestCase):
                                  (base / "ambient-config/codex-wechat").resolve())
                 self.assertEqual(installer.configured_state_root(target),
                                  (base / "ambient-state/codex-wechat").resolve())
+
+    def test_windows_update_rejects_a_different_data_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "install"
+            target.mkdir()
+            (target / installer.DATA_ROOT_FILE).write_text(
+                str(base / "old-data") + "\n", encoding="utf-8")
+            with patch.object(installer, "IS_WINDOWS", True), \
+                    patch.object(installer, "RECONFIGURE_ROOTS", False), \
+                    patch.dict(os.environ, {
+                        "CODEX_WECHAT_DATA_ROOT": str(base / "new-data"),
+                    }, clear=False):
+                with self.assertRaisesRegex(ValueError, "不能通过更新自动切换"):
+                    installer.configured_data_root(target)
 
     def test_linux_root_change_guard_stops_service_and_restarts_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:

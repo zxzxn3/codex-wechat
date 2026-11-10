@@ -7,6 +7,9 @@
 
 - Linux 当前树：`scripts/check.sh` 通过，包含 Ruff、Pyright、ShellCheck、分支覆盖单元测试和
   生成文档漂移检查。具体测试数量以命令输出为准，不在文档维护副本。
+- 2026-11-10 Linux 当前树新增了状态损坏隔离、只读 status 诊断、Git `HEAD` release 边界和
+  Windows 拒绝换根参数的离线回归；完整检查通过。Windows 参数拒绝只验证了 Python 分支，
+  目标 Windows 入口与真实 Scheduled Task 仍需实机复测。
 - Windows 历史提交 `ab6ab61`：完整离线测试和 Ruff 通过；`057a96f` 也有较早的完整报告。
   这些结果不能证明当前树的 Windows 路径已复测。
 - Windows 服务生命周期曾实机验证 PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、
