@@ -1,6 +1,6 @@
 # 验证状态
 
-更新：2026-11-10。离线结果、真实平台行为和外部协议证据分别记录；mock 不能替代 Windows、
+更新：2026-11-11。离线结果、真实平台行为和外部协议证据分别记录；mock 不能替代 Windows、
 微信、CDN、App 或模型验收。
 
 ## 当前证据
@@ -31,14 +31,20 @@
   Windows 上有 20 项失败，全部是测试假设 POSIX：夹具装作 Linux 根目录而代码按
   主机平台校验，现由 `install_platform()` 显式声明。同日匿名访问公开
   一行入口：raw 地址 200、脚本可执行；无终端时拒绝继续而不是半装。
+- 2026-11-11 Windows 实机 `273cb32`、release `4a6696e1f83dc08a`：完整离线测试
+  1038 项中 1011 通过、27 跳过、0 失败，ruff 干净。匿名公开一行安装成功；服务
+  `status` 返回 bound、auth valid、delivery ok、state ok，`unsent` 为 0。真实微信 `/v`
+  显示 release ID 和 Codex 版本；日志构建标识已切换为 release ID。Codex 0.166.0 上
+  `thread/settings/update` 的 `{model, effort}` 与 `{cwd}` 均实测生效。
 - Windows 历史提交 `ab6ab61`：完整离线测试和 Ruff 通过；`057a96f` 也有较早的完整报告。
-  这些结果不能证明 `v1.0` 的 Windows 路径已实机复测。
-- Windows 服务生命周期曾实机验证 PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、
-  通知和命令入口互斥；均缺少可核对到当前提交的完整证据。
+  这些历史结果用于追溯，当前证据以上一节为准。
+- Windows 服务生命周期曾实机验证 PowerShell 5.1、Scheduled Task、Job Object 清理、单实例
+  和命令入口互斥；通知仍按尽力而为能力处理，不写成已验证。以上历史证据均缺少可核对到当前
+  提交的完整生命周期记录。
 - Windows App IPC 曾验证 writer 冲突、身份核对和无 App / App 已持有 / App 后启动状态；
   仍受 App 版本影响。
-- Windows 安装、更新、重启、提权拒绝和卸载曾有实机报告，但部分提交号未记录；`v1.0`
-  仍需在目标机器复测。
+- Windows 安装、启动、提权拒绝和核心服务路径已有当前实机证据；更新后的服务生命周期和
+  purge 卸载仍待当前布局复测。
 - 2026-11-10 Linux `v1.0`（`9ddaa16`）：本机构建 release `5f82a9be2b43942c`，完成默认
   路径布局的安装更新、systemd restart 和 status 检查。该证据不代表自定义 XDG/数据根组合，
   也不代表匿名公开一行安装已验证。
@@ -70,8 +76,11 @@
 ## 部分验证与缺口
 
 - CDN 上传 POST 的幂等性未证实；上传不在原位置盲目重试，下载可以重复。
-- Windows 命名管道存在性、App 更新后的 IPC 兼容、三端并发和 `service.log` 连续轮转仍需
-  实机验证。
+- Windows 命名管道存在性和空闲发现已有历史本机实测；App 更新后的 IPC 兼容、多 home、
+  三端并发和 `service.log` 连续轮转仍需实机验证。
+- Windows 当前实机未逐项覆盖安装器交互菜单、运行中 `/switch` `/new` detach、审批和原生
+  问题、App IPC 跟随、图片/文件/语音/引用真实收发以及卸载。`bootstrap.ps1` 在父进程捕获
+  stdout/stderr 时的 native stderr 行为也仍需确认。
 - 非 ASCII 用户目录下的 Windows `.cmd`、Linux GNOME 代理探测和 Windows 共享后台 WMI
   路径只有在目标环境实测后才能写成完整通过。
 - 图片、引用、原生问题和审批在最新 bot 上没有逐项复测；旧 bot 和早期窗口的结论仍作为历史
