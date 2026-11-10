@@ -99,6 +99,22 @@ class NoticeSettingsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class NumericSettingsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_media_limit_reloads_from_the_config_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "config.json"
+            store = Store(Path(root) / "state")
+            try:
+                bridge = Bridge(store, {"user": "owner"}, {}, config_path=path)
+                path.write_text(json.dumps({"media": {"maxMiB": 25}}))
+                bridge.reload_config()
+                self.assertEqual(bridge.media.limit, 25 * 1024 * 1024)
+
+                path.write_text(json.dumps({"media": {"maxMiB": 0}}))
+                bridge.reload_config()
+                self.assertEqual(bridge.media.limit, 25 * 1024 * 1024)
+            finally:
+                store.lock.close()
+
     async def test_every_numeric_setting_round_trips_without_its_own_reader(self):
         # A new numeric setting only needs the table entry to be covered here.
         numeric = {name: setting for name, setting in SETTINGS.items() if setting.numeric}

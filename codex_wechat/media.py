@@ -11,14 +11,12 @@ import time
 import urllib.parse
 import uuid
 
-from .configuration import DEFAULT_SOURCE_HINT
+from .configuration import (DEFAULT_MAX_MIB, DEFAULT_SOURCE_HINT, MEDIA_MAX_MIB_MAX,
+                            MEDIA_MAX_MIB_MIN)
 from .diagnostics import error_fields, log_event
 from .platform_support import IS_WINDOWS
 
 CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
-DEFAULT_MAX_MIB = 20
-MEDIA_MAX_MIB_MIN = 1
-MEDIA_MAX_MIB_MAX = 100
 # A download can simply be repeated; an upload POST is never repeated in place,
 # because the CDN hands out a different reference for every POST and a second
 # attempt on the same filekey is not known to be idempotent. A failed upload goes

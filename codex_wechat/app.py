@@ -293,6 +293,7 @@ class Bridge:
         changed = self.settings.reload(self.state)
         self.note_reply_budget()
         self.apply_log_keep()
+        self.media.limit = self.settings.hot.media.limit_bytes
         set_idle = getattr(self.channel, "set_idle_seconds", None)
         if set_idle is not None:
             set_idle(self.settings.hot.connection_idle_seconds)

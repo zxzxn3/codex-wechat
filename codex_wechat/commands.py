@@ -18,7 +18,7 @@ from .codex_transport import CodexRpcError
 from .codex_connection import ConnectionSpec
 from .backend import (PreparedSelection, SelectionCommit, WRITER_BUSY,
                       WRITER_NATIVE)
-from .media import DEFAULT_MAX_MIB, MEDIA_MAX_MIB_MAX, MEDIA_MAX_MIB_MIN, MediaError
+from .media import MediaError
 from .records import InputPhase
 from .latency import provider_latency
 from .diagnostics import error_fields, log_event, request_context
@@ -34,8 +34,9 @@ from .version import release_id
 from .configuration import (
     CONNECTION_IDLE_MAX, CONNECTION_IDLE_MIN, HotSettings,
     DEFAULT_CONNECTION_IDLE_SECONDS, DEFAULT_LOG_KEEP, DEFAULT_REPLY_BUDGET,
-    DEFAULT_SLICING_TARGET_CHARS,
+    DEFAULT_MAX_MIB, DEFAULT_SLICING_TARGET_CHARS,
     LOG_KEEP_MAX, LOG_KEEP_MIN,
+    MEDIA_MAX_MIB_MAX, MEDIA_MAX_MIB_MIN,
     REPLY_BUDGET_MAX, REPLY_BUDGET_MIN,
     SOURCE_HINT_LIMIT_BYTES,
     SLICING_TARGET_MAX, SLICING_TARGET_MIN,
@@ -278,8 +279,6 @@ async def set_setting(bridge, name, argument):
     if not should_apply:
         return
     await write_hot_setting(bridge, name, value)
-    if name == "media.maxMiB":
-        bridge.media.limit = value * 1024 * 1024
     if current_setting(bridge, name) != value:
         raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
     display = "true" if value is True else "false" if value is False else value

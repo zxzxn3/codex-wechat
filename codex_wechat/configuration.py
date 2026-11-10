@@ -11,10 +11,13 @@ from .log_rotation import DEFAULT_KEEP, KEEP_MAX, KEEP_MIN, normalize_keep
 DEFAULT_SOURCE_HINT = "[User from WeChat. Keep replies mobile-friendly.]"
 HOT_CONFIG_KEYS = ("processingNotice", "completionNotice", "sourceHint", "slicing",
                    "compactionNotice", "quotaWarningThresholds", "prompts", "connectionIdleSeconds",
-                   "sending", "logs")
+                   "sending", "logs", "media")
 DEFAULT_CONNECTION_IDLE_SECONDS = 60
 CONNECTION_IDLE_MIN = 0
 CONNECTION_IDLE_MAX = 3600
+DEFAULT_MAX_MIB = 20
+MEDIA_MAX_MIB_MIN = 1
+MEDIA_MAX_MIB_MAX = 100
 REPLY_BUDGET_MIN = 1
 # Ten replies per inbound message is the community-observed ceiling; the ceiling
 # here is deliberately higher so an operator who knows this key can take the risk.
@@ -129,6 +132,26 @@ class Sending:
 
 
 @dataclass(frozen=True)
+class MediaSettings:
+    max_mib: int = DEFAULT_MAX_MIB
+
+    @property
+    def limit_bytes(self):
+        return self.max_mib * 1024 * 1024
+
+    @classmethod
+    def from_config(cls, value=None):
+        value = {} if value is None else value
+        if not isinstance(value, dict) or set(value) - {"maxMiB"}:
+            raise ValueError("media 仅支持 maxMiB")
+        limit = value.get("maxMiB", DEFAULT_MAX_MIB)
+        if type(limit) is not int or not MEDIA_MAX_MIB_MIN <= limit <= MEDIA_MAX_MIB_MAX:
+            raise ValueError(
+                f"media.maxMiB 必须是 {MEDIA_MAX_MIB_MIN}–{MEDIA_MAX_MIB_MAX} 的整数")
+        return cls(limit)
+
+
+@dataclass(frozen=True)
 class Logs:
     keep: int = DEFAULT_LOG_KEEP
 
@@ -149,6 +172,7 @@ class HotSettings:
     connection_idle_seconds: int
     sending: Sending
     logs: Logs
+    media: MediaSettings
 
     @classmethod
     def from_config(cls, config):
@@ -170,7 +194,8 @@ class HotSettings:
                    prompts=templates,
                    connection_idle_seconds=idle,
                    sending=Sending.from_config(config.get("sending")),
-                   logs=Logs.from_config(config.get("logs")))
+                   logs=Logs.from_config(config.get("logs")),
+                   media=MediaSettings.from_config(config.get("media")))
 
 
 def processing_template(config, state):

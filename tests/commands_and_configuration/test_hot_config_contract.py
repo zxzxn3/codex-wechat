@@ -49,6 +49,7 @@ class HotConfigContractTests(unittest.TestCase):
             "connectionIdleSeconds": "connection_idle_seconds",
             "sending": "sending",
             "logs": "logs",
+            "media": "media",
         }
         self.assertEqual(set(HOT_CONFIG_KEYS), set(key_fields))
         self.assertEqual({field for field in key_fields.values() if field},
@@ -60,6 +61,7 @@ class HotConfigContractTests(unittest.TestCase):
         settings = HotSettings.from_config(config)
         self.assertEqual(settings.source_hint, DEFAULT_SOURCE_HINT)
         self.assertTrue(settings.notifications.compaction)
+        self.assertEqual(settings.media.max_mib, 20)
         self.assertEqual(settings.notifications.quota_thresholds, {
             "primary": (50, 25, 10, 5, 1),
             "secondary": (50, 25, 10, 5, 1),
