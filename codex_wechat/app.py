@@ -503,10 +503,6 @@ class Bridge:
     def reply(self, text, *, persist=True, request_id=None, source=None):
         return self.output.reply(text, persist=persist, request_id=request_id, source=source)
 
-    @property
-    def delivery_paused(self):
-        return self.output.paused
-
     def resume_delivery(self):
         return self.output.resume_delivery()
 

@@ -36,10 +36,6 @@ def identity(account):
     }
 
 
-def same_identity(left, right):
-    return identity(left) == identity(right)
-
-
 def state(bridge_state):
     value = bridge_state.get("wechatAuth")
     if isinstance(value, dict) and value.get("state") in (AUTH_VALID, AUTH_REQUIRED):
