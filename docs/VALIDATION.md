@@ -29,7 +29,7 @@
 - 2026-11-11 Windows 实机 `8c7741a`：`python -m unittest discover -s tests`
   1035 项、1008 通过、27 跳过、0 失败，ruff 干净。之前在
   Windows 上有 20 项失败，全部是测试假设 POSIX：夹具装作 Linux 根目录而代码按
-  主机平台校验，现由 `linux_install_platform()` 显式声明。同日匿名访问公开
+  主机平台校验，现由 `install_platform()` 显式声明。同日匿名访问公开
   一行入口：raw 地址 200、脚本可执行；无终端时拒绝继续而不是半装。
 - Windows 历史提交 `ab6ab61`：完整离线测试和 Ruff 通过；`057a96f` 也有较早的完整报告。
   这些结果不能证明 `v1.0` 的 Windows 路径已实机复测。
