@@ -196,7 +196,8 @@ systemd manager 是否导出了 XDG 变量。
 只覆盖数据根，因此工作区随数据根移动，配置和状态仍遵循 XDG。
 `CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口和源码副本的运行定位。配置根或状态根与程序安装根
 重叠时安装和 purge 都会 fail closed；默认的 `$data_root/workspace` 是唯一允许位于安装根下的
-purge 目标。
+purge 目标。purge 也会拒绝经过符号链接的配置、状态、数据根或工作区路径，避免删除链接指向
+的外部目录；遇到这种布局时请先手动处理链接。
 
 Windows 保持原布局：程序位于 `%LOCALAPPDATA%\codex-wechat\app`，用户数据根为
 `%LOCALAPPDATA%\codex-wechat`，配置、状态、工作区、日志和共享后台仍位于该数据根。

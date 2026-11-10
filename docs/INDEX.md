@@ -16,6 +16,7 @@
 | [DEVELOPMENT](DEVELOPMENT.md) | 测试、静态检查、依赖、变更检查和发布门 |
 | [VALIDATION](VALIDATION.md) | 离线、实机和外部协议的验证状态与缺口 |
 | [SOURCES](SOURCES.md) | Codex、App、微信和外部协议的版本依据 |
+| [决策记录](decisions/README.md) | 入口、命令、投递和安全取舍 |
 | [事件档案](incidents/2026-11-06-wechat-silent-drop.md) | 微信下行静默丢弃的冻结时间线和样本 |
 
 ## 按任务查找
