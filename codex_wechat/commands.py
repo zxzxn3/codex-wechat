@@ -159,6 +159,8 @@ class Setting:
     minimum: int | None = None
     maximum: int | None = None
     default: int | None = None
+    kind: str = "numeric"
+    max_bytes: int | None = None
 
     @property
     def numeric(self):
@@ -166,9 +168,10 @@ class Setting:
 
 
 SETTINGS = {
-    "compactionNotice": Setting(("compactionNotice",)),
-    "sourceHint": Setting(("sourceHint",)),
-    "slicing.smart": Setting(("slicing", "smart")),
+    "compactionNotice": Setting(("compactionNotice",), kind="boolean"),
+    "sourceHint": Setting(("sourceHint",), kind="text",
+                          max_bytes=SOURCE_HINT_LIMIT_BYTES),
+    "slicing.smart": Setting(("slicing", "smart"), kind="boolean"),
     "connectionIdleSeconds": Setting(("connectionIdleSeconds",),
                                       CONNECTION_IDLE_MIN, CONNECTION_IDLE_MAX,
                                       DEFAULT_CONNECTION_IDLE_SECONDS),
@@ -232,15 +235,16 @@ def text_setting_value(bridge, argument, max_bytes, too_long_key):
     return value
 
 
-def current_numeric_setting(bridge, name):
-    """Read back what the reload applied, derived from SETTINGS itself.
-
-    Adding a hot numeric setting therefore needs no entry here: the camelCase
-    config path is walked over the hot settings object. media.maxMiB is the one
-    runtime value that is not a hot setting, because Media keeps its own limit.
-    """
+def current_setting(bridge, name):
+    """Read back what the reload applied, derived from SETTINGS itself."""
     if name == "media.maxMiB":
         return bridge.media.limit // (1024 * 1024)
+    if name == "compactionNotice":
+        return bridge.notifications.compaction
+    if name == "sourceHint":
+        return bridge.source_hint
+    if name == "slicing.smart":
+        return bridge.slicing.mode == "smart"
     node = bridge.settings.hot
     for part in SETTINGS[name].path:
         attribute = re.sub(r"(?<!^)(?=[A-Z])", "_", part).lower()
@@ -248,48 +252,43 @@ def current_numeric_setting(bridge, name):
     return node
 
 
-async def set_numeric_setting(bridge, name, value):
-    number = numeric_setting_value(bridge, name, value)
-    await write_hot_setting(bridge, name, number)
-    if name == "media.maxMiB":
-        bridge.media.limit = number * 1024 * 1024
-    if current_numeric_setting(bridge, name) != number:
-        raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
-    bridge.reply(panel(f"{name}: {number}"))
+def current_numeric_setting(bridge, name):
+    """Compatibility name for callers that read numeric settings directly."""
+    return current_setting(bridge, name)
 
 
-async def set_compaction_notice(bridge, value):
-    if value not in ("true", "false"):
-        bridge.reply(bridge.prompt("SETTINGS_USAGE"))
-        return
-    enabled = value == "true"
-    await write_hot_setting(bridge, "compactionNotice", enabled)
-    if bridge.notifications.compaction != enabled:
-        raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
-    bridge.reply(panel(f"compactionNotice: {value}"))
-
-
-async def set_slicing_smart(bridge, value):
-    if value not in ("true", "false"):
-        bridge.reply(bridge.prompt("SETTINGS_USAGE"))
-        return
-    mode = "smart" if value == "true" else "length"
-    await write_hot_setting(bridge, "slicing.smart", value == "true")
-    if bridge.slicing.mode != mode:
-        raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
-    bridge.reply(panel(f"slicing.smart: {value}"))
-
-
-async def set_source_hint(bridge, argument):
+def parse_setting_value(bridge, name, argument):
+    """Validate one typed setting and return (should_apply, value)."""
+    setting = SETTINGS[name]
+    if setting.kind == "numeric":
+        if not argument:
+            bridge.reply(bridge.prompt("SETTINGS_USAGE"))
+            return False, None
+        return True, numeric_setting_value(bridge, name, argument)
+    if setting.kind == "boolean":
+        if argument not in ("true", "false"):
+            bridge.reply(bridge.prompt("SETTINGS_USAGE"))
+            return False, None
+        return True, argument == "true"
     if not argument:
-        bridge.reply(panel(f"sourceHint: {bridge.source_hint or VALUE_EMPTY}"))
+        value = current_setting(bridge, name)
+        bridge.reply(panel(f"{name}: {value or VALUE_EMPTY}"))
+        return False, None
+    return True, text_setting_value(
+        bridge, argument, setting.max_bytes, "SOURCE_HINT_TOO_LONG")
+
+
+async def set_setting(bridge, name, argument):
+    should_apply, value = parse_setting_value(bridge, name, argument)
+    if not should_apply:
         return
-    value = text_setting_value(
-        bridge, argument, SOURCE_HINT_LIMIT_BYTES, "SOURCE_HINT_TOO_LONG")
-    await write_hot_setting(bridge, "sourceHint", value)
-    if bridge.source_hint != value:
+    await write_hot_setting(bridge, name, value)
+    if name == "media.maxMiB":
+        bridge.media.limit = value * 1024 * 1024
+    if current_setting(bridge, name) != value:
         raise UserFacingError(bridge.prompt("SETTINGS_NOT_APPLIED"))
-    bridge.reply(panel(f"sourceHint: {value or VALUE_EMPTY}"))
+    display = "true" if value is True else "false" if value is False else value
+    bridge.reply(panel(f"{name}: {display or VALUE_EMPTY}"))
 
 
 async def set_shared_daemon(bridge, enabled):
@@ -375,20 +374,8 @@ async def command_settings(bridge, command, argument, received=None):
         if name in ("ack", "finish"):
             await command_notice(bridge, "/" + name, value)
             return
-        if name in SETTINGS and SETTINGS[name].numeric:
-            if not value:
-                bridge.reply(bridge.prompt("SETTINGS_USAGE"))
-                return
-            await set_numeric_setting(bridge, name, value)
-            return
-        if name == "compactionNotice":
-            await set_compaction_notice(bridge, value)
-            return
-        if name == "slicing.smart":
-            await set_slicing_smart(bridge, value)
-            return
-        if name == "sourceHint":
-            await set_source_hint(bridge, value)
+        if name in SETTINGS:
+            await set_setting(bridge, name, value)
             return
         if name not in ("autostart", "shared") or value not in ("true", "false"):
             bridge.reply(bridge.prompt("SETTINGS_USAGE"))
