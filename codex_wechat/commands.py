@@ -111,7 +111,7 @@ async def activate(bridge, thread_id=None, overrides=None):
     await bridge.backend.finish_prepared(commit)
     # Adoption itself needs no writer: return it so the App can open this thread
     # while the bridge is idle. The next turn resumes it or follows the App.
-    if bridge.backend.writer_state(commit.prepared.thread_id) in (None, WRITER_NATIVE):
+    if commit.lease.writer in (None, WRITER_NATIVE):
         await bridge.backend.release_thread(commit.prepared.thread_id, follow=True)
     return prepared.desktop
 
@@ -346,7 +346,7 @@ async def set_shared_daemon(bridge, enabled):
     if bridge.backend.shared_fallback:
         text += "\n" + bridge.prompt("SETTINGS_SHARED_FALLBACK",
                                      {"reason": bridge.backend.shared_fallback})
-    if bridge.backend.writer_state(bridge.state.get("thread")) == WRITER_BUSY:
+    if bridge.current_lease().writer == WRITER_BUSY:
         text += "\n" + bridge.prompt("SETTINGS_SHARED_BUSY")
     bridge.reply(text)
 
@@ -688,7 +688,7 @@ async def _replace_target(bridge, prepared: PreparedSelection):
     if thread_id:
         await bridge.backend.release_thread(thread_id)
     selected = bridge.state["thread"]
-    if bridge.backend.writer_state(selected) in (None, WRITER_NATIVE):
+    if commit.lease.writer in (None, WRITER_NATIVE):
         await bridge.backend.release_thread(selected, follow=True)
     bridge.running = False
 

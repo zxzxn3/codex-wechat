@@ -34,9 +34,8 @@ class InputDelivery:
         self.next_follow_at = 0.0
 
     def awaiting_desktop(self):
-        backend = self.bridge.backend
         thread = self.bridge.state.get("thread")
-        return bool(thread and backend.writer_state(thread) == WRITER_RELEASED)
+        return bool(thread and self.bridge.current_lease().writer == WRITER_RELEASED)
 
     def writer_wait_left(self, job):
         retry_at = job.get("writerRetryAt")
