@@ -42,7 +42,11 @@ if ($DryRun) {
 $PythonCommand = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue
 $PythonPrefix = @('-3')
 if (-not $PythonCommand) {
-    $PythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+    $PythonCommand = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
+        Where-Object {
+            (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
+            (Get-Item -LiteralPath $_.Source).Length -gt 0
+        } | Select-Object -First 1
     $PythonPrefix = @()
 }
 if (-not $PythonCommand) {

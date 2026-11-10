@@ -26,7 +26,11 @@ if (-not $PreparedRuntime) {
     $py = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue
     $prefix = @('-3')
     if (-not $py) {
-        $py = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+        $py = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
+            Where-Object {
+                (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
+                (Get-Item -LiteralPath $_.Source).Length -gt 0
+            } | Select-Object -First 1
         $prefix = @()
     }
     if (-not $py) {

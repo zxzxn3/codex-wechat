@@ -26,6 +26,8 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.task = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
         self.install = (ROOT / "install.ps1").read_text(encoding="utf-8")
         self.uninstall = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.bootstrap = (ROOT / "bootstrap.ps1").read_text(encoding="utf-8")
+        self.desktop = (ROOT / "codex-desktop.ps1").read_text(encoding="utf-8")
 
     def test_autostart_branch_only_touches_login_triggers(self):
         branch = self.task.split("'autostart' {", 1)[1]
@@ -92,7 +94,9 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertNotIn("'--log'", self.install)
 
     def test_python_fallback_rejects_empty_windowsapps_aliases(self):
-        for text in (self.install, self.uninstall):
+        public_install = self.install.split("# Internal integration only", 1)[0]
+        for text in (public_install, self.uninstall, self.bootstrap,
+                     self.desktop, self.entry):
             self.assertIn("Get-Command python.exe -CommandType Application", text)
             self.assertIn("(Get-Item -LiteralPath $_.Source).Length -gt 0", text)
             self.assertIn("Select-Object -First 1", text)
