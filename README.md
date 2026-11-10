@@ -48,7 +48,7 @@
 前提：Python 3.11+、Git、Codex、`curl` 和微信客户端。Linux 可选 `qrencode`；没有时会使用
 轻量 Python 回退。完整前提和卸载说明见 [INSTALL](docs/INSTALL.md)。
 
-### 一键安装
+### 一行安装
 
 <details>
 <summary>Linux 一行安装</summary>
@@ -64,6 +64,12 @@ curl -fsSL https://raw.githubusercontent.com/zxzxn3/codex-wechat/main/bootstrap.
 
 ```powershell
 irm https://raw.githubusercontent.com/zxzxn3/codex-wechat/main/bootstrap.ps1 | iex
+```
+
+也可以直接分发仓库中的 `bootstrap.ps1`。接收方在原文件所在目录运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
 ```
 
 </details>

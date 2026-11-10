@@ -27,6 +27,12 @@ Windows PowerShell：
 irm https://raw.githubusercontent.com/zxzxn3/codex-wechat/main/bootstrap.ps1 | iex
 ```
 
+也可以直接下载并分发仓库中的 `bootstrap.ps1`。接收方在原文件所在目录运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
+```
+
 入口从公开的 GitHub raw 地址取得 bootstrap。bootstrap 下载安装器，再由安装器把公开仓库
 clone 到临时目录。重跑同一入口即可安装或更新。
 
