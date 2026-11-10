@@ -10,11 +10,12 @@ import unittest
 from unittest.mock import patch
 
 import installer
-from tests.support.helpers import write_installation_layout
+from tests.support.helpers import install_platform, write_installation_layout
 
 
 class BootstrapEntryTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(install_platform("linux"))
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
@@ -98,6 +99,8 @@ class BootstrapEntryTests(unittest.TestCase):
             self.target,
             release_id=identifier,
             data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
             create_release=False,
         )
         saved = self.target / installer.UPDATE_SOURCE_FILE

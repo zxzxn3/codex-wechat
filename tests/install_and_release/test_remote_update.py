@@ -9,11 +9,12 @@ import unittest
 from unittest.mock import patch
 
 import installer
-from tests.support.helpers import write_installation_layout
+from tests.support.helpers import install_platform, write_installation_layout
 
 
 class RemoteUpdateTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(install_platform("linux"))
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
@@ -66,6 +67,8 @@ class RemoteUpdateTests(unittest.TestCase):
         layout = write_installation_layout(
             self.target,
             data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
         )
         manifest = layout.manifest_path.read_bytes()
         saved = self.target / installer.UPDATE_SOURCE_FILE
@@ -86,6 +89,8 @@ class RemoteUpdateTests(unittest.TestCase):
             self.target,
             release_id=identifier,
             data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
         )
         installer.remember_update_source(self.target, self.source, self.choice)
         self.assertEqual(installer.saved_update_source(self.target), self.choice)
@@ -96,6 +101,8 @@ class RemoteUpdateTests(unittest.TestCase):
         write_installation_layout(
             self.target,
             data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
         )
         (self.target / "codex_wechat").mkdir(parents=True, exist_ok=True)
         shutil.copy2(
@@ -154,6 +161,8 @@ class RemoteUpdateTests(unittest.TestCase):
             self.target,
             release_id=identifier,
             data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
         )
         saved = self.target / installer.UPDATE_SOURCE_FILE
         saved.write_text(json.dumps(self.choice) + "\n")
