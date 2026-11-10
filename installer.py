@@ -279,7 +279,7 @@ def available_installed_release_id(source: Path, target: Path) -> str | None:
 
 
 def _private(relative: Path) -> bool:
-    if relative == Path("config.json"):
+    if relative.name in ("config.json", "config.json.tmp"):
         return True
     for part in relative.parts:
         if part in PRIVATE_NAMES:
@@ -424,14 +424,16 @@ def check_config_compatibility(files, layout):
 
 def release_identifier(files: dict[Path, tuple[bytes, int]]) -> str:
     digest = hashlib.sha256()
+    platform_tag = "windows" if IS_WINDOWS else sys.platform
     digest.update(
-        f"codex-wechat-release-{RELEASE_FORMAT}-{sys.platform}\0".encode())
+        f"codex-wechat-release-{RELEASE_FORMAT}-{platform_tag}\0".encode())
     for relative in sorted(files, key=lambda value: value.as_posix()):
         content, mode = files[relative]
         digest.update(relative.as_posix().encode("utf-8"))
         digest.update(b"\0")
-        digest.update(str(mode & 0o777).encode("ascii"))
-        digest.update(b"\0")
+        if not IS_WINDOWS:
+            digest.update(str(mode & 0o777).encode("ascii"))
+            digest.update(b"\0")
         digest.update(content)
         digest.update(b"\0")
     return digest.hexdigest()[:16]
@@ -1191,7 +1193,7 @@ def configure_windows(release: Path, target: Path, *, update: bool) -> None:
         "-InstallRoot",
         str(target),
     ]
-    command.extend(["-PreparedRuntime", "-PreserveAutostart", "-NoStart"])
+    command.append("-PreparedRuntime")
     _run(command, cwd=release)
 
 

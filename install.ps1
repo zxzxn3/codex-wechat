@@ -2,8 +2,6 @@
 [CmdletBinding()]
 param(
     [switch]$PreparedRuntime,
-    [switch]$PreserveAutostart,
-    [switch]$NoStart,
     [string]$InstallRoot,
     [switch]$DryRun,
     [switch]$NonInteractive,
@@ -56,7 +54,11 @@ $TaskName = 'CodexWeChat'
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $LayoutPython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
-    $LayoutPythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+    $LayoutPythonCommand = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
+        Where-Object {
+            (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
+            (Get-Item -LiteralPath $_.Source).Length -gt 0
+        } | Select-Object -First 1
     if (-not $LayoutPythonCommand) { throw 'Python runtime is unavailable.' }
     $LayoutPython = $LayoutPythonCommand.Source
 }

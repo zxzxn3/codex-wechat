@@ -19,7 +19,11 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
 }
 $LayoutPython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
-    $LayoutPythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+    $LayoutPythonCommand = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
+        Where-Object {
+            (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
+            (Get-Item -LiteralPath $_.Source).Length -gt 0
+        } | Select-Object -First 1
     if (-not $LayoutPythonCommand) { throw 'Python runtime is unavailable.' }
     $LayoutPython = $LayoutPythonCommand.Source
 }
@@ -319,6 +323,7 @@ if (Test-Path -LiteralPath $Shim -PathType Leaf) {
 Write-Host "程序文件仍在: $InstallRoot（含 releases 与 Python 环境，不含用户数据）"
 if ($PurgeData) {
     Write-Host "数据文件已删除: $DataRoot"
+    Write-Host '如需在同一路径重新安装，请先手动删除上述程序目录。'
 } else {
     Write-Host "数据文件仍在: $DataRoot"
     Write-Host '重新运行安装器会继续使用这个数据根；如需同时删除配置、登录和待办，请使用 -PurgeData。'

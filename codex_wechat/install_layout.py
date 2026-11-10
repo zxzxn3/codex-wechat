@@ -13,7 +13,13 @@ from typing import Mapping
 
 SCHEMA_VERSION = 1
 INSTALLATION_FILE = ".installation.json"
-LEGACY_FILES = ("current", ".runtime-roots", ".data-root")
+LEGACY_FILES = (
+    "current",
+    ".runtime-roots",
+    ".data-root",
+    ".config-root",
+    ".state-root",
+)
 RELEASE_ID = re.compile(r"[a-f0-9]{16}")
 PLATFORMS = ("linux", "windows")
 
@@ -318,6 +324,7 @@ class InstalledLayout:
         if self.platform == "windows":
             candidates = (
                 OwnedPath("配置", self.data_root / "config.json"),
+                OwnedPath("配置临时文件", self.data_root / "config.json.tmp"),
                 OwnedPath("状态", self.data_root / ".state"),
                 OwnedPath("工作区", self.data_root / "workspace"),
                 OwnedPath("日志", self.data_root / "logs"),
@@ -326,6 +333,8 @@ class InstalledLayout:
         else:
             candidates = (
                 OwnedPath("配置", runtime.config_file),
+                OwnedPath("配置临时文件",
+                          runtime.config_file.with_name(runtime.config_file.name + ".tmp")),
                 OwnedPath("状态", runtime.state_dir),
                 OwnedPath("工作区", runtime.workspace_dir),
             )

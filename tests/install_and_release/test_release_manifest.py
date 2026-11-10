@@ -48,6 +48,20 @@ class ReleaseManifestTests(unittest.TestCase):
         path.write_text(json.dumps(manifest),encoding="utf-8")
         self.assertFalse(installer.release_matches(self.target,self.identifier))
 
+    def test_windows_release_identity_ignores_posix_execute_bits(self):
+        source = {Path("codex-wechat"): (b"fixture", 0o755)}
+        copied = {Path("codex-wechat"): (b"fixture", 0o666)}
+        with patch.object(installer, "IS_WINDOWS", True):
+            self.assertEqual(
+                installer.release_identifier(source),
+                installer.release_identifier(copied),
+            )
+        with patch.object(installer, "IS_WINDOWS", False):
+            self.assertNotEqual(
+                installer.release_identifier(source),
+                installer.release_identifier(copied),
+            )
+
 
 class GitSourceBoundaryTests(unittest.TestCase):
     def setUp(self):

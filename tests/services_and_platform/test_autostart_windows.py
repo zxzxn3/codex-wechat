@@ -61,7 +61,7 @@ class AutostartScriptContractTests(unittest.TestCase):
 
     def test_installer_keeps_autostart_and_immediate_start_independent(self):
         lowered = self.install.lower()
-        self.assertIn("[switch]$nostart", lowered)
+        self.assertNotIn("[switch]$nostart", lowered)
         self.assertIn("[switch]$preparedruntime", lowered)
         self.assertIn("$autostart = $false", self.install)
         self.assertIn("$trigger.Enabled = $autostart", self.install)
@@ -74,7 +74,8 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertIn("bootstrap_supervisor.py", self.install)
         self.assertIn(".bootstrap-venv\\Scripts\\pythonw.exe", self.install)
         self.assertIn("'--install-root'", self.install)
-        self.assertIn("[switch]$PreserveAutostart", self.install)
+        self.assertNotIn("PreserveAutostart", self.install)
+        self.assertNotIn("NoStart", self.install)
         self.assertIn("bootstrap_supervisor.py", self.task)
 
     def test_entry_and_helpers_delegate_layout_to_the_contract(self):
@@ -89,6 +90,12 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertNotIn("'--state-dir'", self.install)
         self.assertNotIn("'--config'", self.install)
         self.assertNotIn("'--log'", self.install)
+
+    def test_python_fallback_rejects_empty_windowsapps_aliases(self):
+        for text in (self.install, self.uninstall):
+            self.assertIn("Get-Command python.exe -CommandType Application", text)
+            self.assertIn("(Get-Item -LiteralPath $_.Source).Length -gt 0", text)
+            self.assertIn("Select-Object -First 1", text)
 
     def test_fast_path_requires_the_exact_stable_action(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -76,6 +76,7 @@ class InstallerTests(unittest.TestCase):
             ".update-backups/old/file.py": "private",
             "workspace/notes.txt": "private",
             "config.json": "{}",
+            "config.json.tmp": '{"env":{"PROXY_TOKEN":"secret"}}',
             "__pycache__/demo.pyc": "private",
             "dist/codex-wechat": "private",
         }
@@ -104,6 +105,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(Path("docs/guide.md"), files)
         for relative in (
             Path("config.json"),
+            Path("config.json.tmp"),
             Path(".state/account.json"),
             Path(".venv/bin/python"),
             Path(".bootstrap-venv/bin/python"),

@@ -50,7 +50,8 @@ class InstalledLayoutTests(unittest.TestCase):
         self.assertEqual(json.loads(
             (self.target / INSTALLATION_FILE).read_text(encoding="utf-8")
         )["releaseId"], RELEASE_ID)
-        for legacy in ("current", ".runtime-roots", ".data-root"):
+        for legacy in ("current", ".runtime-roots", ".data-root",
+                       ".config-root", ".state-root"):
             self.assertFalse((self.target / legacy).exists())
 
     def test_platform_support_reads_the_contract_instead_of_markers(self):
@@ -76,6 +77,14 @@ class InstalledLayoutTests(unittest.TestCase):
         (self.target / "current").write_text("legacy\n", encoding="utf-8")
         with self.assertRaisesRegex(InstallLayoutError, "旧安装布局"):
             InstalledLayout.load(self.target, platform="linux")
+
+    def test_each_legacy_marker_is_rejected(self):
+        for name in (".runtime-roots", ".data-root", ".config-root", ".state-root"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / name).write_text("legacy\n", encoding="utf-8")
+                with self.assertRaisesRegex(InstallLayoutError, "旧安装布局"):
+                    InstalledLayout.load(root, platform="linux")
 
     def test_invalid_manifest_fails_at_the_contract(self):
         self.target.mkdir()
@@ -166,6 +175,7 @@ class InstalledLayoutTests(unittest.TestCase):
             [(item.role, item.path) for item in plan.items],
             [
                 ("配置", self.config / "config.json"),
+                ("配置临时文件", self.config / "config.json.tmp"),
                 ("状态", self.state),
                 ("工作区", self.data / "workspace"),
             ],

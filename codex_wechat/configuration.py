@@ -47,9 +47,20 @@ class ConfigurationError(ValueError):
 def write_config(path, config):
     """Replace the file in one step so a crash never leaves a partial configuration."""
     temp = Path(path).with_name(Path(path).name + ".tmp")
-    temp.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8")
-    os.replace(temp, path)
+    try:
+        temp.unlink(missing_ok=True)
+        descriptor = os.open(
+            temp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(config, ensure_ascii=False, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)

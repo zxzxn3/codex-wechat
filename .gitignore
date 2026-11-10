@@ -19,6 +19,7 @@ workspace/
 shared/
 logs/
 config.json
+config.json.tmp
 .env
 .env.*
 __pycache__/

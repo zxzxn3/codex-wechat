@@ -51,8 +51,8 @@
 - 安装布局只有一个持久契约：`.installation.json` 同时保存 schema、平台、release ID、
   数据根、配置根和状态根。stable 入口只调用 `launcher.py`，卸载器和平台服务控制只通过
   `InstalledLayout` 读取同一记录；`active-release` 仅是运行期 release 租约。
-- 不读取或迁移 `current`、`.runtime-roots`、`.data-root` 等旧标记；旧标记即使与新清单
-  同时出现也 fail closed。重装建立新契约，不维护原地迁移分支。
+- 不读取或迁移 `current`、`.runtime-roots`、`.data-root`、`.config-root`、`.state-root`
+  等旧标记；旧标记即使与新清单同时出现也 fail closed。重装建立新契约，不维护原地迁移分支。
 - `PurgePlan` 是安装契约给出的精确 owned leaves。Linux 和 Windows 只执行该计划，不分别
   重新解释“数据根下哪些东西属于应用”。这样可以删除调用点的重叠、链接和根目录 guard，
   把安全检查集中在不可构造非法状态的契约里。
@@ -62,10 +62,12 @@
   作为第二个状态机。
 - 已安装实例的运行时根固定。普通更新忽略当前 shell 中变化的 XDG 变量，冲突的
   `CODEX_WECHAT_DATA_ROOT` fail closed，不提供 `--reconfigure-roots` 或换根事务。
-- 需要搬迁运行时根时，用户先备份数据，再执行 purge 并从新环境重新安装。通过引入服务停止、
-  状态锁、失败恢复和多标记兼容来支持原地换根，成本高于一次性重新安装，因此不属于产品范围。
+- 需要搬迁运行时根时，用户先备份数据，再执行 purge、手动删除保留的程序安装根，并从新环境
+  重新安装。通过引入服务停止、状态锁、失败恢复和多标记兼容来支持原地换根，成本高于一次性
+  重新安装，因此不属于产品范围。
 - purge 只删除应用拥有的已知项，不是“递归删除任意数据根”的通用工具。数据、配置和状态角色
-  必须互不重叠；删除目标经过符号链接、包含安装树或范围过大时拒绝执行。
+  必须互不重叠；`config.json.tmp` 是配置替换的固定应用临时项，也属于 purge owned leaves。
+  删除目标经过符号链接、包含安装树或范围过大时拒绝执行。
 - Windows 清理普通目录时逐项遍历，遇到 junction、符号链接或其它重解析点只删除链接本身，
   不跟随到目标；PowerShell 5.1 的递归删除不能提供这个保证。
 - purge 只停止 `WorkingDirectory` 属于当前数据根的 Linux shared daemon；保留数据的卸载

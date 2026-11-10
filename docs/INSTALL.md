@@ -137,7 +137,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 再次运行同一个网络入口或本地入口即可更新已有安装。公开网络入口会保存公开仓库作为可复用
 更新来源，也可以继续重跑同一个网络入口。更新会保留配置、登录、待办、工作目录、日志和已有
 的登录自启状态，不重启正在运行的桥接；新版本先进入独立 release 并完成检查和运行时准备，
-最后才原子提交 `.installation.json`。项目不提供安装回滚命令。
+随后原子提交 `.installation.json`。平台服务集成和入口可读性检查发生在提交之后；这些后续
+步骤失败不会回滚已提交版本。项目不提供安装回滚命令。
 
 每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
 release 通过安装布局中的 release ID 和 `active-release` 租约保留。安装器不初始化账户、
@@ -164,7 +165,8 @@ Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是�
 它们只在维护者排查损坏入口时使用。
 
 `--purge-data` / `-PurgeData` 只删除已知用户数据项，不递归删除自定义数据根目录。Linux
-分别删除配置文件、状态目录和数据根下的 `workspace`；Windows 继续删除统一数据根中的已知项。
+分别删除配置文件及其固定临时文件、状态目录和数据根下的 `workspace`；Windows 继续删除
+统一数据根中的已知项，包括 `config.json.tmp`。
 前台桥接仍持有状态锁时，卸载会拒绝继续；先按 `Ctrl+C` 退出。自定义数据目录通过
 `CODEX_WECHAT_DATA_ROOT` 在首次安装时指定；卸载器没有第二套数据根参数。Linux purge 还会
 停止工作目录属于当前数据根的共享 Codex 后台；任何一步无法确认时先保留数据。
@@ -174,7 +176,9 @@ Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是�
 
 不带 purge 的卸载会保留 `.installation.json`：安装树仍在（卸载只移除服务与入口），所以
 重新运行安装器会解析为 update，并继续使用原来的根。purge 处理完计划中的用户数据后才删除
-布局；之后重新安装会按当时的 XDG/数据根环境建立新布局。
+布局，但程序树按设计仍在；重新安装前必须先手动删除安装根（Linux 默认
+`~/.local/share/codex-wechat`，Windows 默认 `%LOCALAPPDATA%\codex-wechat\app`）。之后
+安装器会按当时的 XDG/数据根环境建立新布局。
 
 ## 目录和配置
 
@@ -194,7 +198,7 @@ Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` �
 
 `XDG_CONFIG_HOME`、`XDG_STATE_HOME` 和 `XDG_DATA_HOME` 在首次安装时决定路径根。普通更新
 始终沿用已保存的根，不受当前 shell 中这些变量影响。项目不提供原地换根命令；需要搬迁时先
-备份数据，再 purge 并从目标环境重新安装。`CODEX_WECHAT_DATA_ROOT` 只覆盖首次安装的数据根，
+备份数据，再 purge、删除程序安装根，并从目标环境重新安装。`CODEX_WECHAT_DATA_ROOT` 只覆盖首次安装的数据根，
 因此工作区随数据根移动，配置和状态仍遵循 XDG；与已保存布局冲突时 fail closed。
 `CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口和源码副本的运行定位。配置根或状态根与程序安装根
 重叠，或数据、配置、状态三个角色互相重叠时，安装和 purge 都会 fail closed；默认的
@@ -213,7 +217,8 @@ Windows purge 还会拒绝数据根本身及其已有父链中的任何重解析
 上限的文件直接 fail fast，不属于损坏隔离承诺。
 
 Linux 和 Windows 都只使用 `.installation.json`。当前版本不迁移 `current`、
-`.runtime-roots`、`.data-root` 等旧布局；这些标记存在时直接拒绝启动，避免混用两套根。
+`.runtime-roots`、`.data-root`、`.config-root`、`.state-root` 等旧布局；这些标记存在时
+直接拒绝启动，避免混用两套根。
 
 配置、状态、日志、共享后台和工作区各有独立职责，不复制供应商凭据或会话历史。热配置和提示
 的运行边界见 [ARCHITECTURE](ARCHITECTURE.md#配置与提示)。

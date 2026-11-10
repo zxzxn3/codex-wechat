@@ -8,11 +8,35 @@ from unittest.mock import patch
 
 from codex_wechat.configuration import (
     ConfigLoader, DEFAULT_COMPLETION_TEMPLATE, DEFAULT_SOURCE_HINT, HOT_CONFIG_KEYS, HotSettings,
-    completion_template, processing_template,
+    completion_template, processing_template, write_config,
 )
 
 
 class HotConfigContractTests(unittest.TestCase):
+    def test_write_config_replaces_private_temp_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "config.json"
+            temporary = path.with_name("config.json.tmp")
+            temporary.write_text("stale secret", encoding="utf-8")
+            write_config(path, {"sourceHint": "fresh"})
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8")),
+                {"sourceHint": "fresh"},
+            )
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(temporary.exists())
+
+    def test_write_config_removes_temp_after_replace_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "config.json"
+            with patch("codex_wechat.configuration.os.replace",
+                       side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    write_config(path, {"sourceHint": "fresh"})
+            self.assertFalse(path.exists())
+            self.assertFalse(path.with_name("config.json.tmp").exists())
+
     def test_hot_config_keys_cover_every_hot_setting_source(self):
         key_fields = {
             "processingNotice": None,

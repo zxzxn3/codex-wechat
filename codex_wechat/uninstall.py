@@ -179,6 +179,7 @@ async def uninstall(*, purge: bool = False) -> None:
     print(f"程序文件仍在: {INSTALL_ROOT}（含 releases 与 Python 环境，不含用户数据）")
     if purge:
         print(f"数据文件已删除: {paths.data_root}")
+        print("如需在同一路径重新安装，请先手动删除上述程序目录。")
     else:
         print(f"数据文件仍在: {paths.data_root}")
         print(f"配置仍在: {paths.config_file}")
