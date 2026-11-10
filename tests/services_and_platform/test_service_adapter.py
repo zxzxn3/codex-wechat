@@ -79,6 +79,7 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
                 state = await service_adapter.status()
         self.assertEqual((state.installed, state.running), (True, False))
         self.assertEqual((state.state, state.last_result), ("failed", 78))
+        self.assertEqual(state.fragment_path, unit)
         self.assertIn("--property=ExecMainStatus", command.await_args.args)
 
     async def test_linux_status_reports_the_effective_stop_timeout(self):

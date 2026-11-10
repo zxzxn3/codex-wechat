@@ -22,6 +22,8 @@
 - 2026-11-10 审查确认 `--purge-data` 可能因 XDG 状态根与安装根重叠而误删程序，也确认
   shell 自定义 XDG 不会自动进入 systemd user manager。两项均有隔离回归；真实服务启动仍需
   在自定义 XDG 环境复测。
+- 2026-11-10 卸载器改为按 systemd 实际 `FragmentPath` 移除 unit，不再用当前 shell 的
+  `XDG_CONFIG_HOME` 猜测注册位置；自定义 XDG 的实机卸载仍需复测。
 - App / CLI / 微信三端并发曾在 `sharedDaemon: true` 下实现双向收发；Windows 默认关闭共享
   模式，恢复启用后需要复测。
 

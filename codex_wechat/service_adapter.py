@@ -34,6 +34,8 @@ class ServiceState:
     last_result: int | None = None
     # Effective Linux force-stop timeout, used to observe the post-kill state.
     stop_timeout: float | None = None
+    # The registered unit path reported by systemd; absence means no owned unit.
+    fragment_path: Path | None = None
 
     @property
     def stable_running(self):
@@ -127,7 +129,8 @@ async def status():
     return ServiceState(True, active in {"active", "activating", "reloading", "deactivating"},
                         state=active,
                         last_result=int(exit_code) if exit_code.isdigit() else None,
-                        stop_timeout=_duration_seconds(fields.get("TimeoutStopUSec", "")))
+                        stop_timeout=_duration_seconds(fields.get("TimeoutStopUSec", "")),
+                        fragment_path=Path(fragment))
 
 
 def _duration_seconds(value):

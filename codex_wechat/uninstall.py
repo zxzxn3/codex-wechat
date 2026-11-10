@@ -23,12 +23,17 @@ def _unit_link() -> Path:
     return xdg_config_home() / "systemd/user" / UNIT
 
 
-def _unit_dropin() -> Path:
-    return _unit_link().with_name(UNIT + ".d") / "data-root.conf"
+def _default_unit_link() -> Path:
+    return Path.home() / ".config/systemd/user" / UNIT
 
 
-def _remove_unit_dropin() -> None:
-    path = _unit_dropin()
+def _unit_dropin(link: Path | None = None) -> Path:
+    return (Path(link) if link is not None else _unit_link()).with_name(
+        UNIT + ".d") / "data-root.conf"
+
+
+def _remove_unit_dropin(link: Path | None = None) -> None:
+    path = _unit_dropin(link)
     if path.is_symlink():
         return
     try:
@@ -67,18 +72,20 @@ def _paths_overlap(first: Path, second: Path) -> bool:
 
 async def _linux_service_removal() -> None:
     link = _unit_link()
-    if not link.exists() and not link.is_symlink():
-        # Installations that cannot reach a user service manager never create
-        # this unit link and run in the documented foreground-only mode.
-        _remove_unit_dropin()
-        print("后台服务未注册；跳过服务移除。")
-        return
     try:
         current = await service_adapter.status()
     except FileNotFoundError:
         # No systemd client is installed; there cannot be a registered unit.
         current = None
     except (OSError, RuntimeError) as error:
+        # Preserve foreground-only installs, but never guess that an existing
+        # unit link in either standard location is absent.
+        if not any(
+                candidate.exists() or candidate.is_symlink()
+                for candidate in (link, _default_unit_link())):
+            _remove_unit_dropin()
+            print("systemd 用户服务不可用；跳过服务移除。")
+            return
         raise RuntimeError(f"无法确认后台服务状态，拒绝卸载: {error}") from error
     except ValueError:
         print("检测到不属于本安装的后台服务，未改动该服务。")
@@ -93,14 +100,16 @@ async def _linux_service_removal() -> None:
     except (OSError, RuntimeError):
         # The unit may only have been linked for on-demand starts.
         pass
+    registered = current.fragment_path
     expected = (INSTALL_ROOT / UNIT).resolve()
     try:
-        owns_link = link.is_symlink() and link.resolve() == expected
+        owns_link = (registered is not None and registered.is_symlink()
+                     and registered.resolve() == expected)
     except OSError:
         owns_link = False
-    if owns_link:
-        link.unlink()
-    _remove_unit_dropin()
+    if owns_link and registered is not None:
+        registered.unlink()
+    _remove_unit_dropin(registered)
     try:
         await systemctl("daemon-reload")
     except (OSError, RuntimeError):

@@ -377,13 +377,46 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
     async def test_unregistered_service_skips_an_unreachable_manager(self):
         with tempfile.TemporaryDirectory() as directory:
             unit = Path(directory) / "systemd/user" / uninstall.UNIT
+            default_unit = Path(directory) / "default/systemd/user" / uninstall.UNIT
             status = AsyncMock(side_effect=RuntimeError("manager unavailable"))
             with patch.object(uninstall, "_unit_link", return_value=unit), \
+                    patch.object(uninstall, "_default_unit_link", return_value=default_unit), \
                     patch.object(uninstall.service_adapter, "status", status), \
                     patch.object(uninstall, "_remove_unit_dropin") as dropin:
                 await uninstall._linux_service_removal()
-        status.assert_not_awaited()
+        status.assert_awaited_once_with()
         dropin.assert_called_once_with()
+
+    async def test_removal_uses_the_registered_fragment_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            install = root / "install"
+            install.mkdir()
+            expected = install / uninstall.UNIT
+            expected.write_text("[Unit]\n", encoding="utf-8")
+            shell_link = root / "custom/systemd/user" / uninstall.UNIT
+            registered = root / "default/systemd/user" / uninstall.UNIT
+            registered.parent.mkdir(parents=True)
+            try:
+                registered.symlink_to(expected)
+            except OSError as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+            current = uninstall.service_adapter.ServiceState(
+                True, False, fragment_path=registered)
+            systemctl = AsyncMock(side_effect=[None, None])
+            with patch.object(uninstall, "INSTALL_ROOT", install), \
+                    patch.object(uninstall, "_unit_link", return_value=shell_link), \
+                    patch.object(uninstall.service_adapter, "status",
+                                 AsyncMock(return_value=current)), \
+                    patch.object(uninstall, "systemctl", systemctl), \
+                    patch.object(uninstall, "_remove_unit_dropin") as dropin:
+                await uninstall._linux_service_removal()
+            self.assertFalse(registered.exists())
+            dropin.assert_called_once_with(registered)
+            self.assertEqual(
+                [call.args for call in systemctl.await_args_list],
+                [("disable", uninstall.UNIT), ("daemon-reload",)],
+            )
 
     def test_managed_systemd_data_root_dropin_is_removed(self):
         with tempfile.TemporaryDirectory() as directory:
