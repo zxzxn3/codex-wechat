@@ -15,19 +15,22 @@ from codex_wechat.platform_support import RuntimePaths
 
 
 @contextmanager
-def linux_install_platform():
-    """Model a Linux installation on any host.
+def install_platform(platform):
+    """Model an installation of ``platform`` on whatever host runs the suite.
 
-    The fixtures below shape Linux roots (separate data/config/state) while the
-    code under test resolves the platform from the host, so a Windows run would
-    compare a Windows expectation against a Linux manifest. Pinning both sides
-    here keeps one rule: a test states the platform it models.
+    The platform is required: a fixture that inherits the host's platform is the
+    mistake this helper exists to prevent, so every caller names what it models.
+
+    A fixture shapes one platform's roots (Windows keeps a single root, Linux
+    splits data/config/state) while the code under test resolves the platform
+    from the host. Pin both sides here so a test states the platform it models
+    instead of inheriting the host's.
     """
     with ExitStack() as stack:
         stack.enter_context(patch("codex_wechat.install_layout.current_platform",
-                                  return_value="linux"))
+                                  return_value=platform))
         stack.enter_context(patch("tests.support.helpers.current_platform",
-                                  return_value="linux"))
+                                  return_value=platform))
         # The installer and uninstaller each keep their own host flag, and the
         # uninstaller imported current_platform by name; pin every binding that
         # exists rather than assuming one module owns the decision.
@@ -37,10 +40,11 @@ def linux_install_platform():
             if module is None:
                 continue
             if hasattr(module, "IS_WINDOWS"):
-                stack.enter_context(patch(name + ".IS_WINDOWS", False))
+                stack.enter_context(
+                    patch(name + ".IS_WINDOWS", platform == "windows"))
             if hasattr(module, "current_platform"):
                 stack.enter_context(
-                    patch(name + ".current_platform", return_value="linux"))
+                    patch(name + ".current_platform", return_value=platform))
         yield
 
 
@@ -80,11 +84,36 @@ def write_installation_layout(
     platform=None,
     release_files=False,
     create_release=True,
+    foreign_platform=False,
 ):
+    """Publish a layout whose roots match the platform the code under test resolves.
+
+    The two ways this fixture used to go wrong on a non-Linux host, both caught
+    here with the fix in the message instead of surfacing later as a contract
+    mismatch inside the code under test:
+
+    - roots shaped for one platform while the host resolves the other;
+    - a manifest written for a platform the host is not, without saying so.
+    """
     # Omitted roots follow the platform contract: Windows keeps one root, Linux
     # splits config and state. Callers that model Linux pass all three.
     config_root = data_root if config_root is None else config_root
     state_root = data_root if state_root is None else state_root
+    resolved = current_platform() if platform is None else platform
+    if resolved != current_platform() and not foreign_platform:
+        raise AssertionError(
+            f"fixture writes a {resolved} manifest while the host resolves "
+            f"{current_platform()}; wrap the test in install_platform({resolved!r}) "
+            "or pass foreign_platform=True to model another platform on purpose"
+        )
+    unified = Path(config_root) == Path(data_root) == Path(state_root)
+    if unified != (resolved == "windows"):
+        raise AssertionError(
+            f"fixture roots do not follow the {resolved} contract "
+            f"(unified root: {unified}); Windows keeps one root while Linux "
+            "splits data/config/state. Declare the platform this test models "
+            "with install_platform(...) instead of inheriting the host's"
+        )
     install_root = Path(install_root)
     release = install_root / "releases" / release_id
     if create_release:
@@ -94,14 +123,14 @@ def write_installation_layout(
         if release_files:
             (package / "windows_service.py").write_text("", encoding="utf-8")
             python = (release / ".venv/Scripts/python.exe"
-                      if (platform or current_platform()) == "windows"
+                      if resolved == "windows"
                       else release / ".venv/bin/python")
             python.parent.mkdir(parents=True, exist_ok=True)
             python.write_text("", encoding="utf-8")
     InstalledLayout.create(
         install_root,
         release_id,
-        platform=platform or current_platform(),
+        platform=resolved,
         data_root=data_root,
         config_root=config_root,
         state_root=state_root,

@@ -180,7 +180,7 @@ class PlatformTests(unittest.TestCase):
             state = base / "custom-state/codex-wechat"
             write_installation_layout(
                 install, data_root=data, config_root=config, state_root=state,
-                platform="linux")
+                platform="linux", foreign_platform=True)
             with patch.object(platform_support, "IS_WINDOWS", False), \
                     patch.object(platform_support, "INSTALL_ROOT", install), \
                     patch.dict(os.environ, {

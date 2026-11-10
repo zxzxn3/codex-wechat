@@ -53,6 +53,7 @@ class BootstrapSupervisorTests(unittest.TestCase):
                 config_root=root,
                 state_root=root,
                 platform="windows",
+                foreign_platform=True,
                 create_release=False,
             )
             self.assertEqual(bootstrap_supervisor.active_release(root), release.resolve())
@@ -92,6 +93,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 config_root=marker_root,
                 state_root=marker_root,
                 platform="windows",
+                foreign_platform=True,
                 create_release=False,
             )
             seen = []
@@ -131,6 +133,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 config_root=root,
                 state_root=root,
                 platform="windows",
+                foreign_platform=True,
                 create_release=False,
             )
             first = (root / "releases" / FIRST_RELEASE).resolve()
@@ -148,6 +151,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                             config_root=root,
                             state_root=root,
                             platform="windows",
+                foreign_platform=True,
                             create_release=False,
                         )
                         return 76
@@ -176,6 +180,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 config_root=root,
                 state_root=root,
                 platform="windows",
+                foreign_platform=True,
                 create_release=False,
             )
             runs = []

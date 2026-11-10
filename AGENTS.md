@@ -85,6 +85,23 @@ $errors = $null
   否则夹具事件会写进开发者真实的 `logs/bridge.jsonl`——那份文件是事故证据。
 - 跨平台夹具不要硬编码 `/tmp` 或某个平台的默认目录：用 `tempfile`，需要模拟 Linux 分支时用
   `tests.support.helpers.xdg_user_data_dir`。
+- **夹具建模的平台必须等于被测代码解析的平台**。只做到上一条还不够：曾经有 20 个测试在
+  Windows 上红，全部因为夹具按 Linux 形状造根目录、而被测代码按主机平台校验，看起来像产品缺陷。
+  两条路都写在 `tests/support/helpers.py` 里，由运行期检查强制：
+
+  ```python
+  with install_platform("linux"):        # 声明这个测试建模 Linux，主机是什么都成立
+      layout = write_installation_layout(root, **split_roots)
+  write_installation_layout(root, platform="windows", foreign_platform=True)  # 故意造另一平台的清单
+  ```
+
+  `install_platform()` **必须写出平台名**：继承主机的平台正是这条规则要挡的错误。
+  `write_installation_layout` 会拒绝"根目录形状与解析出的平台不符"和"清单平台不是主机平台却
+  没有 `foreign_platform=True`"两种写法，并在消息里给出改法。加载主机刚创建的布局时不要传
+  `platform=`（默认就是主机平台）。这条规则和两个逃生口由
+  `tests/install_and_release/test_install_layout.py` 的 `FixturePlatformTests` 守着。
+- Windows 侧的 `IS_WINDOWS` 开关和 `install_layout.current_platform()` 是两条独立判断；
+  需要模拟某个平台时用 `install_platform()` 一次pin 住，不要只改其中一个。
 - 卸载/安装这类破坏性路径用 mock 与临时目录验证，**不要**在真机上跑真实卸载来"看看输出"。
 
 ## 文档

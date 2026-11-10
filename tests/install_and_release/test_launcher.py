@@ -4,13 +4,13 @@ import tempfile
 import unittest
 
 from codex_wechat.launcher import command
-from tests.support.helpers import linux_install_platform, write_installation_layout
+from tests.support.helpers import install_platform, write_installation_layout
 
 
 class LauncherTests(unittest.TestCase):
     def setUp(self):
         # The fixture is a Linux layout; the launcher resolves the host platform.
-        self.enterContext(linux_install_platform())
+        self.enterContext(install_platform("linux"))
 
     def test_installed_command_uses_the_layout_release_python(self):
         with tempfile.TemporaryDirectory() as directory:

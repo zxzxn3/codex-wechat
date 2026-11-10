@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 from codex_wechat import platform_support
 from codex_wechat.install_layout import (INSTALLATION_FILE, InstallLayoutError,
-                                         InstalledLayout)
-from tests.support.helpers import (linux_install_platform, requires_symlinks,
+                                         InstalledLayout, current_platform)
+from tests.support.helpers import (install_platform, requires_symlinks,
                                    write_installation_layout)
 
 
@@ -19,7 +19,7 @@ RELEASE_ID = "a" * 16
 
 class InstalledLayoutTests(unittest.TestCase):
     def setUp(self):
-        self.enterContext(linux_install_platform())
+        self.enterContext(install_platform("linux"))
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
@@ -218,6 +218,53 @@ class InstalledLayoutTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(InstallLayoutError, "符号链接"):
             layout.purge_plan()
+
+
+class FixturePlatformTests(unittest.TestCase):
+    """A fixture states the platform it models instead of inheriting the host's.
+
+    The suite runs on Windows and Linux. Fixtures that shaped one platform's
+    roots while the code under test resolved the host's platform produced 20
+    Windows-only failures that read as product bugs, so the shape rule is
+    enforced by the fixture itself rather than left to reviewers.
+    """
+
+    def test_roots_that_do_not_match_the_resolved_platform_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            for platform, roots in (
+                # Linux splits the roots, so a Windows manifest must not use them.
+                ("windows", {"data_root": base / "data", "config_root": base / "config",
+                             "state_root": base / "state"}),
+                # Windows keeps one root, so a Linux manifest must not unify them.
+                ("linux", {"data_root": base / "data"}),
+            ):
+                with self.subTest(platform=platform, roots=sorted(roots)):
+                    with self.assertRaisesRegex(AssertionError, "install_platform"):
+                        with install_platform(platform):
+                            write_installation_layout(
+                                base / "install", platform=platform, **roots)
+
+    def test_a_manifest_for_another_platform_must_say_so(self):
+        foreign = "linux" if current_platform() == "windows" else "windows"
+        roots = (lambda base: {"data_root": base / "data"}) if foreign == "windows" else (
+            lambda base: {"data_root": base / "data", "config_root": base / "config",
+                          "state_root": base / "state"})
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            with self.assertRaisesRegex(AssertionError, "foreign_platform"):
+                write_installation_layout(
+                    base / "install", platform=foreign, **roots(base))
+            declared = write_installation_layout(
+                base / "declared", platform=foreign, foreign_platform=True,
+                **roots(base))
+            self.assertEqual(declared.platform, foreign)
+
+    def test_the_rule_and_its_escape_hatches_are_documented(self):
+        agents = (Path(__file__).resolve().parents[2] / "AGENTS.md").read_text(
+            encoding="utf-8")
+        self.assertIn("install_platform(", agents)
+        self.assertIn("foreign_platform=True", agents)
 
 
 if __name__ == "__main__":
