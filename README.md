@@ -243,6 +243,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start
 ```
 
+**回复太多会被微信限流吗？**
+
+当桥接短时间向微信发送大量回复时，微信可能静默丢弃下行消息：接口可能返回成功但没有消息
+ID，接收端什么也看不到。codex-wechat 默认把每条入站消息触发的出站回复限制为 9 条，并在
+连续出站回复之间至少间隔 2.5 秒；首次发现无消息 ID 时会暂停出站并保留待发内容。这是本地
+保护机制，不是微信对限流阈值的承诺。
+
 **会不会重复发送，或者告诉我“已完成”但其实没收到？**
 
 系统把发送确认和投递未知分开处理。没有明确回执时不会把它伪装成成功。
