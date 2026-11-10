@@ -1,12 +1,12 @@
 """Fault-oriented offline tests. All external operations are stubbed."""
 import asyncio
-from dataclasses import replace
+from dataclasses import asdict, replace
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from codex_wechat.app import Bridge
-from codex_wechat.backend import CodexRpcError, DeferTurn
+from codex_wechat.backend import CodexRpcError, DeferTurn, WRITER_NATIVE, WRITER_RELEASED
 from codex_wechat.records import Delivered, InputPhase, TurnResult
 from codex_wechat.storage import Store
 
@@ -159,6 +159,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             saved = self.store.load("bridge")["currentInput"]
             self.assertEqual(saved["phase"], "dispatching")
             self.assertEqual(params["clientUserMessageId"], saved["clientId"])
+            self.assertEqual(saved["source"], asdict(backend.selection_lease("t").source))
             raise TimeoutError()
 
         backend.rpc = rpc
@@ -175,6 +176,31 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         backend.rpc = AsyncMock(side_effect=CodexRpcError(-32603, "internal failure"))
         with self.assertRaises(CodexRpcError):
             await backend.steer("t", "turn", "input")
+
+    async def test_turn_lease_refreshes_after_writer_recovery(self):
+        backend = self.bridge.backend
+        backend.selected_thread = "t"
+        backend.set_writer(WRITER_RELEASED, "t")
+        observed = []
+
+        async def take_writer(thread_id):
+            backend.selected_thread = thread_id
+            backend.set_writer(WRITER_NATIVE, thread_id)
+
+        backend.thread = AsyncMock(side_effect=take_writer)
+        backend.refresh_runtime = AsyncMock()
+        backend.input_items = AsyncMock(return_value=[])
+        backend.rpc = AsyncMock(return_value={"turn": {"id": "turn"}})
+        backend.await_turn = AsyncMock(return_value=TurnResult(
+            backend.selection_lease("t").source, "turn", "answer", "/tmp", "completed"))
+
+        def dispatch(phase, turn_id):
+            observed.append((phase, backend.active["lease"].writer))
+            return True
+
+        await backend.run("t", "input", dispatch=dispatch)
+
+        self.assertEqual(observed[0], ("dispatching", WRITER_NATIVE))
 
     async def test_local_controls_and_stop_bypass_slow_backend_command(self):
         b = self.bridge

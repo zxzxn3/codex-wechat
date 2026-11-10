@@ -514,8 +514,10 @@ class CodexBackend:
                 if any(request.get("id") == msg["id"] for request in self.pending.values()):
                     return
                 token = self._new_token()
+                lease = self.selection_lease()
                 self.pending[token] = dict(msg, _question={
-                    "source": self.source(), "index": 0, "answers": {}})
+                    "lease": lease, "source": lease.source,
+                    "index": 0, "answers": {}})
                 self.notify(question_prompt(questions[0], token, 0, len(questions), text=self.prompt))
                 return
         if self.shared and not self.app and self.active and not self.active.get("owned"):
@@ -525,7 +527,8 @@ class CodexBackend:
                 and msg["method"] in ("item/commandExecution/requestApproval",
                                        "item/fileChange/requestApproval")):
             token = self._new_token()
-            self.pending[token] = msg
+            lease = self.active.get("lease") or self.selection_lease(self.active["thread"])
+            self.pending[token] = dict(msg, _approval={"lease": lease})
             if msg["method"] == "item/commandExecution/requestApproval":
                 summary = command_approval(
                     command=params.get("command") or self.prompt("COMMAND_NOT_PROVIDED"),
@@ -775,6 +778,7 @@ class CodexBackend:
                 self.pending[token] = {
                     "method": ASYNC_QUESTION_METHOD,
                     "_async": {
+                        "lease": current.get("lease") or self.selection_lease(current["thread"]),
                         "source": current["source"],
                         "thread": current["thread"],
                         "turn": current["turn"],
@@ -838,12 +842,14 @@ class CodexBackend:
         self.on_activity()
 
     def new_turn(self, thread_id, turn_id=None, *, owned):
+        lease = self.selection_lease(thread_id)
         return {"thread": thread_id, "turn": turn_id, "messages": [], "owned": owned,
                 "starting": False,
                 "earlyEvents": [],
                 "itemStartedAtMs": {},
                 "last_progress_at": time.monotonic(),
-                "source": self.source(thread_id),
+                "lease": lease,
+                "source": lease.source,
                 "cwd": self.info.get("cwd") or self.cwd,
                 "done": asyncio.get_running_loop().create_future()}
 
@@ -1487,6 +1493,9 @@ class CodexBackend:
                     self.set_writer(previous, thread_id)
                     raise
             await self.refresh_runtime()
+            lease = self.selection_lease(thread_id)
+            current["lease"] = lease
+            current["source"] = lease.source
             current["cwd"] = self.info.get("cwd") or self.cwd
             inputs = await self.input_items(text, attachments)
             if self.stop_requested:
@@ -1570,6 +1579,10 @@ class CodexBackend:
             return False
         if "id" not in request:
             return False
+        approval = request.get("_approval")
+        if not approval or approval.get("lease") != self.selection_lease():
+            self.pending.pop(token, None)
+            return False
         self.pending.pop(token, None)
         await self.write({"id": request["id"], "result": {"decision": decision}})
         return True
@@ -1583,7 +1596,10 @@ class CodexBackend:
         if request.get("method") != QUESTION_METHOD:
             return False
         state = request["_question"]
-        if state["source"] != self.source():
+        lease = state.get("lease")
+        if lease is None and state.get("source"):
+            lease = self.selection_lease(state["source"].thread)
+        if lease != self.selection_lease():
             self.pending.pop(token, None)
             return False
         questions = request["params"]["questions"]
@@ -1606,7 +1622,14 @@ class CodexBackend:
     async def answer_async_question(self, token, request, text):
         state = request["_async"]
         current = self.active
-        if (state["source"] != self.source() or not current
+        current_lease = (current.get("lease") if current else None)
+        if current_lease is None and current and current.get("thread"):
+            current_lease = self.selection_lease(current["thread"])
+        state_lease = state.get("lease")
+        if state_lease is None and state.get("source"):
+            state_lease = self.selection_lease(state["source"].thread)
+        selected_lease = self.selection_lease()
+        if (state_lease != selected_lease or current_lease != selected_lease or not current
                 or current["thread"] != state["thread"] or current["turn"] != state["turn"]
                 or current["done"].done()):
             self.pending.pop(token, None)

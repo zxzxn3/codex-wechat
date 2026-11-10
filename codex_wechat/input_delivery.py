@@ -101,8 +101,11 @@ class InputDelivery:
                       phase=phase, mode=job.get("mode", "steer"),
                       request_id=job.get("requestId"))
             return False
-        job.update(phase=phase, turn=turn_id, source=asdict(backend.source(bridge.state["thread"])))
         current = backend.active
+        lease = backend.selection_lease(bridge.state["thread"])
+        if current and current.get("thread") == bridge.state["thread"]:
+            lease = current.get("lease") or lease
+        job.update(phase=phase, turn=turn_id, source=asdict(lease.source))
         request_id = job.get("requestId")
         if (phase in (InputPhase.DISPATCHING, InputPhase.ACCEPTED) and request_id and current
                 and current["thread"] == bridge.state["thread"] and current["turn"] == turn_id):

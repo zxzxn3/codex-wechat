@@ -3,7 +3,8 @@ import json
 import unittest
 from unittest.mock import AsyncMock
 
-from codex_wechat.backend import CodexBackend, PENDING_TOKEN_ALPHABET, PENDING_TOKEN_LENGTH
+from codex_wechat.backend import (CodexBackend, PENDING_TOKEN_ALPHABET,
+                                  PENDING_TOKEN_LENGTH, WRITER_FOLLOWED, WRITER_NATIVE)
 from codex_wechat.command_specs import REGISTRY, command_lane
 from codex_wechat.questions import (
     ASYNC_REPLY_CLOSE,
@@ -19,6 +20,7 @@ class QuestionTests(unittest.IsolatedAsyncioTestCase):
         self.notices = []
         self.backend = CodexBackend({}, "/tmp", self.notices.append)
         self.backend.selected_thread = "selected"
+        self.backend.set_writer(WRITER_NATIVE, "selected")
         self.backend.active = self.backend.new_turn("selected", "turn", owned=False)
         self.backend.shared = True
         self.backend.write = AsyncMock()
@@ -30,6 +32,10 @@ class QuestionTests(unittest.IsolatedAsyncioTestCase):
                 "question": "运行在哪里？", "options": [
                     {"label": "Windows", "description": "原生运行"},
                     {"label": "WSL", "description": "Linux 环境"}]}]}}
+
+    def approval(self, identity=2):
+        return {"id": identity, "method": "item/fileChange/requestApproval",
+                "params": {"threadId": "selected", "turnId": "turn"}}
 
     def async_event(self, identity="question", questions=None, *,
                     thread="selected", turn="turn"):
@@ -115,6 +121,20 @@ class QuestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(token, self.backend.pending)
         self.backend.pending["approval"] = {"id": 4, "method": "item/fileChange/requestApproval"}
         self.assertFalse(await self.backend.answer_question("approval", "1"))
+
+    async def test_writer_change_invalidates_question_and_approval(self):
+        await self.backend.server_request(self.request(identity=1))
+        await self.backend.server_request(self.approval(identity=2))
+        question_token = next(token for token, request in self.backend.pending.items()
+                              if request.get("method") == QUESTION_METHOD)
+        approval_token = next(token for token, request in self.backend.pending.items()
+                              if request.get("method") == "item/fileChange/requestApproval")
+
+        self.backend.set_writer(WRITER_FOLLOWED, "selected")
+        self.assertFalse(await self.backend.answer_question(question_token, "1"))
+        self.assertFalse(await self.backend.answer_approval(approval_token, "accept"))
+        self.assertFalse(self.backend.pending)
+        self.backend.write.assert_not_called()
 
     async def test_duplicate_request_and_failed_write_do_not_replay(self):
         await self.backend.server_request(self.request())
