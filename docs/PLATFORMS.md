@@ -8,8 +8,8 @@
 
 | 范围 | Linux | Windows |
 | --- | --- | --- |
-| 安装、启动、停止、卸载 | 当前树有离线回归 | 已通过历史实机验证，当前提交待复测 |
-| systemd / Scheduled Task | 支持 | 支持，任务时序需复测 |
+| 安装、更新、重启、卸载 | 安装、更新、重启和 status 已实机验证；卸载为离线回归 | 已通过历史实机验证，当前提交待复测 |
+| systemd / Scheduled Task | 支持；默认布局已实机验证，自定义 XDG 待复测 | 支持，任务时序需复测 |
 | 登录自启 | 支持 | 支持，当前 action 已改为只传安装根 |
 | `.cmd` 短入口 | 不适用 | 支持；非 ASCII 用户目录待复测 |
 | App IPC follower | 实验性 | 实验性，三端并发待复测 |
@@ -36,7 +36,7 @@ Windows `.cmd` 是薄启动器，内部调用 stable `codex-wechat.ps1`，最终
 Linux 和 Windows 都用 `.installation.json` 一次保存平台、release ID 和运行时根。公开入口、
 systemd 与 Windows supervisor 读取同一契约；shell 和 PowerShell 入口只把它交给 Python
 launcher。布局在首次安装后固定，普通更新只沿用已保存的根；不提供原地换根命令。需要搬迁时
-先备份，再 purge 并从目标环境重新安装。
+先备份，再 purge、手动删除保留的程序安装根，并从目标环境重新安装。
 
 ## Windows 操作
 

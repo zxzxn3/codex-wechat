@@ -7,6 +7,9 @@
 
 - Linux 检查入口：`scripts/check.sh` 包含 Ruff、Pyright、ShellCheck、分支覆盖单元测试和
   生成文档漂移检查。结果按日期与提交记录，不作为永久测试数基线。
+- 2026-11-10 Linux 代码快照 `3905a08`：专用测试会话从隔离副本执行完整
+  `./scripts/check.sh`，1035 项中 1014 通过、21 跳过、0 失败；Ruff、ShellCheck 和生成
+  文档检查通过，Pyright 0 errors / 5 个平台依赖 warning，分支覆盖率 78%。
 - 2026-11-10 Linux `141afe5`：`./scripts/check.sh` 执行 1049 项，1028 通过、21 跳过、
   0 失败/错误；Ruff、ShellCheck 和生成文档检查通过，Pyright 0 errors / 5 个可选依赖
   warning，分支覆盖率 79%。真实 Windows、systemd、微信和 CDN 不在这次结果范围内。
@@ -19,20 +22,23 @@
   （`backend_interactions.py` 93%、`backend_turns.py` 92%）；后者验证声明式 typed settings
   及现有别名、提示和读回语义，定向 41/41 通过。Ruff、Pyright、ShellCheck 和生成文档检查
   均通过。
-- 2026-11-10 Linux 当前树新增了状态损坏隔离、不完整运行时布局拒绝、只读 status 诊断和
+- 2026-11-10 Linux 代码快照 `3905a08` 包含状态损坏隔离、不完整运行时布局拒绝、只读 status 诊断和
   Git `HEAD` release 边界。解析器资源上限与极深状态复制明确采用 fail-fast，不维护隔离
   承诺；原地换根参数和旧标记兼容已移除。Windows 嵌套重解析点清理只有静态回归，目标
   Windows 入口、junction 行为和真实 Scheduled Task 仍需实机复测。
 - Windows 历史提交 `ab6ab61`：完整离线测试和 Ruff 通过；`057a96f` 也有较早的完整报告。
-  这些结果不能证明当前树的 Windows 路径已复测。
+  这些结果不能证明 `v1.0` 的 Windows 路径已实机复测。
 - Windows 服务生命周期曾实机验证 PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、
   通知和命令入口互斥；均缺少可核对到当前提交的完整证据。
 - Windows App IPC 曾验证 writer 冲突、身份核对和无 App / App 已持有 / App 后启动状态；
   仍受 App 版本影响。
-- Windows 安装、更新、重启、提权拒绝和卸载曾有实机报告，但部分提交号未记录；当前 HEAD
+- Windows 安装、更新、重启、提权拒绝和卸载曾有实机报告，但部分提交号未记录；`v1.0`
   仍需在目标机器复测。
-- Linux 安装、入口、更新、配置保留和卸载有隔离环境与离线回归；自定义数据根和 systemd
-  组合仍需真实用户管理器验收。
+- 2026-11-10 Linux `v1.0`（`9ddaa16`）：本机构建 release `5f82a9be2b43942c`，完成默认
+  路径布局的安装更新、systemd restart 和 status 检查。该证据不代表自定义 XDG/数据根组合，
+  也不代表匿名公开一行安装已验证。
+- Linux 安装、入口、更新、配置保留和卸载有隔离环境与离线回归。默认路径下的
+  systemd 组合已由上一项实机验证；自定义 XDG/数据根组合仍需真实用户管理器验收。
 - 2026-11-10 实机卸载复现了 systemd 强停与卸载等待同为 20 秒的竞态；修复后，停机宽限和
   桥关闭总截止时间有离线回归，真实卸载仍需在目标机复测。
 - 2026-11-10 审查确认 `--purge-data` 可能因 XDG 状态根与安装根重叠而误删程序，也确认
