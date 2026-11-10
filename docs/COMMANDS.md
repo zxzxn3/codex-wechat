@@ -1,9 +1,11 @@
 # 命令入口与语义
 
-命令、别名、用途和数值设置只在
+微信聊天命令、别名、用途和数值设置只在
 [command_specs.py](../codex_wechat/command_specs.py) 与
 [commands.py](../codex_wechat/commands.py) 中定义。
 [生成参考](REFERENCE.generated.md) 从这些代码结构渲染，不再手工维护第二份命令表。
+终端 CLI action 的完整 choices 和参数由 [app.py](../codex_wechat/app.py) 的
+`argparse` 定义；本文生命周期段只解释这些 action 的用户语义。
 
 ## 公开入口
 

@@ -33,9 +33,9 @@ Windows `.cmd` 是薄启动器，内部调用 stable `codex-wechat.ps1`，最终
 `python -m codex_wechat`。`.ps1` 不在 `PATHEXT` 中且受执行策略限制，不能作为 `cmd.exe`
 短入口；安装器不会修改 PATH。
 
-数据根由安装根 `.data-root` 唯一解析。环境变量与标记冲突时公开入口、supervisor 和卸载器
-fail closed。Linux 安装后修改数据根必须重新运行安装器；Windows 数据根可由
-`CODEX_WECHAT_DATA_ROOT` 指定。
+数据根由安装根 `.data-root` 唯一解析。Linux 另用 `.config-root` 和 `.state-root` 把安装时
+解析出的 XDG 路径交给公开入口和 systemd 服务。安装后修改数据根或 XDG 根必须重新运行安装器
+持久化；Windows 数据根可由 `CODEX_WECHAT_DATA_ROOT` 指定。
 
 ## Windows 操作
 
