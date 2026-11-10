@@ -2,6 +2,29 @@
 # Public one-line entry.
 set -euo pipefail
 
+dependency_install_hint() {
+    if command -v pacman >/dev/null 2>&1; then
+        echo '  sudo pacman -S --needed python git curl'
+    elif command -v apt-get >/dev/null 2>&1; then
+        echo '  sudo apt-get install -y python3 git curl'
+    elif command -v dnf >/dev/null 2>&1; then
+        echo '  sudo dnf install -y python3 git curl'
+    elif command -v zypper >/dev/null 2>&1; then
+        echo '  sudo zypper install python3 git curl'
+    elif command -v apk >/dev/null 2>&1; then
+        echo '  sudo apk add python3 git curl'
+    else
+        echo '  Python: https://www.python.org/downloads/'
+        echo '  Git: https://git-scm.com/downloads'
+    fi
+}
+
+missing_dependency() {
+    printf '%s\n可使用当前系统的包管理器安装：\n' "$1" >&2
+    dependency_install_hint >&2
+    echo '安装后重开终端并重跑相同命令。' >&2
+}
+
 main() {
     local repo='https://github.com/zxzxn3/codex-wechat' source_ref=main dry_run=0 non_interactive=0 target='' component='' skills_dir='' python_command installer_url task_temporary installer
     while (($#)); do
@@ -24,9 +47,9 @@ main() {
             *) echo "未知参数 $1" >&2; return 2 ;;
         esac
     done
-    python_command=$(command -v python3) || { echo '需要 Python 3.11+，安装后重跑相同命令。' >&2; return 1; }
+    python_command=$(command -v python3) || { missing_dependency '需要 Python 3.11+。'; return 1; }
     "$python_command" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || {
-        echo '需要 Python 3.11+，安装后重跑相同命令。' >&2; return 1;
+        missing_dependency '需要 Python 3.11+。'; return 1;
     }
     installer_base_url=$("$python_command" -c '
 import re, sys
@@ -47,7 +70,7 @@ print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
         echo '正式执行会显示统一菜单，识别安装或更新，展示计划后执行；不扫码、不启用自启、不自动启动。'
         return 0
     fi
-    command -v git >/dev/null || { echo '需要 Git，安装后重跑相同命令。' >&2; return 1; }
+    command -v git >/dev/null || { missing_dependency '需要 Git。'; return 1; }
     # curl | bash consumes stdin. Confirmation must read the real terminal.
     if ((!non_interactive)) && ! { exec 3<> /dev/tty; } 2>/dev/null; then
         echo '安装确认需要交互终端；演练可以使用 --dry-run。' >&2
@@ -57,7 +80,7 @@ print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
     # Freeze the safely quoted path now because task_temporary is local to main().
     # shellcheck disable=SC2064
     trap "$(printf 'rm -rf -- %q' "$task_temporary")" EXIT
-    command -v curl >/dev/null || { echo '需要 curl，安装后重跑相同命令。' >&2; return 1; }
+    command -v curl >/dev/null || { missing_dependency '需要 curl。'; return 1; }
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
         --connect-timeout 15 --max-time 120 "$installer_url" -o "$task_temporary/installer.py"
     installer="$task_temporary/installer.py"

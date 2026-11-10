@@ -129,3 +129,19 @@ class BootstrapEntryTests(unittest.TestCase):
                 "private " "repository",
             ):
                 self.assertNotIn(forbidden_term, text)
+
+    def test_dependency_errors_include_platform_install_commands(self):
+        root = Path(__file__).resolve().parents[2]
+        shell = (root / "bootstrap.sh").read_text(encoding="utf-8")
+        local_shell = (root / "install.sh").read_text(encoding="utf-8")
+        powershell = (root / "bootstrap.ps1").read_text(encoding="utf-8")
+        local_powershell = (root / "install.ps1").read_text(encoding="utf-8")
+
+        for text in (shell, local_shell):
+            self.assertIn("pacman -S --needed python git curl", text)
+            self.assertIn("apt-get install -y python3 git curl", text)
+            self.assertIn("dnf install -y python3 git curl", text)
+        for text in (powershell, local_powershell):
+            self.assertIn("winget install --id $WingetId -e", text)
+            self.assertIn("Python.Python.3.13", text)
+        self.assertIn("'Git.Git'", powershell)

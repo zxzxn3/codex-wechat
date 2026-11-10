@@ -12,6 +12,17 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Get-DependencyHint([string]$Name, [string]$WingetId, [string]$Url) {
+    return @"
+$Name is required.
+Install it with:
+  winget install --id $WingetId -e
+If winget is unavailable: $Url
+Close and reopen this terminal, then rerun the same command.
+"@
+}
+
 $RepoUri = [Uri]$Repo
 $RepositoryPath = $RepoUri.AbsolutePath.Trim('/') -replace '\.git$', ''
 if ($RepoUri.Scheme -ne 'https' -or $RepoUri.Authority -ne 'github.com' -or $RepoUri.UserInfo -or
@@ -34,11 +45,15 @@ if (-not $PythonCommand) {
     $PythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
     $PythonPrefix = @()
 }
-if (-not $PythonCommand) { throw 'Python 3.11+ is required. Install it and rerun the same command.' }
+if (-not $PythonCommand) {
+    throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
+}
 & $PythonCommand.Source @PythonPrefix -c 'import sys; sys.exit(sys.version_info < (3, 11))'
-if ($LASTEXITCODE -ne 0) { throw 'Python 3.11+ is required. Install it and rerun the same command.' }
+if ($LASTEXITCODE -ne 0) {
+    throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
+}
 if (-not (Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue)) {
-    throw 'Git is required. Install it and rerun the same command.'
+    throw (Get-DependencyHint 'Git' 'Git.Git' 'https://git-scm.com/downloads')
 }
 if (-not $NonInteractive -and ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected)) {
     throw 'Installation needs an interactive terminal. Use -NonInteractive for conservative defaults, or -DryRun.'

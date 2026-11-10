@@ -13,6 +13,26 @@
   `start`。
 - 二维码优先使用 `qrencode`；缺少时按安装器提示安装轻量 Python 回退。
 
+缺少 Python 或 Git 时，安装入口不会自动修改系统，而是打印当前包管理器或 `winget` 的安装
+命令。安装依赖后需要重开终端，再重跑原命令。常用命令：
+
+```bash
+# Arch / CachyOS
+sudo pacman -S --needed python git curl
+
+# Debian / Ubuntu
+sudo apt-get install -y python3 git curl
+
+# Fedora
+sudo dnf install -y python3 git curl
+```
+
+```powershell
+# Windows
+winget install --id Python.Python.3.13 -e
+winget install --id Git.Git -e
+```
+
 ## 首次安装
 
 Linux：
@@ -36,7 +56,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
 入口从公开的 GitHub raw 地址取得 bootstrap。bootstrap 下载安装器，再由安装器把公开仓库
 clone 到临时目录。重跑同一入口即可安装或更新。
 
-也可以直接将完整源码目录或源码压缩包交给使用者，在源码目录运行本地入口：
+也可以直接 clone 后运行源码入口：
+
+```bash
+# Linux
+git clone https://github.com/zxzxn3/codex-wechat.git
+cd codex-wechat
+bash install.sh
+```
+
+```powershell
+# Windows PowerShell
+git clone https://github.com/zxzxn3/codex-wechat.git
+Set-Location codex-wechat
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+也可以直接把源码目录或源码压缩包交给使用者，在源码目录运行同一个本地入口：
 
 ```bash
 # Linux

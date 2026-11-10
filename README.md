@@ -43,6 +43,7 @@
 ## 快速开始
 
 前提：Python 3.11+、Git、Codex、`curl`。完整前提和卸载说明见 [INSTALL](docs/INSTALL.md)。
+缺少 Python 或 Git 时，安装入口会给出当前平台的安装命令，但不会自动执行系统级安装。
 
 Linux:
 

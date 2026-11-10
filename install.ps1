@@ -13,6 +13,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-DependencyHint([string]$Name, [string]$WingetId, [string]$Url) {
+    return @"
+$Name is required.
+Install it with:
+  winget install --id $WingetId -e
+If winget is unavailable: $Url
+Close and reopen this terminal, then rerun the same command.
+"@
+}
+
 # Public local entry delegates to the same installer as the network entry.
 if (-not $PreparedRuntime) {
     $py = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue
@@ -21,7 +31,13 @@ if (-not $PreparedRuntime) {
         $py = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
         $prefix = @()
     }
-    if (-not $py) { throw 'Python 3.11+ is required to run the installer.' }
+    if (-not $py) {
+        throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
+    }
+    & $py.Source @prefix -c 'import sys; sys.exit(sys.version_info < (3, 11))'
+    if ($LASTEXITCODE -ne 0) {
+        throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
+    }
     $arguments = @((Join-Path $PSScriptRoot 'installer.py'), 'menu')
     if ($InstallRoot) { $arguments += @('--dir', $InstallRoot) }
     if ($DryRun) { $arguments += '--dry-run' }
