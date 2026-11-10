@@ -63,13 +63,14 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
 
         self.bridge.ensure_backend = AsyncMock()
         self.bridge.backend.transport = SimpleNamespace(server_version="codex_cli_rs/0.167.0")
-        with patch("codex_wechat.commands.release_id", return_value="fixture-release"), \
-                patch("codex_wechat.commands.APP_VERSION", "9.9.9"):
+        with patch("codex_wechat.commands.release_id", return_value="fixture-release"):
             await dispatch(self.bridge, "/v")
         text = self.bridge.state["outbox"][-1]["text"]
-        self.assertIn("微信桥: 9.9.9", text)
+        # No product version: the build id is the only identity, so nothing else
+        # has to be bumped per release.
         self.assertIn("发布: fixture-release", text)
         self.assertIn("Codex: codex_cli_rs/0.167.0", text)
+        self.assertNotIn("微信桥:", text)
         self.bridge.ensure_backend.assert_not_called()
 
         await dispatch(self.bridge, "/version extra")

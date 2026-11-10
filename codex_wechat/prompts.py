@@ -16,7 +16,7 @@ COMPACT_UNCONFIRMED = "上下文压缩结果未确认。"
 
 BACKEND_SUMMARY = "```\n后端: {current}\n可用: {available}\n```\n{hint}"
 EFFORT_SUMMARY = "```\n强度: {current}\n可选: {choices}\n```\n{hint}"
-VERSION_SUMMARY = "```\n微信桥: {version}\n发布: {release}\nCodex: {backend}\n```"
+VERSION_SUMMARY = "```\n发布: {release}\nCodex: {backend}\n```"
 ACK_VIEW = ("```\nack: {template}\n```\n"
             "`/settings ack {{模板}}`\n`/settings ack \"\"` 关闭\n"
             "`/settings ack fields` 可用字段")
@@ -273,7 +273,7 @@ FINISH_VIEW = ACK_VIEW.replace("/settings ack", "/settings finish").replace("ack
 FINISH_TOO_LONG = ACK_TOO_LONG.replace("ack", "finish")
 
 HELP_STATUS = '当前状态'
-HELP_VERSION = '查看微信桥版本'
+HELP_VERSION = '查看当前构建和 Codex 版本'
 HELP_SETTINGS = '查看设置'
 HELP_SESSIONS = '列出、搜索或翻页会话'
 HELP_NEW = '新建会话'

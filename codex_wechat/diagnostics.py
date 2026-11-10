@@ -21,7 +21,7 @@ from .platform_support import runtime_paths
 from .storage import locked_file
 from .latency import NETWORK_TIMING_FIELDS
 from .log_rotation import DEFAULT_KEEP, KEEP_MIN, MAX_BYTES, prune_rotations, rotate
-from .version import APP_VERSION
+from .version import build_id
 
 BACKUP_COUNT = DEFAULT_KEEP
 # Rotated files kept on disk; the active file is extra, so usage is about
@@ -288,7 +288,7 @@ def log_event(event_name, *, level="info", **fields):
             "level": level,
             "event": event_name,
             "platform": sys.platform,
-            "version": APP_VERSION,
+            "version": build_id(),
             "pid": os.getpid(),
         }
         request_id = _REQUEST_ID.get()

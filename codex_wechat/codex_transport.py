@@ -11,7 +11,7 @@ from .diagnostics import error_fields, log_event
 from .errors import ErrorAction
 from .subprocess_io import communicate
 from .platform_support import IS_WINDOWS, PROJECT_ROOT, subprocess_options
-from .version import APP_VERSION
+from .version import build_id
 
 SKILLS_ROOT = PROJECT_ROOT / "skills"
 
@@ -179,7 +179,7 @@ class CodexTransport:
         # The response carries the server's own identification; keep it for the
         # one startup log line instead of guessing versions from the install.
         greeting = await self.rpc("initialize", {"clientInfo": {
-            "name": "codex_wechat", "title": "Codex WeChat", "version": APP_VERSION},
+            "name": "codex_wechat", "title": "Codex WeChat", "version": build_id()},
             "capabilities": {"experimentalApi": True}})
         if isinstance(greeting, dict):
             for key in ("userAgent", "user_agent"):

@@ -30,7 +30,7 @@ from .prompts import (
     ping_channel, status_from_fields, prompt_text, VALUE_EMPTY,
 )
 from .command_specs import REGISTRY, COMMANDS, command_name, command_usage, help_text
-from .version import APP_VERSION, release_id
+from .version import release_id
 from .configuration import (
     CONNECTION_IDLE_MAX, CONNECTION_IDLE_MIN, HotSettings,
     DEFAULT_CONNECTION_IDLE_SECONDS, DEFAULT_LOG_KEEP, DEFAULT_REPLY_BUDGET,
@@ -946,7 +946,6 @@ async def command_status(bridge, command, argument, received=None):
 async def command_version(bridge, command, argument, received=None):
     backend_version = getattr(bridge.backend, "server_version", "")
     bridge.reply(bridge.prompt("VERSION_SUMMARY", {
-        "version": APP_VERSION,
         "release": release_id() or "开发版",
         "backend": backend_version or "未连接",
     }))
