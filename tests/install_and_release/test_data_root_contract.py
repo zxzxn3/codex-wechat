@@ -46,6 +46,7 @@ class DataRootContractTests(unittest.TestCase):
                     installer._write_data_root_marker(target)
                     self.assertEqual(installer.saved_data_root(target), expected.resolve())
                 with self.environment(""), self.runtime_views(), \
+                        patch.object(installer, "IS_WINDOWS", True), \
                         patch.object(platform_support, "IS_WINDOWS", True), \
                         patch.object(platform_support, "INSTALL_ROOT", target):
                     self.assertEqual(platform_support.saved_data_root(target),

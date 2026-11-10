@@ -90,7 +90,7 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertIn("数据根标记缺失", self.install)
         self.assertNotIn("Join-Path $env:LOCALAPPDATA 'codex-wechat'", self.install)
         self.assertIn("不一致", self.entry)
-        self.assertIn("不一致", self.uninstall)
+        self.assertNotIn("CODEX_WECHAT_DATA_ROOT", self.uninstall)
         self.assertNotIn("'--data-root'", self.install)
         self.assertNotIn("'--state-dir'", self.install)
         self.assertNotIn("'--config'", self.install)

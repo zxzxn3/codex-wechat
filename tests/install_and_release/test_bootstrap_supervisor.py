@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from codex_wechat import bootstrap_supervisor
+from codex_wechat import platform_support
 from unittest.mock import patch
 
 # `installer.release_identifier()` writes 16 hex digits; the pointer is validated
@@ -210,6 +211,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 return Module()
 
             with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}), \
+                 patch.object(platform_support, "IS_WINDOWS", True), \
                  patch.object(bootstrap_supervisor.time, "sleep"), \
                  patch.object(bootstrap_supervisor, "load_supervisor", load):
                 code = bootstrap_supervisor.main(self._argv(directory, root))
@@ -237,6 +239,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                     return 0
 
             with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}), \
+                 patch.object(platform_support, "IS_WINDOWS", True), \
                  patch.object(bootstrap_supervisor.time, "sleep"), \
                  patch.object(bootstrap_supervisor, "load_supervisor",
                               lambda release: Module()):
