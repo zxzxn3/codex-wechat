@@ -308,7 +308,7 @@ def configured_data_root(target: Path) -> Path:
     """Resolve one explicit root without repairing old installation layouts."""
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     if override:
-        return Path(override).expanduser()
+        return Path(override).expanduser().absolute()
     saved = saved_data_root(target)
     if saved is not None:
         return saved
@@ -386,13 +386,14 @@ def check_runtime_root_layout(target: Path) -> None:
     install = Path(target).resolve()
     for filename, role in ((CONFIG_ROOT_FILE, "配置"), (STATE_ROOT_FILE, "状态")):
         path = _runtime_roots(target)[filename]
-        if (path == install or install.is_relative_to(path)
-                or path.is_relative_to(install)):
+        resolved = path.resolve()
+        if (resolved == install or install.is_relative_to(resolved)
+                or resolved.is_relative_to(install)):
             raise ValueError(f"{role}路径与程序安装目录重叠: {path}")
 
 
 def _publish_runtime_roots(target: Path) -> None:
-    """Persist resolved roots so shell and systemd services read the same paths."""
+    """Persist configured roots so shell and systemd services read the same paths."""
     values = _runtime_roots(target)
     previous = _marker_snapshot(target)
     try:

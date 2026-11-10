@@ -70,6 +70,16 @@ class DataRootContractTests(unittest.TestCase):
             self.assertEqual(windows_service.data_root(), saved)
             self.assertEqual(installer.configured_data_root(target), saved)
 
+    def test_relative_data_root_override_is_made_absolute(self):
+        target = self.base / "install"
+        target.mkdir()
+        expected = Path("relative-data").absolute()
+        with patch.dict(os.environ, {
+                "CODEX_WECHAT_DATA_ROOT": "relative-data",
+        }, clear=False), patch.object(platform_support, "INSTALL_ROOT", target):
+            self.assertEqual(platform_support.data_root(target), expected)
+            self.assertEqual(installer.configured_data_root(target), expected)
+
     def test_installer_can_replace_a_marker_but_runtime_rejects_unapplied_conflict(self):
         target = self.base / "install"
         target.mkdir()

@@ -116,7 +116,7 @@ def data_root(install_root: Path | None = None):
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     saved = saved_data_root(install_root)
     if override and saved is not None:
-        requested = Path(override).expanduser()
+        requested = Path(override).expanduser().absolute()
         if requested.resolve() != saved.resolve():
             raise ValueError(
                 "CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；"
@@ -124,7 +124,7 @@ def data_root(install_root: Path | None = None):
             )
         return requested
     if override:
-        return Path(override).expanduser()
+        return Path(override).expanduser().absolute()
     if saved is not None:
         return saved
     return default_data_root()

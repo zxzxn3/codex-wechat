@@ -978,6 +978,23 @@ class DataRootMarkerTests(unittest.TestCase):
                 str(base / "state-home/codex-wechat") + "\n",
             )
 
+    @requires_symlinks
+    def test_linux_layout_rejects_a_symlinked_root_into_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "install"
+            target.mkdir()
+            config_home = base / "config-home"
+            config_home.symlink_to(target, target_is_directory=True)
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.dict(os.environ, {
+                        "XDG_CONFIG_HOME": str(config_home),
+                        "XDG_STATE_HOME": "",
+                        "CODEX_WECHAT_DATA_ROOT": "",
+                    }, clear=False):
+                with self.assertRaisesRegex(ValueError, "程序安装目录重叠"):
+                    installer.check_runtime_root_layout(target)
+
     def test_linux_layout_rejects_config_or_state_inside_the_install_root(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
