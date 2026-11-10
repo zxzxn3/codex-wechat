@@ -6,6 +6,7 @@ from pathlib import Path
 from . import service_adapter
 from . import wechat_auth
 from .platform_support import runtime_paths
+from .state import BridgeStateError, load_bridge_state
 from .storage import Store
 from .wechat import login
 
@@ -35,6 +36,15 @@ def _close_store(store):
         lock.close()
 
 
+def _load_preview_state(store):
+    try:
+        return load_bridge_state(store, recover=False)
+    except BridgeStateError as error:
+        raise RuntimeError(
+            "微信桥状态损坏；请先运行 codex-wechat status 查看诊断"
+        ) from error
+
+
 async def _acquire_locked_store(state_dir, *, wait_for_service):
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 30
@@ -57,9 +67,7 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
 
     await adapter.status()  # Refuse foreign/unavailable service management before scanning.
     preview = Store(Path(state_dir), lock=False)
-    state = preview.load("bridge", {})
-    if not isinstance(state, dict):
-        raise RuntimeError("微信桥状态格式无效")
+    state = _load_preview_state(preview)
     if active_work(state) and not stop_active:
         raise RuntimeError(
             "当前有尚未完成的任务；确认停止桥接后使用 "
@@ -76,9 +84,7 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
     # The scan can take minutes while the bridge keeps working. Re-read the
     # live state before stopping the service so work started during the scan
     # still needs the explicit --stop-active acknowledgement.
-    latest = preview.load("bridge", {})
-    if not isinstance(latest, dict):
-        raise RuntimeError("微信桥状态格式无效")
+    latest = _load_preview_state(preview)
     if active_work(latest) and not stop_active:
         raise RuntimeError(
             "当前有尚未完成的任务；确认停止桥接后使用 "
@@ -88,9 +94,7 @@ async def run_rebind(state_dir, config_path, *, stop_active=False, interactive=N
         if was_running:
             await adapter.stop_and_wait()
         store = await _acquire_locked_store(Path(state_dir), wait_for_service=was_running)
-        state = store.load("bridge", {})
-        if not isinstance(state, dict):
-            raise RuntimeError("微信桥状态格式无效")
+        state = load_bridge_state(store)
         if active_work(state) and not stop_active:
             raise RuntimeError(
                 "当前有尚未完成的任务；确认停止桥接后使用 "

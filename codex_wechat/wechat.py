@@ -15,6 +15,7 @@ from .latency import timeout_stage
 from .wechat_http import PooledHTTP
 from .configuration import DEFAULT_CONNECTION_IDLE_SECONDS
 from . import wechat_auth
+from .state import load_bridge_state
 from .wechat_auth import identity
 
 BASE_URL = "https://ilinkai.weixin.qq.com"
@@ -293,7 +294,7 @@ async def _login(client, store, *, starting, rebind, before_identity_change, per
         elif status == "binded_redirect":
             if not previous or not previous.get("token") or not previous.get("user"):
                 raise RuntimeError("微信报告已绑定，但本机没有可用凭据；请检查状态目录")
-            state = store.load("bridge", {})
+            state = load_bridge_state(store, recover=persist)
             if (wechat_auth.state(state) == wechat_auth.AUTH_REQUIRED or state.get("bindingPending")):
                 # QR status alone does not prove that a previously rejected token
                 # works. getconfig authenticates without consuming the message cursor.

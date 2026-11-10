@@ -23,6 +23,7 @@ class LoadBridgeStateTests(unittest.TestCase):
             state = load_bridge_state(store)
         self.assertEqual(state["wechatAuth"], {"state": "valid"})
         self.assertEqual(state["seen"], ["a"])
+        self.assertEqual(state["version"], 1)
         for key in ("cursor", "thread", "inbox", "outbox", "running"):
             self.assertIn(key, state)
 
@@ -34,19 +35,87 @@ class LoadBridgeStateTests(unittest.TestCase):
             second = load_bridge_state(store)
         self.assertEqual(second["inbox"], [])
 
-    def test_non_object_file_is_replaced_by_defaults(self):
+    def test_non_object_file_is_quarantined_before_defaults_are_saved(self):
         with tempfile.TemporaryDirectory() as directory:
-            store = Store(Path(directory), lock=False)
-            store.save("bridge", ["not", "a", "dict"])
-            self.assertEqual(load_bridge_state(store), BRIDGE_STATE_DEFAULTS)
+            root = Path(directory)
+            store = Store(root, lock=False)
+            raw = '["not", "a", "dict"]\n'
+            (root / "bridge.json").write_text(raw, encoding="utf-8")
+            state = load_bridge_state(store)
+            backups = list(root.glob("bridge.corrupt-*.json"))
+            quarantined = backups[0].read_text(encoding="utf-8") if backups else None
+        self.assertEqual(state["version"], 1)
+        self.assertEqual(state["inbox"], [])
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(quarantined, raw)
 
-    def test_status_payload_accepts_a_non_object_bridge_file(self):
+    def test_status_reports_bad_state_without_modifying_or_quarantining_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = Store(root, lock=False)
+            path = root / "bridge.json"
+            raw = '{"inbox": null}\n'
+            path.write_text(raw, encoding="utf-8")
+            payload = codex_wechat.status_payload(store)
+            self.assertEqual(path.read_text(encoding="utf-8"), raw)
+            self.assertEqual(list(root.glob("bridge.corrupt-*.json")), [])
+        self.assertEqual(payload["state"], "recovery_required")
+        self.assertEqual(payload["state_diagnostic"]["kind"], "invalid_shape")
+        self.assertIn("inbox", payload["state_diagnostic"]["detail"])
+
+    def test_malformed_json_is_quarantined_byte_for_byte(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = Store(root, lock=False)
+            raw = '{"cursor": '
+            (root / "bridge.json").write_text(raw, encoding="utf-8")
+            state = load_bridge_state(store)
+            backups = list(root.glob("bridge.corrupt-*.json"))
+            quarantined = backups[0].read_text(encoding="utf-8") if backups else None
+        self.assertEqual(state["cursor"], "")
+        self.assertEqual(state["stateRecovery"]["kind"], "invalid_json")
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(quarantined, raw)
+
+    def test_nested_invalid_type_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = Store(root, lock=False)
+            store.save("bridge", {"pendingControls": {}})
+            state = load_bridge_state(store)
+        self.assertEqual(state["pendingControls"], [])
+        self.assertEqual(state["stateRecovery"]["kind"], "invalid_shape")
+
+    def test_invalid_backend_session_and_budget_types_are_quarantined(self):
+        cases = (
+            {"backendSessions": {"codex": {"thread": []}}},
+            {"replyBudget": {"seq": 1, "used": "many"}},
+        )
+        for saved in cases:
+            with self.subTest(saved=saved), tempfile.TemporaryDirectory() as directory:
+                store = Store(Path(directory), lock=False)
+                store.save("bridge", saved)
+                state = load_bridge_state(store)
+                self.assertEqual(state["stateRecovery"]["kind"], "invalid_shape")
+
+    def test_future_version_fails_closed_without_moving_the_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = Store(root, lock=False)
+            path = root / "bridge.json"
+            raw = '{"version": 2}\n'
+            path.write_text(raw, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unsupported_version"):
+                load_bridge_state(store)
+            self.assertEqual(path.read_text(encoding="utf-8"), raw)
+            self.assertEqual(list(root.glob("bridge.corrupt-*.json")), [])
+
+    def test_valid_status_exposes_schema_version(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory), lock=False)
-            store.save("bridge", ["not", "a", "dict"])
             payload = codex_wechat.status_payload(store)
-        self.assertFalse(payload["unfinished_at_last_save"])
-        self.assertEqual(payload["queued"], 0)
+        self.assertEqual(payload["state"], "ok")
+        self.assertEqual(payload["state_version"], 1)
 
 
 class BridgeRepairTests(unittest.TestCase):

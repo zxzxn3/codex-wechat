@@ -40,6 +40,7 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(key, state)
         for key in ("inbox", "outbox", "seen", "pendingControls"):
             self.assertIsInstance(state[key], list, key)
+        self.assertEqual(state["version"], 1)
 
         self.assertLessEqual(len(state["inbox"]), INBOX_LIMIT)
         self.assertLessEqual(len(state["pendingControls"]), PENDING_CONTROL_LIMIT)

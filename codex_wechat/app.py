@@ -2,7 +2,6 @@
 """Local WeChat ↔ Codex bridge. Media transport uses cryptography."""
 import argparse
 import asyncio
-from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -23,6 +22,8 @@ from .input_delivery import InputDelivery
 from .ingress import Ingress
 from .backend_session import BackendSession
 from .storage import Store
+from .state import (BRIDGE_STATE_DEFAULTS, STATE_RECOVERY_KEY, STATE_VERSION,
+                    BridgeStateError, load_bridge_state)
 from .wechat import WeChat, login
 from .commands import dispatch, notice, parse_control
 from .command_specs import CONTROL_LANES, PENDING_CONTROL_LIMIT, REGISTRY
@@ -50,31 +51,8 @@ SERVICE_CHILD_ENV = "CODEX_WECHAT_SERVICE_CHILD"
 RESTART_DRAIN_GRACE_SECONDS = 3.0
 SHUTDOWN_TIMEOUT_SECONDS = 15.0
 SHUTDOWN_WORKER_GRACE_SECONDS = 2.0
-__all__ = ["Bridge", "parse_control"]
-
-# The bridge assumes these keys always exist. A state file can be written before
-# the bridge ever runs (the login action persists auth on its own), so loading
-# must fill them in rather than trust the file.
-BRIDGE_STATE_DEFAULTS = {
-    "cursor": "",
-    "thread": None,
-    "inbox": [],
-    "outbox": [],
-    "seen": [],
-    "running": False,
-    "inboundSeq": 0,
-    "replyBudget": {},
-    "deliveryUnknownTotal": 0,
-    "pendingControls": [],
-}
-
-
-def load_bridge_state(store):
-    """Read the saved state, repairing keys a partial writer never set."""
-    saved = store.load("bridge")
-    if not isinstance(saved, dict):
-        saved = {}
-    return {**deepcopy(BRIDGE_STATE_DEFAULTS), **saved}
+__all__ = ["BRIDGE_STATE_DEFAULTS", "BridgeStateError", "Bridge", "load_bridge_state",
+           "parse_control"]
 
 
 def mark_active_release():
@@ -338,6 +316,7 @@ class Bridge:
 
     def save(self, state=None):
         target = self.state if state is None else state
+        target["version"] = STATE_VERSION
         target["backendName"] = self.backend_name
         target.setdefault("backendSessions", {})[self.backend_name] = snapshot(target)
         self.store.save("bridge", target)
@@ -863,8 +842,8 @@ async def startup_account(store):
     """Only an unbound foreground launch may ask the user to scan a QR code."""
     account = store.load("account")
     if account:
-        state = store.load("bridge", {})
-        if account.get("bindingPending") or isinstance(state, dict) and state.get("bindingPending"):
+        state = load_bridge_state(store)
+        if account.get("bindingPending") or state.get("bindingPending"):
             raise ConfigurationError("重新绑定尚未完成；运行 " + wechat_auth.rebind_command() + " 继续。")
         if not all(account.get(key) for key in ("user", "token")):
             raise ConfigurationError("微信凭据不完整；运行 " + wechat_auth.rebind_command() + " 重新绑定。")
@@ -881,7 +860,24 @@ async def startup_account(store):
 
 
 def status_payload(store):
-    state = load_bridge_state(store)
+    try:
+        state = load_bridge_state(store, recover=False)
+    except BridgeStateError as error:
+        return {
+            "bound": bool(store.load("account")),
+            "auth": wechat_auth.AUTH_UNKNOWN,
+            "available": None,
+            "rebind_required": False,
+            "rebind_command": wechat_auth.rebind_command(),
+            "thread": None,
+            "backend": None,
+            "unfinished_at_last_save": None,
+            "queued": None,
+            "unsent": None,
+            "delivery": "unknown",
+            "state": "recovery_required",
+            "state_diagnostic": error.diagnostic(),
+        }
     auth = wechat_auth.state(state)
     unknown_retained = sum(1 for entry in state.get("failedOutbox", [])
                            if isinstance(entry, dict)
@@ -908,7 +904,11 @@ def status_payload(store):
         "delivery": ("unconfirmed"
                      if state.get("consecutiveSendFailures", 0) >= DELIVERY_DEGRADED_THRESHOLD
                      else "ok"),
+        "state": "ok",
+        "state_version": state["version"],
     }
+    if state.get(STATE_RECOVERY_KEY):
+        payload["state_recovery"] = state[STATE_RECOVERY_KEY]
     if unknown_total:
         payload["delivery_unknown"] = unknown_total
         payload["delivery_unknown_retained"] = unknown_retained
@@ -954,7 +954,7 @@ async def send_stop_notification(state_dir, config_path):
     try:
         store = Store(state_dir, lock=False)
         account = store.load("account")
-        state = store.load("bridge", {})
+        state = load_bridge_state(store, recover=False)
     except (OSError, ValueError):
         return
     context = state.get("context") if isinstance(state, dict) else None
