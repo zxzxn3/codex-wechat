@@ -1,4 +1,4 @@
-"""Small OS boundaries; Linux keeps its existing paths and defaults."""
+"""Small OS boundaries with per-platform configuration and state roots."""
 import ast
 from dataclasses import dataclass
 import ipaddress
@@ -23,6 +23,8 @@ INSTALL_ROOT = Path(
     os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(PROJECT_ROOT))
 ).expanduser().resolve()
 DATA_ROOT_FILE = ".data-root"
+CONFIG_ROOT_FILE = ".config-root"
+STATE_ROOT_FILE = ".state-root"
 
 
 @dataclass(frozen=True)
@@ -37,22 +39,34 @@ class RuntimePaths:
     shared_dir: Path
 
 
-def saved_data_root(install_root: Path | None = None) -> Path | None:
-    path = (INSTALL_ROOT if install_root is None else Path(install_root)) / DATA_ROOT_FILE
+def _saved_root(filename: str, install_root: Path | None = None) -> Path | None:
+    path = (INSTALL_ROOT if install_root is None else Path(install_root)) / filename
     if not path.exists() and not path.is_symlink():
         return None
     if path.is_symlink() or not path.is_file():
-        raise ValueError(f"数据根标记不是普通文件: {path}")
+        raise ValueError(f"路径标记不是普通文件: {path}")
     try:
         text = path.read_text(encoding="utf-8").rstrip("\r\n")
     except OSError as error:
-        raise ValueError(f"无法读取数据根标记: {path}") from error
+        raise ValueError(f"无法读取路径标记: {path}") from error
     if not text or "\n" in text or "\r" in text or "\x00" in text:
-        raise ValueError(f"数据根标记内容无效: {path}")
+        raise ValueError(f"路径标记内容无效: {path}")
     root = Path(text).expanduser()
     if not root.is_absolute():
-        raise ValueError(f"数据根标记必须是绝对路径: {path}")
+        raise ValueError(f"路径标记必须是绝对路径: {path}")
     return root.resolve()
+
+
+def saved_data_root(install_root: Path | None = None) -> Path | None:
+    return _saved_root(DATA_ROOT_FILE, install_root)
+
+
+def saved_config_root(install_root: Path | None = None) -> Path | None:
+    return _saved_root(CONFIG_ROOT_FILE, install_root)
+
+
+def saved_state_root(install_root: Path | None = None) -> Path | None:
+    return _saved_root(STATE_ROOT_FILE, install_root)
 
 
 def default_data_root() -> Path:
@@ -90,6 +104,15 @@ def default_state_root() -> Path:
             "codex-wechat").resolve()
 
 
+def config_root(install_root: Path | None = None) -> Path:
+    """Persisted install-time root wins over a service manager's defaults."""
+    return saved_config_root(install_root) or default_config_root()
+
+
+def state_root(install_root: Path | None = None) -> Path:
+    return saved_state_root(install_root) or default_state_root()
+
+
 def data_root(install_root: Path | None = None):
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     saved = saved_data_root(install_root)
@@ -120,10 +143,11 @@ def runtime_paths(install_root: Path | None = None) -> RuntimePaths:
             logs_dir=data / "logs",
             shared_dir=data / "shared",
         )
-    state = default_state_root()
+    config = config_root(install_root)
+    state = state_root(install_root)
     return RuntimePaths(
         data_root=data,
-        config_file=default_config_root() / "config.json",
+        config_file=config / "config.json",
         state_dir=state,
         workspace_dir=data / "workspace",
         logs_dir=state / "logs",

@@ -335,7 +335,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_failed_first_activation_without_marker_removes_the_target(self):
         with patch("builtins.input", return_value="y"), \
-                patch.object(installer, "_publish_data_root",
+                patch.object(installer, "_publish_runtime_roots",
                              side_effect=OSError("marker failed")):
             with self.assertRaisesRegex(OSError, "marker failed"):
                 installer.install(self.source, self.target)
@@ -813,7 +813,7 @@ class RuntimeRepairTests(unittest.TestCase):
             encoding="utf-8")
         start = text.index('phase("准备程序与依赖...")')
         activation = text.index("activate_release(target, identifier)", start)
-        publication = text.index("_publish_data_root(target)", activation)
+        publication = text.index("_publish_runtime_roots(target)", activation)
         configuration = text.index("service_ready = configure_platform_service", publication)
         self.assertLess(activation, publication)
         self.assertLess(publication, configuration)
@@ -918,6 +918,46 @@ class DataRootMarkerTests(unittest.TestCase):
             self.assertEqual(installer.saved_data_root(target), data.resolve())
             with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
                 self.assertEqual(installer.configured_data_root(target), data.resolve())
+
+    def test_linux_runtime_roots_are_persisted_for_systemd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "install"
+            target.mkdir()
+            config_home = base / "custom-config"
+            state_home = base / "custom-state"
+            data_home = base / "custom-data"
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.dict(os.environ, {
+                        "XDG_CONFIG_HOME": str(config_home),
+                        "XDG_STATE_HOME": str(state_home),
+                        "CODEX_WECHAT_DATA_ROOT": str(data_home),
+                    }, clear=False):
+                installer._publish_runtime_roots(target)
+            self.assertEqual(
+                (target / installer.CONFIG_ROOT_FILE).read_text(encoding="utf-8"),
+                str((config_home / "codex-wechat").resolve()) + "\n",
+            )
+            self.assertEqual(
+                (target / installer.STATE_ROOT_FILE).read_text(encoding="utf-8"),
+                str((state_home / "codex-wechat").resolve()) + "\n",
+            )
+            self.assertEqual(
+                (target / installer.DATA_ROOT_FILE).read_text(encoding="utf-8"),
+                str(data_home.resolve()) + "\n",
+            )
+
+    def test_linux_layout_rejects_config_or_state_inside_the_install_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "install"
+            target.mkdir()
+            for variable in ("XDG_CONFIG_HOME", "XDG_STATE_HOME"):
+                with self.subTest(variable=variable), \
+                        patch.object(installer, "IS_WINDOWS", False), \
+                        patch.dict(os.environ, {variable: str(target)}, clear=False):
+                    with self.assertRaisesRegex(ValueError, "程序安装目录重叠"):
+                        installer.check_runtime_root_layout(target)
 
     def test_invalid_marker_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -54,6 +54,9 @@ RELEASES_DIR = "releases"
 ACTIVE_FILE = "active-release"
 SERVICE_UNIT = "codex-wechat.service"
 DATA_ROOT_FILE = ".data-root"
+CONFIG_ROOT_FILE = ".config-root"
+STATE_ROOT_FILE = ".state-root"
+RUNTIME_ROOT_FILES = (DATA_ROOT_FILE, CONFIG_ROOT_FILE, STATE_ROOT_FILE)
 PACKAGE_ROOT = Path("codex_wechat")
 # A directory handle held for a moment - by a scanner or a just-exited process -
 # blocks the rename that makes a release deletable; one retry covers it.
@@ -235,22 +238,34 @@ def default_target() -> Path:
     return Path.home() / ".local/share/codex-wechat"
 
 
-def saved_data_root(target: Path) -> Path | None:
-    path = Path(target) / DATA_ROOT_FILE
+def _saved_root(target: Path, filename: str) -> Path | None:
+    path = Path(target) / filename
     if not path.exists() and not path.is_symlink():
         return None
     if path.is_symlink() or not path.is_file():
-        raise ValueError(f"数据根标记不是普通文件: {path}")
+        raise ValueError(f"路径标记不是普通文件: {path}")
     try:
         text = path.read_text(encoding="utf-8").rstrip("\r\n")
     except OSError as error:
-        raise ValueError(f"无法读取数据根标记: {path}") from error
+        raise ValueError(f"无法读取路径标记: {path}") from error
     if not text or "\n" in text or "\r" in text or "\x00" in text:
-        raise ValueError(f"数据根标记内容无效: {path}")
+        raise ValueError(f"路径标记内容无效: {path}")
     root = Path(text).expanduser()
     if not root.is_absolute():
-        raise ValueError(f"数据根标记必须是绝对路径: {path}")
+        raise ValueError(f"路径标记必须是绝对路径: {path}")
     return root.resolve()
+
+
+def saved_data_root(target: Path) -> Path | None:
+    return _saved_root(target, DATA_ROOT_FILE)
+
+
+def saved_config_root(target: Path) -> Path | None:
+    return _saved_root(target, CONFIG_ROOT_FILE)
+
+
+def saved_state_root(target: Path) -> Path | None:
+    return _saved_root(target, STATE_ROOT_FILE)
 
 
 def _default_data_root() -> Path:
@@ -282,6 +297,13 @@ def _default_config_root() -> Path:
     return (Path.home() / ".config" / "codex-wechat").resolve()
 
 
+def _default_state_root() -> Path:
+    state_home = os.environ.get("XDG_STATE_HOME")
+    if state_home and Path(state_home).is_absolute():
+        return (Path(state_home).expanduser() / "codex-wechat").resolve()
+    return (Path.home() / ".local" / "state" / "codex-wechat").resolve()
+
+
 def configured_data_root(target: Path) -> Path:
     """Resolve one explicit root without repairing old installation layouts."""
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
@@ -297,25 +319,88 @@ def configured_config_file(target: Path) -> Path:
     """Resolve the active config without coupling the installer to runtime code."""
     if IS_WINDOWS:
         return configured_data_root(target) / "config.json"
-    return _default_config_root() / "config.json"
+    return configured_config_root(target) / "config.json"
 
 
-def _write_data_root_marker(target: Path) -> None:
-    root = configured_data_root(target)
-    # Keep the marker even for the default root. "No marker" is not allowed to
-    # mean "default" because an old task action could otherwise resurrect a
-    # previously configured custom root.
+def configured_config_root(target: Path) -> Path:
+    """The installer accepts an explicit XDG change and persists it."""
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if config_home and Path(config_home).is_absolute():
+        return (Path(config_home).expanduser() / "codex-wechat").resolve()
+    return saved_config_root(target) or _default_config_root()
+
+
+def configured_state_root(target: Path) -> Path:
+    state_home = os.environ.get("XDG_STATE_HOME")
+    if state_home and Path(state_home).is_absolute():
+        return (Path(state_home).expanduser() / "codex-wechat").resolve()
+    return saved_state_root(target) or _default_state_root()
+
+
+def _write_root_marker(target: Path, filename: str, root: Path) -> None:
     _atomic_write(
-        Path(target) / DATA_ROOT_FILE,
+        Path(target) / filename,
         (str(root) + "\n").encode("utf-8"),
         0o600,
         root=target,
     )
 
 
-def _publish_data_root(target: Path) -> None:
-    """Make marker the only source before the platform service is reconfigured."""
-    _write_data_root_marker(target)
+def _write_data_root_marker(target: Path) -> None:
+    _write_root_marker(target, DATA_ROOT_FILE, configured_data_root(target))
+
+
+def _runtime_roots(target: Path) -> dict[str, Path]:
+    if IS_WINDOWS:
+        return {DATA_ROOT_FILE: configured_data_root(target)}
+    return {
+        DATA_ROOT_FILE: configured_data_root(target),
+        CONFIG_ROOT_FILE: configured_config_root(target),
+        STATE_ROOT_FILE: configured_state_root(target),
+    }
+
+
+def _marker_snapshot(target: Path) -> dict[str, bytes | None]:
+    snapshot = {}
+    for filename in RUNTIME_ROOT_FILES:
+        path = Path(target) / filename
+        snapshot[filename] = (
+            path.read_bytes() if path.is_file() and not path.is_symlink() else None
+        )
+    return snapshot
+
+
+def _restore_marker_snapshot(target: Path, snapshot: dict[str, bytes | None]) -> None:
+    for filename, contents in snapshot.items():
+        path = Path(target) / filename
+        if contents is None:
+            path.unlink(missing_ok=True)
+        else:
+            _atomic_write(path, contents, 0o600, root=target)
+
+
+def check_runtime_root_layout(target: Path) -> None:
+    """Reject configuration/state roots that could overlap program files."""
+    if IS_WINDOWS:
+        return
+    install = Path(target).resolve()
+    for filename, role in ((CONFIG_ROOT_FILE, "配置"), (STATE_ROOT_FILE, "状态")):
+        path = _runtime_roots(target)[filename]
+        if (path == install or install.is_relative_to(path)
+                or path.is_relative_to(install)):
+            raise ValueError(f"{role}路径与程序安装目录重叠: {path}")
+
+
+def _publish_runtime_roots(target: Path) -> None:
+    """Persist resolved roots so shell and systemd services read the same paths."""
+    values = _runtime_roots(target)
+    previous = _marker_snapshot(target)
+    try:
+        for filename, root in values.items():
+            _write_root_marker(target, filename, root)
+    except BaseException:
+        _restore_marker_snapshot(target, previous)
+        raise
 
 
 def _private(relative: Path) -> bool:
@@ -1310,6 +1395,7 @@ def _common_install(
         current = None
     else:
         check_install_target(source, target, update=update)
+        check_runtime_root_layout(target)
         preflight_command_link(target)
         current = read_pointer(target, CURRENT_FILE)
         if current == identifier and release_matches(target, identifier, files) and stable_files_match(source, target):
@@ -1322,23 +1408,18 @@ def _common_install(
             # start anything. Both platform steps are idempotent.
             with InstallLock(target):
                 ensure_release_runtime(target / RELEASES_DIR / identifier)
-            marker = target / DATA_ROOT_FILE
-            previous_marker = (marker.read_bytes()
-                               if marker.is_file() and not marker.is_symlink() else None)
+            marker_snapshot = _marker_snapshot(target)
             published = False
             try:
-                _publish_data_root(target)
+                _publish_runtime_roots(target)
                 published = True
                 configure_platform_service(target / "releases" / identifier, target,
                                            update=update)
             except BaseException:
-                # This path does not activate a new release. Keep the old
-                # data-root contract if service integration fails.
+                # This path does not activate a new release. Keep the old path
+                # contract if service integration fails.
                 if published:
-                    if previous_marker is None:
-                        marker.unlink(missing_ok=True)
-                    else:
-                        _atomic_write(marker, previous_marker, 0o600, root=target)
+                    _restore_marker_snapshot(target, marker_snapshot)
                 raise
             print(f"版本 {identifier} 已经安装，没有修改。")
             return 0
@@ -1372,6 +1453,7 @@ def _common_install(
         make_private(target)
         with InstallLock(target):
             check_install_target(source, target, update=update)
+            check_runtime_root_layout(target)
             fresh_files = project_files(source)
             if fresh_files != files:
                 raise ValueError("确认期间源码发生变化，请重新运行")
@@ -1385,12 +1467,17 @@ def _common_install(
             install_bootstrap(source, target)
             install_command_link(target)
             activate_release(target, identifier)
-            # Publish the marker only after the current pointer is committed:
+            # Publish all path markers only after the current pointer is committed:
             # a failed update must not move an existing installation to a new
-            # data root while its old release and service are still active.
-            _publish_data_root(target)
+            # root while its old release and service are still active.
+            marker_snapshot = _marker_snapshot(target)
+            _publish_runtime_roots(target)
             marker_ready = True
-            service_ready = configure_platform_service(release, target, update=update)
+            try:
+                service_ready = configure_platform_service(release, target, update=update)
+            except BaseException:
+                _restore_marker_snapshot(target, marker_snapshot)
+                raise
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier, source)
             try:

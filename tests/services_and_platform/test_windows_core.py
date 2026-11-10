@@ -140,6 +140,27 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(paths.shared_dir,
                              (base / "state/codex-wechat/shared").resolve())
 
+    def test_linux_persisted_xdg_roots_win_over_service_manager_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            install = base / "install"
+            install.mkdir()
+            config = base / "custom-config/codex-wechat"
+            state = base / "custom-state/codex-wechat"
+            (install / platform_support.CONFIG_ROOT_FILE).write_text(
+                str(config) + "\n", encoding="utf-8")
+            (install / platform_support.STATE_ROOT_FILE).write_text(
+                str(state) + "\n", encoding="utf-8")
+            with patch.object(platform_support, "IS_WINDOWS", False), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.dict(os.environ, {
+                        "XDG_CONFIG_HOME": str(base / "default-config"),
+                        "XDG_STATE_HOME": str(base / "default-state"),
+                    }, clear=False):
+                paths = platform_support.runtime_paths()
+            self.assertEqual(paths.config_file, config / "config.json")
+            self.assertEqual(paths.state_dir, state)
+
     def test_windows_runtime_paths_keep_the_existing_unified_layout(self):
         with tempfile.TemporaryDirectory() as directory:
             install = Path(directory) / "install"
