@@ -31,6 +31,8 @@
 | --- | --- |
 | [app.py](../codex_wechat/app.py) | 组合根、状态保存和启动生命周期 |
 | [backend.py](../codex_wechat/backend.py) | Codex 会话、回合、事件和设置 |
+| [backend_interactions.py](../codex_wechat/backend_interactions.py) | 问题/审批 token、归属和失效 |
+| [backend_turns.py](../codex_wechat/backend_turns.py) | turn 记录、错误映射和结果构造 |
 | [backend_runtime.py](../codex_wechat/backend_runtime.py) / [codex_transport.py](../codex_wechat/codex_transport.py) | 后台所有权、JSON-RPC 连接和关闭 |
 | [app_ipc.py](../codex_wechat/app_ipc.py) / [app_ipc_windows.py](../codex_wechat/app_ipc_windows.py) | 跟随 App 已持有的 thread；不抢 writer |
 | [ingress.py](../codex_wechat/ingress.py) | 微信入站过滤、去重、引用归一化和命令路由 |

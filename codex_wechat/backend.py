@@ -5,18 +5,19 @@ steer(id, turn_id, text, attachments=None), answer_approval(token, decision), cl
 pending contains UI approval data.
 """
 import asyncio
-from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 import json
 import os
 from pathlib import Path
-import secrets
 import time
 from typing import Any
 import uuid
 
+from .backend_interactions import (PENDING_TOKEN_ALPHABET, PENDING_TOKEN_LENGTH,
+                                   InteractionRegistry, interaction_is_question)
+from .backend_turns import answer_text, build_result, new_turn as make_turn, turn_error_code
 from .records import AgentMessage, Source, TurnResult
 from .media import OUTPUT_HINT
 from .diagnostics import error_reason, log_event
@@ -37,9 +38,8 @@ from .prompts import (command_approval, file_approval)
 
 from .codex_transport import CodexTransport, CodexRpcError, SharedDaemonUnavailable
 
-PENDING_TOKEN_ALPHABET = "023456789abcdefghjkmnpqrstuvwxyz"
-PENDING_TOKEN_LENGTH = 3
-PENDING_TOKEN_RECENT = 128
+__all__ = ["PENDING_TOKEN_ALPHABET", "PENDING_TOKEN_LENGTH"]
+
 # A turn that reports nothing for this long is treated as stalled. Disconnects
 # already fail the turn; this covers "connection alive but events stopped",
 # which would otherwise freeze the delivery worker until the service restarts.
@@ -136,35 +136,6 @@ class SelectionSnapshot:
     attach_error: str | None
 
 
-TURN_ERROR_PROMPTS = {
-    "usageLimitExceeded": "TURN_FAILED_USAGE_LIMIT",
-    "sessionBudgetExceeded": "TURN_FAILED_SESSION_BUDGET",
-    "contextWindowExceeded": "TURN_FAILED_CONTEXT",
-    "rateLimitExceeded": "TURN_FAILED_RATE_LIMIT",
-    "unauthorized": "TURN_FAILED_UNAUTHORIZED",
-    "modelNotFound": "TURN_FAILED_MODEL_NOT_FOUND",
-    "flexUnavailable": "TURN_FAILED_SERVICE_UNAVAILABLE",
-    "serverOverloaded": "TURN_FAILED_SERVICE_UNAVAILABLE",
-    "policyCapacityUnavailable": "TURN_FAILED_SERVICE_UNAVAILABLE",
-    "cyberPolicy": "TURN_FAILED_POLICY",
-    "misalignmentPolicyViolation": "TURN_FAILED_POLICY",
-    "tooManyDenials": "TURN_FAILED_TOO_MANY_DENIALS",
-    "sandboxError": "TURN_FAILED_SANDBOX",
-    "httpConnectionFailed": "TURN_FAILED_SERVICE_UNAVAILABLE",
-}
-
-HTTP_ERROR_VARIANTS = (
-    "httpConnectionFailed",
-    "http_connection_failed",
-    "responseStreamConnectionFailed",
-    "response_stream_connection_failed",
-    "responseStreamDisconnected",
-    "response_stream_disconnected",
-    "responseTooManyFailedAttempts",
-    "response_too_many_failed_attempts",
-)
-
-
 class DeferTurn(RuntimeError):
     """The desktop owns an active turn that did not accept this input."""
     error_actions = ErrorAction.RETRYABLE
@@ -175,20 +146,10 @@ class TurnStalled(RuntimeError):
     error_actions = ErrorAction.TERMINAL
 
 
-def _insufficient_balance_message(message):
-    if not isinstance(message, str):
-        return False
-    normalized = message.casefold()
-    return ("insufficient balance" in normalized
-            or "insufficient_quota" in normalized
-            or ("402" in normalized and "payment required" in normalized))
-
-
 class CodexBackend:
     def __init__(self, config, cwd, notify):
         self.config, self.cwd, self.notify = config, cwd, notify
-        self.pending = {}
-        self.recent_tokens = deque(maxlen=PENDING_TOKEN_RECENT)
+        self.interactions = InteractionRegistry()
         self.active = None
         self.writer_states = {}
         self.attach_error = None
@@ -228,6 +189,17 @@ class CodexBackend:
             on_request=self.server_request, on_event=self.transport_event,
             on_connect=self.reset_connection, on_disconnect=self.connection_lost)
 
+    @property
+    def pending(self):
+        return self.interactions.items
+
+    @pending.setter
+    def pending(self, value):
+        self.interactions.replace(value)
+
+    def _new_token(self):
+        return self.interactions.new_token()
+
     def reset_connection(self):
         self.connection_id = uuid.uuid4().hex
         self.usage_by_thread.clear()
@@ -247,7 +219,7 @@ class CodexBackend:
                 self.active["done"].set_exception(error)
             else:
                 self.active["done"].cancel()
-        self.pending.clear()
+        self.interactions.clear()
         self.blocked = False
         self.on_connection(False, error)
         self.on_activity()
@@ -367,7 +339,7 @@ class CodexBackend:
         if self.selected_thread != thread_id:
             self.selection_epoch += 1
             self.active = None
-            self.pending.clear()
+            self.interactions.clear()
         self.selected_thread = thread_id
         self.attach_error = None
         self.set_writer(WRITER_FOLLOWED, thread_id)
@@ -479,14 +451,6 @@ class CodexBackend:
             follower=follower,
         )
 
-    def _new_token(self):
-        while True:
-            token = "".join(secrets.choice(PENDING_TOKEN_ALPHABET)
-                            for _ in range(PENDING_TOKEN_LENGTH))
-            if token not in self.pending and token not in self.recent_tokens:
-                self.recent_tokens.append(token)
-                return token
-
     async def server_request(self, msg, *, app_origin=False):
         params = msg.get("params", {})
         request_thread = params.get("threadId")
@@ -511,13 +475,11 @@ class CodexBackend:
                          or params.get("turnId") == self.active["turn"])):
                 # Questions may belong to a desktop turn. Answer only requests actually
                 # delivered to this connection; leave other interaction ownership intact.
-                if any(request.get("id") == msg["id"] for request in self.pending.values()):
+                if self.interactions.has_request_id(msg["id"]):
                     return
-                token = self._new_token()
                 lease = self.selection_lease()
-                self.pending[token] = dict(msg, _question={
-                    "lease": lease, "source": lease.source,
-                    "index": 0, "answers": {}})
+                token = self.interactions.create(dict(msg, _question={
+                    "lease": lease, "source": lease.source, "index": 0, "answers": {}}))
                 self.notify(question_prompt(questions[0], token, 0, len(questions), text=self.prompt))
                 return
         if self.shared and not self.app and self.active and not self.active.get("owned"):
@@ -526,9 +488,8 @@ class CodexBackend:
         if (self.active and params.get("threadId") == self.active["thread"]
                 and msg["method"] in ("item/commandExecution/requestApproval",
                                        "item/fileChange/requestApproval")):
-            token = self._new_token()
             lease = self.active.get("lease") or self.selection_lease(self.active["thread"])
-            self.pending[token] = dict(msg, _approval={"lease": lease})
+            token = self.interactions.create(dict(msg, _approval={"lease": lease}))
             if msg["method"] == "item/commandExecution/requestApproval":
                 summary = command_approval(
                     command=params.get("command") or self.prompt("COMMAND_NOT_PROVIDED"),
@@ -548,7 +509,7 @@ class CodexBackend:
             if len(summary) <= 1200:
                 self.notify(summary)
                 return
-            self.pending.pop(token)
+            self.interactions.pop(token)
             await self.write({"id": msg["id"], "error": {
                 "code": -32601, "message": "This bridge does not support this request"}})
             self.notify(self.prompt("APPROVAL_TOO_LONG"))
@@ -563,10 +524,7 @@ class CodexBackend:
         if self.active and params.get("threadId") == self.active.get("thread"):
             self.active["last_progress_at"] = self.last_event_at
         if msg.get("method") == "serverRequest/resolved":
-            for token, request in list(self.pending.items()):
-                if (request.get("id") == params.get("requestId") and
-                        request.get("params", {}).get("threadId") == params.get("threadId")):
-                    self.pending.pop(token, None)
+            self.interactions.resolve(params.get("requestId"), params.get("threadId"))
         method = msg.get("method")
         if method == "account/rateLimits/updated":
             self._update_rate_limits(params)
@@ -582,12 +540,7 @@ class CodexBackend:
         item = params.get("item", {})
         if method == "item/completed":
             answered = async_reply_question_ids(item)
-            if answered:
-                for token, request in list(self.pending.items()):
-                    state = request.get("_async")
-                    if state and any(question["id"] in answered
-                                     for question in state["questions"]):
-                        self.pending.pop(token, None)
+            self.interactions.discard_answered(answered)
         if method in ("item/started", "item/completed") and item.get("type") == "contextCompaction":
             self._handle_compaction(method, params, item)
             return
@@ -695,40 +648,12 @@ class CodexBackend:
 
     def _record_turn_error(self, params):
         thread_id, turn_id = params.get("threadId"), params.get("turnId")
-        code = self._turn_error_code(params.get("error"))
+        code = turn_error_code(params.get("error"))
         if isinstance(thread_id, str) and isinstance(turn_id, str) and code:
             self.turn_error_codes.pop((thread_id, turn_id), None)
             self.turn_error_codes[(thread_id, turn_id)] = code
             while len(self.turn_error_codes) > 20:
                 self.turn_error_codes.pop(next(iter(self.turn_error_codes)))
-
-    @staticmethod
-    def _turn_error_code(error):
-        if isinstance(error, str):
-            return "usageLimitExceeded" if _insufficient_balance_message(error) else None
-        if not isinstance(error, dict):
-            return None
-        info = error.get("codexErrorInfo")
-        if info is None:
-            info = error.get("codex_error_info")
-        if isinstance(info, str) and info:
-            return info
-        if isinstance(info, dict):
-            for name in HTTP_ERROR_VARIANTS:
-                detail = info.get(name)
-                if not isinstance(detail, dict):
-                    continue
-                status = detail.get("httpStatusCode", detail.get("http_status_code"))
-                if status == 402:
-                    return "usageLimitExceeded"
-                if status == 429:
-                    return "rateLimitExceeded"
-                if isinstance(status, int) and 500 <= status <= 599:
-                    return "serverOverloaded"
-                return "httpConnectionFailed"
-        if _insufficient_balance_message(error.get("message")):
-            return "usageLimitExceeded"
-        return None
 
     def _update_thread_settings(self, params):
         # Native settings are authoritative; no replay of previously observed defaults.
@@ -774,8 +699,7 @@ class CodexBackend:
             current["messages"].append(message)
             questions = async_questions(message)
             if questions is not None:
-                token = self._new_token()
-                self.pending[token] = {
+                token = self.interactions.create({
                     "method": ASYNC_QUESTION_METHOD,
                     "_async": {
                         "lease": current.get("lease") or self.selection_lease(current["thread"]),
@@ -787,7 +711,7 @@ class CodexBackend:
                         "index": 0,
                         "answers": [],
                     },
-                }
+                })
                 self.notify(question_prompt(questions[0], token, 0, len(questions),
                                             text=self.prompt))
             elif message.get("phase") in ("commentary", "partial_answer") and message.get("text"):
@@ -798,39 +722,21 @@ class CodexBackend:
     def _complete_turn(self, current, turn):
         if current["turn"] and turn["id"] != current["turn"]:
             return
-        messages = current["messages"]
-        finals = [m for m in messages
-                  if async_questions(m) is None and m.get("phase") == "final_answer"]
-        legacy = [m for m in messages
-                  if async_questions(m) is None and not m.get("phase")]
-        answer_items = finals or legacy
-        text = "\n\n".join(m["text"] for m in answer_items)
-        answer_item = answer_items[-1] if answer_items else {}
-        has_partial_answer = any(async_questions(m) is None
-                                 and m.get("phase") == "partial_answer" and m.get("text")
-                                 for m in messages)
         status = turn["status"]
+        error_code = None
         if status != "completed":
-            error_code = self._turn_error_code(turn.get("error"))
+            error_code = turn_error_code(turn.get("error"))
             if error_code is None and current["turn"]:
                 error_code = self.turn_error_codes.pop(
                     (current["thread"], current["turn"]), None)
-            status_text = {
-                "failed": self.prompt(TURN_ERROR_PROMPTS.get(error_code, "TURN_FAILED")),
-                "interrupted": self.prompt("TURN_INTERRUPTED"),
-            }.get(status, self.prompt("TURN_ENDED_UNEXPECTEDLY"))
-            text = (text + "\n\n" if text else "") + status_text
         usage = None
         if current["turn"]:
             usage = self.usage_by_turn.get((current["thread"], current["turn"]))
-        result = TurnResult(current["source"], current["turn"],
-                            text if text or has_partial_answer else self.prompt("TURN_COMPLETED_EMPTY"),
-                            current["cwd"], status, tuple(current.get("requestIds", ())),
-                            final_answer_started_at_ms=answer_item.get("startedAtMs"),
-                            final_answer_completed_at_ms=answer_item.get("completedAtMs"),
-                            usage=usage)
+        text = answer_text(current)
+        result = build_result(current, turn, prompt=self.prompt,
+                              error_code=error_code, usage=usage)
         current["done"].set_result(result)
-        self.pending.clear()
+        self.interactions.clear()
         compact_turn = any(key[:3] == (self.selection_epoch, self.selected_thread, turn["id"])
                            for key in self.compactions)
         self.manual_compactions.discard((self.selection_epoch, self.selected_thread))
@@ -843,15 +749,8 @@ class CodexBackend:
 
     def new_turn(self, thread_id, turn_id=None, *, owned):
         lease = self.selection_lease(thread_id)
-        return {"thread": thread_id, "turn": turn_id, "messages": [], "owned": owned,
-                "starting": False,
-                "earlyEvents": [],
-                "itemStartedAtMs": {},
-                "last_progress_at": time.monotonic(),
-                "lease": lease,
-                "source": lease.source,
-                "cwd": self.info.get("cwd") or self.cwd,
-                "done": asyncio.get_running_loop().create_future()}
+        return make_turn(thread_id, turn_id, owned=owned, lease=lease,
+                         cwd=self.info.get("cwd") or self.cwd)
 
     async def refresh_runtime(self):
         if not self.shared or not self.selected_thread:
@@ -947,7 +846,7 @@ class CodexBackend:
             self.selection_epoch += 1
             if not preserve_active:
                 self.active = None
-                self.pending.clear()
+                self.interactions.clear()
         self.selected_thread = thread["id"]
         if app is None:
             # Native writer path: any follower from the previous selection is gone.
@@ -1323,7 +1222,7 @@ class CodexBackend:
             self.selection_epoch += 1
             if not preserve_active:
                 self.active = None
-                self.pending.clear()
+                self.interactions.clear()
         self.selected_thread = thread_id
         self.set_writer(WRITER_BUSY, thread_id)
         return thread_id
@@ -1459,7 +1358,7 @@ class CodexBackend:
             self.active = None
         if not current["done"].done():
             current["done"].cancel()
-        self.pending.clear()
+        self.interactions.clear()
         app, self.app = self.app, None
         if app is not None:
             # The follower never published, so stop pretending to follow it.
@@ -1544,7 +1443,7 @@ class CodexBackend:
         finally:
             if self.active is current:
                 self.active = None
-                self.pending.clear()
+                self.interactions.clear()
             self.stop_requested = False
 
     async def detach_active(self):
@@ -1553,7 +1452,7 @@ class CodexBackend:
         if current is None:
             return False
         self.active = None
-        self.pending.clear()
+        self.interactions.clear()
         self.stop_requested = False
         if not current["done"].done():
             current["done"].set_result(TurnResult(
@@ -1572,23 +1471,23 @@ class CodexBackend:
         return True
 
     async def answer_approval(self, token, decision):
-        if self.pending.get(token, {}).get("method") in (QUESTION_METHOD, ASYNC_QUESTION_METHOD):
+        if interaction_is_question(self.interactions.get(token, {})):
             return False
-        request = self.pending.get(token)
+        request = self.interactions.get(token)
         if not request:
             return False
         if "id" not in request:
             return False
         approval = request.get("_approval")
         if not approval or approval.get("lease") != self.selection_lease():
-            self.pending.pop(token, None)
+            self.interactions.pop(token, None)
             return False
-        self.pending.pop(token, None)
+        self.interactions.pop(token, None)
         await self.write({"id": request["id"], "result": {"decision": decision}})
         return True
 
     async def answer_question(self, token, text):
-        request = self.pending.get(token)
+        request = self.interactions.get(token)
         if not request:
             return False
         if request.get("method") == ASYNC_QUESTION_METHOD:
@@ -1600,7 +1499,7 @@ class CodexBackend:
         if lease is None and state.get("source"):
             lease = self.selection_lease(state["source"].thread)
         if lease != self.selection_lease():
-            self.pending.pop(token, None)
+            self.interactions.pop(token, None)
             return False
         questions = request["params"]["questions"]
         index = state["index"]
@@ -1608,13 +1507,13 @@ class CodexBackend:
         answer = question_answer(question, text, render=self.prompt)
         answers = {**state["answers"], question["id"]: {"answers": [answer]}}
         # Consume before writing: a transport failure is uncertain, never auto-resend.
-        self.pending.pop(token)
+        self.interactions.pop(token)
         if index + 1 == len(questions):
             await self.write({"id": request["id"], "result": {"answers": answers}})
         else:
             state.update(index=index + 1, answers=answers)
             next_token = self._new_token()
-            self.pending[next_token] = request
+            self.interactions.items[next_token] = request
             self.notify(question_prompt(questions[index + 1], next_token, index + 1, len(questions),
                                         text=self.prompt))
         return True
@@ -1632,7 +1531,7 @@ class CodexBackend:
         if (state_lease != selected_lease or current_lease != selected_lease or not current
                 or current["thread"] != state["thread"] or current["turn"] != state["turn"]
                 or current["done"].done()):
-            self.pending.pop(token, None)
+            self.interactions.pop(token, None)
             return False
         questions = state["questions"]
         index = state["index"]
@@ -1644,11 +1543,11 @@ class CodexBackend:
         }]
         # Consume before steering: once sent, a transport error is uncertain and
         # must not replay an answer.
-        self.pending.pop(token)
+        self.interactions.pop(token)
         if index + 1 < len(questions):
             state.update(index=index + 1, answers=answers)
             next_token = self._new_token()
-            self.pending[next_token] = request
+            self.interactions.items[next_token] = request
             self.notify(question_prompt(questions[index + 1], next_token, index + 1,
                                         len(questions), text=self.prompt))
             return True
