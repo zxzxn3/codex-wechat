@@ -12,7 +12,7 @@
 <h1 align="center">codex-wechat</h1>
 
 <p align="center">
-  <strong>在你外出吃饭的时候，在微信里继续吃你的饭</strong>
+  <strong>“这样你就有更多时间来烧你的人民币、你的重置卡，和你的青春了”</strong>
 </p>
 
 <p align="center">
@@ -113,31 +113,33 @@ codex-wechat 把微信变成这台电脑上 Codex 的远程入口。你在微信
 
 ## 与其它项目的能力矩阵
 
-> 2026-11-09 按公开源码口径。`●` 直接实现，`◐` 部分或间接，空白表示未实现或当前未确认。
+> 2026-11-10 按公开 README 与源码口径。`●` 直接实现，`◐` 部分或间接，空白表示未实现或当前未确认。
 > 只比较与本项目核心路线相关的能力，不是功能总分，也不代表各平台均已实机验收。
 
 | 能力 | codex-wechat | [CLI-WeChat-Bridge](https://github.com/UNLINEARITY/CLI-WeChat-Bridge) | [CodexBridge](https://github.com/Gan-Xing/CodexBridge) | [Kites](https://github.com/kites262/codex-wechat) |
 | --- | :---: | :---: | :---: | :---: |
-| 接管已有 Codex CLI 会话 | ● | ● |  | ● |
+| 接管已有 Codex CLI 会话 | ● | ● | ● | ● |
 | 跟随 Codex App 活会话 | ● |  |  | ◐ |
-| 写者所有权与会话来源隔离 | ● | ◐ | ◐ | ◐ |
-| 会话、模型、目录与压缩控制 | ● | ● | ● | ◐ |
-| 运行中切换会话与隔离旧回合 | ● |  |  |  |
+| 写者所有权与会话来源隔离 | ● | ● | ◐ | ● |
+| 会话、模型、目录与压缩控制 | ● | ◐ | ◐ | ◐ |
+| 运行中切换会话与隔离旧回合 | ● |  |  | ● |
 | 忙时 steer / queue / unqueue | ● | ◐ |  |  |
 | 原生审批与提问 | ● | ● | ● | ● |
-| 入站微信媒体 | ● | ◐ | ● |  |
-| 出站媒体与结果文件回传 | ● | ● | ● |  |
+| 入站微信媒体 | ● | ● | ● |  |
+| 出站媒体与结果文件回传 | ● | ● |  |  |
 | 持久输入 / 输出队列 | ● | ◐ | ◐ | ● |
-| 投递确认与静默丢包隔离 | ● | ◐ | ◐ |  |
+| 投递确认与静默丢包隔离 | ● | ◐ | ◐ | ◐ |
 | 热配置、提示与智能切片 | ● | ◐ | ◐ |  |
-| 多后端 / 多 CLI | ◐ | ● | ◐ |  |
+| 多 Codex 后端 / 实例 | ● | ● | ◐ | ◐ |
+| 异构 CLI（Claude Code / OpenCode / Pi） |  | ● |  |  |
 | 多渠道入口（企业微信 / Telegram 等） |  | ● |  |  |
-| Web 控制台 / Mission Control |  |  | ● |  |
+| Web 控制台 / Mission Control |  |  | ◐ |  |
 | 平台支持 | <kbd>Linux</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> <kbd>macOS</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> <kbd>macOS</kbd> <kbd>Windows</kbd> | <kbd>Linux</kbd> |
 
-其它路线的强项也很明确：CLI-WeChat-Bridge 覆盖多 IM，CodexBridge 提供更宽的控制台与任务
-编排，Kites 保持更小的核心实现。外部项目会变化，具体能力以对方当前文档和源码为准。平台行
-只列各项目当前公开文档明确支持的系统。
+其它路线的强项也很明确：CLI-WeChat-Bridge 覆盖多 IM、多 CLI 和双向文件；CodexBridge 在
+线程管理、自动化和个人记录上更宽；Kites 以单个 Rust 二进制实现原生会话、运行中切换和持久
+交付。外部项目会变化，具体能力以对方当前文档和源码为准。平台行只列各项目当前公开文档明确
+支持的系统。
 
 <details>
 <summary>其它相邻项目</summary>
