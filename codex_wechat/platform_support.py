@@ -32,6 +32,7 @@ RUNTIME_ROOT_ROLES = {
     "config": CONFIG_ROOT_FILE,
     "state": STATE_ROOT_FILE,
 }
+CURRENT_FILE = "current"
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,16 @@ def saved_runtime_roots(install_root: Path | None = None, *, require_complete=Fa
     return roots
 
 
+def _saved_linux_layout(install_root: Path | None = None):
+    """Return installed roots, or None only when this is not an installed tree."""
+    root = INSTALL_ROOT if install_root is None else Path(install_root)
+    indicators = (CURRENT_FILE, RUNTIME_ROOTS_FILE, *RUNTIME_ROOT_ROLES.values())
+    if not any((root / name).exists() or (root / name).is_symlink()
+               for name in indicators):
+        return None
+    return saved_runtime_roots(install_root, require_complete=True)
+
+
 def default_data_root() -> Path:
     """Return the platform user-data directory, with a pre-venv fallback."""
     if _platform_user_data_dir is not None:
@@ -166,11 +177,13 @@ def default_state_root() -> Path:
 
 def config_root(install_root: Path | None = None) -> Path:
     """Persisted install-time root wins over a service manager's defaults."""
-    return saved_config_root(install_root) or default_config_root()
+    layout = _saved_linux_layout(install_root)
+    return layout["config"] if layout is not None else default_config_root()
 
 
 def state_root(install_root: Path | None = None) -> Path:
-    return saved_state_root(install_root) or default_state_root()
+    layout = _saved_linux_layout(install_root)
+    return layout["state"] if layout is not None else default_state_root()
 
 
 def _paths_overlap(first: Path, second: Path) -> bool:
@@ -243,7 +256,8 @@ def reject_symlink_path(path: Path) -> None:
 
 
 def runtime_paths(install_root: Path | None = None) -> RuntimePaths:
-    """Resolve each persistent-data role once for the active platform."""
+    """Resolve one complete installed layout, or source-tree defaults."""
+    layout = None if IS_WINDOWS else _saved_linux_layout(install_root)
     data = data_root(install_root)
     if IS_WINDOWS:
         return RuntimePaths(
@@ -254,8 +268,8 @@ def runtime_paths(install_root: Path | None = None) -> RuntimePaths:
             logs_dir=data / "logs",
             shared_dir=data / "shared",
         )
-    config = config_root(install_root)
-    state = state_root(install_root)
+    config = layout["config"] if layout is not None else default_config_root()
+    state = layout["state"] if layout is not None else default_state_root()
     validate_runtime_roots(
         data,
         config,

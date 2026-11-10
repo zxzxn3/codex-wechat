@@ -91,7 +91,9 @@ class DataRootContractTests(unittest.TestCase):
             target, data_root=data, config_root=config, state_root=state, manifest=True)
         (target / platform_support.DATA_ROOT_FILE).write_text(
             str(self.base / "legacy-data") + "\n", encoding="utf-8")
-        with self.environment(""), patch.object(platform_support, "INSTALL_ROOT", target):
+        with self.environment(""), \
+                patch.object(platform_support, "IS_WINDOWS", False), \
+                patch.object(platform_support, "INSTALL_ROOT", target):
             self.assertEqual(platform_support.saved_data_root(target), data)
             self.assertEqual(platform_support.saved_config_root(target), config)
             self.assertEqual(platform_support.saved_state_root(target), state)
@@ -102,6 +104,10 @@ class DataRootContractTests(unittest.TestCase):
                 platform_support.saved_runtime_roots(target, require_complete=True),
                 {"data": data, "config": config, "state": state},
             )
+            paths = platform_support.runtime_paths()
+            self.assertEqual(paths.data_root, data)
+            self.assertEqual(paths.config_file, config / "config.json")
+            self.assertEqual(paths.state_dir, state)
 
     def test_incomplete_legacy_runtime_markers_fail_the_strict_reader(self):
         target = self.base / "install"
@@ -110,6 +116,32 @@ class DataRootContractTests(unittest.TestCase):
             str(self.base / "data") + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "路径标记不完整"):
             platform_support.saved_runtime_roots(target, require_complete=True)
+
+    def test_runtime_paths_reject_incomplete_legacy_markers(self):
+        target = self.base / "install"
+        target.mkdir()
+        (target / platform_support.DATA_ROOT_FILE).write_text(
+            str(self.base / "data") + "\n", encoding="utf-8")
+        with self.environment(""), self.runtime_views(), \
+                patch.object(platform_support, "IS_WINDOWS", False), \
+                patch.object(platform_support, "INSTALL_ROOT", target):
+            for resolver in (
+                    platform_support.runtime_paths,
+                    platform_support.config_root,
+                    platform_support.state_root):
+                with self.subTest(resolver=resolver.__name__):
+                    with self.assertRaisesRegex(ValueError, "路径标记不完整"):
+                        resolver()
+
+    def test_runtime_paths_reject_an_installed_tree_without_root_markers(self):
+        target = self.base / "install"
+        target.mkdir()
+        (target / "current").write_text("release\n", encoding="utf-8")
+        with self.environment(""), self.runtime_views(), \
+                patch.object(platform_support, "IS_WINDOWS", False), \
+                patch.object(platform_support, "INSTALL_ROOT", target):
+            with self.assertRaisesRegex(ValueError, "路径标记不完整"):
+                platform_support.runtime_paths()
 
     def test_invalid_runtime_manifest_fails_closed(self):
         target = self.base / "install"

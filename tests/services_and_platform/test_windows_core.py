@@ -206,8 +206,11 @@ class PlatformTests(unittest.TestCase):
             base = Path(directory)
             install = base / "install"
             install.mkdir()
+            data = base / "custom-data/codex-wechat"
             config = base / "custom-config/codex-wechat"
             state = base / "custom-state/codex-wechat"
+            (install / platform_support.DATA_ROOT_FILE).write_text(
+                str(data) + "\n", encoding="utf-8")
             (install / platform_support.CONFIG_ROOT_FILE).write_text(
                 str(config) + "\n", encoding="utf-8")
             (install / platform_support.STATE_ROOT_FILE).write_text(
@@ -219,6 +222,7 @@ class PlatformTests(unittest.TestCase):
                         "XDG_STATE_HOME": str(base / "default-state"),
                     }, clear=False):
                 paths = platform_support.runtime_paths()
+            self.assertEqual(paths.data_root, data)
             self.assertEqual(paths.config_file, config / "config.json")
             self.assertEqual(paths.state_dir, state)
 
