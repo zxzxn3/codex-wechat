@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from codex_wechat import wechat_auth
 from codex_wechat.app import Bridge, status_payload
 from codex_wechat.errors import WeChatAuthExpired
+from codex_wechat.records import AuthenticationRequired
 from codex_wechat.storage import Store
 
 
@@ -45,7 +46,7 @@ class WeChatReauthTests(unittest.IsolatedAsyncioTestCase):
         bridge = self.bridge
         bridge.reply("pending")
         original = dict(bridge.state["outbox"][0])
-        self.channel.send.side_effect = WeChatAuthExpired()
+        self.channel.send.return_value = AuthenticationRequired()
         with patch("codex_wechat.app.service_adapter.notify", AsyncMock()) as notify:
             task = asyncio.create_task(bridge.sender())
             self.tasks.append(task)

@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from codex_wechat.app import Bridge
+from codex_wechat.records import Delivered
 from codex_wechat.storage import Store
 from codex_wechat import wechat_auth
 
@@ -58,6 +59,7 @@ class RebindDeliveryTests(unittest.IsolatedAsyncioTestCase):
         async def send(entry):
             self.assertEqual(entry["context"], "fresh")
             sent.set()
+            return Delivered("fresh")
         b.channel.send = AsyncMock(side_effect=send)
         b.media.upload = AsyncMock()
         self.tasks.append(asyncio.create_task(b.sender()))

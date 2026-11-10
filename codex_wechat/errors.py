@@ -79,27 +79,6 @@ class WeChatApiError(RuntimeError):
         super().__init__(f"微信 API 错误 {code}")
 
 
-class WeChatNotAcknowledged(WeChatApiError):
-    """The call completed but no message id came back, so delivery is unknown.
-
-    The server answers 200 with `{"ret": 0}` while dropping the message (observed
-    while a bot's outbound text channel was blocked: `sendtyping` still worked).
-    Treating that as success removed the entry from the outbox, so the user saw
-    nothing and only the log knew. Never retry this automatically: the first
-    response may already have been delivered, and an automatic resend can create
-    a duplicate. The entry is quarantined for manual confirmation instead.
-    """
-
-    error_actions = ErrorAction.USER_ACTION
-
-    def __init__(self, ret=None):
-        # `code` stays the server's own ret value; the type carries the meaning.
-        super().__init__("no_id" if ret is None else ret, "not_acknowledged")
-
-    def __str__(self):
-        return f"微信未确认消息投递（ret={self.code}）"
-
-
 def writer_conflict(error):
     """A resume rejected because another client still holds the thread's writer."""
     return (getattr(error, "code", None) == -32600

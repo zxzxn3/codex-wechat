@@ -7,8 +7,7 @@ from unittest.mock import patch
 
 from codex_wechat.app import BRIDGE_STATE_DEFAULTS, Bridge
 from codex_wechat.command_specs import PENDING_CONTROL_LIMIT
-from codex_wechat.errors import WeChatNotAcknowledged
-from codex_wechat.records import InputPhase
+from codex_wechat.records import AcceptedUnknown, Delivered, InputPhase
 from codex_wechat.storage import Store
 
 
@@ -193,7 +192,7 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_successful_send_persists_a_consistent_empty_outbox(self):
         self.bridge.reply("one")
-        self.bridge.channel.send = lambda entry: asyncio.sleep(0, result={"message_id": "m"})
+        self.bridge.channel.send = lambda entry: asyncio.sleep(0, result=Delivered("m"))
         task = asyncio.create_task(self.bridge.sender())
         try:
             await asyncio.wait_for(self.bridge.outbox_drained.wait(), 1)
@@ -210,7 +209,7 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.reply("two")
 
         async def send(_):
-            raise WeChatNotAcknowledged(0)
+            return AcceptedUnknown(0)
 
         self.bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event"), self.crashing_save(self.bridge, "after"):
@@ -239,7 +238,7 @@ class StateContractTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.reply("one")
 
         async def send(_):
-            raise WeChatNotAcknowledged(0)
+            return AcceptedUnknown(0)
 
         self.bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event"), self.crashing_save(self.bridge, "before"):

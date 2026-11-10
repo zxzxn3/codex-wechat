@@ -9,13 +9,12 @@ import sys
 import time
 import uuid
 from .configuration import completion_template
-from .records import TurnResult
+from .records import (AcceptedUnknown, AuthenticationRequired, Delivered,
+                      Rejected, Retryable, TurnResult)
 from .slicing import split_text
-from .wechat import acknowledged_message_id
 from .media import MediaError, MAX_ATTACHMENTS, split_answer
 from .wechat_content import entry_summary, remember_quote
-from .errors import (ErrorAction, WeChatApiError, WeChatAuthExpired,
-                    WeChatNotAcknowledged, attachment_reason, disposition)
+from .errors import ErrorAction, attachment_reason, disposition
 from .diagnostics import current_request_id, error_fields, log_event
 from .prompts import render_ack
 from .command_specs import command_usage
@@ -319,6 +318,124 @@ class OutputDelivery:
             return
         self.bridge.spend_reply_budget()
 
+    async def _retry(self, entry, *, error=None, reason=None, retry_after=None):
+        """Persist one retryable attempt, then wait before trying again."""
+        bridge = self.bridge
+        entry["attempts"] = entry.get("attempts", 0) + 1
+        if entry["attempts"] >= SEND_ATTEMPTS:
+            bridge.fail_output(entry)
+            self._in_flight_id = None
+            return
+        bridge.save()
+        self._in_flight_id = None
+        if (isinstance(retry_after, (int, float))
+                and not isinstance(retry_after, bool) and retry_after >= 0):
+            delay = retry_after
+        else:
+            delay = SEND_RETRY_SECONDS * 3 ** (entry["attempts"] - 1)
+        fields = {
+            "role": entry.get("role", "body"),
+            "attempt": entry["attempts"],
+            "retry_in_ms": int(delay * 1000),
+            "job_id": entry.get("group"),
+            "request_id": entry.get("requestId"),
+        }
+        if error is not None:
+            fields.update(error_fields(error))
+            label = type(error).__name__
+        else:
+            fields.update(error_type=type(error or Retryable).__name__)
+            if reason:
+                fields["reason"] = reason
+            label = "channel"
+        log_event("output.send_failed", level="warning", component="output", **fields)
+        print(f"发送失败（{label}），稍后重试；回复已保存。", file=sys.stderr)
+        await asyncio.sleep(delay)
+
+    async def _handle_outcome(self, entry, outcome, *, send_ms, waiting):
+        """Apply the five explicit channel outcomes without exception guessing."""
+        bridge = self.bridge
+        if isinstance(outcome, Delivered):
+            self.charge_reply(entry)
+            remember_quote(bridge.state, outcome.message_id, entry_summary(entry))
+            bridge.state["outbox"].pop(0)
+            self._queued_at.pop(entry.get("id"), None)
+            self._in_flight_id = None
+            bridge.state["consecutiveSendFailures"] = 0
+            log_event("output.sent", component="output", role=entry.get("role", "body"),
+                      attempt=entry.get("attempts", 0), duration_ms=send_ms,
+                      queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
+                      request_id=entry.get("requestId"), **waiting)
+            bridge.latency.sends.append(send_ms)
+            bridge.state["lastSendMs"] = round(send_ms, 1)
+            bridge.mark_wechat_valid()
+            bridge.save()
+            if not bridge.state["outbox"]:
+                bridge.outbox_drained.set()
+            elif SEND_SPACING_SECONDS > 0:
+                # Space consecutive sends to the same user instead of bursting
+                # the whole sliced answer at once.
+                await asyncio.sleep(SEND_SPACING_SECONDS)
+            return
+
+        if isinstance(outcome, AcceptedUnknown):
+            self.charge_reply(entry)
+            entry["attempts"] = entry.get("attempts", 0) + 1
+            bridge.state["deliveryUnknownTotal"] += 1
+            self.paused = True
+            log_event("output.delivery_unknown", level="warning", component="output",
+                      role=entry.get("role", "body"), attempt=entry["attempts"],
+                      error_type="AcceptedUnknown", error_code=outcome.ret,
+                      queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
+                      request_id=entry.get("requestId"))
+            bridge.fail_output(entry, notify=False, status="delivery_unknown")
+            self._in_flight_id = None
+            log_event("output.send_paused", level="warning", component="output",
+                      reason="not_acknowledged", release="next_inbound",
+                      send_failures=bridge.state["consecutiveSendFailures"],
+                      queued=len(bridge.state["outbox"]))
+            return
+
+        if isinstance(outcome, Rejected):
+            self.charge_reply(entry)
+            entry["attempts"] = entry.get("attempts", 0) + 1
+            # Any explicit API rejection is terminal for this payload. A
+            # prepare_failed response usually means the context token is stale;
+            # hold the queue until a fresh inbound message arrives.
+            log_event("output.send_rejected", level="warning", component="output",
+                      role=entry.get("role", "body"), attempt=entry["attempts"],
+                      error_code=outcome.code, api_error_kind=outcome.kind,
+                      queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
+                      request_id=entry.get("requestId"))
+            if outcome.kind in CONTEXT_REJECTION_KINDS:
+                log_event("output.waiting_context", level="warning", component="output",
+                          status="pending", queued=len(bridge.state["outbox"]))
+                bridge.state["wechatContextPending"] = True
+            bridge.fail_output(entry)
+            self._in_flight_id = None
+            return
+
+        if isinstance(outcome, Retryable):
+            await self._retry(entry, reason=outcome.reason,
+                              retry_after=outcome.retry_after)
+            return
+
+        if isinstance(outcome, AuthenticationRequired):
+            await bridge.require_wechat_rebind()
+            self._in_flight_id = None
+            return
+
+        # A channel adapter returning an unknown object is a programming error,
+        # not evidence that a retry is safe.
+        entry["attempts"] = entry.get("attempts", 0) + 1
+        log_event("output.send_rejected", level="warning", component="output",
+                  role=entry.get("role", "body"), attempt=entry["attempts"],
+                  error_type=type(outcome).__name__, reason="invalid_send_outcome",
+                  queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
+                  request_id=entry.get("requestId"))
+        bridge.fail_output(entry)
+        self._in_flight_id = None
+
     async def _next_sendable(self):
         """Block until an entry may be sent; None means the caller re-checks.
 
@@ -374,62 +491,16 @@ class OutputDelivery:
                           parts=entry.get("parts"), job_id=entry.get("group"),
                           request_id=entry.get("requestId"), **waiting)
                 send_started = time.perf_counter()
-                try:
-                    response = await bridge.channel.send(entry)
-                except WeChatApiError:
-                    self.charge_reply(entry)
-                    raise
+                outcome = await bridge.channel.send(entry)
                 send_ms = (time.perf_counter() - send_started) * 1000
-                self.charge_reply(entry)
-                message_id = acknowledged_message_id(response)
-                if message_id is not None:
-                    remember_quote(bridge.state, message_id, entry_summary(entry))
-            except WeChatAuthExpired:
-                await bridge.require_wechat_rebind()
-                self._in_flight_id = None
-                continue
-            except WeChatApiError as error:
-                entry["attempts"] = entry.get("attempts", 0) + 1
-                if isinstance(error, WeChatNotAcknowledged):
-                    # A no-id response is not a retryable failure: the first call
-                    # may already have been delivered, so resending can duplicate
-                    # it. Pause sending and keep the remaining queue intact for
-                    # the user's later /discard-or-resume decision.
-                    bridge.state["deliveryUnknownTotal"] += 1
-                    self.paused = True
-                    log_event("output.delivery_unknown", level="warning",
-                              component="output", role=entry.get("role", "body"),
-                              attempt=entry["attempts"], error_type=type(error).__name__,
-                              error_code=error.code, queued=len(bridge.state["outbox"]),
-                              job_id=entry.get("group"), request_id=entry.get("requestId"))
-                    bridge.fail_output(entry, notify=False, status="delivery_unknown")
-                    self._in_flight_id = None
-                    log_event("output.send_paused", level="warning", component="output",
-                              reason="not_acknowledged",
-                              release="next_inbound",
-                              send_failures=bridge.state["consecutiveSendFailures"],
-                              queued=len(bridge.state["outbox"]))
-                    continue
-                # Any explicit API rejection is terminal for this payload. A
-                # prepare_failed response usually means the context token is stale;
-                # hold the queue until a fresh inbound message arrives.
-                log_event("output.send_rejected", level="warning", component="output",
-                          role=entry.get("role", "body"), attempt=entry["attempts"],
-                          error_code=error.code, api_error_kind=error.kind,
-                          queued=len(bridge.state["outbox"]),
-                          job_id=entry.get("group"), request_id=entry.get("requestId"))
-                if error.kind in CONTEXT_REJECTION_KINDS:
-                    log_event("output.waiting_context", level="warning", component="output",
-                              status="pending", queued=len(bridge.state["outbox"]))
-                    bridge.state["wechatContextPending"] = True
-                bridge.fail_output(entry)
-                self._in_flight_id = None
-                continue
             except Exception as error:
-                entry["attempts"] = entry.get("attempts", 0) + 1
+                # Keep an adapter contract breach fail-safe: only ordinary
+                # transport failures are retried, never an unknown protocol or
+                # programming failure that could be amplified.
                 if disposition(error).primary is not ErrorAction.RETRYABLE:
                     # Only ordinary transport failures are retryable. An unknown
                     # programming/protocol failure must not be amplified.
+                    entry["attempts"] = entry.get("attempts", 0) + 1
                     log_event("output.send_rejected", level="warning", component="output",
                               role=entry.get("role", "body"), attempt=entry["attempts"],
                               error_type=type(error).__name__, queued=len(bridge.state["outbox"]),
@@ -437,36 +508,6 @@ class OutputDelivery:
                     bridge.fail_output(entry)
                     self._in_flight_id = None
                     continue
-                if entry["attempts"] >= SEND_ATTEMPTS:
-                    bridge.fail_output(entry)
-                    self._in_flight_id = None
-                    continue
-                bridge.save()
-                self._in_flight_id = None
-                delay = SEND_RETRY_SECONDS * 3 ** (entry["attempts"] - 1)
-                log_event("output.send_failed", level="warning", component="output",
-                          role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
-                          retry_in_ms=int(delay * 1000), job_id=entry.get("group"),
-                          request_id=entry.get("requestId"),
-                          **error_fields(error))
-                print(f"发送失败（{type(error).__name__}），稍后重试；回复已保存。", file=sys.stderr)
-                await asyncio.sleep(delay)
+                await self._retry(entry, error=error)
                 continue
-            bridge.state["outbox"].pop(0)
-            self._queued_at.pop(entry.get("id"), None)
-            self._in_flight_id = None
-            bridge.state["consecutiveSendFailures"] = 0
-            log_event("output.sent", component="output", role=entry.get("role", "body"),
-                      attempt=entry.get("attempts", 0), duration_ms=send_ms,
-                      queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
-                      request_id=entry.get("requestId"), **waiting)
-            bridge.latency.sends.append(send_ms)
-            bridge.state["lastSendMs"] = round(send_ms, 1)
-            bridge.mark_wechat_valid()
-            bridge.save()
-            if not bridge.state["outbox"]:
-                bridge.outbox_drained.set()
-            elif SEND_SPACING_SECONDS > 0:
-                # Space consecutive sends to the same user instead of bursting the
-                # whole sliced answer at once.
-                await asyncio.sleep(SEND_SPACING_SECONDS)
+            await self._handle_outcome(entry, outcome, send_ms=send_ms, waiting=waiting)

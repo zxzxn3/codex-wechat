@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.commands import dispatch, handle
+from codex_wechat.records import Delivered
 from codex_wechat.storage import Store
 
 
@@ -88,7 +89,7 @@ class DiscardTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(entry):
             sent.append(entry["text"])
-            return {"message_id": len(sent)}
+            return Delivered(str(len(sent)))
 
         bridge.channel.send = send
         return sent
@@ -229,7 +230,7 @@ class DiscardTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(entry):
             sent.append(entry["text"])
-            return {"message_id": len(sent)}
+            return Delivered(str(len(sent)))
 
         bridge.channel.send = send
         message = {

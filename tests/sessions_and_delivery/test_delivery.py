@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.backend import CodexRpcError, DeferTurn
-from codex_wechat.records import InputPhase, TurnResult
+from codex_wechat.records import Delivered, InputPhase, TurnResult
 from codex_wechat.storage import Store
 
 
@@ -246,7 +246,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_send_persists_last_latency_sample(self):
         b = self.bridge
         b.reply("one")
-        b.channel.send = AsyncMock(return_value={"message_id": "m"})
+        b.channel.send = AsyncMock(return_value=Delivered("m"))
         task = self.start(b.sender())
         await asyncio.wait_for(b.outbox_drained.wait(), 1)
         saved = self.store.load("bridge")

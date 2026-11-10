@@ -9,7 +9,7 @@ from codex_wechat.app import Bridge
 from codex_wechat.commands import HANDLERS, SETTINGS
 from codex_wechat.command_specs import HELP, HELP_ALL, REGISTRY
 from codex_wechat.configuration import Sending
-from codex_wechat.errors import WeChatApiError, WeChatNotAcknowledged
+from codex_wechat.records import AcceptedUnknown, Delivered, Rejected, Retryable
 from codex_wechat.storage import Store
 
 
@@ -77,7 +77,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(entry):
             sent.append(entry)
-            return {"message_id": len(sent)}
+            return Delivered(str(len(sent)))
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
@@ -108,8 +108,8 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
             nonlocal calls
             calls += 1
             if calls < 3:
-                raise OSError("simulated channel failure")
-            return {"message_id": calls}
+                return Retryable("simulated channel failure")
+            return Delivered(str(calls))
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event"), patch("codex_wechat.output_delivery.SEND_RETRY_SECONDS", 0):
@@ -131,7 +131,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
         async def send(_):
             nonlocal calls
             calls += 1
-            raise WeChatNotAcknowledged(0)
+            return AcceptedUnknown(0)
 
         bridge.channel.send = send
         with patch.object(Bridge, "reply_budget", lambda self: 9), \
@@ -155,7 +155,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
         async def send(_):
             nonlocal calls
             calls += 1
-            raise WeChatApiError(-2, "prepare_failed")
+            return Rejected(-2, "prepare_failed")
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event"):
@@ -177,7 +177,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(entry):
             sent.append(entry)
-            return {"message_id": len(sent)}
+            return Delivered(str(len(sent)))
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):

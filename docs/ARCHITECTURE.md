@@ -93,6 +93,9 @@
   本机保存前崩溃仍可能重复送达，不承诺恰好一次。
 - 自动回传和 `/get` 只接受当前会话 cwd 内的普通文件。该检查是保守近似，不等价于 Codex
   sandbox；附件说明 skill 是行为约束，不是强制隔离。
+- 微信发送适配器只返回 `Delivered`、`AcceptedUnknown`、`Rejected`、`Retryable` 或
+  `AuthenticationRequired` 五种结果；出站层只在这一个接口上决定扣预算、暂停、重试或重绑，
+  不再从异常文本和原始响应推断投递状态。
 - 服务端返回有效消息 ID 才算成功。HTTP 成功但没有 ID 时标记 delivery unknown，暂停当前
   运行时出站，保留队列和新增输出；下一条被接受的入站消息恢复发送，`/discard` 可主动清空。
 - 连续发送间隔、回复预算和 `delivery=unconfirmed` 阈值由代码定义，当前值只在

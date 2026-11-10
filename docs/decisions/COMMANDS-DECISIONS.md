@@ -32,6 +32,10 @@
   用户显式执行 `/discard`。
 - `staleOutbox` 已删除：恢复发送时不能证明旧队列必然过时，自动隔离会制造第二套状态语义。
   no-id 或恢复发送不会自动隔离、丢弃旧队列；剩余 outbox 按原顺序保留。
+- 发送适配器返回显式 `SendOutcome`，不靠异常子类或响应 dict 形状表达结果。只有
+  `Delivered` 扣预算并确认成功；`AcceptedUnknown` 扣预算后隔离且永不自动重发；
+  `Rejected` 扣预算后终止该 payload；`Retryable` 不扣预算并走有界退避；
+  `AuthenticationRequired` 不消费重试次数，转入重绑流程。
 
 ## 安全与权限
 

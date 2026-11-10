@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from codex_wechat.app import Bridge
 from codex_wechat.commands import dispatch
 from codex_wechat import diagnostics
+from codex_wechat.records import Delivered
 from codex_wechat.storage import Store
 from codex_wechat.wechat import WeChat
 from tests.support.http_fixtures import exchange
@@ -64,7 +65,7 @@ class DiagnosticStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.records()[-1]['command'], '/status')
 
     async def send_one(self):
-        self.bridge.channel.send = AsyncMock(return_value={})
+        self.bridge.channel.send = AsyncMock(return_value=Delivered("m"))
         task = asyncio.create_task(self.bridge.sender())
         try:
             await asyncio.wait_for(self.bridge.outbox_drained.wait(), 1)

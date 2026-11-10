@@ -8,8 +8,8 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from .errors import (WeChatApiError, WeChatAuthExpired, WeChatNotAcknowledged,
-                    WeChatPollTimeout, WeChatTransportError)
+from .errors import (WeChatApiError, WeChatAuthExpired, WeChatPollTimeout,
+                     WeChatTransportError)
 from .diagnostics import error_fields, log_event
 from .latency import timeout_stage
 from .wechat_http import PooledHTTP
@@ -17,6 +17,8 @@ from .configuration import DEFAULT_CONNECTION_IDLE_SECONDS
 from . import wechat_auth
 from .state import load_bridge_state
 from .wechat_auth import identity
+from .records import (AcceptedUnknown, AuthenticationRequired, Delivered, Rejected,
+                      Retryable, SendOutcome)
 
 BASE_URL = "https://ilinkai.weixin.qq.com"
 # This is the WeChat channel protocol identity, independent of the product version.
@@ -184,29 +186,34 @@ class WeChat:
             self.poll_timeout = min(MAX_POLL_TIMEOUT, max(1, suggested / 1000))
         return result
 
-    async def send(self, entry):
-        result = await self.request("ilink/bot/sendmessage", {"msg": {
-            "from_user_id": "", "to_user_id": entry["user"],
-            "client_id": entry["id"], "message_type": 2, "message_state": 2,
-            "context_token": entry["context"],
-            "item_list": [entry["item"]] if "item" in entry else
-                         [{"type": 1, "text_item": {"text": entry["text"]}}]}},
-            timeout=SEND_TIMEOUT, request_id=entry.get("requestId"))
+    async def send(self, entry) -> SendOutcome:
+        try:
+            result = await self.request("ilink/bot/sendmessage", {"msg": {
+                "from_user_id": "", "to_user_id": entry["user"],
+                "client_id": entry["id"], "message_type": 2, "message_state": 2,
+                "context_token": entry["context"],
+                "item_list": [entry["item"]] if "item" in entry else
+                             [{"type": 1, "text_item": {"text": entry["text"]}}]}},
+                timeout=SEND_TIMEOUT, request_id=entry.get("requestId"))
+        except WeChatAuthExpired:
+            return AuthenticationRequired()
+        except WeChatApiError as error:
+            return Rejected(error.code, error.kind)
+        except (WeChatTransportError, TimeoutError, ConnectionError, OSError) as error:
+            return Retryable(type(error).__name__)
         # A 200 alone does not prove delivery: record whether the server
         # acknowledged the message with an id, so a silent drop is visible.
         keys = result if isinstance(result, dict) else {}
         message_id = acknowledged_message_id(keys)
-        acknowledged = message_id is not None
         log_event("wechat.send_ack", level="debug", component="wechat",
-                  status="acked" if acknowledged else "no_id", count=len(keys),
+                  status="acked" if message_id is not None else "no_id", count=len(keys),
                   request_id=entry.get("requestId"))
-        if not acknowledged:
-            # Returning normally here made the caller record output.sent and drop
+        if message_id is None:
+            # A plain success return made the caller record output.sent and drop
             # the entry, so a dropped message looked delivered to everyone but the
-            # log. Raise instead: the outbox quarantines this as delivery_unknown
-            # and never retries it automatically.
-            raise WeChatNotAcknowledged(keys.get("ret"))
-        return result
+            # log. The explicit unknown outcome is quarantined and never retried.
+            return AcceptedUnknown(keys.get("ret"))
+        return Delivered(message_id)
 
     async def typing_ticket(self, user, context=None):
         body = {"ilink_user_id": user}

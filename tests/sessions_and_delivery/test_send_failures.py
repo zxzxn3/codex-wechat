@@ -7,8 +7,8 @@ import unittest
 from unittest.mock import patch
 
 from codex_wechat.app import Bridge
-from codex_wechat.errors import WeChatApiError, WeChatNotAcknowledged
 from codex_wechat.profiles import restore
+from codex_wechat.records import AcceptedUnknown, Delivered, Rejected, Retryable
 from codex_wechat.storage import Store
 
 
@@ -34,9 +34,10 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             nonlocal calls
             calls += 1
             if calls == 1:
-                raise OSError("simulated channel failure")
+                return Retryable("simulated channel failure")
             reached.set()
             await release.wait()
+            return Delivered(str(calls))
         bridge.channel.send = send
         task = asyncio.create_task(bridge.sender())
         try:
@@ -62,7 +63,8 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
             nonlocal calls
             calls += 1
             if calls == 1:
-                raise OSError("simulated channel failure")
+                return Retryable("simulated channel failure")
+            return Delivered(str(calls))
 
         bridge.channel.send = send
         with (patch("codex_wechat.output_delivery.log_event") as log_event,
@@ -77,6 +79,33 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
+    async def test_retryable_outcome_can_supply_its_wait(self):
+        bridge = self.bridge
+        bridge.reply("answer")
+        calls = 0
+        sleeps = []
+
+        async def send(_):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return Retryable("channel busy", retry_after=0.4)
+            return Delivered("m")
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+
+        bridge.channel.send = send
+        with patch("codex_wechat.output_delivery.log_event"), \
+                patch("codex_wechat.output_delivery.asyncio.sleep", sleep):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                await asyncio.wait_for(bridge.outbox_drained.wait(), 1)
+                self.assertEqual(sleeps[0], 0.4)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
     async def test_api_rejection_is_not_retried_and_waits_for_a_new_context(self):
         bridge = self.bridge
         bridge.reply("answer")
@@ -85,7 +114,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         async def send(_):
             nonlocal calls
             calls += 1
-            raise WeChatApiError(-2, "prepare_failed")
+            return Rejected(-2, "prepare_failed")
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event") as log_event:
@@ -115,7 +144,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         async def send(_):
             nonlocal calls
             calls += 1
-            raise WeChatNotAcknowledged(0)
+            return AcceptedUnknown(0)
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event") as log_event:
@@ -156,7 +185,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         async def send(_):
             nonlocal calls
             calls += 1
-            raise WeChatNotAcknowledged(0)
+            return AcceptedUnknown(0)
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event"):
@@ -181,7 +210,8 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         async def send(entry):
             attempts.append(entry)
             if not entry.get("failureNotice"):
-                raise WeChatNotAcknowledged(0)
+                return AcceptedUnknown(0)
+            return Delivered(str(len(attempts)))
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event"):
@@ -209,8 +239,8 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         async def send(entry):
             attempts.append(entry)
             if len([item for item in attempts if not item.get("failureNotice")]) == 1:
-                raise WeChatNotAcknowledged(0)
-            return {"message_id": len(attempts)}
+                return AcceptedUnknown(0)
+            return Delivered(str(len(attempts)))
 
         bridge.channel.send = send
         with (patch("codex_wechat.output_delivery.log_event") as log_event,
@@ -248,7 +278,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(entry):
             attempts.append(entry)
-            raise WeChatApiError(-2, "rate_limit_hint")
+            return Rejected(-2, "rate_limit_hint")
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event") as log_event:
@@ -275,7 +305,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(entry):
             attempts.append(entry)
-            raise RuntimeError("unexpected local failure")
+            return object()
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event"):
@@ -297,7 +327,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         bridge.reply("second")
 
         async def send(_):
-            raise WeChatNotAcknowledged(0)
+            return AcceptedUnknown(0)
 
         bridge.channel.send = send
         with patch("codex_wechat.output_delivery.log_event"):
@@ -324,7 +354,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
 
         async def restarted_send(entry):
             sent.append(entry)
-            return {"message_id": len(sent)}
+            return Delivered(str(len(sent)))
 
         restarted.channel.send = restarted_send
         task = asyncio.create_task(restarted.sender())
@@ -351,7 +381,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
         real_sleep = asyncio.sleep
 
         async def send(_):
-            raise OSError("simulated channel failure")
+            return Retryable("simulated channel failure")
 
         async def sleep(seconds, *args, **kwargs):
             if seconds:
@@ -380,6 +410,7 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
 
         async def send(_):
             stamps.append(time.perf_counter())
+            return Delivered(str(len(stamps)))
 
         bridge.channel.send = send
         with (patch("codex_wechat.output_delivery.log_event"),

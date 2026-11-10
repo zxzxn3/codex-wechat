@@ -8,11 +8,13 @@ from unittest.mock import AsyncMock, patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.command_specs import REGISTRY
+from codex_wechat.errors import WeChatApiError, WeChatAuthExpired, WeChatTransportError
 from codex_wechat.media import Media, split_answer
+from codex_wechat.records import (AcceptedUnknown, AuthenticationRequired, Delivered,
+                                  Rejected, Retryable)
 from codex_wechat.storage import Store
 from codex_wechat.wechat import SEND_TIMEOUT, TYPING_TIMEOUT, WeChat
 from codex_wechat.wechat_content import remember_quote
-from codex_wechat.errors import WeChatAuthExpired, WeChatNotAcknowledged
 
 
 class FakeChannel:
@@ -70,7 +72,7 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bridge.state["inbox"][1]["text"], "voice prompt")
 
         bridge.reply("answer")
-        bridge.channel.send = AsyncMock(return_value={"message_id": "900"})
+        bridge.channel.send = AsyncMock(return_value=Delivered("900"))
         self.tasks.append(asyncio.create_task(bridge.sender()))
         await asyncio.wait_for(bridge.outbox_drained.wait(), 1)
         self.assertEqual(bridge.state["quoteCache"]["900"], "answer")
@@ -79,7 +81,7 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         bridge = Bridge(self.store, {"user": "owner", "token": "token"}, {}, channel=FakeChannel())
         bridge.state["context"] = "context"
         bridge.reply("answer")
-        bridge.channel.send = AsyncMock(return_value={"msgid": 900})
+        bridge.channel.send = AsyncMock(return_value=Delivered("900"))
         self.tasks.append(asyncio.create_task(bridge.sender()))
         await asyncio.wait_for(bridge.outbox_drained.wait(), 1)
         self.assertEqual(bridge.state["quoteCache"]["900"], "answer")
@@ -233,10 +235,25 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
     async def test_send_message_uses_short_timeout(self):
         client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
         client.request = AsyncMock(return_value={"msgid": 900})
-        await client.send({
+        self.assertEqual(await client.send({
             "id": "client", "user": "owner", "context": "context", "text": "answer",
-        })
+        }), Delivered("900"))
         self.assertEqual(client.request.await_args.kwargs["timeout"], SEND_TIMEOUT)
+
+    async def test_send_maps_failures_to_explicit_outcomes(self):
+        client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
+        cases = (
+            (WeChatAuthExpired(), AuthenticationRequired()),
+            (WeChatApiError(-2, "prepare_failed"), Rejected(-2, "prepare_failed")),
+            (WeChatTransportError("offline"), Retryable("WeChatTransportError")),
+        )
+        for error, expected in cases:
+            with self.subTest(error=type(error).__name__):
+                client.request = AsyncMock(side_effect=error)
+                self.assertEqual(await client.send({
+                    "id": "client", "user": "owner",
+                    "context": "context", "text": "answer",
+                }), expected)
 
     async def test_a_200_without_a_message_id_is_not_reported_as_sent(self):
         # Observed in the wild: the bot's outbound text channel was blocked, the
@@ -244,20 +261,16 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
         # working. Returning normally lost the reply silently.
         client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
         client.request = AsyncMock(return_value={"ret": 0})
-        with self.assertRaises(WeChatNotAcknowledged) as raised:
-            await client.send({
-                "id": "client", "user": "owner", "context": "context", "text": "answer",
-            })
-        self.assertEqual(raised.exception.kind, "not_acknowledged")
-        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(await client.send({
+            "id": "client", "user": "owner", "context": "context", "text": "answer",
+        }), AcceptedUnknown(0))
 
     async def test_an_empty_response_is_not_reported_as_sent(self):
         client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
         client.request = AsyncMock(return_value={})
-        with self.assertRaises(WeChatNotAcknowledged):
-            await client.send({
-                "id": "client", "user": "owner", "context": "context", "text": "answer",
-            })
+        self.assertEqual(await client.send({
+            "id": "client", "user": "owner", "context": "context", "text": "answer",
+        }), AcceptedUnknown(None))
 
     async def test_empty_or_non_scalar_message_ids_are_not_acknowledgements(self):
         client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
@@ -269,23 +282,24 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
                          {"ret": 0, "msg_id": {}}):
             with self.subTest(response=response):
                 client.request = AsyncMock(return_value=response)
-                with self.assertRaises(WeChatNotAcknowledged):
-                    await client.send({
-                        "id": "client", "user": "owner",
-                        "context": "context", "text": "answer",
-                    })
+                self.assertEqual(await client.send({
+                    "id": "client", "user": "owner",
+                    "context": "context", "text": "answer",
+                }), AcceptedUnknown(response.get("ret")))
 
     async def test_any_supported_protocol_id_is_accepted(self):
         client = WeChat({"token": "token", "base_url": "https://ilinkai.weixin.qq.com"})
-        for response in ({"msgid": 900}, {"msg_id": "901"},
-                         {"message_id": "902"}, {"messageId": "903"},
-                         {"msgId": "904"}):
+        for response, expected in (({"msgid": 900}, "900"),
+                                   ({"msg_id": "901"}, "901"),
+                                   ({"message_id": "902"}, "902"),
+                                   ({"messageId": "903"}, "903"),
+                                   ({"msgId": "904"}, "904")):
             with self.subTest(response=response):
                 client.request = AsyncMock(return_value=response)
                 self.assertEqual(await client.send({
                     "id": "client", "user": "owner",
                     "context": "context", "text": "answer",
-                }), response)
+                }), Delivered(expected))
 
     async def test_video_snapshot_and_upload_item(self):
         with tempfile.TemporaryDirectory() as source:
