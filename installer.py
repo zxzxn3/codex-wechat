@@ -279,7 +279,7 @@ def available_installed_release_id(source: Path, target: Path) -> str | None:
 
 
 def _private(relative: Path) -> bool:
-    if relative.name in ("config.json", "config.json.tmp"):
+    if relative in (Path("config.json"), Path("config.json.tmp")):
         return True
     for part in relative.parts:
         if part in PRIVATE_NAMES:

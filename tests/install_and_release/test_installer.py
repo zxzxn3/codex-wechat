@@ -114,6 +114,17 @@ class InstallerTests(unittest.TestCase):
         ):
             self.assertNotIn(relative, files)
 
+    def test_payload_keeps_nested_files_named_like_runtime_config(self):
+        nested = (Path("docs/config.json"), Path("docs/config.json.tmp"))
+        for relative in nested:
+            path = self.source / relative
+            path.write_text("public fixture\n", encoding="utf-8")
+
+        files = installer.project_files(self.source)
+
+        for relative in nested:
+            self.assertIn(relative, files)
+
     @requires_symlinks
     def test_payload_refuses_file_source_and_directory_symlinks(self):
         link = self.source / "link.py"
