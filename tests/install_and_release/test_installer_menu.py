@@ -18,12 +18,12 @@ class InstallerMenuTests(unittest.TestCase):
              patch.object(installer, 'default_target', side_effect=AssertionError('target inspected')):
             self.assertEqual(installer.main([]), 0)
 
-    def test_introduction_declares_internal_beta_terms(self):
+    def test_introduction_declares_open_source_license(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             installer.introduction()
         text = output.getvalue()
-        for phrase in ("专有内测版本", "保密", "重新分发", "LICENSE"):
+        for phrase in ("Apache License 2.0", "LICENSE", "TRADEMARKS.md"):
             self.assertIn(phrase, text)
 
     def test_noninteractive_is_explicit_and_does_not_read_input(self):

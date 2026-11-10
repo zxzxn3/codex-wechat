@@ -1,7 +1,7 @@
 # Brand assets
 
-The files in this directory are project identity assets. They are licensed
-separately from the source code and documentation.
+The files in this directory are project identity assets. They are not licensed
+under the Apache License 2.0 that covers the source code and documentation.
 
 ## Files
 
@@ -26,12 +26,11 @@ The source project records these character references:
 - Video reference for the GPT input frame:
   <https://www.bilibili.com/video/BV1gVHA6mEbS/>
 
-The original character post states CC BY-NC-SA 4.0. The project's adapted
+The original character post states **CC BY-NC-SA 4.0**. The project's adapted
 mascot is therefore also made available under
 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/):
-attribution, noncommercial use, and share-alike are required. This artwork
-license is independent of the repository's source-code and documentation
-license.
+attribution, noncommercial use, and share-alike are required. The code and
+documentation remain under Apache-2.0; this artwork license is separate.
 
 Changes made for this project: a reference frame was supplied to GPT for
 reinterpretation, the background was changed from `#242424` to `#0057B8`, and

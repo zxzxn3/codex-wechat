@@ -4,13 +4,12 @@
 cfg 工作树的一部分。对外更新时，在独立仓库中提交并推送，核对发布内容不包含私有数据；
 cfg 只保存本机其它配置，不保存本项目源码。
 
-当前远端为 `https://github.com/zxzxn3/codex-wechat.git`，发布阶段保持私有。内测入口使用
-GitHub Contents API 和 fine-grained PAT 从同一仓库取得 bootstrap，不需要额外公开引导库；
-Windows 开发从同一远端取得源码，切换环境前先同步，避免两份源码分叉。
+当前远端为 `https://github.com/zxzxn3/codex-wechat.git`。公开入口直接读取该仓库
+`main` 分支的 bootstrap，不需要额外引导库、GitHub 登录或访问凭据；Windows 开发从同一
+远端取得源码，切换环境前先同步，避免两份源码分叉。
 
-内测 PAT 只授予该仓库 `Contents: Read-only`。bootstrap 使用临时 Authorization header
-clone 到临时目录，再调用同一个本地安装器；token 不进入 argv、remote URL、更新来源、
-持久配置或日志，临时 git config 在 clone 完成后立即删除。PAT 撤销后新安装与更新立即失效。
+bootstrap 从公开 raw 地址下载安装器，再由安装器把同一仓库 clone 到临时目录并调用安装
+流程。安装和更新只依赖公开仓库与声明的运行时前提。
 
 平台网络入口调用同一个安装器；依赖声明集中在 `installer.py` 和 requirements 文件。
 原生二维码可用时不安装 Python 回退；附件 skill 由组件入口选择安装。
