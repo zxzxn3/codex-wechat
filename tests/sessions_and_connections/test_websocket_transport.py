@@ -25,6 +25,22 @@ class WebSocketTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(transport.shared)
         self.assertIsNone(transport.proc)
 
+    async def test_connect_identifies_the_client_with_the_build_id(self):
+        transport = self.transport()
+        transport.read = AsyncMock()
+        transport.rpc = AsyncMock(return_value={})
+        transport.write = AsyncMock()
+        socket = Mock()
+        with (patch("websockets.asyncio.client.connect",
+                    AsyncMock(return_value=socket)),
+              patch("codex_wechat.codex_transport.build_id",
+                    return_value="fixture-release")):
+            await transport.connect([], {})
+        self.assertIs(transport.websocket, socket)
+        initialize = transport.rpc.await_args_list[0]
+        self.assertEqual(initialize.args[0], "initialize")
+        self.assertEqual(initialize.args[1]["clientInfo"]["version"], "fixture-release")
+
     async def test_send_without_child_and_close_only_our_connection(self):
         transport = self.transport()
         end = asyncio.Event()

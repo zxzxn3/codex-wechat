@@ -49,12 +49,14 @@ class DiagnosticsTests(unittest.TestCase):
         return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
 
     def test_jsonl_record_has_only_declared_metadata(self):
-        diagnostics.log_event("input.received", component="input", kind="input",
-                              chars=12, count=2, ok=True, status="preparing")
+        with patch("codex_wechat.diagnostics.build_id", return_value="fixture-release"):
+            diagnostics.log_event("input.received", component="input", kind="input",
+                                  chars=12, count=2, ok=True, status="preparing")
         records = self.records()
         self.assertEqual(len(records), 1)
         record = records[0]
         self.assertEqual(record["event"], "input.received")
+        self.assertEqual(record["version"], "fixture-release")
         self.assertEqual(record["component"], "input")
         self.assertEqual(record["chars"], 12)
         self.assertTrue(record["ok"])

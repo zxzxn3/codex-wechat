@@ -11,7 +11,7 @@ from codex_wechat.commands import HANDLERS, dispatch, parse_control, validate
 from codex_wechat.errors import UserFacingError
 from codex_wechat.prompts import SETTINGS_HELP, prompt_text
 from codex_wechat.storage import Store
-from codex_wechat.version import release_id
+from codex_wechat.version import build_id, release_id
 
 
 class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -90,6 +90,19 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(release_id(temp), "fixture-release")
             Path(temp, ".release.json").write_text("{invalid", encoding="utf-8")
             self.assertEqual(release_id(temp), "")
+
+    def test_build_id_caches_the_installed_release_or_dev_fallback(self):
+        build_id.cache_clear()
+        self.addCleanup(build_id.cache_clear)
+        with patch("codex_wechat.version.release_id",
+                   return_value="fixture-release") as read_release:
+            self.assertEqual(build_id(), "fixture-release")
+            self.assertEqual(build_id(), "fixture-release")
+        read_release.assert_called_once_with()
+
+        build_id.cache_clear()
+        with patch("codex_wechat.version.release_id", return_value=""):
+            self.assertEqual(build_id(), "dev")
 
     async def test_help_all_lists_the_complete_catalogue_and_rejects_other_arguments(self):
         self.bridge.ensure_backend = AsyncMock()
