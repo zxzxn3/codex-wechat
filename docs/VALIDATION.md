@@ -35,16 +35,17 @@
   1038 项中 1011 通过、27 跳过、0 失败，ruff 干净。匿名公开一行安装成功；服务
   `status` 返回 bound、auth valid、delivery ok、state ok，`unsent` 为 0。真实微信 `/v`
   显示 release ID 和 Codex 版本；日志构建标识已切换为 release ID。Codex 0.166.0 上
-  `thread/settings/update` 的 `{model, effort}` 与 `{cwd}` 均实测生效。
+  `thread/settings/update` 的 `{model, effort}` 与 `{cwd}` 均实测生效；同机还验证了
+  更新、重启、卸载和基础 App IPC follower。
 - Windows 历史提交 `ab6ab61`：完整离线测试和 Ruff 通过；`057a96f` 也有较早的完整报告。
   这些历史结果用于追溯，当前证据以上一节为准。
 - Windows 服务生命周期曾实机验证 PowerShell 5.1、Scheduled Task、Job Object 清理、单实例
   和命令入口互斥；通知仍按尽力而为能力处理，不写成已验证。以上历史证据均缺少可核对到当前
   提交的完整生命周期记录。
-- Windows App IPC 曾验证 writer 冲突、身份核对和无 App / App 已持有 / App 后启动状态；
-  仍受 App 版本影响。
-- Windows 安装、启动、提权拒绝和核心服务路径已有当前实机证据；更新后的服务生命周期和
-  purge 卸载仍待当前布局复测。
+- Windows App IPC 已实机验证基础跟随、writer 冲突、身份核对和无 App / App 已持有 /
+  App 后启动状态；三端并发和 App 更新兼容仍受 App 版本影响。
+- Windows 安装、更新、启动、重启、提权拒绝、核心服务路径和卸载均已有当前实机证据；
+  三端并发和更细的任务时序仍需按目标环境复测。
 - 2026-11-10 Linux `v1.0`（`9ddaa16`）：本机构建 release `5f82a9be2b43942c`，完成默认
   路径布局的安装更新、systemd restart 和 status 检查。该证据不代表自定义 XDG/数据根组合，
   也不代表匿名公开一行安装已验证。
@@ -79,7 +80,7 @@
 - Windows 命名管道存在性和空闲发现已有历史本机实测；App 更新后的 IPC 兼容、多 home、
   三端并发和 `service.log` 连续轮转仍需实机验证。
 - Windows 当前实机未逐项覆盖安装器交互菜单、运行中 `/switch` `/new` detach、审批和原生
-  问题、App IPC 跟随、图片/文件/语音/引用真实收发以及卸载。`bootstrap.ps1` 在父进程捕获
+  问题、图片/文件/语音/引用真实收发以及三端并发。`bootstrap.ps1` 在父进程捕获
   stdout/stderr 时的 native stderr 行为也仍需确认。
 - 非 ASCII 用户目录下的 Windows `.cmd`、Linux GNOME 代理探测和 Windows 共享后台 WMI
   路径只有在目标环境实测后才能写成完整通过。

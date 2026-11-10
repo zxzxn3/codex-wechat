@@ -8,11 +8,11 @@
 
 | 范围 | Linux | Windows |
 | --- | --- | --- |
-| 安装、更新、重启、卸载 | 安装、更新、重启和 status 已实机验证；卸载为离线回归 | 2026-11-11 实机完成匿名一行安装、status 和服务使用；更新、卸载待当前布局复测 |
-| systemd / Scheduled Task | 支持；默认布局已实机验证，自定义 XDG 待复测 | 支持；当前安装后的 Scheduled Task 启动和 service status 已实测，任务时序与卸载待复测 |
+| 安装、更新、重启、卸载 | 安装、更新、重启和 status 已实机验证；卸载为离线回归 | 2026-11-11 实机完成匿名一行安装，并验证更新、重启、status 和卸载 |
+| systemd / Scheduled Task | 支持；默认布局已实机验证，自定义 XDG 待复测 | 支持；当前安装后的 Scheduled Task 启动、service status 和卸载已实测，任务时序待复测 |
 | 登录自启 | 支持 | 支持，当前 action 已改为只传安装根 |
 | `.cmd` 短入口 | 不适用 | 支持；非 ASCII 用户目录待复测 |
-| App IPC follower | 实验性 | 实验性，三端并发待复测 |
+| App IPC follower | 实验性 | 实验性；基础跟随路径已实机验证，三端并发与 App 更新兼容待复测 |
 | 共享 daemon | 支持 | 支持，App 并发需复测 |
 
 “支持”表示已实现并纳入维护；“实验性”允许尝试但不保证；未列出的 Codex/App 版本按待验证
