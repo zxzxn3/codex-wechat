@@ -38,6 +38,12 @@
   <sub>codex-wechat 是第三方独立项目，与 OpenAI、DeepSeek、腾讯及其关联方没有隶属、合作、授权或背书关系。相关名称与商标归各自权利人所有。</sub>
 </p>
 
+<p align="center">
+  <sub>品牌形象由 GPT 基于 Bilibili 来源图生成；原角色上善无形、二创 ZipZipPipe，相关素材按
+  <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>
+  单独提供；详见<a href="assets/branding/README.md">素材说明</a>。</sub>
+</p>
+
 > **内测中**：当前仓库保持私有，仅供从仓库所有者处取得 fine-grained PAT 的用户测试。
 > 下方内测安装命令包含临时 PAT，公开发布前会移除。
 
@@ -278,6 +284,11 @@ README 用于项目介绍；agent、维护者和测试者从 [文档索引](docs
 本项目采用 [Proprietary Beta License](LICENSE)，不是开源软件。仅授权仓库所有者直接许可的
 个人在自控设备上进行非商业评估和测试；不得转售、再分发、商用或创建衍生作品。正式发布前
 请以 `LICENSE` 原文为准。
+
+`assets/branding/` 中的 mascot 是基于社区二创角色的美术改编，单独按
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 提供，不适用
+源代码的 Proprietary Beta License；署名、来源和修改记录见
+[品牌素材说明](assets/branding/README.md)。
 
 “Codex”“OpenAI”“DeepSeek”“微信”“WeChat”“Tencent”等名称与商标归各自权利人所有。
 本项目是第三方独立开发，与 OpenAI、DeepSeek、腾讯及其关联方没有隶属、合作、授权或背书关系。

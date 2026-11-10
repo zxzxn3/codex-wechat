@@ -2,6 +2,10 @@ codex-wechat Proprietary Beta License
 
 Copyright (c) 2026 zxzxn3. All rights reserved.
 
+Brand assets under `assets/branding/` are excluded from this License and are
+separately made available under CC BY-NC-SA 4.0. See
+`assets/branding/README.md` for attribution, source, and modification details.
+
 This software, including its source code, binaries, documentation, update
 artifacts, and related materials (collectively, the "Software"), is proprietary
 and is not open-source software.
