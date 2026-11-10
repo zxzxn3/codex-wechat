@@ -75,6 +75,8 @@
   epoch 提交。连接或选择已变化时拒绝提交，旧选择保持不变。
 - 提交产生一个 `SelectionLease`；回合、审批、问题和输出必须携带该 lease 对应的
   `Source`。旧 selection 的晚到事件不能写入新会话。
+- question 和 approval 还记录创建时的 lease；connection、selection epoch、thread 或 writer
+  变化后，旧 token 只能失效，不能把答案送回新的运行身份。
 - 输入从 inbox 进入 currentInput；RPC 前记录 dispatching，接受后记录 accepted。
   preparing 可恢复；dispatching 结果未知和 accepted 均不自动重放，用客户端消息 ID 仅追踪，
   不承诺服务端持久幂等。
