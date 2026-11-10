@@ -14,6 +14,8 @@
 | thread / 会话 | Codex 的持久会话，拥有独立历史和目录 | 不是 turn |
 | turn / 回合 | 一次从输入到完成或中断的执行 | 不是一条微信消息 |
 | writer / 写入者 | 当前持有 thread 写权的客户端 | 同一 thread 同时只有一个 writer |
+| prepared selection | 已连接、但尚未改变当前选择的 thread 目标 | 不是已提交会话 |
+| selection lease | 已提交的 backend、连接、selection epoch、thread 和 writer 身份 | 不是可跨切换复用的旧输出 |
 | shared daemon | App、CLI 和桥接复用的 Codex App Server 后台 | 不是微信桥接服务 |
 | steer / queue | 追加到运行中的 turn / 等 turn 结束后执行 | 两者不能互换 |
 | detach | 切换或新建会话时放弃旧回合的本地交付 | 不是 stop |
@@ -69,13 +71,17 @@
 
 ## 输入与会话切换
 
+- `/new`、`/switch` 和启动恢复都先生成 `PreparedSelection`，再按原连接和 selection
+  epoch 提交。连接或选择已变化时拒绝提交，旧选择保持不变。
+- 提交产生一个 `SelectionLease`；回合、审批、问题和输出必须携带该 lease 对应的
+  `Source`。旧 selection 的晚到事件不能写入新会话。
 - 输入从 inbox 进入 currentInput；RPC 前记录 dispatching，接受后记录 accepted。
   preparing 可恢复；dispatching 结果未知和 accepted 均不自动重放，用客户端消息 ID 仅追踪，
   不承诺服务端持久幂等。
 - 明确不能 steer 时按 queue 排队。进入 service 前，输入和控制在有界队列内；异常恢复不会
   变成无界队列。
-- `/switch` 和 `/new` 可以在回合运行时执行：旧回合只在本地 detach，后台继续；旧来源未发送
-  输出、当前输入和排队输入作废。已经进入发送 API 的一条无法撤回。
+- `/switch` 和 `/new` 可以在回合运行时执行：新目标提交成功后，旧回合只在本地 detach，
+  后台继续；旧来源未发送输出、当前输入和排队输入作废。已经进入发送 API 的一条无法撤回。
 - `/model`、`/effort` 和 `/cwd` 只修改后续回合。目标准备失败时旧输入、输出和当前回合不变。
 - `/new` 已创建 thread 但本地提交失败时，只尝试删除该空 thread；`/switch` 不删除用户原有
   会话。真实服务端的删除行为仍属于待验证能力。

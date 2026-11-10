@@ -25,16 +25,12 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 bridge.backend.selected_thread = "old"
                 bridge.backend.set_writer(WRITER_NATIVE, "old")
                 bridge.backend.read_thread = AsyncMock(return_value={"status": {"type": "idle"}})
-
-                async def select(thread_id, overrides=None):
-                    bridge.backend.set_writer(WRITER_NATIVE, thread_id)
-                    return thread_id
+                bridge.backend.rpc = AsyncMock(return_value={"thread": {"id": "new"}})
 
                 async def release(thread_id, follow=False):
                     bridge.backend.set_writer(WRITER_RELEASED, thread_id)
                     return True
 
-                bridge.backend.thread = AsyncMock(side_effect=select)
                 bridge.backend.release_thread = AsyncMock(side_effect=release)
                 await activate(bridge, "new")
                 self.assertEqual(bridge.backend.writer_state("old"), WRITER_RELEASED)
@@ -48,8 +44,8 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
             try:
                 bridge = Bridge(store, {"user": "owner"}, {})
                 bridge.backend.read_thread = AsyncMock(return_value={"status": {"type": "idle"}})
-                bridge.backend.thread = AsyncMock(
-                    side_effect=lambda thread_id=None, overrides=None: thread_id or "created")
+                bridge.backend.rpc = AsyncMock(side_effect=lambda method, params: {
+                    "thread": {"id": params.get("threadId", "created")}})
                 bridge.backend.release_thread = AsyncMock(return_value=True)
                 await activate(bridge, "target")
                 bridge.backend.release_thread.assert_awaited_once_with("target", follow=True)
@@ -69,7 +65,7 @@ class NativeSettingsTests(unittest.IsolatedAsyncioTestCase):
                 conflict = CodexRpcError(-32600, "thread t already has an active writer")
                 bridge.backend.read_thread = AsyncMock(return_value={"status": {"type": "idle"},
                                                                      "name": "name", "cwd": "/cwd"})
-                bridge.backend.thread = AsyncMock(side_effect=conflict)
+                bridge.backend.rpc = AsyncMock(side_effect=conflict)
                 bridge.backend.release_thread = AsyncMock(return_value=True)
                 await activate(bridge, "t")
                 self.assertTrue(bridge.loaded)

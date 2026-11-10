@@ -27,6 +27,7 @@ from codex_wechat.prompts import (
     status_summary,
 )
 from codex_wechat.storage import Store
+from tests.support.selection import prepared_selection
 from codex_wechat.wechat import trusted_url
 from codex_wechat.profiles import backend_label, default_backends, definitions, ensure_backend_config
 
@@ -424,12 +425,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             "data": [{"id": "target", "name": "微信重构"}]})
         self.bridge.backend.read_thread = AsyncMock(return_value={
             "id": "target", "status": {"type": "inactive"}})
-        self.bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": "target",
-            "result": {"thread": {"id": "target"}},
-            "adopt": False,
-            "desktop": False,
-        })
+        self.bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(self.bridge.backend, "target"))
         await handle(self.bridge, "/switch", "重构")
         self.bridge.backend.prepare_thread.assert_awaited_once_with(
             "target", {}, thread={"id": "target", "status": {"type": "inactive"}})
@@ -446,12 +443,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                       "name": "其他会话"}]})
         self.bridge.backend.read_thread = AsyncMock(return_value={
             "id": target, "status": {"type": "inactive"}})
-        self.bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": target,
-            "result": {"thread": {"id": target}},
-            "adopt": False,
-            "desktop": False,
-        })
+        self.bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(self.bridge.backend, target))
         await handle(self.bridge, "/switch", "01a13162")
         self.bridge.backend.prepare_thread.assert_awaited_once()
         self.assertEqual(self.bridge.state["thread"], target)
@@ -465,12 +458,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                       "name": "其他会话"}]})
         self.bridge.backend.read_thread = AsyncMock(return_value={
             "id": target, "status": {"type": "inactive"}})
-        self.bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": target,
-            "result": {"thread": {"id": target}},
-            "adopt": False,
-            "desktop": False,
-        })
+        self.bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(self.bridge.backend, target))
         await handle(self.bridge, "/switch", "1234")
         self.bridge.backend.prepare_thread.assert_awaited_once()
         self.assertEqual(self.bridge.state["thread"], target)
@@ -518,12 +507,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.backend.list_threads = threads
         self.bridge.backend.read_thread = AsyncMock(return_value={
             "id": target, "status": {"type": "inactive"}})
-        self.bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": target,
-            "result": {"thread": {"id": target}},
-            "adopt": False,
-            "desktop": False,
-        })
+        self.bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(self.bridge.backend, target))
         await handle(self.bridge, "/switch", "dead")
         self.bridge.backend.prepare_thread.assert_awaited_once()
 

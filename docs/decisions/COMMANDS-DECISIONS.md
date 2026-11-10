@@ -52,6 +52,10 @@
 - `PurgePlan` 是安装契约给出的精确 owned leaves。Linux 和 Windows 只执行该计划，不分别
   重新解释“数据根下哪些东西属于应用”。这样可以删除调用点的重叠、链接和根目录 guard，
   把安全检查集中在不可构造非法状态的契约里。
+- 会话切换只有一个提交路径：`PreparedSelection` 在不改变当前选择的情况下准备目标，
+  `commit_prepared()` 必须匹配原连接和 selection epoch。成功返回 `SelectionLease`，
+  输出和回合以该 lease 的 `Source` 判断归属；旧 dict 快照、启动直选和命令层恢复分支不再
+  作为第二个状态机。
 - 已安装实例的运行时根固定。普通更新忽略当前 shell 中变化的 XDG 变量，冲突的
   `CODEX_WECHAT_DATA_ROOT` fail closed，不提供 `--reconfigure-roots` 或换根事务。
 - 需要搬迁运行时根时，用户先备份数据，再执行 purge 并从新环境重新安装。通过引入服务停止、

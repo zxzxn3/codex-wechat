@@ -7,11 +7,14 @@ pending contains UI approval data.
 import asyncio
 from collections import deque
 from copy import deepcopy
+from dataclasses import dataclass, field
+from enum import StrEnum
 import json
 import os
 from pathlib import Path
 import secrets
 import time
+from typing import Any
 import uuid
 
 from .records import AgentMessage, Source, TurnResult
@@ -52,6 +55,86 @@ WRITER_NATIVE = "native"        # this connection holds the writer
 WRITER_FOLLOWED = "followed"    # the App holds it and its event stream feeds us
 WRITER_RELEASED = "released"    # handed back after a turn; take it back next turn
 WRITER_BUSY = "busy"            # the desktop holds it and we could not follow
+
+
+class SelectionConflict(RuntimeError):
+    """A prepared selection no longer belongs to the current connection."""
+
+
+class PreparedSelectionKind(StrEnum):
+    NATIVE = "native"
+    FOLLOWER = "follower"
+    ADOPTED = "adopted"
+
+
+@dataclass(frozen=True)
+class PreparedSelection:
+    """A target validated off-selection and ready for one epoch-checked commit."""
+
+    expected_connection: str
+    expected_epoch: int
+    thread_id: str
+    kind: PreparedSelectionKind
+    result: dict | None = None
+    thread: dict | None = None
+    app: Any = None
+    created: bool = False
+    desktop: bool = False
+
+    def __post_init__(self):
+        if not self.expected_connection or not self.thread_id:
+            raise ValueError("prepared selection requires a connection and thread")
+        if type(self.expected_epoch) is not int or self.expected_epoch < 0:
+            raise ValueError("prepared selection epoch is invalid")
+        if not isinstance(self.kind, PreparedSelectionKind):
+            raise ValueError("prepared selection kind is invalid")
+        if self.kind is PreparedSelectionKind.ADOPTED:
+            if self.result is not None or self.app is not None or self.created:
+                raise ValueError("adopted selection cannot carry a result or follower")
+            return
+        if not isinstance(self.result, dict):
+            raise ValueError("prepared selection result does not match its kind")
+        if self.kind is PreparedSelectionKind.FOLLOWER:
+            if self.app is None or self.created:
+                raise ValueError("followed selection requires an App follower")
+        elif self.app is not None:
+            raise ValueError("native selection cannot carry an App follower")
+
+
+@dataclass(frozen=True)
+class SelectionLease:
+    """The single committed selection identity used by turns and output."""
+
+    source: Source
+    writer: str | None
+    follower: Any = field(default=None, compare=False, repr=False)
+
+
+@dataclass(frozen=True)
+class SelectionCommit:
+    """A committed target plus the follower it replaced."""
+
+    lease: SelectionLease
+    prepared: PreparedSelection
+    previous_app: Any = field(default=None, compare=False, repr=False)
+    deferred_cleanup: bool = False
+
+
+@dataclass(frozen=True)
+class SelectionSnapshot:
+    """Typed rollback state for a failed local selection save."""
+
+    selected_thread: str | None
+    info: dict
+    active: dict | None
+    pending: dict
+    app: Any
+    writer_states: dict
+    blocked: bool
+    selection_epoch: int
+    runtime_generation: int
+    attach_error: str | None
+
 
 TURN_ERROR_PROMPTS = {
     "usageLimitExceeded": "TURN_FAILED_USAGE_LIMIT",
@@ -241,32 +324,32 @@ class CodexBackend:
         """True when the next turn must take the writer back for this thread."""
         return self.writer_state(thread_id) in (WRITER_RELEASED, WRITER_BUSY)
 
-    def selection_snapshot(self):
+    def selection_snapshot(self) -> SelectionSnapshot:
         """Capture local selection state for a failed target change."""
-        return {
-            "selected_thread": self.selected_thread,
-            "info": deepcopy(self.info),
-            "active": self.active,
-            "pending": dict(self.pending),
-            "app": self.app,
-            "writer_states": dict(self.writer_states),
-            "blocked": self.blocked,
-            "selection_epoch": self.selection_epoch,
-            "runtime_generation": self.runtime_generation,
-            "attach_error": self.attach_error,
-        }
+        return SelectionSnapshot(
+            selected_thread=self.selected_thread,
+            info=deepcopy(self.info),
+            active=self.active,
+            pending=dict(self.pending),
+            app=self.app,
+            writer_states=dict(self.writer_states),
+            blocked=self.blocked,
+            selection_epoch=self.selection_epoch,
+            runtime_generation=self.runtime_generation,
+            attach_error=self.attach_error,
+        )
 
-    def restore_selection(self, snapshot):
-        self.selected_thread = snapshot["selected_thread"]
-        self.info = snapshot["info"]
-        self.active = snapshot["active"]
-        self.pending = snapshot["pending"]
-        self.app = snapshot["app"]
-        self.writer_states = snapshot["writer_states"]
-        self.blocked = snapshot["blocked"]
-        self.selection_epoch = snapshot["selection_epoch"]
-        self.runtime_generation = snapshot["runtime_generation"]
-        self.attach_error = snapshot["attach_error"]
+    def restore_selection(self, snapshot: SelectionSnapshot) -> None:
+        self.selected_thread = snapshot.selected_thread
+        self.info = snapshot.info
+        self.active = snapshot.active
+        self.pending = snapshot.pending
+        self.app = snapshot.app
+        self.writer_states = snapshot.writer_states
+        self.blocked = snapshot.blocked
+        self.selection_epoch = snapshot.selection_epoch
+        self.runtime_generation = snapshot.runtime_generation
+        self.attach_error = snapshot.attach_error
 
     async def attach_follower(self, thread_id, options, *, activate=True):
         """Attach to the App's copy of a thread and make it the selection.
@@ -386,6 +469,15 @@ class CodexBackend:
     def source(self, thread_id=None):
         return Source(self.source_name, self.connection_id, self.selection_epoch,
                       thread_id or self.selected_thread)
+
+    def selection_lease(self, thread_id=None) -> SelectionLease:
+        thread = thread_id or self.selected_thread
+        follower = self.app if thread == self.selected_thread else None
+        return SelectionLease(
+            source=self.source(thread),
+            writer=self.writer_state(thread),
+            follower=follower,
+        )
 
     def _new_token(self):
         while True:
@@ -876,33 +968,39 @@ class CodexBackend:
         return thread["id"]
 
     async def thread(self, thread_id=None, overrides=None):
-        options = self._thread_options(thread_id, overrides)
-        app = None
-        if thread_id and self.app and self.app.thread_id == thread_id and self.app.connected:
-            await self.app.settings(options)
-            app = self.app
-            result = app.thread_result()
-        elif thread_id:
-            try:
-                result = await self.rpc("thread/resume", {
-                    **options, "threadId": thread_id, "excludeTurns": True})
-            except CodexRpcError as error:
-                # Only this explicit writer conflict permits the App follower path.
-                # Other RPC failures must never silently change transports.
-                if error.code != -32600 or "already has an active writer" not in error.reason:
-                    raise
-                app = await self.attach_follower(thread_id, options, activate=False)
-                if app is None:
-                    raise
-                result = app.thread_result()
-        else:
-            result = await self.rpc("thread/start", options)
-        return await self._select_thread_result(result, app=app)
+        prepared = await self.prepare_thread(
+            thread_id, overrides, adopt_on_conflict=False)
+        commit = await self.commit_prepared(prepared, defer_cleanup=True)
+        await self.finish_prepared(commit)
+        return commit.prepared.thread_id
 
-    async def prepare_thread(self, thread_id=None, overrides=None, *, thread=None):
+    async def prepare_thread(
+        self,
+        thread_id=None,
+        overrides=None,
+        *,
+        thread=None,
+        adopt_on_conflict=True,
+    ):
         """Prepare a target without changing this connection's selection."""
+        expected_connection = self.connection_id
+        expected_epoch = self.selection_epoch
         options = self._thread_options(thread_id, overrides)
         if thread_id:
+            if self.app and self.app.thread_id == thread_id and self.app.connected:
+                await self.app.settings(options)
+                result = self.app.thread_result()
+                target = thread or result["thread"]
+                return PreparedSelection(
+                    expected_connection,
+                    expected_epoch,
+                    thread_id,
+                    PreparedSelectionKind.FOLLOWER,
+                    result=result,
+                    thread=target,
+                    app=self.app,
+                    desktop=target.get("status", {}).get("type") == "active",
+                )
             try:
                 result = await self.rpc("thread/resume", {
                     **options, "threadId": thread_id, "excludeTurns": True})
@@ -912,66 +1010,112 @@ class CodexBackend:
                 app = await self.attach_app(thread_id, options)
                 if app is not None:
                     result = app.thread_result()
-                    return {"thread_id": thread_id, "thread": thread or result["thread"],
-                            "result": result, "app": app, "adopt": False}
-                return {"thread_id": thread_id, "thread": thread or {}, "adopt": True}
-            return {"thread_id": result["thread"]["id"], "result": result, "adopt": False}
+                    target = thread or result["thread"]
+                    return PreparedSelection(
+                        expected_connection,
+                        expected_epoch,
+                        thread_id,
+                        PreparedSelectionKind.FOLLOWER,
+                        result=result,
+                        thread=target,
+                        app=app,
+                        desktop=target.get("status", {}).get("type") == "active",
+                    )
+                if not adopt_on_conflict:
+                    raise
+                return PreparedSelection(
+                    expected_connection,
+                    expected_epoch,
+                    thread_id,
+                    PreparedSelectionKind.ADOPTED,
+                    thread=thread or {},
+                    desktop=(thread or {}).get("status", {}).get("type") == "active",
+                )
+            return PreparedSelection(
+                expected_connection,
+                expected_epoch,
+                result["thread"]["id"],
+                PreparedSelectionKind.NATIVE,
+                result=result,
+            )
         result = await self.rpc("thread/start", options)
-        return {"thread_id": result["thread"]["id"], "result": result, "adopt": False,
-                "created": True}
+        return PreparedSelection(
+            expected_connection,
+            expected_epoch,
+            result["thread"]["id"],
+            PreparedSelectionKind.NATIVE,
+            result=result,
+            created=True,
+        )
 
-    async def commit_prepared(self, prepared, *, preserve_active=False,
-                              defer_cleanup=False):
+    async def commit_prepared(
+        self,
+        prepared: PreparedSelection,
+        *,
+        preserve_active=False,
+        defer_cleanup=False,
+    ) -> SelectionCommit:
+        if prepared.expected_connection != self.connection_id:
+            raise SelectionConflict("后端连接在会话准备期间已变化")
+        if prepared.expected_epoch != self.selection_epoch:
+            raise SelectionConflict("会话选择在准备期间已变化")
         previous_app = self.app
-        if prepared.get("adopt"):
+        if prepared.kind is PreparedSelectionKind.ADOPTED:
             selected = await self.adopt_thread(
-                prepared["thread_id"], prepared.get("thread"),
+                prepared.thread_id, prepared.thread,
                 preserve_active=preserve_active)
-            status = (prepared.get("thread") or {}).get("status")
+            status = (prepared.thread or {}).get("status")
             if isinstance(status, dict):
                 self.blocked = (bool(status.get("activeFlags"))
                                 or status.get("type") == "systemError")
             if defer_cleanup:
-                prepared["previous_app"] = previous_app
                 self.app = None
-            return selected
-        selected = await self._select_thread_result(
-            prepared["result"], app=prepared.get("app"),
-            refresh=False, preserve_active=preserve_active,
-            defer_cleanup=defer_cleanup)
-        if defer_cleanup:
-            prepared["previous_app"] = previous_app
-        return selected
+        else:
+            if prepared.result is None:
+                raise ValueError("prepared selection result is missing")
+            selected = await self._select_thread_result(
+                prepared.result, app=prepared.app,
+                refresh=False, preserve_active=preserve_active,
+                defer_cleanup=defer_cleanup)
+        return SelectionCommit(
+            lease=self.selection_lease(selected),
+            prepared=prepared,
+            previous_app=previous_app if defer_cleanup else None,
+            deferred_cleanup=defer_cleanup,
+        )
 
-    async def finish_prepared(self, prepared):
+    async def finish_prepared(self, commit: SelectionCommit) -> None:
         """Close the replaced App follower and activate the prepared one."""
-        previous_app = prepared.get("previous_app")
+        previous_app = commit.previous_app
         if previous_app is not None and previous_app is not self.app:
             await previous_app.close()
-        app = prepared.get("app")
-        if app is not None:
-            self.activate_follower(app)
         try:
             await self.refresh_runtime()
         except (OSError, RuntimeError, KeyError, TypeError, ValueError):
             pass
+        app = commit.prepared.app
+        if app is not None and commit.deferred_cleanup:
+            # The runtime turn must exist before the follower starts publishing
+            # interaction requests, otherwise a pending approval can arrive
+            # before the selected turn is known.
+            self.activate_follower(app)
         try:
             await self.refresh_usage()
         except (OSError, RuntimeError, KeyError, TypeError, ValueError):
             pass
 
-    async def abandon_prepared(self, prepared):
-        app = prepared.get("app")
+    async def abandon_prepared(self, prepared: PreparedSelection) -> None:
+        app = prepared.app
         if app is not None:
             await app.close()
             return
-        thread_id = prepared.get("thread_id")
+        thread_id = prepared.thread_id
         if thread_id:
             # A native prepare may have resumed or created a thread before the
             # local commit failed. Only a thread created by /new may be deleted;
             # an existing session is released without destroying its history.
             try:
-                if prepared.get("created"):
+                if prepared.created:
                     await self.rpc("thread/delete", {"threadId": thread_id})
                 else:
                     await self.release_thread(thread_id)

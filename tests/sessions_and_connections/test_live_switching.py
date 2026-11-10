@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.backend import (
-    CodexBackend, DeferTurn, WRITER_FOLLOWED, WRITER_NATIVE, WRITER_RELEASED,
+    CodexBackend, DeferTurn, SelectionConflict, WRITER_FOLLOWED, WRITER_NATIVE,
+    WRITER_RELEASED,
 )
 from codex_wechat.commands import _replace_target, handle
 from codex_wechat.errors import UserFacingError
@@ -17,6 +18,7 @@ from codex_wechat.lifecycle import can_change_session, can_steer_input
 from codex_wechat.records import InputPhase, Source, TurnResult
 from codex_wechat.storage import Store
 from codex_wechat.codex_transport import CodexRpcError
+from tests.support.selection import prepared_selection
 
 
 class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
@@ -122,9 +124,34 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(backend.selected_thread, "old")
         self.assertEqual(backend.writer_state("old"), WRITER_NATIVE)
-        await backend.commit_prepared(prepared)
+        commit = await backend.commit_prepared(prepared)
         self.assertEqual(backend.selected_thread, "target")
         self.assertEqual(backend.writer_state("target"), WRITER_NATIVE)
+        self.assertEqual(commit.lease.source.thread, "target")
+        self.assertEqual(commit.lease.writer, WRITER_NATIVE)
+
+    async def test_commit_rejects_a_prepared_selection_from_an_old_epoch(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.selected_thread = "old"
+        backend.rpc = AsyncMock(return_value={"thread": {"id": "target"}})
+        prepared = await backend.prepare_thread("target")
+        backend.selected_thread = "newer"
+        backend.selection_epoch += 1
+
+        with self.assertRaisesRegex(SelectionConflict, "选择"):
+            await backend.commit_prepared(prepared)
+        self.assertEqual(backend.selected_thread, "newer")
+
+    async def test_commit_rejects_a_prepared_selection_from_an_old_connection(self):
+        backend = CodexBackend({}, "/tmp", lambda _: None)
+        backend.selected_thread = "old"
+        backend.rpc = AsyncMock(return_value={"thread": {"id": "target"}})
+        prepared = await backend.prepare_thread("target")
+        backend.connection_id = "new-connection"
+
+        with self.assertRaisesRegex(SelectionConflict, "连接"):
+            await backend.commit_prepared(prepared)
+        self.assertEqual(backend.selected_thread, "old")
 
     async def test_prepare_thread_attaches_a_shared_active_target(self):
         backend = CodexBackend({}, "/tmp", lambda _: None)
@@ -140,7 +167,7 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         prepared = await backend.prepare_thread("target")
 
         self.assertEqual(backend.selected_thread, "old")
-        self.assertIs(prepared["app"], app)
+        self.assertIs(prepared.app, app)
         await backend.commit_prepared(prepared)
         self.assertEqual(backend.selected_thread, "target")
         self.assertEqual(backend.app, app)
@@ -162,12 +189,12 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         backend.attach_app = AsyncMock(return_value=app)
 
         prepared = await backend.prepare_thread("target")
-        await backend.commit_prepared(
+        commit = await backend.commit_prepared(
             prepared, preserve_active=True, defer_cleanup=True)
 
         self.assertIs(backend.active, old)
         app.activate.assert_not_called()
-        await backend.finish_prepared(prepared)
+        await backend.finish_prepared(commit)
         app.activate.assert_called_once()
 
     async def test_finish_prepared_discovers_an_active_adopted_target(self):
@@ -188,7 +215,11 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
             return {}
 
         backend.rpc = rpc
-        await backend.finish_prepared({"thread_id": "target", "adopt": True})
+        prepared = prepared_selection(
+            backend, "target", adopt=True, desktop=True,
+            thread={"id": "target", "status": {"type": "active"}})
+        commit = await backend.commit_prepared(prepared)
+        await backend.finish_prepared(commit)
 
         self.assertEqual(backend.active["turn"], "target-turn")
         self.assertEqual(self.bridge.prompt_fields()["status"], "运行中")
@@ -246,12 +277,8 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         bridge.backend.read_thread = AsyncMock(
             return_value={"status": {"type": "idle"}})
         target = "00000000-0000-0000-0000-000000000001"
-        bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": target,
-            "result": {"thread": {"id": target}},
-            "adopt": False,
-            "desktop": False,
-        })
+        bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(bridge.backend, target))
         bridge.backend.release_thread = AsyncMock(return_value=True)
 
         await handle(bridge, "/switch", target)
@@ -271,12 +298,9 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
     async def test_new_session_detaches_the_live_turn(self):
         bridge = self.bridge
         current = self.add_running_turn()
-        bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": "new-thread",
-            "result": {"thread": {"id": "new-thread"}},
-            "adopt": False,
-            "desktop": False,
-        })
+        bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(
+                bridge.backend, "new-thread", created=True))
         bridge.backend.release_thread = AsyncMock(return_value=True)
 
         await handle(bridge, "/new", "")
@@ -345,12 +369,8 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
             {"id": "old-output", "text": "old", "source": asdict(self.source())}]
         bridge.backend.read_thread = AsyncMock(
             return_value={"status": {"type": "idle"}})
-        bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": "target",
-            "result": {"thread": {"id": "target"}},
-            "adopt": False,
-            "desktop": False,
-        })
+        bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(bridge.backend, "target"))
         bridge.backend.commit_prepared = AsyncMock(
             side_effect=RuntimeError("commit failed"))
 
@@ -375,12 +395,8 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
             {"id": "old-output", "text": "old", "source": asdict(self.source())}]
         bridge.backend.read_thread = AsyncMock(
             return_value={"status": {"type": "idle"}})
-        bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": "target",
-            "result": {"thread": {"id": "target"}},
-            "adopt": False,
-            "desktop": False,
-        })
+        bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(bridge.backend, "target"))
         bridge.backend.release_thread = AsyncMock(return_value=True)
         bridge.save = Mock(side_effect=OSError("disk full"))
 
@@ -691,11 +707,8 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         bridge.backend.read_thread = AsyncMock(
             return_value={"status": {"type": "idle"}})
         target = "00000000-0000-0000-0000-000000000001"
-        bridge.backend.prepare_thread = AsyncMock(return_value={
-            "thread_id": target,
-            "result": {"thread": {"id": target}},
-            "adopt": False,
-        })
+        bridge.backend.prepare_thread = AsyncMock(
+            return_value=prepared_selection(bridge.backend, target))
         bridge.backend.release_thread = AsyncMock(return_value=True)
 
         await handle(bridge, "/switch", target)
@@ -727,11 +740,7 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
 
         bridge.backend.run = run
         bridge.backend.release_thread = AsyncMock(return_value=True)
-        prepared = {
-            "thread_id": target,
-            "result": {"thread": {"id": target}},
-            "adopt": False,
-        }
+        prepared = prepared_selection(bridge.backend, target)
 
         task = asyncio.create_task(bridge.worker())
         try:
@@ -780,11 +789,8 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         target = "00000000-0000-0000-0000-000000000001"
         bridge.backend.release_thread = AsyncMock(return_value=True)
 
-        await _replace_target(bridge, {
-            "thread_id": target,
-            "result": {"thread": {"id": target}},
-            "adopt": False,
-        })
+        await _replace_target(
+            bridge, prepared_selection(bridge.backend, target))
 
         self.assertNotIn("sessionChoices", bridge.state)
         self.assertEqual(bridge.model_choices, [])

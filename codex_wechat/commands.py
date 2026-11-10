@@ -13,10 +13,11 @@ from dataclasses import dataclass
 from . import autostart
 
 from .profiles import backend_argument, backend_label, definitions, ensure_backend_config, switch
-from .errors import UserFacingError, attachment_reason, backend_reason, writer_conflict
+from .errors import UserFacingError, attachment_reason, backend_reason
 from .codex_transport import CodexRpcError
 from .codex_connection import ConnectionSpec
-from .backend import WRITER_BUSY, WRITER_NATIVE
+from .backend import (PreparedSelection, SelectionCommit, WRITER_BUSY,
+                      WRITER_NATIVE)
 from .media import DEFAULT_MAX_MIB, MEDIA_MAX_MIB_MAX, MEDIA_MAX_MIB_MIN, MediaError
 from .records import InputPhase
 from .latency import provider_latency
@@ -61,21 +62,11 @@ def info(bridge, action=None, *, include_backend=False):
     return text
 
 
-async def adopt(bridge, thread_id, overrides, thread):
-    """Resume the target, or adopt it without a writer when the desktop owns it.
-
-    A desktop that holds the thread and cannot be followed must not fail the
-    session: the bridge would stay unloaded, pause input and retry forever.
-    """
-    try:
-        return await bridge.backend.thread(thread_id, overrides)
-    except CodexRpcError as error:
-        if not writer_conflict(error):
-            raise
-        return await bridge.backend.adopt_thread(thread_id, thread)
-
-
-async def _prepare_activation(bridge, thread_id=None, overrides=None):
+async def _prepare_activation(
+    bridge,
+    thread_id=None,
+    overrides=None,
+) -> PreparedSelection:
     """Validate and prepare a target; never touch the current selection."""
     saved = dict(overrides or {})
     thread = None
@@ -95,37 +86,34 @@ async def _prepare_activation(bridge, thread_id=None, overrides=None):
 
 
 async def activate(bridge, thread_id=None, overrides=None):
-    # Only this explicit command may override native settings. Never replay a mobile cache.
-    saved = dict(overrides or {})
+    """Commit one startup or background-target selection without side drift."""
+    prepared = await _prepare_activation(bridge, thread_id, overrides)
+    snapshot = bridge.backend.selection_snapshot()
     previous = bridge.state.get("thread")
-    desktop = False
-    thread = None
-    if thread_id:
-        thread = await bridge.backend.read_thread(thread_id)
-        status = thread.get("status", {}).get("type")
-        if status == "systemError":
-            raise UserFacingError(bridge.prompt("SESSION_TARGET_BLOCKED"))
-        if status == "active":
-            desktop = True
-            if not bridge.backend.shared:
-                raise UserFacingError(bridge.prompt("SESSION_TARGET_ACTIVE"))
-            if overrides:
-                raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
-            # Adopt the desktop's current settings instead of applying stale mobile overrides.
-            saved = {}
-    bridge.loaded = False
-    selected = await adopt(bridge, thread_id, saved, thread)
-    if previous and previous != selected:
-        # Leaving a thread must not keep its writer, or the App shows it locked.
-        await bridge.backend.release_thread(previous)
-    bridge.state["thread"] = selected
-    bridge.loaded = True
-    bridge.save()
+    was_loaded = bridge.loaded
+    commit = None
+    try:
+        commit = await bridge.backend.commit_prepared(
+            prepared, defer_cleanup=True)
+        selected = commit.prepared.thread_id
+        if previous and previous != selected:
+            # Leaving a thread must not keep its writer, or the App shows it locked.
+            await bridge.backend.release_thread(previous)
+        bridge.state["thread"] = selected
+        bridge.loaded = True
+        bridge.save()
+    except BaseException:
+        bridge.backend.restore_selection(snapshot)
+        bridge.state["thread"] = previous
+        bridge.loaded = was_loaded
+        await bridge.backend.abandon_prepared(prepared)
+        raise
+    await bridge.backend.finish_prepared(commit)
     # Adoption itself needs no writer: return it so the App can open this thread
     # while the bridge is idle. The next turn resumes it or follows the App.
-    if bridge.backend.writer_state(selected) in (None, WRITER_NATIVE):
-        await bridge.backend.release_thread(selected, follow=True)
-    return desktop
+    if bridge.backend.writer_state(commit.prepared.thread_id) in (None, WRITER_NATIVE):
+        await bridge.backend.release_thread(commit.prepared.thread_id, follow=True)
+    return prepared.desktop
 
 
 async def ensure_session(bridge):
@@ -660,15 +648,16 @@ def require_idle(bridge):
         raise UserFacingError(bridge.prompt("BUSY_CHANGE"))
 
 
-async def _replace_target(bridge, prepared):
+async def _replace_target(bridge, prepared: PreparedSelection):
     """Commit a prepared target, or leave the old state untouched on failure."""
     backend_name = bridge.backend_name
     thread_id = bridge.state.get("thread")
     backend_state = bridge.backend.selection_snapshot()
     reason = "switch"
     try:
-        selected = await bridge.backend.commit_prepared(
+        commit: SelectionCommit = await bridge.backend.commit_prepared(
             prepared, preserve_active=True, defer_cleanup=True)
+        selected = commit.prepared.thread_id
         # The worker keeps the job objects that are live right now; the discard
         # below only marks their staged copies, so remember the originals.
         live_jobs = [bridge.state.get("currentInput"), *bridge.state.get("inbox", [])]
@@ -695,7 +684,7 @@ async def _replace_target(bridge, prepared):
     bridge.output.sync_drained()
     if bridge.backend.active:
         await bridge.backend.detach_active()
-    await bridge.backend.finish_prepared(prepared)
+    await bridge.backend.finish_prepared(commit)
     if thread_id:
         await bridge.backend.release_thread(thread_id)
     selected = bridge.state["thread"]
