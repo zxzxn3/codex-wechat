@@ -137,6 +137,11 @@ class DataRootContractTests(unittest.TestCase):
 
         with self.environment(str(new)), self.runtime_views(), \
                 patch.object(platform_support, "INSTALL_ROOT", target):
+            with self.assertRaisesRegex(ValueError, "--reconfigure-roots"):
+                installer.configured_data_root(target)
+        with self.environment(str(new)), self.runtime_views(), \
+                patch.object(platform_support, "INSTALL_ROOT", target), \
+                patch.object(installer, "RECONFIGURE_ROOTS", True):
             self.assertEqual(installer.configured_data_root(target), new.resolve())
             with self.assertRaisesRegex(ValueError, "不一致"):
                 platform_support.data_root(target)

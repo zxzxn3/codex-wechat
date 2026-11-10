@@ -90,9 +90,20 @@ class RemoteUpdateTests(unittest.TestCase):
              patch.object(installer, "bootstrap", return_value=0) as remote, \
              patch.object(installer, "update", return_value=0) as local:
             self.assertEqual(installer.main(["update", "--non-interactive"]), 0)
-            remote.assert_called_once_with(self.target, self.choice, dry_run=False)
+            remote.assert_called_once_with(
+                self.target, self.choice, dry_run=False, reconfigure_roots=False)
+            remote.reset_mock()
+            self.assertEqual(
+                installer.main([
+                    "update", "--non-interactive", "--reconfigure-roots",
+                ]),
+                0,
+            )
+            remote.assert_called_once_with(
+                self.target, self.choice, dry_run=False, reconfigure_roots=True)
             self.assertEqual(installer.main(["update", "--source", str(self.source), "--non-interactive"]), 0)
-            local.assert_called_once_with(self.source, self.target, dry_run=False)
+            local.assert_called_once_with(
+                self.source, self.target, dry_run=False, reconfigure_roots=False)
 
     def test_missing_source_does_not_infer_any_git_remote(self):
         with patch.object(installer, "SOURCE_ROOT", self.target), \

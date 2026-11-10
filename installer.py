@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -31,6 +32,7 @@ DECLARATION_PATHS = {
     "complete": Path("assets/install/after-install.txt"),
 }
 NON_INTERACTIVE = False
+RECONFIGURE_ROOTS = False
 # Dependency declarations are shared; requirements versions live in their files.
 PYTHON_REQUIREMENTS = Path("requirements.txt")
 QR_FALLBACK_REQUIREMENTS = Path("requirements-qr.txt")
@@ -96,6 +98,17 @@ PRIVATE_NAMES = {
     UPDATE_SOURCE_FILE,
     ACTIVE_FILE,
 }
+
+
+@contextmanager
+def _root_configuration_mode(enabled):
+    global RECONFIGURE_ROOTS
+    previous = RECONFIGURE_ROOTS
+    RECONFIGURE_ROOTS = enabled
+    try:
+        yield
+    finally:
+        RECONFIGURE_ROOTS = previous
 REQUIRED_FILES = {
     Path(".gitignore"),
     Path("LICENSE"),
@@ -344,11 +357,18 @@ def _default_state_root() -> Path:
 
 
 def configured_data_root(target: Path) -> Path:
-    """Resolve one explicit root without repairing old installation layouts."""
+    """Keep the saved root unless an explicit root reconfiguration is requested."""
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
+    saved = saved_data_root(target)
+    if saved is not None and not RECONFIGURE_ROOTS:
+        if override and Path(override).expanduser().resolve() != saved.resolve():
+            raise ValueError(
+                "CODEX_WECHAT_DATA_ROOT 与已保存的数据根不一致；"
+                "如确需切换，请同时使用 --reconfigure-roots"
+            )
+        return saved
     if override:
         return Path(override).expanduser().absolute()
-    saved = saved_data_root(target)
     if saved is not None:
         return saved
     return _default_data_root()
@@ -362,18 +382,25 @@ def configured_config_file(target: Path) -> Path:
 
 
 def configured_config_root(target: Path) -> Path:
-    """The installer accepts an explicit XDG change and persists it."""
+    """Use XDG only for first install or an explicit root reconfiguration."""
+    saved = saved_config_root(target)
+    if saved is not None and not RECONFIGURE_ROOTS:
+        return saved
     config_home = os.environ.get("XDG_CONFIG_HOME")
     if config_home and Path(config_home).is_absolute():
         return Path(config_home).expanduser() / "codex-wechat"
-    return saved_config_root(target) or _default_config_root()
+    return _default_config_root() if RECONFIGURE_ROOTS else (saved or _default_config_root())
 
 
 def configured_state_root(target: Path) -> Path:
+    """Use XDG only for first install or an explicit root reconfiguration."""
+    saved = saved_state_root(target)
+    if saved is not None and not RECONFIGURE_ROOTS:
+        return saved
     state_home = os.environ.get("XDG_STATE_HOME")
     if state_home and Path(state_home).is_absolute():
         return Path(state_home).expanduser() / "codex-wechat"
-    return saved_state_root(target) or _default_state_root()
+    return _default_state_root() if RECONFIGURE_ROOTS else (saved or _default_state_root())
 
 
 def _write_root_marker(target: Path, filename: str, root: Path) -> None:
@@ -456,6 +483,132 @@ def check_runtime_root_layout(target: Path) -> None:
     workspace = (roots["数据根"] / "workspace").resolve()
     if workspace == install or install.is_relative_to(workspace):
         raise ValueError(f"工作区不能包含程序安装目录: {workspace}")
+
+
+def _saved_runtime_roots_for_reconfigure(target: Path) -> dict[str, Path]:
+    manifest = _saved_manifest(target)
+    if manifest is not None:
+        return manifest
+    roots = {}
+    missing = []
+    for role, filename in RUNTIME_ROOT_ROLES.items():
+        root = _saved_root(target, filename)
+        if root is None:
+            missing.append(filename)
+        else:
+            roots[role] = root
+    if missing:
+        raise ValueError(
+            "切换运行时根需要完整的旧路径标记；"
+            f"当前缺少 {', '.join(missing)}，请先完成一次普通更新"
+        )
+    return roots
+
+
+def _configured_runtime_roots(target: Path) -> dict[str, Path]:
+    values = _runtime_roots(target)
+    return {
+        role: values[filename]
+        for role, filename in RUNTIME_ROOT_ROLES.items()
+    }
+
+
+def _runtime_roots_differ(
+    previous: dict[str, Path], configured: dict[str, Path]
+) -> bool:
+    return any(previous[role].resolve() != configured[role].resolve()
+               for role in RUNTIME_ROOT_ROLES)
+
+
+@contextmanager
+def _lock_linux_state(state_dir: Path):
+    """Hold the bridge state lock across a runtime-root transition."""
+    import fcntl
+
+    state_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        state_dir.chmod(0o700)
+    except OSError:
+        pass
+    lock_path = state_dir / "lock"
+    with lock_path.open("a+") as stream:
+        try:
+            lock_path.chmod(0o600)
+        except OSError:
+            pass
+        try:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise ValueError(
+                "切换运行时根前检测到前台桥接仍在运行；请先停止桥接"
+            ) from None
+        yield
+
+
+def _stop_linux_service_for_root_change(systemctl: str, unit: Path) -> None:
+    result = subprocess.run(
+        [systemctl, "--user", "stop", unit.name],
+        cwd=unit.parent,
+        check=False,
+        timeout=35,
+    )
+    if result.returncode:
+        raise ValueError("切换运行时根前无法停止 codex-wechat 后台服务")
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        state, active = _linux_service_snapshot(systemctl, unit)
+        if state in {"missing", "unavailable"} or active in {"", "inactive", "failed"}:
+            return
+        time.sleep(0.25)
+    raise ValueError("codex-wechat 后台服务未在切换运行时根前停止")
+
+
+def _restart_linux_service_after_failed_root_change(systemctl: str | None, unit: Path) -> None:
+    if systemctl is None:
+        return
+    try:
+        result = subprocess.run(
+            [systemctl, "--user", "start", unit.name],
+            cwd=unit.parent,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        detail("运行时根切换失败；旧后台服务也未能自动恢复，请手动启动。")
+        return
+    if result.returncode:
+        detail("运行时根切换失败；旧后台服务也未能自动恢复，请手动启动。")
+
+
+@contextmanager
+def _linux_root_change_guard(target: Path, *, update: bool):
+    """Stop and lock the old service before changing persisted runtime roots."""
+    if IS_WINDOWS or not update or not RECONFIGURE_ROOTS:
+        yield False
+        return
+    previous = _saved_runtime_roots_for_reconfigure(target)
+    configured = _configured_runtime_roots(target)
+    if not _runtime_roots_differ(previous, configured):
+        yield False
+        return
+
+    unit = Path(target) / SERVICE_UNIT
+    systemctl = shutil.which("systemctl")
+    stopped = False
+    if systemctl:
+        state, active = _linux_service_snapshot(systemctl, unit)
+        if state == "foreign":
+            raise ValueError("当前用户已有不属于本安装目录的 codex-wechat.service")
+        if state == "owned" and active in {"active", "activating", "reloading", "deactivating"}:
+            _stop_linux_service_for_root_change(systemctl, unit)
+            stopped = True
+    try:
+        with _lock_linux_state(previous["state"]):
+            yield True
+    except BaseException:
+        if stopped:
+            _restart_linux_service_after_failed_root_change(systemctl, unit)
+        raise
 
 
 def _publish_runtime_roots(target: Path) -> None:
@@ -1354,11 +1507,12 @@ def configure_windows(release: Path, target: Path, *, update: bool) -> None:
     _run(command, cwd=release)
 
 
-def _linux_service_state(systemctl: str, unit: Path) -> str:
+def _linux_service_snapshot(systemctl: str, unit: Path) -> tuple[str, str]:
     try:
         result = subprocess.run(
             [systemctl, "--user", "show", unit.name,
-             "--property=LoadState", "--property=FragmentPath"],
+             "--property=LoadState", "--property=FragmentPath",
+             "--property=ActiveState"],
             cwd=unit.parent,
             capture_output=True,
             text=True,
@@ -1368,9 +1522,9 @@ def _linux_service_state(systemctl: str, unit: Path) -> str:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return "unavailable"
+        return "unavailable", ""
     if result.returncode:
-        return "unavailable"
+        return "unavailable", ""
     fields = dict(
         line.split("=", 1)
         for line in result.stdout.splitlines()
@@ -1378,12 +1532,18 @@ def _linux_service_state(systemctl: str, unit: Path) -> str:
     )
     fragment = fields.get("FragmentPath", "")
     if not fragment:
-        return "missing" if fields.get("LoadState") == "not-found" else "unavailable"
+        state = "missing" if fields.get("LoadState") == "not-found" else "unavailable"
+        return state, fields.get("ActiveState", "")
     try:
         registered = Path(fragment).resolve()
     except OSError:
-        return "unavailable"
-    return "owned" if registered == unit.resolve() else "foreign"
+        return "unavailable", ""
+    state = "owned" if registered == unit.resolve() else "foreign"
+    return state, fields.get("ActiveState", "")
+
+
+def _linux_service_state(systemctl: str, unit: Path) -> str:
+    return _linux_service_snapshot(systemctl, unit)[0]
 
 
 def configure_linux_service(target: Path) -> bool:
@@ -1434,6 +1594,25 @@ def _common_install(
     dry_run: bool,
     update: bool,
     announce: bool = True,
+    reconfigure_roots: bool = False,
+) -> int:
+    with _root_configuration_mode(reconfigure_roots):
+        return _common_install_with_roots(
+            source,
+            target,
+            dry_run=dry_run,
+            update=update,
+            announce=announce,
+        )
+
+
+def _common_install_with_roots(
+    source: Path,
+    target: Path,
+    *,
+    dry_run: bool,
+    update: bool,
+    announce: bool = True,
 ) -> int:
     source = _resolved_root(source, "源码目录")
     target = target.expanduser().absolute() if dry_run else _resolved_root(target, "安装目录")
@@ -1461,6 +1640,7 @@ def _common_install(
             raise
         detail(f"运行能力检查: {error}；因 --dry-run 放行。")
     identifier = release_identifier(files) if files is not None else "演示版本"
+    root_change_applied = False
     if dry_run:
         detail("因 --dry-run，真实安装目录与命令入口检查按通过处理；不代表实际安装条件已满足。")
         current = None
@@ -1479,20 +1659,25 @@ def _common_install(
             # start anything. Both platform steps are idempotent.
             with InstallLock(target):
                 ensure_release_runtime(target / RELEASES_DIR / identifier)
-            marker_snapshot = _marker_snapshot(target)
-            published = False
-            try:
-                _publish_runtime_roots(target)
-                published = True
-                configure_platform_service(target / "releases" / identifier, target,
-                                           update=update)
-            except BaseException:
-                # This path does not activate a new release. Keep the old path
-                # contract if service integration fails.
-                if published:
-                    _restore_marker_snapshot(target, marker_snapshot)
-                raise
+            with _linux_root_change_guard(target, update=update) as changed:
+                root_change_applied = changed
+                marker_snapshot = _marker_snapshot(target)
+                published = False
+                try:
+                    _publish_runtime_roots(target)
+                    published = True
+                    configure_platform_service(target / "releases" / identifier, target,
+                                               update=update)
+                except BaseException:
+                    # This path does not activate a new release. Keep the old path
+                    # contract if service integration fails.
+                    if published:
+                        _restore_marker_snapshot(target, marker_snapshot)
+                    raise
             print(f"版本 {identifier} 已经安装，没有修改。")
+            if root_change_applied:
+                print("运行时根已切换；后台服务保持停止，请确认配置和登录后运行 "
+                      "codex-wechat service-start。")
             return 0
     if not introduction():
         return 0
@@ -1535,20 +1720,22 @@ def _common_install(
             prepare_bootstrap_runtime(target, requirements=release / "requirements-windows.txt")
             # Everything requiring downloads/builds/user input finishes above.
             phase("更新入口与当前版本...")
-            install_bootstrap(source, target)
-            install_command_link(target)
-            activate_release(target, identifier)
-            # Publish all path markers only after the current pointer is committed:
-            # a failed update must not move an existing installation to a new
-            # root while its old release and service are still active.
-            marker_snapshot = _marker_snapshot(target)
-            _publish_runtime_roots(target)
-            marker_ready = True
-            try:
-                service_ready = configure_platform_service(release, target, update=update)
-            except BaseException:
-                _restore_marker_snapshot(target, marker_snapshot)
-                raise
+            with _linux_root_change_guard(target, update=update) as changed:
+                root_change_applied = changed
+                install_bootstrap(source, target)
+                install_command_link(target)
+                activate_release(target, identifier)
+                # Publish all path markers only after the current pointer is committed:
+                # a failed update must not move an existing installation to a new
+                # root while its old release and service are still active.
+                marker_snapshot = _marker_snapshot(target)
+                _publish_runtime_roots(target)
+                marker_ready = True
+                try:
+                    service_ready = configure_platform_service(release, target, update=update)
+                except BaseException:
+                    _restore_marker_snapshot(target, marker_snapshot)
+                    raise
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier, source)
             try:
@@ -1579,12 +1766,18 @@ def _common_install(
         raise
     print(styled("==> 更新完成。" if update else "==> 安装完成。", "1;32"))
     declaration(source, "complete")
-    if (service_ready and not NON_INTERACTIVE
+    if (service_ready and not root_change_applied and not NON_INTERACTIVE
             and sys.stdin.isatty() and sys.stdout.isatty()
             and confirm_start()):
         if start_installed(target, update=update):
             return 0
-    next_steps(target, update=update, identifier=identifier, service_ready=service_ready)
+    next_steps(
+        target,
+        update=update,
+        identifier=identifier,
+        service_ready=service_ready,
+        roots_changed=root_change_applied,
+    )
     return 0
 
 
@@ -1639,11 +1832,24 @@ def start_installed(target: Path, *, update: bool) -> bool:
     return True
 
 
-def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bool = True) -> None:
+def next_steps(
+    target: Path,
+    *,
+    update: bool,
+    identifier: str,
+    service_ready: bool = True,
+    roots_changed: bool = False,
+) -> None:
     print()
     phase("下一步")
     print(f"版本: {identifier}")
     print()
+    if roots_changed:
+        print("运行时根已切换；为避免新旧状态混用，后台服务保持停止。")
+        print("1. 检查新配置根和状态根；新的状态根可能需要重新扫码登录。")
+        print("2. 确认后运行: codex-wechat service-start")
+        print("3. 在微信发送 /status 确认连接。")
+        return
     if IS_WINDOWS:
         if windows_command_state(target)[1] == "ready":
             command = "codex-wechat"
@@ -1683,12 +1889,36 @@ def next_steps(target: Path, *, update: bool, identifier: str, service_ready: bo
         print("- 微信中发送 /settings autostart true 打开开机自启")
 
 
-def install(source: Path, target: Path, *, dry_run: bool = False) -> int:
-    return _common_install(source, target, dry_run=dry_run, update=False)
+def install(
+    source: Path,
+    target: Path,
+    *,
+    dry_run: bool = False,
+    reconfigure_roots: bool = False,
+) -> int:
+    return _common_install(
+        source,
+        target,
+        dry_run=dry_run,
+        update=False,
+        reconfigure_roots=reconfigure_roots,
+    )
 
 
-def update(source: Path, target: Path, *, dry_run: bool = False) -> int:
-    return _common_install(source, target, dry_run=dry_run, update=True)
+def update(
+    source: Path,
+    target: Path,
+    *,
+    dry_run: bool = False,
+    reconfigure_roots: bool = False,
+) -> int:
+    return _common_install(
+        source,
+        target,
+        dry_run=dry_run,
+        update=True,
+        reconfigure_roots=reconfigure_roots,
+    )
 
 
 def update_source(repo: str, ref: str = "main") -> dict:
@@ -1756,7 +1986,13 @@ def fetch_update_source(choice: dict, destination: Path) -> None:
     ], env=env, check=True, timeout=180)
 
 
-def remote_update(target: Path, choice: dict, *, dry_run: bool = False) -> int:
+def remote_update(
+    target: Path,
+    choice: dict,
+    *,
+    dry_run: bool = False,
+    reconfigure_roots: bool = False,
+) -> int:
     phase("在线更新")
     print(f"来源: {choice['repo']}")
     print(f"分支或标签: {choice['ref']}")
@@ -1773,18 +2009,30 @@ def remote_update(target: Path, choice: dict, *, dry_run: bool = False) -> int:
         source = Path(directory) / "source"
         fetch_update_source(choice, source)
         # Use the installed updater, not an unconfirmed remote installer script.
-        result = update(source, target)
+        result = update(source, target, reconfigure_roots=reconfigure_roots)
         remember_update_source(target, source, choice, previous=previous)
         return result
 
 
-def bootstrap(target: Path, choice: dict, *, dry_run: bool = False) -> int:
+def bootstrap(
+    target: Path,
+    choice: dict,
+    *,
+    dry_run: bool = False,
+    reconfigure_roots: bool = False,
+) -> int:
     """One entry for first installation and repeated installation/update."""
     if dry_run:
         print(f"来源: {choice['repo']} ({choice['ref']})")
         phase("演练模式，不会修改文件")
         return _common_install(
-            SOURCE_ROOT, target, dry_run=True, update=False, announce=False)
+            SOURCE_ROOT,
+            target,
+            dry_run=True,
+            update=False,
+            announce=False,
+            reconfigure_roots=reconfigure_roots,
+        )
     _check_target_path(target)
     updating = _installation_state(target) is not None
     phase("更新" if updating else "安装")
@@ -1797,7 +2045,13 @@ def bootstrap(target: Path, choice: dict, *, dry_run: bool = False) -> int:
         source = Path(directory) / "source"
         fetch_update_source(choice, source)
         result = _common_install(
-            source, target, dry_run=False, update=updating, announce=False)
+            source,
+            target,
+            dry_run=False,
+            update=updating,
+            announce=False,
+            reconfigure_roots=reconfigure_roots,
+        )
         remember_update_source(target, source, choice, previous=previous)
         return result
 
@@ -1936,6 +2190,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--source", type=Path, help="本地源码，不联网")
     result.add_argument("--component", choices=tuple(COMPONENTS))
     result.add_argument("--skills-dir", type=Path, default=Path.home() / ".agents/skills")
+    result.add_argument(
+        "--reconfigure-roots",
+        action="store_true",
+        help="显式按当前 XDG/数据根环境切换运行时根；切换前停止后台服务",
+    )
     return result
 
 
@@ -1986,6 +2245,8 @@ def main(argv: list[str] | None = None) -> int:
         if not options.non_interactive and not options.dry_run and not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise ValueError("交互安装需要终端；自动化请显式使用 --non-interactive。")
         target = (options.dir or default_target()).expanduser()
+        if options.reconfigure_roots and command == "components":
+            raise ValueError("--reconfigure-roots 只适用于安装或更新")
         if command == "components":
             name = options.component
             if name is None:
@@ -2024,21 +2285,37 @@ def main(argv: list[str] | None = None) -> int:
         if not options.dry_run and not IS_WINDOWS and target != default_target().resolve():
             raise ValueError(f"Linux 安装目录必须是 {default_target()}")
         if options.repo:
-            return bootstrap(target, update_source(options.repo, options.ref or "main"), dry_run=options.dry_run)
+            return bootstrap(
+                target,
+                update_source(options.repo, options.ref or "main"),
+                dry_run=options.dry_run,
+                reconfigure_roots=options.reconfigure_roots,
+            )
         if options.ref:
             raise ValueError("--ref 需要同时指定 --repo。")
         installed_entry = SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents
         if options.source is None and installed_entry and not options.dry_run and (command == "update" or read_pointer(target, CURRENT_FILE)):
             choice = saved_update_source(target)
             if choice:
-                return bootstrap(target, choice, dry_run=options.dry_run)
+                return bootstrap(
+                    target,
+                    choice,
+                    dry_run=options.dry_run,
+                    reconfigure_roots=options.reconfigure_roots,
+                )
             if not options.dry_run:
                 raise ValueError(
                     "尚未配置更新来源；若通过私有网络入口安装，请重跑同一网络入口，"
                     "或用 --source 指定本地源码。")
         source = options.source or SOURCE_ROOT
         updating = False if options.dry_run else _installation_state(target) is not None
-        return (update if updating else install)(source, target, dry_run=options.dry_run)
+        operation = update if updating else install
+        return operation(
+            source,
+            target,
+            dry_run=options.dry_run,
+            reconfigure_roots=options.reconfigure_roots,
+        )
     finally:
         NON_INTERACTIVE = previous_mode
 

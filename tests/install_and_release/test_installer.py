@@ -316,10 +316,13 @@ class InstallerTests(unittest.TestCase):
         self.make_project(self.source, version="two")
         with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": str(new_root)}), \
                 patch("builtins.input", return_value="y"), \
+                patch.object(installer, "_linux_service_snapshot",
+                             return_value=("missing", "")), \
                 patch.object(installer, "install_bootstrap",
                              side_effect=OSError("entry failed")):
             with self.assertRaisesRegex(OSError, "entry failed"):
-                installer.update(self.source, self.target)
+                installer.update(
+                    self.source, self.target, reconfigure_roots=True)
         self.assertEqual(self.current(), first)
         self.assertEqual(installer.saved_data_root(self.target), old_root)
 
@@ -539,10 +542,13 @@ class InstallerTests(unittest.TestCase):
         old_root = (self.base / "data").resolve()
         with patch.dict(os.environ, {
                 "CODEX_WECHAT_DATA_ROOT": str(self.base / "new-data")}), \
+                patch.object(installer, "_linux_service_snapshot",
+                             return_value=("missing", "")), \
                 patch.object(installer, "configure_platform_service",
                              side_effect=OSError("service failed")):
             with self.assertRaisesRegex(OSError, "service failed"):
-                installer.update(self.source, self.target)
+                installer.update(
+                    self.source, self.target, reconfigure_roots=True)
         self.assertEqual(self.current(), current)
         self.assertEqual(installer.saved_data_root(self.target), old_root)
         manifest = json.loads(
@@ -958,6 +964,82 @@ class DataRootMarkerTests(unittest.TestCase):
                 "config": str((config_home / "codex-wechat").resolve()),
                 "state": str((state_home / "codex-wechat").resolve()),
             })
+
+    def test_update_keeps_saved_xdg_roots_without_explicit_reconfiguration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "install"
+            target.mkdir()
+            old_data = base / "old-data"
+            old_config = base / "old-config"
+            old_state = base / "old-state"
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.dict(os.environ, {
+                        "CODEX_WECHAT_DATA_ROOT": str(old_data),
+                        "XDG_CONFIG_HOME": str(old_config),
+                        "XDG_STATE_HOME": str(old_state),
+                    }, clear=False):
+                installer._publish_runtime_roots(target)
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.object(installer, "RECONFIGURE_ROOTS", False), \
+                    patch.dict(os.environ, {
+                        "CODEX_WECHAT_DATA_ROOT": "",
+                        "XDG_CONFIG_HOME": str(base / "ambient-config"),
+                        "XDG_STATE_HOME": str(base / "ambient-state"),
+                    }, clear=False):
+                self.assertEqual(installer.configured_config_root(target),
+                                 (old_config / "codex-wechat").resolve())
+                self.assertEqual(installer.configured_state_root(target),
+                                 (old_state / "codex-wechat").resolve())
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.object(installer, "RECONFIGURE_ROOTS", True), \
+                    patch.dict(os.environ, {
+                        "CODEX_WECHAT_DATA_ROOT": "",
+                        "XDG_CONFIG_HOME": str(base / "ambient-config"),
+                        "XDG_STATE_HOME": str(base / "ambient-state"),
+                    }, clear=False):
+                self.assertEqual(installer.configured_config_root(target),
+                                 (base / "ambient-config/codex-wechat").resolve())
+                self.assertEqual(installer.configured_state_root(target),
+                                 (base / "ambient-state/codex-wechat").resolve())
+
+    def test_linux_root_change_guard_stops_service_and_restarts_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "install"
+            target.mkdir()
+            old_data = base / "old-data"
+            old_config = base / "old-config"
+            old_state = base / "old-state"
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.dict(os.environ, {
+                        "CODEX_WECHAT_DATA_ROOT": str(old_data),
+                        "XDG_CONFIG_HOME": str(old_config),
+                        "XDG_STATE_HOME": str(old_state),
+                    }, clear=False):
+                installer._publish_runtime_roots(target)
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.object(installer, "RECONFIGURE_ROOTS", True), \
+                    patch.dict(os.environ, {
+                        "CODEX_WECHAT_DATA_ROOT": str(base / "new-data"),
+                        "XDG_CONFIG_HOME": str(base / "new-config"),
+                        "XDG_STATE_HOME": str(base / "new-state"),
+                    }, clear=False), \
+                    patch.object(installer.shutil, "which",
+                                 return_value="/usr/bin/systemctl"), \
+                    patch.object(installer, "_linux_service_snapshot",
+                                 return_value=("owned", "active")), \
+                    patch.object(installer, "_stop_linux_service_for_root_change") as stop, \
+                    patch.object(
+                        installer,
+                        "_restart_linux_service_after_failed_root_change",
+                    ) as restart:
+                with self.assertRaisesRegex(RuntimeError, "integration failed"):
+                    with installer._linux_root_change_guard(target, update=True) as changed:
+                        self.assertTrue(changed)
+                        raise RuntimeError("integration failed")
+            stop.assert_called_once()
+            restart.assert_called_once()
 
     @requires_symlinks
     def test_linux_runtime_markers_keep_symlinked_xdg_roots(self):

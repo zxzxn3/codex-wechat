@@ -193,9 +193,16 @@ Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` �
 在已安装布局中，它缺失时才要求三个旧标记完整存在。公开入口和 systemd 服务都读取同一组
 路径，不依赖交互 shell 或 systemd manager 是否导出了 XDG 变量。
 
-`XDG_CONFIG_HOME`、`XDG_STATE_HOME` 和 `XDG_DATA_HOME` 只决定下一次安装时解析出的根；
-安装后修改 XDG 环境变量不会移动现有数据，需要重跑安装器持久化新根。`CODEX_WECHAT_DATA_ROOT`
-只覆盖数据根，因此工作区随数据根移动，配置和状态仍遵循 XDG。
+`XDG_CONFIG_HOME`、`XDG_STATE_HOME` 和 `XDG_DATA_HOME` 在首次安装时决定路径根。普通更新
+始终沿用已保存的根，不受当前 shell 中这些变量影响。需要换根时显式运行：
+
+```bash
+codex-wechat update --reconfigure-roots
+```
+
+安装器会先停止后台服务并确认旧状态没有前台进程，再原子切换三个根。切换成功后服务保持
+停止，避免用空的新状态自动启动；确认配置和登录后运行 `codex-wechat service-start`。
+`CODEX_WECHAT_DATA_ROOT` 只覆盖数据根，因此工作区随数据根移动，配置和状态仍遵循 XDG。
 `CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口和源码副本的运行定位。配置根或状态根与程序安装根
 重叠，或数据、配置、状态三个角色互相重叠时，安装和 purge 都会 fail closed；默认的
 `$data_root/workspace` 是唯一允许位于安装根下的 purge 目标。purge 也会拒绝经过符号链接的
