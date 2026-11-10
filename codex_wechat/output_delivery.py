@@ -395,8 +395,11 @@ class OutputDelivery:
             self.charge_reply(entry)
             entry["attempts"] = entry.get("attempts", 0) + 1
             bridge.state["deliveryUnknownTotal"] += 1
-            if (FailedOutboxStatus.DELIVERY_UNKNOWN.pauses_current_delivery
-                    and entry.get("replySeq") == bridge.state.get("inboundSeq", 0)):
+            paused_now = (
+                FailedOutboxStatus.DELIVERY_UNKNOWN.pauses_current_delivery
+                and entry.get("replySeq") == bridge.state.get("inboundSeq", 0)
+            )
+            if paused_now:
                 self.paused = True
             log_event("output.delivery_unknown", level="warning", component="output",
                       role=entry.get("role", "body"), attempt=entry["attempts"],
@@ -409,10 +412,11 @@ class OutputDelivery:
                 status=FailedOutboxStatus.DELIVERY_UNKNOWN,
             )
             self._in_flight_id = None
-            log_event("output.send_paused", level="warning", component="output",
-                      reason="not_acknowledged", release="next_inbound",
-                      send_failures=bridge.state["consecutiveSendFailures"],
-                      queued=len(bridge.state["outbox"]))
+            if paused_now:
+                log_event("output.send_paused", level="warning", component="output",
+                          reason="not_acknowledged", release="next_inbound",
+                          send_failures=bridge.state["consecutiveSendFailures"],
+                          queued=len(bridge.state["outbox"]))
             return
 
         if isinstance(outcome, Rejected):

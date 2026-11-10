@@ -133,7 +133,7 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
             return AcceptedUnknown(0)
 
         bridge.channel.send = send
-        with patch("codex_wechat.output_delivery.log_event"):
+        with patch("codex_wechat.output_delivery.log_event") as log_event:
             task = asyncio.create_task(bridge.sender())
             try:
                 await asyncio.wait_for(entered.wait(), 1)
@@ -142,6 +142,9 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(await self.wait_for(
                     lambda: bridge.state["deliveryUnknownTotal"] == 1))
                 self.assertFalse(bridge.output.paused)
+                events = [call.args[0] for call in log_event.call_args_list if call.args]
+                self.assertIn("output.delivery_unknown", events)
+                self.assertNotIn("output.send_paused", events)
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
