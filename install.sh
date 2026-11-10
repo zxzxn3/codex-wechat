@@ -20,12 +20,31 @@ dependency_install_hint() {
     fi
 }
 
+python_version_hint() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo '注意：Ubuntu 22.04 等旧发行版的官方 python3 低于 3.11；仅重复安装 python3 不会满足要求。' >&2
+    fi
+}
+
 missing_python() {
     echo '需要 Python 3.11+。可使用当前系统的包管理器安装：' >&2
     dependency_install_hint >&2
+    python_version_hint
     echo '安装后重开终端并重跑。' >&2
 }
 
-command -v python3 >/dev/null || { missing_python; exit 1; }
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' || { missing_python; exit 1; }
-exec python3 -u "$PROJECT_DIR/installer.py" "$@"
+find_python() {
+    local candidate
+    for candidate in python3 python3.13 python3.12 python3.11; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
+                    >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+python_command=$(find_python) || { missing_python; exit 1; }
+exec "$python_command" -u "$PROJECT_DIR/installer.py" "$@"

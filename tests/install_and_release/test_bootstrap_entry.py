@@ -1,8 +1,10 @@
 """One-line entry chooses install/update without contacting a real repository."""
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -109,6 +111,25 @@ class BootstrapEntryTests(unittest.TestCase):
             if valid:
                 self.assertIn("不下载或修改文件", result.stdout)
 
+    @unittest.skipUnless(shutil.which("bash"), "Bash unavailable")
+    def test_shell_entry_finds_a_versioned_supported_python(self):
+        binary = self.root / "bin"
+        binary.mkdir()
+        unsupported = binary / "python3"
+        unsupported.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        unsupported.chmod(0o755)
+        (binary / "python3.11").symlink_to(Path(sys.executable).resolve())
+        entry = Path(__file__).resolve().parents[2] / "bootstrap.sh"
+        result = subprocess.run(
+            [shutil.which("bash"), str(entry), "--dry-run"],
+            env={**os.environ, "PATH": str(binary)},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("不下载或修改文件", result.stdout)
+
     def test_network_entry_only_downloads_the_installer(self):
         shell = (Path(__file__).resolve().parents[2] / "bootstrap.sh").read_text(encoding="utf-8")
         powershell = (Path(__file__).resolve().parents[2] / "bootstrap.ps1").read_text(encoding="utf-8")
@@ -141,6 +162,8 @@ class BootstrapEntryTests(unittest.TestCase):
             self.assertIn("pacman -S --needed python git curl", text)
             self.assertIn("apt-get install -y python3 git curl", text)
             self.assertIn("dnf install -y python3 git curl", text)
+            self.assertIn("python3.13", text)
+            self.assertIn("Ubuntu 22.04", text)
         for text in (powershell, local_powershell):
             self.assertIn("winget install --id $WingetId -e", text)
             self.assertIn("Python.Python.3.13", text)

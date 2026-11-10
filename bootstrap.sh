@@ -19,10 +19,36 @@ dependency_install_hint() {
     fi
 }
 
+python_version_hint() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo '  注意：Ubuntu 22.04 等旧发行版的官方 python3 低于 3.11；仅重复安装 python3 不会满足要求。' >&2
+    fi
+}
+
+missing_python() {
+    echo '需要 Python 3.11+。可使用当前系统的包管理器安装：' >&2
+    dependency_install_hint >&2
+    python_version_hint
+    echo '安装后重开终端并重跑相同命令。' >&2
+}
+
 missing_dependency() {
     printf '%s\n可使用当前系统的包管理器安装：\n' "$1" >&2
     dependency_install_hint >&2
     echo '安装后重开终端并重跑相同命令。' >&2
+}
+
+find_python() {
+    local candidate
+    for candidate in python3 python3.13 python3.12 python3.11; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
+                    >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
 }
 
 main() {
@@ -47,10 +73,7 @@ main() {
             *) echo "未知参数 $1" >&2; return 2 ;;
         esac
     done
-    python_command=$(command -v python3) || { missing_dependency '需要 Python 3.11+。'; return 1; }
-    "$python_command" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || {
-        missing_dependency '需要 Python 3.11+。'; return 1;
-    }
+    python_command=$(find_python) || { missing_python; return 1; }
     installer_base_url=$("$python_command" -c '
 import re, sys
 from urllib.parse import quote, urlsplit
