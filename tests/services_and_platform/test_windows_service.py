@@ -347,11 +347,6 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(text.index("数据文件仍在: $DataRoot"),
                         text.index("手动删除上述目录"))
 
-    def test_supervisor_resolves_the_configured_data_root(self):
-        # The marker, not the platform default, decides where state and logs live.
-        with patch("codex_wechat.platform_support.data_root", return_value=Path("/custom root")):
-            self.assertEqual(windows_service.data_root(), Path("/custom root"))
-
     def test_uninstall_refuses_a_live_foreground_bridge(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("Assert-NoForegroundBridge", text)
@@ -363,14 +358,12 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("if (Test-ReparsePointPath $DataRoot)", text)
         self.assertIn("if (Test-Path -LiteralPath $DataRoot)", text)
 
-    def test_uninstall_validates_the_saved_data_root_before_task_changes(self):
+    def test_uninstall_reads_the_layout_before_task_changes(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
-        self.assertIn("$SavedDataRoot = Read-SavedDataRoot $InstallRoot", text)
-        self.assertIn("拒绝清理无法确认的数据", text)
-        self.assertLess(
-            text.index("拒绝清理无法确认的数据"),
-            text.index("$task = Get-ScheduledTask"),
-        )
+        self.assertIn("-m codex_wechat.install_layout show", text)
+        self.assertLess(text.index("install_layout show"),
+                        text.index("$task = Get-ScheduledTask"))
+        self.assertNotIn("Read-SavedDataRoot", text)
         self.assertIn("[IO.FileShare]::None", text)
         check = text.index("Assert-NoForegroundBridge\n\n# Data removal")
         self.assertLess(text.index("未安装计划任务"), check)
@@ -390,12 +383,11 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[IO.Directory]::Delete($Path, $false)", text)
         self.assertNotIn("Remove-Item -LiteralPath $path -Recurse -Force", text)
 
-    def test_uninstall_only_forgets_the_data_root_when_purging(self):
+    def test_uninstall_only_removes_the_layout_when_purging(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
-        guard = text.index("if ($PurgeData) {\n    # Only a purge forgets the root")
-        removal = text.index("Remove-Item -LiteralPath (Join-Path $InstallRoot '.data-root')")
-        self.assertGreater(removal, guard)
-        self.assertEqual(text.count("'.data-root') -Force"), 1)
+        removal = text.index("-m codex_wechat.install_layout remove")
+        self.assertGreater(removal, text.index("if ($PurgeData)"))
+        self.assertEqual(text.count("install_layout remove"), 1)
 
     def test_uninstall_checks_exact_task_ownership_before_stopping(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
@@ -411,7 +403,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(text.rindex("Stop-SharedBackends"),
                            text.index("if ($PurgeData)"))
         self.assertLess(text.rindex("Stop-SharedBackends"),
-                        text.index("Remove-DataPath $name"))
+                        text.index("Remove-DataPath ([string]$item.path)"))
         self.assertIn("shared-backend-process.json", text)
         self.assertIn("记录的身份已不匹配", text)
         self.assertIn("仍有已连接的客户端", text)
@@ -421,7 +413,8 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertGreater(text.index("Unregister-ScheduledTask"),
                            text.index("Remove-DataPath"))
-        self.assertIn("$DataPaths = @('config.json', '.state', 'workspace', 'logs', 'shared')", text)
+        self.assertIn("install_layout purge-plan", text)
+        self.assertIn("foreach ($item in $PurgeItems)", text)
 
     def test_powershell_entry_routes_uninstall_to_stable_helper(self):
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
@@ -429,10 +422,11 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("uninstall.ps1", entry)
         self.assertIn("$PurgeData", entry)
         self.assertNotIn("--purge-data", entry)
-        self.assertLess(entry.index("$Command -eq 'uninstall'"), entry.index("$CurrentFile"))
-        self.assertIn("-cnotmatch", entry)
+        self.assertLess(entry.index("$Command -eq 'uninstall'"),
+                        entry.index("codex_wechat.launcher"))
+        self.assertNotIn("$CurrentFile", entry)
         desktop = (ROOT / "codex-desktop.ps1").read_text(encoding="utf-8")
-        self.assertIn("-cnotmatch", desktop)
+        self.assertIn("codex_wechat.launcher", desktop)
 
     def test_powershell_entry_splats_uninstall_by_name_not_position(self):
         # An array splat binds positionally and switches are skipped. Only a

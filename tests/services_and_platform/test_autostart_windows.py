@@ -76,20 +76,14 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertIn("'--install-root'", self.install)
         self.assertIn("[switch]$PreserveAutostart", self.install)
         self.assertIn("bootstrap_supervisor.py", self.task)
-        self.assertIn(r"releases\$ReleaseId", self.entry)
-        self.assertIn("[IO.FileAttributes]::ReparsePoint", self.entry)
 
-    def test_entry_and_task_resolve_the_data_root_marker(self):
+    def test_entry_and_helpers_delegate_layout_to_the_contract(self):
+        self.assertIn("codex_wechat.launcher", self.entry)
+        for text in (self.install, self.uninstall):
+            self.assertIn("-m codex_wechat.install_layout", text)
         for text in (self.entry, self.install, self.uninstall):
-            self.assertIn("Read-SavedDataRoot", text)
-            self.assertIn(".data-root", text)
-        for text in (self.entry, self.install):
-            self.assertIn("$DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT)", text)
-            self.assertIn("[IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)", text)
-        self.assertIn("Join-Path $env:LOCALAPPDATA 'codex-wechat'", self.entry)
-        self.assertIn("数据根标记缺失", self.install)
-        self.assertNotIn("Join-Path $env:LOCALAPPDATA 'codex-wechat'", self.install)
-        self.assertIn("不一致", self.entry)
+            self.assertNotIn("Read-SavedDataRoot", text)
+            self.assertNotIn(".data-root", text)
         self.assertNotIn("CODEX_WECHAT_DATA_ROOT", self.uninstall)
         self.assertNotIn("'--data-root'", self.install)
         self.assertNotIn("'--state-dir'", self.install)

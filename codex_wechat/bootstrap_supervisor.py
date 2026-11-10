@@ -2,7 +2,7 @@
 """Resolve the active release and run its Windows supervisor.
 
 The supervisor returns 76 when the user asks for a restart, so this loop
-re-resolves the version pointer and loads whatever release it now names.
+reloads the release selected by the installation contract.
 """
 from __future__ import annotations
 
@@ -11,43 +11,22 @@ import asyncio
 import importlib.util
 import os
 from pathlib import Path
-import re
 import sys
 import time
 
+from .install_layout import InstallLayoutError, InstalledLayout, default_roots
 from .log_rotation import (DEFAULT_KEEP, KeepSource, append as append_log,
                           keep_from_config)
-from .platform_support import DATA_ROOT_FILE, data_root
+from .platform_support import INSTALL_ROOT
 
 # Let the previous child finish closing before the next supervisor starts.
 RESTART_SETTLE_SECONDS = 0.2
-# `installer.release_identifier()` writes the first 16 hex digits of the hash.
-RELEASE_ID = re.compile(r"[a-f0-9]{16}")
 
 
 def active_release(install_root: Path) -> Path:
-    install_root = Path(install_root).expanduser()
-    if install_root.is_symlink():
-        raise ValueError(f"安装根目录不能是符号链接: {install_root}")
-    install_root = install_root.resolve()
-    current = install_root / "current"
-    if current.is_symlink():
-        raise ValueError(f"当前版本指针 current 不能是符号链接或重解析点: {current}")
-    if not current.exists():
-        raise ValueError(f"当前版本指针 current 缺失: {current}")
-    if not current.is_file():
-        raise ValueError(f"当前版本指针 current 必须是普通文件: {current}")
-    identifier = current.read_text(encoding="utf-8").strip()
-    # The installer writes the first 16 hex digits of the release hash; anything
-    # else (notably "..", which would resolve to the install root) is corruption.
-    if not RELEASE_ID.fullmatch(identifier):
-        raise ValueError(f"当前版本指针 current 包含无效版本标识: {current}")
-    releases = install_root / "releases"
-    if releases.is_symlink():
-        raise ValueError(f"releases 目录不能是符号链接: {releases}")
-    release = releases / identifier
-    if release.is_symlink():
-        raise ValueError(f"release 目录不能是符号链接: {release}")
+    layout = InstalledLayout.load(
+        install_root, platform="windows", required=True)
+    release = layout.release_dir()
     if not (release / "codex_wechat" / "windows_service.py").is_file():
         raise ValueError(f"当前版本不完整: {release}")
     return release
@@ -88,9 +67,17 @@ def parser() -> argparse.ArgumentParser:
 
 
 def log_failure(error: BaseException) -> None:
-    write_log(data_root() / "logs" / "service.log",
+    try:
+        install_root = Path(
+            os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(INSTALL_ROOT))
+        ).expanduser().resolve()
+        layout = InstalledLayout.load(install_root, platform="windows")
+        root = layout.data_root if layout is not None else default_roots("windows")[0]
+    except (InstallLayoutError, OSError):
+        return
+    write_log(root / "logs" / "service.log",
               f"{type(error).__name__}: {error}",
-              keep=keep_from_config(data_root() / "config.json"))
+              keep=keep_from_config(root / "config.json"))
 
 
 def log_release_failure(error: BaseException, path: Path, keep: KeepSource) -> None:
@@ -109,13 +96,12 @@ def main(argv=None) -> int:
     args = parser().parse_args(argv)
     install_root = args.install_root.expanduser().resolve()
     os.environ["CODEX_WECHAT_INSTALL_ROOT"] = str(install_root)
-    marker = install_root / DATA_ROOT_FILE
-    if marker.is_symlink() or not marker.is_file():
-        raise ValueError(f"安装根缺少数据根标记: {marker}")
-    root = data_root(install_root)
-    state_dir = root / ".state"
-    config = root / "config.json"
-    log_path = root / "logs" / "service.log"
+    layout = InstalledLayout.load(
+        install_root, platform="windows", required=True)
+    paths = layout.runtime_paths()
+    state_dir = paths.state_dir
+    config = paths.config_file
+    log_path = paths.logs_dir / "service.log"
 
     def log_keep():
         return keep_from_config(config)
@@ -141,7 +127,7 @@ def main(argv=None) -> int:
         else:
             last_failure = None
             if active is not None and release != active[0]:
-                write_log(log_path, f"版本指针已变化，正在加载 {release.name}",
+                write_log(log_path, f"当前版本已变化，正在加载 {release.name}",
                           keep=log_keep)
             active = (release, python, module)
         try:

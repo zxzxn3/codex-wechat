@@ -17,17 +17,10 @@ from codex_wechat.pipe_websocket import PipeWebSocket
 from codex_wechat.profiles import definitions, resume_or_adopt
 from codex_wechat.storage import Store
 from codex_wechat import platform_support
-from tests.support.helpers import requires_symlinks, write_runtime_roots_manifest
+from tests.support.helpers import requires_symlinks, write_installation_layout
 from websockets.server import ServerProtocol
 from websockets.http11 import Request
 from websockets.frames import Frame, Opcode
-
-
-def xdg_user_data_dir(name, appauthor=False):
-    """Stand in for platformdirs' Linux branch so Linux cases run on any host."""
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return str(Path(base) / name)
-
 
 class PlatformTests(unittest.TestCase):
     def test_existing_directory_is_tightened(self):
@@ -74,46 +67,21 @@ class PlatformTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(platform_support, "IS_WINDOWS", True), \
              patch.object(platform_support, "INSTALL_ROOT", Path(directory)), \
-             patch.object(platform_support, "_platform_user_data_dir",
-                          lambda name, appauthor=False: Path("/tmp/local") / name), \
              patch.dict("os.environ", {"LOCALAPPDATA": "/tmp/local",
                                        "CODEX_WECHAT_DATA_ROOT": ""}):
             # An ambient override (a test-isolated run sets one) must not leak in.
-            self.assertEqual(platform_support.data_root(),
+            self.assertEqual(platform_support.runtime_paths().data_root,
                              (Path("/tmp/local/codex-wechat")).resolve())
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(platform_support, "IS_WINDOWS", False), \
                 patch.object(platform_support, "INSTALL_ROOT", Path(directory)), \
                 patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": "/tmp/stable-data"}):
-            self.assertEqual(platform_support.data_root(), Path("/tmp/stable-data").resolve())
+            self.assertEqual(platform_support.runtime_paths().data_root,
+                             Path("/tmp/stable-data").resolve())
         with patch("codex_wechat.profiles.IS_WINDOWS", True):
             self.assertEqual(set(definitions({})), {"codex"})
             self.assertEqual(set(definitions({"backends": {"deepseek": {
                 "command": ["custom.exe", "app-server"]}}})), {"deepseek"})
-
-    def test_linux_default_data_root_uses_xdg_and_has_a_fallback(self):
-        with tempfile.TemporaryDirectory() as directory:
-            install = Path(directory) / "install"
-            install.mkdir()
-            data_home = Path(directory) / "xdg"
-            with patch.object(platform_support, "IS_WINDOWS", False), \
-                    patch.object(platform_support, "INSTALL_ROOT", install), \
-                    patch.object(platform_support, "_platform_user_data_dir", xdg_user_data_dir), \
-                    patch.dict("os.environ", {
-                        "CODEX_WECHAT_DATA_ROOT": "",
-                        "XDG_DATA_HOME": str(data_home),
-                    }, clear=False):
-                self.assertEqual(platform_support.data_root(),
-                                 (data_home / "codex-wechat").resolve())
-            with patch.object(platform_support, "IS_WINDOWS", False), \
-                    patch.object(platform_support, "INSTALL_ROOT", install), \
-                    patch.object(platform_support, "_platform_user_data_dir", None), \
-                    patch.dict("os.environ", {
-                        "CODEX_WECHAT_DATA_ROOT": "",
-                        "XDG_DATA_HOME": str(data_home),
-                    }, clear=False):
-                self.assertEqual(platform_support.data_root(),
-                                 (data_home / "codex-wechat").resolve())
 
     def test_linux_runtime_paths_split_config_state_and_data(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -209,8 +177,9 @@ class PlatformTests(unittest.TestCase):
             data = base / "custom-data/codex-wechat"
             config = base / "custom-config/codex-wechat"
             state = base / "custom-state/codex-wechat"
-            write_runtime_roots_manifest(
-                install, data_root=data, config_root=config, state_root=state)
+            write_installation_layout(
+                install, data_root=data, config_root=config, state_root=state,
+                platform="linux")
             with patch.object(platform_support, "IS_WINDOWS", False), \
                     patch.object(platform_support, "INSTALL_ROOT", install), \
                     patch.dict(os.environ, {
@@ -229,9 +198,10 @@ class PlatformTests(unittest.TestCase):
             install.mkdir()
             with patch.object(platform_support, "IS_WINDOWS", True), \
                     patch.object(platform_support, "INSTALL_ROOT", install), \
-                    patch.object(platform_support, "_platform_user_data_dir",
-                                 lambda name, appauthor=False: Path(directory) / "local" / name), \
-                    patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                    patch.dict(os.environ, {
+                        "LOCALAPPDATA": str(Path(directory) / "local"),
+                        "CODEX_WECHAT_DATA_ROOT": "",
+                    }, clear=False):
                 paths = platform_support.runtime_paths()
             data = (Path(directory) / "local/codex-wechat").resolve()
             self.assertEqual(paths.data_root, data)
@@ -240,42 +210,6 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(paths.workspace_dir, data / "workspace")
             self.assertEqual(paths.logs_dir, data / "logs")
             self.assertEqual(paths.shared_dir, data / "shared")
-
-    def test_saved_data_root_marker_is_used_without_an_environment_override(self):
-        with tempfile.TemporaryDirectory() as directory:
-            install = Path(directory) / "install"
-            install.mkdir()
-            data = Path(directory) / "custom data"
-            data.mkdir()
-            (install / platform_support.DATA_ROOT_FILE).write_text(
-                str(data) + "\n", encoding="utf-8")
-            with patch.object(platform_support, "IS_WINDOWS", True), \
-                    patch.object(platform_support, "INSTALL_ROOT", install), \
-                    patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": ""},
-                               clear=False):
-                self.assertEqual(platform_support.data_root(), data.resolve())
-
-    def test_environment_and_saved_data_root_must_agree(self):
-        with tempfile.TemporaryDirectory() as directory:
-            install = Path(directory) / "install"
-            install.mkdir()
-            saved = Path(directory) / "saved"
-            other = Path(directory) / "other"
-            saved.mkdir()
-            other.mkdir()
-            (install / platform_support.DATA_ROOT_FILE).write_text(
-                str(saved) + "\n", encoding="utf-8")
-            with patch.object(platform_support, "IS_WINDOWS", True), \
-                    patch.object(platform_support, "INSTALL_ROOT", install), \
-                    patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": str(saved)},
-                               clear=False):
-                self.assertEqual(platform_support.data_root(), saved.resolve())
-            with patch.object(platform_support, "IS_WINDOWS", True), \
-                    patch.object(platform_support, "INSTALL_ROOT", install), \
-                    patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": str(other)},
-                               clear=False):
-                with self.assertRaisesRegex(ValueError, "不一致"):
-                    platform_support.data_root()
 
     def test_windows_refuses_implicit_shell(self):
         with patch.object(platform_support, "IS_WINDOWS", True), \

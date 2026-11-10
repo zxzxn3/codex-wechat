@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 import installer
+from tests.support.helpers import write_installation_layout
 
 
 class RemoteUpdateTests(unittest.TestCase):
@@ -23,6 +24,10 @@ class RemoteUpdateTests(unittest.TestCase):
             path = self.source / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("public payload\n")
+        shutil.copy2(
+            Path(__file__).resolve().parents[2] / "codex_wechat/install_layout.py",
+            self.source / "codex_wechat/install_layout.py",
+        )
         self.choice = installer.update_source("https://github.com/example/codex-wechat", "stable")
 
     def test_source_validation_rejects_credentials_paths_and_options(self):
@@ -52,22 +57,27 @@ class RemoteUpdateTests(unittest.TestCase):
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
 
     def test_remote_dry_run_neither_fetches_nor_inspects_installation(self):
-        with patch.object(installer, "fetch_update_source") as fetch, \
-             patch.object(installer, "_installation_state", side_effect=AssertionError("read target")):
+        with patch.object(installer, "fetch_update_source") as fetch:
             self.assertEqual(installer.remote_update(self.target, self.choice, dry_run=True), 0)
         fetch.assert_not_called()
         self.assertFalse(self.target.exists())
 
     def test_download_failure_preserves_version_and_previous_source(self):
-        self.target.mkdir()
-        (self.target / "current").write_text("old\n")
+        layout = write_installation_layout(
+            self.target,
+            data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
+            platform="linux",
+        )
+        manifest = layout.manifest_path.read_bytes()
         saved = self.target / installer.UPDATE_SOURCE_FILE
         saved.write_text(json.dumps(self.choice))
         before = saved.read_bytes()
         with patch.object(installer, "fetch_update_source", side_effect=subprocess.CalledProcessError(1, "git")):
             with self.assertRaises(subprocess.CalledProcessError):
                 installer.remote_update(self.target, self.choice)
-        self.assertEqual((self.target / "current").read_text(), "old\n")
+        self.assertEqual(layout.manifest_path.read_bytes(), manifest)
         self.assertEqual(saved.read_bytes(), before)
 
     def test_remember_only_after_activation_and_exclude_metadata_from_payload(self):
@@ -75,15 +85,32 @@ class RemoteUpdateTests(unittest.TestCase):
         installer.remember_update_source(self.target, self.source, self.choice)
         self.assertFalse((self.target / installer.UPDATE_SOURCE_FILE).exists())
         identifier = installer.release_identifier(installer.project_files(self.source))
-        (self.target / "current").write_text(identifier)
+        write_installation_layout(
+            self.target,
+            release_id=identifier,
+            data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
+            platform="linux",
+        )
         installer.remember_update_source(self.target, self.source, self.choice)
         self.assertEqual(installer.saved_update_source(self.target), self.choice)
         (self.source / installer.UPDATE_SOURCE_FILE).write_text(json.dumps(self.choice))
         self.assertNotIn(Path(installer.UPDATE_SOURCE_FILE), installer.project_files(self.source))
 
     def test_installed_command_uses_saved_source_and_explicit_local_source_wins(self):
-        self.target.mkdir()
-        (self.target / "current").write_text("a" * 16)
+        write_installation_layout(
+            self.target,
+            data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
+            platform="linux",
+        )
+        (self.target / "codex_wechat").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(
+            Path(__file__).resolve().parents[2] / "codex_wechat/install_layout.py",
+            self.target / "codex_wechat/install_layout.py",
+        )
         (self.target / installer.UPDATE_SOURCE_FILE).write_text(json.dumps(self.choice))
         with patch.object(installer, "SOURCE_ROOT", self.target), \
              patch.object(installer, "default_target", return_value=self.target), \
@@ -131,9 +158,15 @@ class RemoteUpdateTests(unittest.TestCase):
             installer.saved_update_source(self.target)
 
     def test_same_version_remote_noop_keeps_saved_source(self):
-        self.target.mkdir()
         identifier = installer.release_identifier(installer.project_files(self.source))
-        (self.target / installer.CURRENT_FILE).write_text(identifier + "\n")
+        write_installation_layout(
+            self.target,
+            release_id=identifier,
+            data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
+            platform="linux",
+        )
         saved = self.target / installer.UPDATE_SOURCE_FILE
         saved.write_text(json.dumps(self.choice) + "\n")
         new = installer.update_source("https://github.com/other/repo")

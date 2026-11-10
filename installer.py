@@ -51,15 +51,12 @@ COMPONENTS = {
     "codex-wechat-guide": ("微信使用说明 skill", Path("skills/codex-wechat-guide/SKILL.md")),
 }
 RELEASE_FORMAT = 1
-CURRENT_FILE = "current"
 PREVIOUS_FILE = "previous"
 RELEASES_DIR = "releases"
 ACTIVE_FILE = "active-release"
 SERVICE_UNIT = "codex-wechat.service"
-DATA_ROOT_FILE = ".data-root"
-RUNTIME_ROOTS_FILE = ".runtime-roots"
-RUNTIME_ROOT_ROLES = ("data", "config", "state")
 PACKAGE_ROOT = Path("codex_wechat")
+LAYOUT_CONTRACT_FILE = PACKAGE_ROOT / "install_layout.py"
 # A directory handle held for a moment - by a scanner or a just-exited process -
 # blocks the rename that makes a release deletable; one retry covers it.
 PRUNE_RETRY_SECONDS = 0.2
@@ -76,7 +73,6 @@ PRIVATE_NAMES = {
     ".update-backups",
     ".venv",
     ".bootstrap-venv",
-    ".data-root",
     "__pycache__",
     "dist",
     "experiments",
@@ -86,7 +82,6 @@ PRIVATE_NAMES = {
     "workspace",
     "shared",
     "logs",
-    CURRENT_FILE,
     PREVIOUS_FILE,
     LOCK_FILE,
     UPDATE_SOURCE_FILE,
@@ -102,6 +97,8 @@ REQUIRED_FILES = {
     PACKAGE_ROOT / "__init__.py",
     PACKAGE_ROOT / "app.py",
     PACKAGE_ROOT / "bootstrap_supervisor.py",
+    PACKAGE_ROOT / "install_layout.py",
+    PACKAGE_ROOT / "launcher.py",
     PACKAGE_ROOT / "platform_support.py",
     PACKAGE_ROOT / "state.py",
     PACKAGE_ROOT / "windows_service.py",
@@ -242,195 +239,43 @@ def default_target() -> Path:
     return Path.home() / ".local/share/codex-wechat"
 
 
-def _saved_root(target: Path, filename: str) -> Path | None:
-    path = Path(target) / filename
-    if not path.exists() and not path.is_symlink():
-        return None
-    if path.is_symlink() or not path.is_file():
-        raise ValueError(f"路径标记不是普通文件: {path}")
+def install_layout(source: Path):
+    """Load the same installed-layout contract that the release will execute."""
+    path = Path(source) / LAYOUT_CONTRACT_FILE
+    name = "_codex_wechat_install_layout_contract"
+    existing = sys.modules.get(name)
+    if existing is not None and Path(existing.__file__ or "").resolve() == path.resolve():
+        return existing
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"安装布局契约缺失: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     try:
-        text = path.read_text(encoding="utf-8").rstrip("\r\n")
-    except OSError as error:
-        raise ValueError(f"无法读取路径标记: {path}") from error
-    if not text or "\n" in text or "\r" in text or "\x00" in text:
-        raise ValueError(f"路径标记内容无效: {path}")
-    root = Path(text).expanduser()
-    if not root.is_absolute():
-        raise ValueError(f"路径标记必须是绝对路径: {path}")
-    return root
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
 
 
-def _saved_manifest(target: Path) -> dict[str, Path] | None:
-    path = Path(target) / RUNTIME_ROOTS_FILE
-    if not path.exists() and not path.is_symlink():
-        return None
-    if path.is_symlink() or not path.is_file():
-        raise ValueError(f"运行时路径清单不是普通文件: {path}")
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise ValueError(f"无法读取运行时路径清单: {path}") from error
-    if (not isinstance(value, dict) or type(value.get("version")) is not int
-            or value["version"] != 1):
-        raise ValueError(f"运行时路径清单格式无效: {path}")
-    roots = {}
-    for role in RUNTIME_ROOT_ROLES:
-        text = value.get(role)
-        if (not isinstance(text, str) or not text or "\n" in text
-                or "\r" in text or "\x00" in text):
-            raise ValueError(f"运行时路径清单缺少有效的 {role}: {path}")
-        root = Path(text).expanduser()
-        if not root.is_absolute():
-            raise ValueError(f"运行时路径清单中的 {role} 必须是绝对路径: {path}")
-        roots[role] = root
-    return roots
-
-
-def saved_data_root(target: Path) -> Path | None:
-    if IS_WINDOWS:
-        return _saved_root(target, DATA_ROOT_FILE)
-    manifest = _saved_manifest(target)
-    return manifest["data"] if manifest is not None else None
-
-
-def _default_data_root() -> Path:
-    try:
-        from codex_wechat.platform_support import default_data_root
-    except ImportError:
-        default_data_root = None
-    if default_data_root is not None:
-        try:
-            return Path(default_data_root())
-        except RuntimeError as error:
-            raise ValueError(str(error)) from error
-    # Standalone installer fallback for a source tree without platform_support.
-    if IS_WINDOWS:
-        local = os.environ.get("LOCALAPPDATA")
-        if not local:
-            raise ValueError("Windows 缺少 LOCALAPPDATA，无法确定数据目录")
-        return Path(local) / "codex-wechat"
-    data_home = os.environ.get("XDG_DATA_HOME")
-    if data_home and Path(data_home).is_absolute():
-        return Path(data_home).expanduser() / "codex-wechat"
-    return Path.home() / ".local" / "share" / "codex-wechat"
-
-
-def _default_config_root() -> Path:
-    config_home = os.environ.get("XDG_CONFIG_HOME")
-    if config_home and Path(config_home).is_absolute():
-        return Path(config_home).expanduser() / "codex-wechat"
-    return Path.home() / ".config" / "codex-wechat"
-
-
-def _default_state_root() -> Path:
-    state_home = os.environ.get("XDG_STATE_HOME")
-    if state_home and Path(state_home).is_absolute():
-        return Path(state_home).expanduser() / "codex-wechat"
-    return Path.home() / ".local" / "state" / "codex-wechat"
-
-
-def configured_data_root(target: Path) -> Path:
-    """Keep an installed data root fixed; environment overrides only bootstrap source runs."""
-    override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
-    saved = saved_data_root(target)
-    if saved is not None:
-        if override and Path(override).expanduser().resolve() != saved.resolve():
-            raise ValueError(
-                "CODEX_WECHAT_DATA_ROOT 与已保存的数据根不一致；"
-                "已安装实例的数据根固定，请清除环境变量"
-            )
-        return saved
-    if override:
-        return Path(override).expanduser().absolute()
-    return _default_data_root()
-
-
-def configured_config_file(target: Path) -> Path:
-    """Resolve the active config without coupling the installer to runtime code."""
-    if IS_WINDOWS:
-        return configured_data_root(target) / "config.json"
-    return configured_config_root(target) / "config.json"
-
-
-def configured_config_root(target: Path) -> Path:
-    """Keep an installed config root fixed; use XDG only for the first install."""
-    manifest = _saved_manifest(target)
-    return manifest["config"] if manifest is not None else _default_config_root()
-
-
-def configured_state_root(target: Path) -> Path:
-    """Keep an installed state root fixed; use XDG only for the first install."""
-    manifest = _saved_manifest(target)
-    return manifest["state"] if manifest is not None else _default_state_root()
-
-
-def _write_root_marker(target: Path, filename: str, root: Path) -> None:
-    _atomic_write(
-        Path(target) / filename,
-        (str(root) + "\n").encode("utf-8"),
-        0o600,
-        root=target,
+def installed_layout(source: Path, target: Path, *, required=False):
+    return install_layout(source).InstalledLayout.load(
+        target,
+        platform="windows" if IS_WINDOWS else "linux",
+        required=required,
     )
 
 
-def _write_runtime_roots_manifest(target: Path, roots: dict[str, Path]) -> None:
-    value = {"version": 1, **{role: str(root) for role, root in roots.items()}}
-    _atomic_write(
-        Path(target) / RUNTIME_ROOTS_FILE,
-        (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"),
-        0o600,
-        root=target,
-    )
+def installed_release_id(source: Path, target: Path) -> str | None:
+    layout = installed_layout(source, target)
+    return layout.release_id if layout is not None else None
 
 
-def _write_data_root_marker(target: Path) -> None:
-    _write_root_marker(target, DATA_ROOT_FILE, configured_data_root(target))
-
-
-def _configured_runtime_roots(target: Path) -> dict[str, Path]:
-    return {
-        "data": configured_data_root(target),
-        "config": configured_config_root(target),
-        "state": configured_state_root(target),
-    }
-
-
-def _paths_overlap(first: Path, second: Path) -> bool:
-    return first == second or first.is_relative_to(second) or second.is_relative_to(first)
-
-
-def check_runtime_root_layout(target: Path) -> None:
-    """Reject ambiguous runtime-root ownership before publishing markers."""
-    if IS_WINDOWS:
-        return
-    try:
-        install = Path(target).resolve()
-        values = _configured_runtime_roots(target)
-        roots = {
-            "数据根": values["data"].resolve(),
-            "配置根": values["config"].resolve(),
-            "状态根": values["state"].resolve(),
-        }
-    except (OSError, RuntimeError) as error:
-        raise ValueError(f"无法解析运行时路径布局: {error}") from error
-    for role in ("配置根", "状态根"):
-        if _paths_overlap(roots[role], install):
-            raise ValueError(f"{role}与程序安装目录重叠: {roots[role]}")
-    for first, second in (("数据根", "配置根"), ("数据根", "状态根"),
-                          ("配置根", "状态根")):
-        if _paths_overlap(roots[first], roots[second]):
-            raise ValueError(f"{first}与{second}不能重叠: {roots[first]} / {roots[second]}")
-    workspace = (roots["数据根"] / "workspace").resolve()
-    if workspace == install or install.is_relative_to(workspace):
-        raise ValueError(f"工作区不能包含程序安装目录: {workspace}")
-
-
-def _publish_runtime_roots(target: Path) -> None:
-    """Persist the one platform-specific installation-layout marker."""
-    if IS_WINDOWS:
-        _write_data_root_marker(target)
-    else:
-        _write_runtime_roots_manifest(target, _configured_runtime_roots(target))
+def available_installed_release_id(source: Path, target: Path) -> str | None:
+    if not (Path(source) / LAYOUT_CONTRACT_FILE).is_file():
+        return None
+    return installed_release_id(source, target)
 
 
 def _private(relative: Path) -> bool:
@@ -565,8 +410,10 @@ def check_runtime_compatibility(files, config):
         raise ValueError("当前配置使用共享 WebSocket，但待安装版本不支持；未修改安装。")
 
 
-def check_config_compatibility(files, target):
-    path = configured_config_file(target)
+def check_config_compatibility(files, layout):
+    if layout is None:
+        return
+    path = layout.runtime_paths().config_file
     if not path.exists():
         return
     config = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -604,23 +451,6 @@ def _check_target_path(target: Path) -> None:
         raise ValueError(f"安装目录不是文件夹: {target}")
 
 
-def read_pointer(target: Path, name: str) -> str | None:
-    path = target / name
-    if path.is_symlink():
-        raise ValueError(f"版本指针不能是符号链接: {path}")
-    try:
-        value = path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return None
-    except OSError as error:
-        raise ValueError(f"无法读取版本指针 {path}: {error}") from error
-    if not value:
-        return None
-    if not value.isascii() or not all(char.isalnum() or char in "._-" for char in value):
-        raise ValueError(f"版本指针内容无效: {path}")
-    return value
-
-
 def _atomic_write(
     path: Path,
     content: bytes,
@@ -649,15 +479,6 @@ def _atomic_write(
         temporary.unlink(missing_ok=True)
 
 
-def _write_pointer(target: Path, name: str, value: str) -> None:
-    _atomic_write(
-        target / name,
-        (value + "\n").encode("utf-8"),
-        0o600,
-        root=target,
-    )
-
-
 def _readable(path: Path) -> bool:
     """A real access check: Windows denies reads without failing stat()."""
     try:
@@ -672,7 +493,12 @@ def _readable(path: Path) -> bool:
     return True
 
 
-def check_user_access(target: Path, identifier: str, source: Path) -> None:
+def check_user_access(
+    target: Path,
+    identifier: str,
+    source: Path,
+    layout,
+) -> None:
     """The service starts as the installing user, so entries must be readable.
 
     A restricted or elevated sandbox can create files with a private DACL: the
@@ -680,7 +506,7 @@ def check_user_access(target: Path, identifier: str, source: Path) -> None:
     scheduled task logs nothing. Detect that here instead.
     """
     entries = [target / relative for relative in _stable_files(source)]
-    entries += [target / CURRENT_FILE, release_path(target, identifier)]
+    entries += [layout.manifest_path, release_path(target, identifier)]
     denied = [path for path in entries if not _readable(path)]
     if denied:
         remedy = (f'icacls "{target}" /reset /t /c /q' if IS_WINDOWS
@@ -740,38 +566,38 @@ class InstallLock:
             self.stream = None
 
 
-def _installation_state(target: Path) -> str | None:
-    return read_pointer(target, CURRENT_FILE)
-
-
 def check_install_target(
     source: Path | None,
     target: Path,
     *,
     update: bool,
+    contract,
 ) -> None:
     _check_target_path(target)
-    state = _installation_state(target)
+    layout = contract.InstalledLayout.load(
+        target,
+        platform="windows" if IS_WINDOWS else "linux",
+    )
     if source == target:
-        if read_pointer(target, CURRENT_FILE):
+        if layout is not None:
             raise ValueError(
                 "版本化安装不能把安装根目录本身当作新源码；"
                 "请从另一份源码 checkout 运行 update。"
             )
         return
     if update:
-        if state is None:
+        if layout is None:
             raise ValueError(
                 f"目标不是现有 codex-wechat 安装: {target}\n"
                 "全新安装请使用 install。"
             )
-        if not release_matches(target, state):
+        if not release_matches(target, layout.release_id):
             raise ValueError(
                 f"目标不是完整的现有 codex-wechat 安装: {target}\n"
                 "未修改现有文件。"
             )
         return
-    if state is not None:
+    if layout is not None:
         raise ValueError(
             f"目标已有 codex-wechat 安装: {target}\n"
             "现有安装在保留数据的前提下升级，请使用 update。"
@@ -1179,10 +1005,6 @@ def install_bootstrap(source: Path, target: Path) -> None:
         shutil.rmtree(staging, ignore_errors=True)
 
 
-def activate_release(target: Path, identifier: str) -> None:
-    _write_pointer(target, CURRENT_FILE, identifier)
-
-
 def prune_releases(target: Path, *, keep, report=None) -> list[str]:
     """Delete stale releases, but never the one a running bridge marked active."""
     releases = Path(target) / RELEASES_DIR
@@ -1463,7 +1285,19 @@ def _common_install(
 ) -> int:
     source = _resolved_root(source, "源码目录")
     target = target.expanduser().absolute() if dry_run else _resolved_root(target, "安装目录")
-    if not dry_run and source == target and read_pointer(target, CURRENT_FILE):
+    contract = None
+    if (source / LAYOUT_CONTRACT_FILE).is_file():
+        contract = install_layout(source)
+    elif not dry_run:
+        raise ValueError(f"安装布局契约缺失: {source / LAYOUT_CONTRACT_FILE}")
+    existing = None
+    if not dry_run:
+        check_install_target(source, target, update=update, contract=contract)
+        existing = contract.InstalledLayout.load(
+            target,
+            platform="windows" if IS_WINDOWS else "linux",
+        )
+    if source == target and existing is not None:
         raise ValueError(
             "版本化安装不能把安装根目录本身当作新源码；"
             "请从另一份源码 checkout 运行 update。"
@@ -1481,20 +1315,24 @@ def _common_install(
         detail(f"源码检查: {error}；因 --dry-run 放行。")
         files = None
     try:
-        check_config_compatibility(files, target)
+        check_config_compatibility(files, existing)
     except (OSError, ValueError) as error:
         if not dry_run:
             raise
         detail(f"运行能力检查: {error}；因 --dry-run 放行。")
     identifier = release_identifier(files) if files is not None else "演示版本"
+    planned = None
     if dry_run:
         detail("因 --dry-run，真实安装目录与命令入口检查按通过处理；不代表实际安装条件已满足。")
-        current = None
     else:
-        check_install_target(source, target, update=update)
-        check_runtime_root_layout(target)
+        planned = contract.InstalledLayout.planned(
+            target,
+            identifier,
+            platform="windows" if IS_WINDOWS else "linux",
+            existing=existing,
+        )
         preflight_command_link(target)
-        current = read_pointer(target, CURRENT_FILE)
+        current = existing.release_id if existing is not None else None
         if (current == identifier and release_matches(target, identifier, files)
                 and stable_files_match(release_path(target, identifier), target)):
             # A previous install may have skipped the Windows shim because the
@@ -1506,7 +1344,6 @@ def _common_install(
             # start anything. Both platform steps are idempotent.
             with InstallLock(target):
                 ensure_release_runtime(target / RELEASES_DIR / identifier)
-                _publish_runtime_roots(target)
                 configure_platform_service(target / "releases" / identifier, target,
                                            update=update)
             print(f"版本 {identifier} 已经安装，没有修改。")
@@ -1531,7 +1368,7 @@ def _common_install(
     release = None
     created = False
     service_ready = False
-    marker_ready = False
+    layout_published = False
     try:
         sys.path.insert(0, str(source))
         try:
@@ -1540,12 +1377,16 @@ def _common_install(
             sys.path.pop(0)
         make_private(target)
         with InstallLock(target):
-            check_install_target(source, target, update=update)
-            check_runtime_root_layout(target)
+            check_install_target(source, target, update=update, contract=contract)
             fresh_files = project_files(source)
             if fresh_files != files:
                 raise ValueError("确认期间源码发生变化，请重新运行")
-            if read_pointer(target, CURRENT_FILE) != current:
+            locked_layout = contract.InstalledLayout.load(
+                target,
+                platform="windows" if IS_WINDOWS else "linux",
+            )
+            locked_release = locked_layout.release_id if locked_layout is not None else None
+            if locked_release != current:
                 raise ValueError("确认期间当前版本发生变化，请重新运行")
             phase("准备程序与依赖...")
             release, created = install_release(target, identifier, files)
@@ -1554,12 +1395,11 @@ def _common_install(
             phase("更新入口与当前版本...")
             install_bootstrap(release, target)
             install_command_link(target)
-            activate_release(target, identifier)
-            _publish_runtime_roots(target)
-            marker_ready = True
+            planned.publish()
+            layout_published = True
             service_ready = configure_platform_service(release, target, update=update)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
-            check_user_access(target, identifier, release)
+            check_user_access(target, identifier, release, planned)
             try:
                 pruned = prune_releases(target, keep=(identifier, current))
             except OSError as error:
@@ -1568,13 +1408,17 @@ def _common_install(
                 for name in pruned:
                     detail(f"已移除旧版本: {name}")
     except BaseException:
-        # Only delete a release we created and never activated; no restoration.
-        if created and release is not None and read_pointer(target, CURRENT_FILE) != identifier:
+        # Only delete a release this attempt created but did not select.
+        try:
+            active_identifier = installed_release_id(source, target)
+        except (OSError, ValueError):
+            active_identifier = None
+        if created and release is not None and active_identifier != identifier:
             shutil.rmtree(release)
-        # A target created by this attempt is disposable until current is
-        # activated with its data-root contract. Remove it as a whole so a
-        # failed first install cannot leave a current without a marker.
-        if created_target and not marker_ready:
+        # A target created by this attempt is disposable until the contract is
+        # published. Remove it as a whole so first install cannot leave roots
+        # or a release without a selected layout.
+        if created_target and not layout_published:
             shutil.rmtree(target, ignore_errors=True)
         elif not created_target:
             # Never remove a directory the user already owned; only clear what a
@@ -1765,7 +1609,7 @@ def remember_update_source(
 ) -> None:
     identifier = release_identifier(project_files(source))
     # Cancellation returns 0 too; never save a source for a cancelled install.
-    if read_pointer(target, CURRENT_FILE) != identifier:
+    if installed_release_id(source, target) != identifier:
         return
     # A same-version rerun is a no-op (or only repairs stable entry files).
     # Do not silently change the saved source when one is already recorded.
@@ -1773,7 +1617,7 @@ def remember_update_source(
             and (target / UPDATE_SOURCE_FILE).exists()):
         return
     with InstallLock(target):
-        if read_pointer(target, CURRENT_FILE) == identifier:
+        if installed_release_id(source, target) == identifier:
             if (previous == identifier
                     and (target / UPDATE_SOURCE_FILE).exists()):
                 return
@@ -1811,12 +1655,12 @@ def remote_update(
         print("演练未获取远程版本，不代表该来源或新版本已通过校验。")
         return 0
     _check_target_path(target)
-    if _installation_state(target) is None:
-        raise ValueError("目标尚未安装 codex-wechat；请先使用 install。")
-    previous = read_pointer(target, CURRENT_FILE)
     with tempfile.TemporaryDirectory(prefix="codex-wechat-update-") as directory:
         source = Path(directory) / "source"
         fetch_update_source(choice, source)
+        previous = installed_release_id(source, target)
+        if previous is None:
+            raise ValueError("目标尚未安装 codex-wechat；请先使用 install。")
         # Use the installed updater, not an unconfirmed remote installer script.
         result = update(source, target)
         remember_update_source(target, source, choice, previous=previous)
@@ -1841,16 +1685,20 @@ def bootstrap(
             announce=False,
         )
     _check_target_path(target)
-    updating = _installation_state(target) is not None
-    phase("更新" if updating else "安装")
-    print(f"来源: {choice['repo']} ({choice['ref']})")
-    previous = read_pointer(target, CURRENT_FILE)
-    # Reject unrelated files before any network or install side effect.
-    check_install_target(None, target, update=updating)
-    print("检测到已有安装，将执行更新。" if updating else "未检测到已有安装，将执行首次安装。")
     with tempfile.TemporaryDirectory(prefix="codex-wechat-bootstrap-") as directory:
         source = Path(directory) / "source"
         fetch_update_source(choice, source)
+        contract = install_layout(source)
+        layout = contract.InstalledLayout.load(
+            target,
+            platform="windows" if IS_WINDOWS else "linux",
+        )
+        updating = layout is not None
+        previous = layout.release_id if layout is not None else None
+        phase("更新" if updating else "安装")
+        print(f"来源: {choice['repo']} ({choice['ref']})")
+        check_install_target(source, target, update=updating, contract=contract)
+        print("检测到已有安装，将执行更新。" if updating else "未检测到已有安装，将执行首次安装。")
         result = _common_install(
             source,
             target,
@@ -2064,7 +1912,7 @@ def main(argv: list[str] | None = None) -> int:
             source = options.source or SOURCE_ROOT
             if options.source is None and not options.repo and not options.dry_run:
                 if SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents:
-                    identifier = read_pointer(target, CURRENT_FILE)
+                    identifier = available_installed_release_id(SOURCE_ROOT, target)
                     if identifier:
                         source = release_path(target, identifier)
             if options.repo:
@@ -2092,7 +1940,13 @@ def main(argv: list[str] | None = None) -> int:
         if options.ref:
             raise ValueError("--ref 需要同时指定 --repo。")
         installed_entry = SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents
-        if options.source is None and installed_entry and not options.dry_run and (command == "update" or read_pointer(target, CURRENT_FILE)):
+        current_identifier = (
+            available_installed_release_id(SOURCE_ROOT, target)
+            if installed_entry and not options.dry_run
+            else None
+        )
+        if options.source is None and installed_entry and not options.dry_run and (
+                command == "update" or current_identifier):
             choice = saved_update_source(target)
             if choice:
                 return bootstrap(
@@ -2105,7 +1959,10 @@ def main(argv: list[str] | None = None) -> int:
                     "尚未配置更新来源；若通过私有网络入口安装，请重跑同一网络入口，"
                     "或用 --source 指定本地源码。")
         source = options.source or SOURCE_ROOT
-        updating = False if options.dry_run else _installation_state(target) is not None
+        updating = (
+            False if options.dry_run
+            else installed_layout(source, target) is not None
+        )
         operation = update if updating else install
         return operation(
             source,

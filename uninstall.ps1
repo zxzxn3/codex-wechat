@@ -17,30 +17,37 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
 } else {
     $Project
 }
-function Read-SavedDataRoot([string]$Root) {
-    $Marker = Join-Path $Root '.data-root'
-    $Item = Get-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue
-    if (-not $Item) { return $null }
-    if ($Item.PSIsContainer -or
-            (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-        throw "数据根标记不是普通文件: $Marker"
-    }
-    try {
-        $Value = Get-Content -LiteralPath $Marker -Raw -Encoding UTF8 -ErrorAction Stop
-    } catch {
-        throw "无法读取数据根标记: $Marker"
-    }
-    $Value = ([string]$Value).TrimEnd([char[]]"`r`n")
-    if ([string]::IsNullOrWhiteSpace($Value) -or
-            $Value.Contains("`n") -or $Value.Contains("`r") -or
-            -not [IO.Path]::IsPathRooted($Value)) {
-        throw "数据根标记内容无效: $Marker"
-    }
-    return [IO.Path]::GetFullPath($Value)
+$LayoutPython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
+    $LayoutPythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $LayoutPythonCommand) { throw 'Python runtime is unavailable.' }
+    $LayoutPython = $LayoutPythonCommand.Source
 }
-$SavedDataRoot = Read-SavedDataRoot $InstallRoot
-if ($PurgeData -and -not $SavedDataRoot) {
-    throw 'uninstall.ps1: 缺少数据根标记；拒绝清理无法确认的数据'
+$PreviousPythonPath = $env:PYTHONPATH
+try {
+    $env:PYTHONPATH = if ($PreviousPythonPath) {
+        "$InstallRoot;$PreviousPythonPath"
+    } else {
+        $InstallRoot
+    }
+    $LayoutJson = & $LayoutPython -m codex_wechat.install_layout show `
+        --install-root $InstallRoot
+    if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
+    $Layout = $LayoutJson | ConvertFrom-Json
+    $PurgeItems = @()
+    if ($PurgeData) {
+        $PurgePlanJson = & $LayoutPython -m codex_wechat.install_layout purge-plan `
+            --install-root $InstallRoot
+        if ($LASTEXITCODE) { throw 'Purge plan is unavailable.' }
+        $PurgePlan = $PurgePlanJson | ConvertFrom-Json
+        $PurgeItems = @($PurgePlan.items)
+    }
+} finally {
+    if ($null -eq $PreviousPythonPath) {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONPATH = $PreviousPythonPath
+    }
 }
 $StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $ExpectedActionPrefixes = @(
@@ -50,13 +57,7 @@ $ExpectedActionExecutables = @(
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'),
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe')
 )
-$RequestedDataRoot = if ($SavedDataRoot) {
-    $SavedDataRoot
-} else {
-    Join-Path $env:LOCALAPPDATA 'codex-wechat'
-}
-$DataRoot = $RequestedDataRoot
-$DataPaths = @('config.json', '.state', 'workspace', 'logs', 'shared')
+$DataRoot = [IO.Path]::GetFullPath([string]$Layout.dataRoot)
 
 function Fail([string]$Message) {
     throw "uninstall.ps1: $Message"
@@ -116,8 +117,8 @@ function Remove-TreeWithoutFollowingLinks([string]$Path) {
     [IO.Directory]::Delete($Path, $false)
 }
 
-function Remove-DataPath([string]$Name) {
-    $path = Join-Path $DataRoot $Name
+function Remove-DataPath([string]$Path) {
+    $path = [IO.Path]::GetFullPath($Path)
     $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
     if (-not $item) {
         return
@@ -264,8 +265,8 @@ if ($PurgeData) {
             Fail "拒绝清理非目录数据目录: $DataRoot"
         }
         Stop-SharedBackends
-        foreach ($name in $DataPaths) {
-            Remove-DataPath $name
+        foreach ($item in $PurgeItems) {
+            Remove-DataPath ([string]$item.path)
         }
         Write-Host '已删除数据目录中的用户数据。'
     }
@@ -277,10 +278,23 @@ if ($task) {
     Write-Host "已移除计划任务: $TaskName"
 }
 if ($PurgeData) {
-    # Only a purge forgets the root: the marker is the single pointer back to the
-    # data a data-preserving uninstall deliberately keeps, and a reinstall (which
-    # resolves to `update` because the install tree stays) reads it.
-    Remove-Item -LiteralPath (Join-Path $InstallRoot '.data-root') -Force -ErrorAction SilentlyContinue
+    $PreviousPythonPath = $env:PYTHONPATH
+    try {
+        $env:PYTHONPATH = if ($PreviousPythonPath) {
+            "$InstallRoot;$PreviousPythonPath"
+        } else {
+            $InstallRoot
+        }
+        & $LayoutPython -m codex_wechat.install_layout remove `
+            --install-root $InstallRoot
+        if ($LASTEXITCODE) { throw 'Failed to remove the installation manifest.' }
+    } finally {
+        if ($null -eq $PreviousPythonPath) {
+            Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONPATH = $PreviousPythonPath
+        }
+    }
 }
 $Shim = Join-Path $env:USERPROFILE '.local\bin\codex-wechat.cmd'
 if (Test-Path -LiteralPath $Shim -PathType Leaf) {

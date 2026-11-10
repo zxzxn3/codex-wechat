@@ -18,45 +18,23 @@ $installRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
 } elseif ((Split-Path -Leaf (Split-Path -Parent $PSScriptRoot)) -eq 'releases') {
     Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 } else { $PSScriptRoot }
-$project = $installRoot
-$current = Join-Path $installRoot 'current'
-if (-not (Test-Path -LiteralPath $current)) {
-    throw "codex-desktop.ps1: 当前版本指针 current 缺失: $current"
-}
-if (Test-Path -LiteralPath $current) {
-    $item = Get-Item -LiteralPath $current -Force
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        throw "codex-desktop.ps1: 当前版本指针 current 不能是符号链接或重解析点: $current"
-    }
-    if ($item.PSIsContainer) {
-        throw "codex-desktop.ps1: 当前版本指针 current 必须是普通文件: $current"
-    }
-    $identifier = (Get-Content -LiteralPath $current -Raw -Encoding UTF8).Trim()
-    if ($identifier -cnotmatch '^[a-f0-9]{16}$') {
-        throw "codex-desktop.ps1: 当前版本指针 current 包含无效版本标识: $current"
-    }
-    $project = Join-Path $installRoot ('releases\' + $identifier)
-}
-$python = Join-Path $project '.venv\Scripts\python.exe'
+$python = Join-Path $installRoot '.bootstrap-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     $native = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
     if (-not $native) { throw 'Python runtime is unavailable.' }
     $python = $native.Source
-}
-$script = Join-Path $project 'codex_wechat\desktop.py'
-if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
-    throw "codex-desktop.ps1: 当前版本不完整: $project`n请从新源码重新运行 update。"
 }
 $before = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT','Process')
 $beforePythonPath = [Environment]::GetEnvironmentVariable('PYTHONPATH','Process')
 try {
     $env:CODEX_WECHAT_INSTALL_ROOT = $installRoot
     $env:PYTHONPATH = if ($beforePythonPath) {
-        "$project;$beforePythonPath"
+        "$installRoot;$beforePythonPath"
     } else {
-        $project
+        $installRoot
     }
-    & $python -u -m codex_wechat.desktop @args
+    & $python -u -m codex_wechat.launcher --install-root $installRoot `
+        --module codex_wechat.desktop -- @args
     $result = $LASTEXITCODE
 } finally {
     [Environment]::SetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT',$before,'Process')

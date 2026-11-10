@@ -54,39 +54,31 @@ if (-not $InstallRoot -or (-not $env:LOCALAPPDATA -and -not $env:CODEX_WECHAT_DA
 if ($DryRun -or $NonInteractive -or $Repo -or $Ref) { throw 'Invalid internal integration arguments.' }
 $TaskName = 'CodexWeChat'
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
-function Read-SavedDataRoot([string]$Root) {
-    $Marker = Join-Path $Root '.data-root'
-    $Item = Get-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue
-    if (-not $Item) { return $null }
-    if ($Item.PSIsContainer -or
-            (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-        throw "数据根标记不是普通文件: $Marker"
+$LayoutPython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
+    $LayoutPythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $LayoutPythonCommand) { throw 'Python runtime is unavailable.' }
+    $LayoutPython = $LayoutPythonCommand.Source
+}
+$PreviousPythonPath = $env:PYTHONPATH
+try {
+    $env:PYTHONPATH = if ($PreviousPythonPath) {
+        "$InstallRoot;$PreviousPythonPath"
+    } else {
+        $InstallRoot
     }
-    try {
-        $Value = Get-Content -LiteralPath $Marker -Raw -Encoding UTF8 -ErrorAction Stop
-    } catch {
-        throw "无法读取数据根标记: $Marker"
+    $LayoutJson = & $LayoutPython -m codex_wechat.install_layout show `
+        --install-root $InstallRoot
+    if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
+    $Layout = $LayoutJson | ConvertFrom-Json
+} finally {
+    if ($null -eq $PreviousPythonPath) {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONPATH = $PreviousPythonPath
     }
-    $Value = ([string]$Value).TrimEnd([char[]]"`r`n")
-    if ([string]::IsNullOrWhiteSpace($Value) -or
-            $Value.Contains("`n") -or $Value.Contains("`r") -or
-            -not [IO.Path]::IsPathRooted($Value)) {
-        throw "数据根标记内容无效: $Marker"
-    }
-    return [IO.Path]::GetFullPath($Value)
 }
-$SavedDataRoot = Read-SavedDataRoot $InstallRoot
-if (-not $SavedDataRoot) {
-    throw '数据根标记缺失；请重新运行安装器。'
-}
-if (-not $env:CODEX_WECHAT_DATA_ROOT) {
-    $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot
-}
-$DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT) {
-    [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
-} else {
-    $SavedDataRoot
-}
+$DataRoot = [IO.Path]::GetFullPath([string]$Layout.dataRoot)
 $ServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $Python = Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {

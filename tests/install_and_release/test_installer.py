@@ -1,8 +1,7 @@
 """Offline contracts for immutable release installation without rollback."""
-from tests.support.helpers import requires_symlinks, xdg_user_data_dir
+from tests.support.helpers import requires_symlinks
 import contextlib
 import io
-import json
 import os
 from pathlib import Path
 import shutil
@@ -15,6 +14,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import installer
+from codex_wechat.install_layout import INSTALLATION_FILE, InstalledLayout
 
 
 class InstallerTests(unittest.TestCase):
@@ -55,6 +55,10 @@ class InstallerTests(unittest.TestCase):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"{relative}: {version}\n", encoding="utf-8")
+        shutil.copy2(
+            installer.SOURCE_ROOT / "codex_wechat/install_layout.py",
+            root / "codex_wechat/install_layout.py",
+        )
         (root / "codex-wechat").chmod(0o755)
         (root / "install.sh").chmod(0o755)
         (root / "extra.py").write_text(f"VERSION = {version!r}\n", encoding="utf-8")
@@ -82,10 +86,16 @@ class InstallerTests(unittest.TestCase):
         return private
 
     def current(self):
-        return installer.read_pointer(self.target, installer.CURRENT_FILE)
+        layout = InstalledLayout.load(
+            self.target, platform="windows" if installer.IS_WINDOWS else "linux")
+        return layout.release_id if layout is not None else None
 
     def previous(self):
-        return installer.read_pointer(self.target, installer.PREVIOUS_FILE)
+        try:
+            return (self.target / installer.PREVIOUS_FILE).read_text(
+                encoding="utf-8").strip() or None
+        except FileNotFoundError:
+            return None
 
     def test_payload_excludes_private_runtime_content(self):
         self.add_private_data(self.source)
@@ -155,7 +165,7 @@ class InstallerTests(unittest.TestCase):
     def test_cancel_and_dry_run_do_not_create_version_state(self):
         with patch("builtins.input", return_value="n"):
             self.assertEqual(installer.install(self.source, self.target), 0)
-        self.assertFalse((self.target / installer.CURRENT_FILE).exists())
+        self.assertFalse((self.target / INSTALLATION_FILE).exists())
         with patch("builtins.input", return_value="y"):
             self.assertEqual(installer.install(self.source, self.target, dry_run=True), 0)
         self.assertFalse((self.target / installer.RELEASES_DIR).exists())
@@ -173,28 +183,6 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(":: 更新", update_output.getvalue())
         self.assertNotIn("安装 / 更新", update_output.getvalue())
 
-    def test_bootstrap_does_not_print_a_generic_install_or_update_title(self):
-        for existing, expected in ((False, ":: 安装"), (True, ":: 更新")):
-            with self.subTest(existing=existing):
-                output = io.StringIO()
-                with patch.object(
-                        installer, "_installation_state",
-                        return_value="current" if existing else None), \
-                        patch.object(installer, "_check_target_path"), \
-                        patch.object(installer, "check_install_target"), \
-                        patch.object(installer, "fetch_update_source"), \
-                        patch.object(installer, "remember_update_source"), \
-                        patch.object(installer, "_common_install", return_value=0), \
-                        contextlib.redirect_stdout(output):
-                    installer.bootstrap(
-                        self.target,
-                        {"repo": "https://example.invalid/project",
-                         "ref": "main"},
-                    )
-                text = output.getvalue()
-                self.assertIn(expected, text)
-                self.assertNotIn("安装或更新", text)
-
     def test_nonempty_unrelated_target_is_rejected_before_prompt(self):
         self.target.mkdir()
         marker = self.target / "unrelated"
@@ -205,18 +193,18 @@ class InstallerTests(unittest.TestCase):
             prompt.assert_not_called()
         self.assertEqual(marker.read_text(), "keep")
 
-    def test_update_rejects_unrelated_directory_with_forged_current_pointer(self):
+    def test_update_rejects_the_legacy_pointer_layout(self):
         self.target.mkdir()
-        (self.target / installer.CURRENT_FILE).write_text("deadbeef\n", encoding="utf-8")
+        (self.target / "current").write_text("deadbeef\n", encoding="utf-8")
         marker = self.target / "unrelated"
         marker.write_text("keep", encoding="utf-8")
         with patch("builtins.input") as prompt:
-            with self.assertRaisesRegex(ValueError, "不是完整的现有"):
+            with self.assertRaisesRegex(ValueError, "旧安装布局"):
                 installer.update(self.source, self.target)
             prompt.assert_not_called()
         self.assertEqual(marker.read_text(), "keep")
         self.assertEqual(
-            (self.target / installer.CURRENT_FILE).read_text(),
+            (self.target / "current").read_text(),
             "deadbeef\n",
         )
         self.assertFalse((self.target / installer.RELEASES_DIR).exists())
@@ -225,7 +213,6 @@ class InstallerTests(unittest.TestCase):
         self.target.write_text("existing file, not an installation directory", encoding="utf-8")
         output = io.StringIO()
         with patch("builtins.input", return_value="y"), \
-             patch.object(installer, "read_pointer", side_effect=AssertionError("read target")), \
              patch.object(installer, "preflight_command_link", side_effect=AssertionError("check link")), \
              patch.object(installer, "prepare_runtime") as prepare, \
              contextlib.redirect_stdout(output):
@@ -239,8 +226,7 @@ class InstallerTests(unittest.TestCase):
         self.target.write_text("keep", encoding="utf-8")
         with patch("builtins.input", return_value="y"), \
              patch.object(installer, "IS_WINDOWS", False), \
-             patch.object(installer, "SOURCE_ROOT", self.source), \
-             patch.object(installer, "read_pointer", side_effect=AssertionError("read target")):
+             patch.object(installer, "SOURCE_ROOT", self.source):
             for operation in ("install", "update"):
                 self.assertEqual(installer.main([
                     operation, "--dir", str(self.target), "--dry-run",
@@ -329,7 +315,10 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "固定"):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), first)
-        self.assertEqual(installer.saved_data_root(self.target), old_root)
+        self.assertEqual(
+            InstalledLayout.load(self.target, platform="linux").data_root,
+            old_root,
+        )
 
     def test_failed_first_install_removes_the_disposable_target(self):
         with patch("builtins.input", return_value="y"), \
@@ -342,17 +331,18 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.install(self.source, self.target), 0)
         self.assertIsNotNone(self.current())
 
-    def test_failed_first_activation_without_marker_removes_the_target(self):
+    def test_failed_first_activation_without_manifest_removes_the_target(self):
+        contract = installer.install_layout(self.source)
         with patch("builtins.input", return_value="y"), \
-                patch.object(installer, "_publish_runtime_roots",
-                             side_effect=OSError("marker failed")):
-            with self.assertRaisesRegex(OSError, "marker failed"):
+                patch.object(contract.InstalledLayout, "publish",
+                             side_effect=OSError("manifest failed")):
+            with self.assertRaisesRegex(OSError, "manifest failed"):
                 installer.install(self.source, self.target)
         self.assertFalse(self.target.exists())
         with patch("builtins.input", return_value="y"):
             self.assertEqual(installer.install(self.source, self.target), 0)
         self.assertIsNotNone(self.current())
-        self.assertTrue((self.target / installer.RUNTIME_ROOTS_FILE).is_file())
+        self.assertTrue((self.target / INSTALLATION_FILE).is_file())
 
     def test_source_change_after_confirmation_is_rejected(self):
         def change_source(_):
@@ -362,7 +352,7 @@ class InstallerTests(unittest.TestCase):
         with patch("builtins.input", side_effect=change_source):
             with self.assertRaisesRegex(ValueError, "源码发生变化"):
                 installer.install(self.source, self.target)
-        self.assertFalse((self.target / installer.CURRENT_FILE).exists())
+        self.assertFalse((self.target / INSTALLATION_FILE).exists())
 
     def test_prune_keeps_the_newest_and_the_release_that_may_still_run(self):
         releases = self.target / installer.RELEASES_DIR
@@ -482,31 +472,6 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(installer.release_matches(self.target, self.current()))
         self.assertFalse((self.target / installer.PREVIOUS_FILE).exists())
 
-    def test_activation_is_the_single_visibility_boundary(self):
-        stages_before_activation = (
-            "install_release",
-            "prepare_bootstrap_runtime",
-            "install_bootstrap",
-            "install_command_link",
-            "activate_release",
-        )
-        stages_after_activation = (
-            "configure_platform_service",
-            "check_user_access",
-        )
-        for index, stage in enumerate(stages_before_activation + stages_after_activation):
-            with self.subTest(stage=stage):
-                target = self.base / f"phase-{index}"
-                with patch("builtins.input", return_value="y"), \
-                        patch.object(installer, stage, side_effect=OSError(stage)):
-                    with self.assertRaisesRegex(OSError, stage):
-                        installer.install(self.source, target)
-                current = installer.read_pointer(target, installer.CURRENT_FILE)
-                if stage in stages_after_activation:
-                    self.assertIsNotNone(current)
-                else:
-                    self.assertIsNone(current)
-
     def test_same_version_update_repairs_missing_stable_entry(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
@@ -550,10 +515,8 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "service failed"):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), current)
-        self.assertEqual(installer.saved_data_root(self.target), old_root)
-        manifest = json.loads(
-            (self.target / installer.RUNTIME_ROOTS_FILE).read_text(encoding="utf-8"))
-        self.assertEqual(manifest["data"], str(old_root))
+        layout = InstalledLayout.load(self.target, platform="linux")
+        self.assertEqual(layout.data_root, old_root)
 
     def test_same_version_update_repairs_a_missing_release_runtime(self):
         with patch("builtins.input", return_value="y"):
@@ -645,8 +608,8 @@ class InstallerTests(unittest.TestCase):
         text = (installer.SOURCE_ROOT / "codex-wechat").read_text(encoding="utf-8")
         self.assertIn("install|update|menu|components", text)
         self.assertIn('INSTALL_ROOT/installer.py', text)
-        self.assertIn('INSTALL_ROOT/releases/$RELEASE_ID', text)
-        self.assertIn('[ -L "$CURRENT_FILE" ]', text)
+        self.assertIn("codex_wechat.launcher", text)
+        self.assertNotIn("CURRENT_FILE", text)
 
 
 class BootstrapRuntimeTests(unittest.TestCase):
@@ -749,17 +712,19 @@ class InstallerCommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             files = installer._stable_files(installer.SOURCE_ROOT)
-            for name in (*files, installer.CURRENT_FILE):
+            contract = installer.install_layout(installer.SOURCE_ROOT)
+            for name in (*files, contract.INSTALLATION_FILE):
                 path = target / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("x", encoding="utf-8")
             (target / "releases" / "abc").mkdir(parents=True)
-            installer.check_user_access(target, "abc", installer.SOURCE_ROOT)
+            installer.check_user_access(target, "abc", installer.SOURCE_ROOT, contract)
             with patch.object(installer, "_readable",
-                              side_effect=lambda path: path.name != installer.CURRENT_FILE):
+                              side_effect=lambda path: path.name != contract.INSTALLATION_FILE):
                 with self.assertRaisesRegex(ValueError, "chmod|icacls") as caught:
-                    installer.check_user_access(target, "abc", installer.SOURCE_ROOT)
-            self.assertIn(installer.CURRENT_FILE, str(caught.exception))
+                    installer.check_user_access(
+                        target, "abc", installer.SOURCE_ROOT, contract)
+            self.assertIn(contract.INSTALLATION_FILE, str(caught.exception))
 
 
 class LinuxServiceRegistrationTests(unittest.TestCase):
@@ -818,14 +783,12 @@ class LinuxServiceRegistrationTests(unittest.TestCase):
 
 
 class RuntimeRepairTests(unittest.TestCase):
-    def test_marker_follows_current_activation_and_precedes_service_configuration(self):
+    def test_manifest_publication_precedes_service_configuration(self):
         text = (Path(__file__).resolve().parents[2] / "installer.py").read_text(
             encoding="utf-8")
         start = text.index('phase("准备程序与依赖...")')
-        activation = text.index("activate_release(target, identifier)", start)
-        publication = text.index("_publish_runtime_roots(target)", activation)
+        publication = text.index("planned.publish()", start)
         configuration = text.index("service_ready = configure_platform_service", publication)
-        self.assertLess(activation, publication)
         self.assertLess(publication, configuration)
 
     def test_runtime_version_contracts_match_requirements(self):
@@ -884,174 +847,6 @@ class RuntimeRepairTests(unittest.TestCase):
                     patch.object(installer, "project_files", return_value={}):
                 installer.prepare_runtime(root)
             self.assertEqual(calls[0][1:3], ["-m", "venv"])
-
-
-class DataRootMarkerTests(unittest.TestCase):
-    def test_linux_config_path_uses_the_xdg_config_root(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            with patch.dict(os.environ, {
-                    "XDG_CONFIG_HOME": str(base / "config"),
-            }, clear=False), patch.object(installer, "IS_WINDOWS", False):
-                self.assertEqual(
-                    installer.configured_config_file(base / "install"),
-                    (base / "config/codex-wechat/config.json").resolve())
-
-    def test_default_root_uses_the_platform_data_directory(self):
-        with tempfile.TemporaryDirectory() as directory:
-            data_home = Path(directory) / "xdg"
-            with patch.dict(os.environ, {
-                    "CODEX_WECHAT_DATA_ROOT": "",
-                    "XDG_DATA_HOME": str(data_home),
-            }, clear=False), \
-                    patch("codex_wechat.platform_support._platform_user_data_dir", xdg_user_data_dir):
-                self.assertEqual(installer._default_data_root(),
-                                 (data_home / "codex-wechat").resolve())
-
-    def test_linux_runtime_roots_are_persisted_for_systemd(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            target = base / "install"
-            target.mkdir()
-            config_home = base / "custom-config"
-            state_home = base / "custom-state"
-            data_home = base / "custom-data"
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.dict(os.environ, {
-                        "XDG_CONFIG_HOME": str(config_home),
-                        "XDG_STATE_HOME": str(state_home),
-                        "CODEX_WECHAT_DATA_ROOT": str(data_home),
-                    }, clear=False):
-                installer._publish_runtime_roots(target)
-            manifest = json.loads(
-                (target / installer.RUNTIME_ROOTS_FILE).read_text(encoding="utf-8"))
-            self.assertEqual(manifest, {
-                "version": 1,
-                "data": str(data_home.resolve()),
-                "config": str((config_home / "codex-wechat").resolve()),
-                "state": str((state_home / "codex-wechat").resolve()),
-            })
-            self.assertFalse((target / installer.DATA_ROOT_FILE).exists())
-            self.assertFalse((target / ".config-root").exists())
-            self.assertFalse((target / ".state-root").exists())
-
-    def test_update_keeps_saved_xdg_roots(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            target = base / "install"
-            target.mkdir()
-            old_data = base / "old-data"
-            old_config = base / "old-config"
-            old_state = base / "old-state"
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.dict(os.environ, {
-                        "CODEX_WECHAT_DATA_ROOT": str(old_data),
-                        "XDG_CONFIG_HOME": str(old_config),
-                        "XDG_STATE_HOME": str(old_state),
-                    }, clear=False):
-                installer._publish_runtime_roots(target)
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.dict(os.environ, {
-                        "CODEX_WECHAT_DATA_ROOT": "",
-                        "XDG_CONFIG_HOME": str(base / "ambient-config"),
-                        "XDG_STATE_HOME": str(base / "ambient-state"),
-                    }, clear=False):
-                self.assertEqual(installer.configured_config_root(target),
-                                 (old_config / "codex-wechat").resolve())
-                self.assertEqual(installer.configured_state_root(target),
-                                 (old_state / "codex-wechat").resolve())
-
-    def test_windows_update_rejects_a_different_data_root(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            target = base / "install"
-            target.mkdir()
-            (target / installer.DATA_ROOT_FILE).write_text(
-                str(base / "old-data") + "\n", encoding="utf-8")
-            with patch.object(installer, "IS_WINDOWS", True), \
-                    patch.dict(os.environ, {
-                        "CODEX_WECHAT_DATA_ROOT": str(base / "new-data"),
-                    }, clear=False):
-                with self.assertRaisesRegex(ValueError, "固定"):
-                    installer.configured_data_root(target)
-
-    @requires_symlinks
-    def test_linux_runtime_manifest_keeps_symlinked_xdg_roots(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            target = base / "install"
-            target.mkdir()
-            for name in ("data", "config", "state"):
-                (base / f"{name}-target").mkdir()
-                (base / f"{name}-home").symlink_to(
-                    base / f"{name}-target", target_is_directory=True)
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.dict(os.environ, {
-                        "XDG_DATA_HOME": str(base / "data-home"),
-                        "XDG_CONFIG_HOME": str(base / "config-home"),
-                        "XDG_STATE_HOME": str(base / "state-home"),
-                        "CODEX_WECHAT_DATA_ROOT": "",
-                    }, clear=False):
-                installer._publish_runtime_roots(target)
-            manifest = json.loads(
-                (target / installer.RUNTIME_ROOTS_FILE).read_text(encoding="utf-8"))
-            self.assertEqual(manifest["data"], str(base / "data-home/codex-wechat"))
-            self.assertEqual(manifest["config"], str(base / "config-home/codex-wechat"))
-            self.assertEqual(manifest["state"], str(base / "state-home/codex-wechat"))
-
-    @requires_symlinks
-    def test_linux_layout_rejects_a_symlinked_root_into_install(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            target = base / "install"
-            target.mkdir()
-            config_home = base / "config-home"
-            config_home.symlink_to(target, target_is_directory=True)
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.dict(os.environ, {
-                        "XDG_CONFIG_HOME": str(config_home),
-                        "XDG_STATE_HOME": "",
-                        "CODEX_WECHAT_DATA_ROOT": "",
-                    }, clear=False):
-                with self.assertRaisesRegex(ValueError, "程序安装目录重叠"):
-                    installer.check_runtime_root_layout(target)
-
-    def test_linux_layout_rejects_config_or_state_inside_the_install_root(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            target = base / "install"
-            target.mkdir()
-            for variable in ("XDG_CONFIG_HOME", "XDG_STATE_HOME"):
-                with self.subTest(variable=variable), \
-                        patch.object(installer, "IS_WINDOWS", False), \
-                        patch.dict(os.environ, {variable: str(target)}, clear=False):
-                    with self.assertRaisesRegex(ValueError, "程序安装目录重叠"):
-                        installer.check_runtime_root_layout(target)
-
-    def test_linux_layout_rejects_overlapping_runtime_roles(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            target = base / "install"
-            target.mkdir()
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.dict(os.environ, {
-                        "XDG_CONFIG_HOME": str(base / "config"),
-                        "XDG_STATE_HOME": str(base),
-                        "CODEX_WECHAT_DATA_ROOT": str(base / "codex-wechat"),
-                    }, clear=False):
-                with self.assertRaisesRegex(ValueError, "不能重叠"):
-                    installer.check_runtime_root_layout(target)
-
-    def test_invalid_windows_marker_fails_closed(self):
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "install"
-            target.mkdir()
-            (target / installer.DATA_ROOT_FILE).write_text(
-                "relative/path\n", encoding="utf-8")
-            with patch.object(installer, "IS_WINDOWS", True), \
-                    patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
-                with self.assertRaisesRegex(ValueError, "绝对路径"):
-                    installer.configured_data_root(target)
 
 
 if __name__ == "__main__":

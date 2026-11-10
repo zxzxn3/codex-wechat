@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import installer
+from tests.support.helpers import write_installation_layout
 
 
 class BootstrapEntryTests(unittest.TestCase):
@@ -28,32 +29,44 @@ class BootstrapEntryTests(unittest.TestCase):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"{relative}\n", encoding="utf-8")
+        shutil.copy2(
+            Path(__file__).resolve().parents[2] / "codex_wechat/install_layout.py",
+            root / "codex_wechat/install_layout.py",
+        )
         return root
 
-    def test_fresh_install_does_not_treat_an_unversioned_directory_as_an_install(self):
+    def test_fresh_install_rejects_an_unversioned_directory(self):
         target = self.root / "target"
         target.mkdir()
         (target / "codex_wechat").mkdir()
         (target / "codex_wechat/app.py").write_text("old")
         (target / "installer.py").write_text("old")
-        with patch.object(installer, "fetch_update_source") as fetch:
+        source = self.make_source(self.root / "source")
+
+        def fetch(_choice, destination):
+            shutil.copytree(source, destination)
+
+        with patch.object(installer, "fetch_update_source", side_effect=fetch):
             with self.assertRaisesRegex(ValueError, "非空"):
                 installer.bootstrap(target, self.choice)
-            fetch.assert_not_called()
+        self.assertEqual((target / "installer.py").read_text(), "old")
 
-    def test_unrelated_directory_is_not_adopted_or_downloaded_over(self):
+    def test_unrelated_directory_is_not_adopted_or_overwritten(self):
         self.target.mkdir()
         (self.target / "notes.txt").write_text("keep")
-        with patch.object(installer, "fetch_update_source") as fetch:
+        source = self.make_source(self.root / "source")
+
+        def fetch(_choice, destination):
+            shutil.copytree(source, destination)
+
+        with patch.object(installer, "fetch_update_source", side_effect=fetch):
             with self.assertRaisesRegex(ValueError, "非空"):
                 installer.bootstrap(self.target, self.choice)
-            fetch.assert_not_called()
         self.assertEqual((self.target / "notes.txt").read_text(), "keep")
 
     def test_dry_run_bypasses_target_and_performs_no_download(self):
         self.target.write_text("not a directory")
         with patch.object(installer, "fetch_update_source") as fetch, \
-             patch.object(installer, "_installation_state", side_effect=AssertionError("inspect target")), \
              patch("builtins.input", return_value="y"):
             self.assertEqual(installer.bootstrap(self.target, self.choice, dry_run=True), 0)
             fetch.assert_not_called()
@@ -77,12 +90,18 @@ class BootstrapEntryTests(unittest.TestCase):
 
     def test_same_version_rerun_keeps_saved_source_and_repairs_missing_one(self):
         source = self.make_source(self.root / "source")
-        self.target.mkdir()
         files = installer.project_files(source)
         identifier = installer.release_identifier(files)
         with patch.object(installer, "prepare_runtime"):
             installer.install_release(self.target, identifier, files)
-        (self.target / installer.CURRENT_FILE).write_text(identifier + "\n")
+        write_installation_layout(
+            self.target,
+            release_id=identifier,
+            data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
+            create_release=False,
+        )
         saved = self.target / installer.UPDATE_SOURCE_FILE
         old = {"repo": "https://github.com/old/repo.git", "ref": "main"}
         saved.write_text(json.dumps(old) + "\n")

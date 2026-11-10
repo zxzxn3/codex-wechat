@@ -1,19 +1,17 @@
-"""Release-pointer contracts for the stable Windows supervisor bootstrap."""
-from tests.support.helpers import requires_symlinks
-import os
+"""Installed-layout contracts for the stable Windows supervisor bootstrap."""
 from pathlib import Path
 import tempfile
 import unittest
 
 from codex_wechat import bootstrap_supervisor
-from codex_wechat import platform_support
+from codex_wechat.install_layout import INSTALLATION_FILE
+from tests.support.helpers import write_installation_layout
 from unittest.mock import patch
 
-# `installer.release_identifier()` writes 16 hex digits; the pointer is validated
-# against exactly that shape.
+# `installer.release_identifier()` writes 16 hex digits; the layout contract
+# validates that shape before selecting a release.
 FIRST_RELEASE = "0f1e2d3c4b5a6978"
 SECOND_RELEASE = "8877665544332211"
-MISSING_RELEASE = "0123456789abcdef"
 
 
 class BootstrapSupervisorTests(unittest.TestCase):
@@ -40,64 +38,29 @@ class BootstrapSupervisorTests(unittest.TestCase):
                 loaded.append(module)
             self.assertEqual([module.marker() for module in loaded], ["one", "two"])
 
-    def test_missing_current_pointer_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "当前版本指针 current 缺失"):
-                bootstrap_supervisor.active_release(Path(directory))
-
-    def test_current_pointer_selects_immutable_release(self):
+    def test_manifest_selects_immutable_release(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             release = root / "releases" / FIRST_RELEASE
             package = release / "codex_wechat"
             package.mkdir(parents=True)
+            (package / "app.py").write_text("", encoding="utf-8")
             (package / "windows_service.py").write_text("", encoding="utf-8")
-            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
+            write_installation_layout(
+                root,
+                release_id=FIRST_RELEASE,
+                data_root=root,
+                config_root=root,
+                state_root=root,
+                platform="windows",
+                create_release=False,
+            )
             self.assertEqual(bootstrap_supervisor.active_release(root), release.resolve())
 
-    def test_invalid_or_incomplete_pointer_is_rejected(self):
+    def test_missing_manifest_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "current").write_text("../escape\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "无效版本标识"):
-                bootstrap_supervisor.active_release(root)
-            (root / "current").write_text("ABC123\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "无效版本标识"):
-                bootstrap_supervisor.active_release(root)
-            (root / "current").write_text(MISSING_RELEASE + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "当前版本不完整"):
-                bootstrap_supervisor.active_release(root)
-
-    def test_dotdot_in_the_pointer_cannot_escape_to_the_install_root(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "windows_service.py").write_text("", encoding="utf-8")
-            (root / "releases").mkdir()
-            (root / "current").write_text("..\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "无效版本标识"):
-                bootstrap_supervisor.active_release(root)
-
-    @unittest.skipUnless(hasattr(os, "symlink"), "symbolic links unavailable")
-    @requires_symlinks
-    def test_pointer_and_release_paths_reject_symlinks(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            external = root / "external"
-            external.mkdir()
-            (root / "current").symlink_to(external / "pointer")
-            with self.assertRaisesRegex(ValueError, "不能是符号链接或重解析点"):
-                bootstrap_supervisor.active_release(root)
-
-            (root / "current").unlink()
-            outside_releases = root / "outside"
-            release = outside_releases / FIRST_RELEASE
-            package = release / "codex_wechat"
-            package.mkdir(parents=True)
-            (package / "windows_service.py").write_text("", encoding="utf-8")
-            (root / "releases").symlink_to(outside_releases, target_is_directory=True)
-            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "releases 目录不能是符号链接"):
-                bootstrap_supervisor.active_release(root)
+            with self.assertRaisesRegex(ValueError, "安装清单缺失"):
+                bootstrap_supervisor.active_release(Path(directory))
 
 
 class BootstrapSupervisorLoopTests(unittest.TestCase):
@@ -109,23 +72,28 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
             (release / ".venv" / "Scripts" / "python.exe").write_text("", encoding="utf-8")
             package = release / "codex_wechat"
             package.mkdir()
+            (package / "app.py").write_text("", encoding="utf-8")
             (package / "windows_service.py").write_text("", encoding="utf-8")
         root.mkdir(exist_ok=True)
-        (root / bootstrap_supervisor.DATA_ROOT_FILE).write_text(
-            str(root) + "\n", encoding="utf-8")
         return root
 
     def _argv(self, directory, root):
         return ["supervise", "--install-root", str(root)]
 
-    def test_marker_selects_data_root(self):
+    def test_manifest_selects_data_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(directory, FIRST_RELEASE)
-            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
             marker_root = Path(directory) / "marker-data"
             marker_root.mkdir()
-            (root / bootstrap_supervisor.DATA_ROOT_FILE).write_text(
-                str(marker_root) + "\n", encoding="utf-8")
+            write_installation_layout(
+                root,
+                release_id=FIRST_RELEASE,
+                data_root=marker_root,
+                config_root=marker_root,
+                state_root=marker_root,
+                platform="windows",
+                create_release=False,
+            )
             seen = []
 
             class Module:
@@ -136,12 +104,8 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                     return 0
 
             argv = self._argv(directory, root)
-            with patch.dict(os.environ, {}, clear=False), \
-                    patch.object(bootstrap_supervisor, "data_root",
-                                 return_value=marker_root), \
-                    patch.object(bootstrap_supervisor, "load_supervisor",
+            with patch.object(bootstrap_supervisor, "load_supervisor",
                                  lambda release: Module()):
-                os.environ.pop("CODEX_WECHAT_DATA_ROOT", None)
                 code = bootstrap_supervisor.main(argv)
 
             self.assertEqual(code, 0)
@@ -151,49 +115,24 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 marker_root / "logs" / "service.log",
             )])
 
-    def test_default_root_marker_resolves_under_install_root(self):
+    def test_missing_manifest_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(directory, FIRST_RELEASE)
-            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
-            (root / bootstrap_supervisor.DATA_ROOT_FILE).write_text(
-                str(root) + "\n", encoding="utf-8")
-            seen = []
-
-            class Module:
-                RELEASE_SWITCH_EXIT_CODE = 76
-
-                async def supervise(self, project, state_dir, config, log_path, **_kwargs):
-                    seen.append((state_dir, config, log_path))
-                    return 0
-
-            argv = self._argv(directory, root)
-            with patch.dict(os.environ, {}, clear=False), \
-                    patch.object(bootstrap_supervisor, "data_root", return_value=root), \
-                    patch.object(bootstrap_supervisor, "load_supervisor",
-                                 lambda release: Module()):
-                os.environ.pop("CODEX_WECHAT_DATA_ROOT", None)
-                code = bootstrap_supervisor.main(argv)
-
-            self.assertEqual(code, 0)
-            self.assertEqual(seen, [(
-                root / ".state",
-                root / "config.json",
-                root / "logs" / "service.log",
-            )])
-
-    def test_missing_marker_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = self._root(directory, FIRST_RELEASE)
-            (root / "current").write_text(FIRST_RELEASE + "\n", encoding="utf-8")
-            (root / bootstrap_supervisor.DATA_ROOT_FILE).unlink()
-            with self.assertRaisesRegex(ValueError, "缺少数据根标记"):
+            with self.assertRaisesRegex(ValueError, "安装清单缺失"):
                 bootstrap_supervisor.main(self._argv(directory, root))
 
-    def test_switch_code_reloads_the_release_selected_by_the_pointer(self):
+    def test_switch_code_reloads_the_release_selected_by_the_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(directory, FIRST_RELEASE, SECOND_RELEASE)
-            pointer = root / "current"
-            pointer.write_text(FIRST_RELEASE + "\n", encoding="utf-8")
+            write_installation_layout(
+                root,
+                release_id=FIRST_RELEASE,
+                data_root=root,
+                config_root=root,
+                state_root=root,
+                platform="windows",
+                create_release=False,
+            )
             first = (root / "releases" / FIRST_RELEASE).resolve()
             loaded = []
 
@@ -202,7 +141,15 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
 
                 async def supervise(self, project, *_args, **_kwargs):
                     if project == first:
-                        pointer.write_text(SECOND_RELEASE + "\n", encoding="utf-8")
+                        write_installation_layout(
+                            root,
+                            release_id=SECOND_RELEASE,
+                            data_root=root,
+                            config_root=root,
+                            state_root=root,
+                            platform="windows",
+                            create_release=False,
+                        )
                         return 76
                     return 0
 
@@ -210,22 +157,27 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 loaded.append(release.name)
                 return Module()
 
-            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}), \
-                 patch.object(platform_support, "IS_WINDOWS", True), \
-                 patch.object(bootstrap_supervisor.time, "sleep"), \
+            with patch.object(bootstrap_supervisor.time, "sleep"), \
                  patch.object(bootstrap_supervisor, "load_supervisor", load):
                 code = bootstrap_supervisor.main(self._argv(directory, root))
 
             self.assertEqual(code, 0)
             self.assertEqual(loaded, [FIRST_RELEASE, SECOND_RELEASE])
             log = (root / "logs" / "service.log").read_text(encoding="utf-8")
-            self.assertIn(f"版本指针已变化，正在加载 {SECOND_RELEASE}", log)
+            self.assertIn(f"当前版本已变化，正在加载 {SECOND_RELEASE}", log)
 
-    def test_broken_pointer_keeps_the_running_release(self):
+    def test_broken_manifest_keeps_the_running_release(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._root(directory, FIRST_RELEASE)
-            pointer = root / "current"
-            pointer.write_text(FIRST_RELEASE + "\n", encoding="utf-8")
+            write_installation_layout(
+                root,
+                release_id=FIRST_RELEASE,
+                data_root=root,
+                config_root=root,
+                state_root=root,
+                platform="windows",
+                create_release=False,
+            )
             runs = []
 
             class Module:
@@ -234,13 +186,11 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                 async def supervise(self, project, *_args, **_kwargs):
                     runs.append(project.name)
                     if len(runs) == 1:
-                        pointer.write_text(MISSING_RELEASE + "\n", encoding="utf-8")
+                        (root / INSTALLATION_FILE).write_text("{", encoding="utf-8")
                         return 76
                     return 0
 
-            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}), \
-                 patch.object(platform_support, "IS_WINDOWS", True), \
-                 patch.object(bootstrap_supervisor.time, "sleep"), \
+            with patch.object(bootstrap_supervisor.time, "sleep"), \
                  patch.object(bootstrap_supervisor, "load_supervisor",
                               lambda release: Module()):
                 code = bootstrap_supervisor.main(self._argv(directory, root))
@@ -248,7 +198,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(runs, [FIRST_RELEASE, FIRST_RELEASE])
             log = (root / "logs" / "service.log").read_text(encoding="utf-8")
-            # The same broken pointer is reported once, not on every restart.
+            # The same broken manifest is reported once, not on every restart.
             self.assertEqual(log.count("release switch:"), 1)
 
 

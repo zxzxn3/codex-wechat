@@ -46,48 +46,6 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     $PSScriptRoot
 }
 
-function Read-SavedDataRoot([string]$Root) {
-    $Marker = Join-Path $Root '.data-root'
-    $Item = Get-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue
-    if (-not $Item) { return $null }
-    if ($Item.PSIsContainer -or
-            (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-        throw "数据根标记不是普通文件: $Marker"
-    }
-    try {
-        $Value = Get-Content -LiteralPath $Marker -Raw -Encoding UTF8 -ErrorAction Stop
-    } catch {
-        throw "无法读取数据根标记: $Marker"
-    }
-    $Value = ([string]$Value).TrimEnd([char[]]"`r`n")
-    if ([string]::IsNullOrWhiteSpace($Value) -or
-            $Value.Contains("`n") -or $Value.Contains("`r") -or
-            -not [IO.Path]::IsPathRooted($Value)) {
-        throw "数据根标记内容无效: $Marker"
-    }
-    return [IO.Path]::GetFullPath($Value)
-}
-
-$InstallerCommand = $Command -in @('update', 'install', 'menu', 'components')
-$SavedDataRoot = if ($InstallerCommand -and $env:CODEX_WECHAT_DATA_ROOT) {
-    $null
-} else {
-    Read-SavedDataRoot $InstallRoot
-}
-if ($SavedDataRoot) {
-    if (-not $env:CODEX_WECHAT_DATA_ROOT) {
-        $env:CODEX_WECHAT_DATA_ROOT = $SavedDataRoot
-    } elseif (-not $InstallerCommand -and
-            [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT) -ne $SavedDataRoot) {
-        throw 'CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；Windows 已安装数据根不能自动切换，请清除环境变量'
-    }
-}
-$InstalledCurrent = Join-Path $InstallRoot 'current'
-if (-not $SavedDataRoot -and -not $InstallerCommand -and $Command -ne 'uninstall' -and
-        (Test-Path -LiteralPath $InstalledCurrent)) {
-    throw '已安装布局缺少数据根标记；请重新运行安装器。'
-}
-
 if ($Command -in @('update', 'install', 'menu', 'components')) {
     if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $Service -or $PurgeData -or
             $StopActive) {
@@ -152,42 +110,23 @@ if ($Command -eq 'uninstall') {
     exit 0
 }
 
-$Project = $InstallRoot
-$CurrentFile = Join-Path $InstallRoot 'current'
-$CurrentItem = Get-Item -LiteralPath $CurrentFile -Force -ErrorAction SilentlyContinue
-if ($null -eq $CurrentItem) {
-    throw "codex-wechat.ps1: 当前版本指针 current 缺失: $CurrentFile"
-} else {
-    if ($CurrentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        throw "codex-wechat.ps1: 当前版本指针 current 不能是符号链接或重解析点: $CurrentFile"
-    }
-    if ($CurrentItem.PSIsContainer) {
-        throw "codex-wechat.ps1: 当前版本指针 current 必须是普通文件: $CurrentFile"
-    }
-    $ReleaseId = (Get-Content -LiteralPath $CurrentFile -TotalCount 1).Trim()
-    if (-not $ReleaseId -or $ReleaseId -cnotmatch '^[a-f0-9]{16}$') {
-        throw "codex-wechat.ps1: 当前版本指针 current 包含无效版本标识: $CurrentFile"
-    }
-    $Project = Join-Path $InstallRoot "releases\$ReleaseId"
-}
-if (-not (Test-Path -LiteralPath (Join-Path $Project 'codex_wechat\app.py') -PathType Leaf)) {
-    throw "codex-wechat.ps1: 当前版本不完整: $Project`n请从新源码重新运行 update。"
-}
-
 $env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot
-$DataRoot = if ($env:CODEX_WECHAT_DATA_ROOT) {
-    [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
-} else {
-    Join-Path $env:LOCALAPPDATA 'codex-wechat'
+$EntryPython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $EntryPython -PathType Leaf)) {
+    $PythonCommand = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
+        Where-Object {
+            (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
+            (Get-Item -LiteralPath $_.Source).Length -gt 0
+        } | Select-Object -First 1
+    if (-not $PythonCommand) { throw 'Python runtime is unavailable.' }
+    $EntryPython = $PythonCommand.Source
 }
-$StateDir = Join-Path $DataRoot '.state'
-$ConfigPath = Join-Path $DataRoot 'config.json'
-$VenvPython = Join-Path $Project '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
-    throw "Python environment not found at $VenvPython; run .\install.ps1 first"
-}
-
-$Arguments = @('-m', 'codex_wechat', $Command, '--state-dir', $StateDir, '--config', $ConfigPath)
+$Arguments = @(
+    '-m', 'codex_wechat.launcher',
+    '--install-root', $InstallRoot,
+    '--module', 'codex_wechat',
+    '--', $Command
+)
 if ($Command -eq 'logs') {
     if ($Follow) { $Arguments += '--follow' }
     if ($Service) { $Arguments += '--service' }
@@ -201,11 +140,11 @@ if ($Command -eq 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
 $PreviousPythonPath = $env:PYTHONPATH
 try {
     $env:PYTHONPATH = if ($PreviousPythonPath) {
-        "$Project;$PreviousPythonPath"
+        "$InstallRoot;$PreviousPythonPath"
     } else {
-        $Project
+        $InstallRoot
     }
-    & $VenvPython -u @Arguments
+    & $EntryPython -u @Arguments
     $Result = $LASTEXITCODE
 } finally {
     if ($null -eq $PreviousPythonPath) {

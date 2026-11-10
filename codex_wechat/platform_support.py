@@ -1,8 +1,6 @@
 """Small OS boundaries with per-platform configuration and state roots."""
 import ast
-from dataclasses import dataclass
 import ipaddress
-import json
 import os
 from pathlib import Path
 import shutil
@@ -10,12 +8,10 @@ import subprocess
 import sys
 from urllib.parse import urlsplit
 from urllib.request import getproxies
-from .native_codex import discover_codex
 
-try:
-    from platformdirs import user_data_dir as _platform_user_data_dir
-except ImportError:  # Stable entry runs before the release environment exists.
-    _platform_user_data_dir = None
+from .install_layout import (InstalledLayout, RuntimePaths, default_roots,
+                             validate_roots)
+from .native_codex import discover_codex
 
 IS_WINDOWS = os.name == "nt"
 ALLOW_ROOT_ENV = "CODEX_WECHAT_ALLOW_ROOT"
@@ -23,232 +19,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_ROOT = Path(
     os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(PROJECT_ROOT))
 ).expanduser().resolve()
-DATA_ROOT_FILE = ".data-root"
-RUNTIME_ROOTS_FILE = ".runtime-roots"
-RUNTIME_ROOT_ROLES = ("data", "config", "state")
-CURRENT_FILE = "current"
 
 
-@dataclass(frozen=True)
-class RuntimePaths:
-    """Persistent storage locations using their configured, unresolved paths."""
-
-    data_root: Path
-    config_file: Path
-    state_dir: Path
-    workspace_dir: Path
-    logs_dir: Path
-    shared_dir: Path
-
-
-def _saved_root(filename: str, install_root: Path | None = None) -> Path | None:
-    path = (INSTALL_ROOT if install_root is None else Path(install_root)) / filename
-    if not path.exists() and not path.is_symlink():
-        return None
-    if path.is_symlink() or not path.is_file():
-        raise ValueError(f"路径标记不是普通文件: {path}")
-    try:
-        text = path.read_text(encoding="utf-8").rstrip("\r\n")
-    except OSError as error:
-        raise ValueError(f"无法读取路径标记: {path}") from error
-    if not text or "\n" in text or "\r" in text or "\x00" in text:
-        raise ValueError(f"路径标记内容无效: {path}")
-    root = Path(text).expanduser()
-    if not root.is_absolute():
-        raise ValueError(f"路径标记必须是绝对路径: {path}")
-    return root
-
-
-def saved_data_root(install_root: Path | None = None) -> Path | None:
-    if IS_WINDOWS:
-        return _saved_root(DATA_ROOT_FILE, install_root)
-    layout = _saved_linux_layout(install_root)
-    return layout["data"] if layout is not None else None
-
-
-def saved_config_root(install_root: Path | None = None) -> Path | None:
-    layout = _saved_linux_layout(install_root)
-    return layout["config"] if layout is not None else None
-
-
-def saved_state_root(install_root: Path | None = None) -> Path | None:
-    layout = _saved_linux_layout(install_root)
-    return layout["state"] if layout is not None else None
-
-
-def _saved_manifest(install_root: Path | None = None) -> dict[str, Path] | None:
-    path = (INSTALL_ROOT if install_root is None else Path(install_root)) / RUNTIME_ROOTS_FILE
-    if not path.exists() and not path.is_symlink():
-        return None
-    if path.is_symlink() or not path.is_file():
-        raise ValueError(f"运行时路径清单不是普通文件: {path}")
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise ValueError(f"无法读取运行时路径清单: {path}") from error
-    if (not isinstance(value, dict) or type(value.get("version")) is not int
-            or value["version"] != 1):
-        raise ValueError(f"运行时路径清单格式无效: {path}")
-    roots = {}
-    for role in RUNTIME_ROOT_ROLES:
-        text = value.get(role)
-        if (not isinstance(text, str) or not text or "\n" in text
-                or "\r" in text or "\x00" in text):
-            raise ValueError(f"运行时路径清单缺少有效的 {role}: {path}")
-        root = Path(text).expanduser()
-        if not root.is_absolute():
-            raise ValueError(f"运行时路径清单中的 {role} 必须是绝对路径: {path}")
-        roots[role] = root
-    return roots
-
-
-def saved_runtime_roots(install_root: Path | None = None) -> dict[str, Path] | None:
-    """Return the single Linux installation-layout object, if present."""
-    return _saved_manifest(install_root)
-
-
-def _saved_linux_layout(install_root: Path | None = None):
-    """Return installed roots, or None only when this is not an installed tree."""
-    root = INSTALL_ROOT if install_root is None else Path(install_root)
-    indicators = (CURRENT_FILE, RUNTIME_ROOTS_FILE)
-    if not any((root / name).exists() or (root / name).is_symlink()
-               for name in indicators):
-        return None
-    layout = saved_runtime_roots(install_root)
-    if layout is None:
-        raise ValueError(f"Linux 已安装布局缺少运行清单: {root / RUNTIME_ROOTS_FILE}")
-    return layout
-
-
-def default_data_root() -> Path:
-    """Return the platform user-data directory, with a pre-venv fallback."""
-    if _platform_user_data_dir is not None:
-        return Path(_platform_user_data_dir("codex-wechat", appauthor=False)).expanduser()
-    if IS_WINDOWS:
-        local = os.environ.get("LOCALAPPDATA")
-        if not local:
-            raise RuntimeError("Windows 缺少 LOCALAPPDATA，无法定位当前用户数据目录")
-        return (Path(local) / "codex-wechat").expanduser()
-    data_home = os.environ.get("XDG_DATA_HOME")
-    if data_home and Path(data_home).is_absolute():
-        return Path(data_home).expanduser() / "codex-wechat"
-    return Path.home() / ".local" / "share" / "codex-wechat"
-
-
-def _xdg_root(variable: str, fallback: Path) -> Path:
-    value = os.environ.get(variable)
-    if value and Path(value).is_absolute():
-        return Path(value).expanduser()
-    return fallback.expanduser()
-
-
-def xdg_config_home() -> Path:
-    return _xdg_root("XDG_CONFIG_HOME", Path.home() / ".config")
-
-
-def default_config_root() -> Path:
-    return xdg_config_home() / "codex-wechat"
-
-
-def default_state_root() -> Path:
-    return _xdg_root("XDG_STATE_HOME", Path.home() / ".local" / "state") / "codex-wechat"
-
-
-def config_root(install_root: Path | None = None) -> Path:
-    """Persisted install-time root wins over a service manager's defaults."""
-    layout = _saved_linux_layout(install_root)
-    return layout["config"] if layout is not None else default_config_root()
-
-
-def state_root(install_root: Path | None = None) -> Path:
-    layout = _saved_linux_layout(install_root)
-    return layout["state"] if layout is not None else default_state_root()
-
-
-def _paths_overlap(first: Path, second: Path) -> bool:
-    return first == second or first.is_relative_to(second) or second.is_relative_to(first)
-
-
-def validate_runtime_roots(data_root, config_root, state_root, install_root) -> None:
-    """Reject ambiguous role ownership before data is written or purged."""
-    try:
-        roots = {
-            "数据根": Path(data_root).resolve(),
-            "配置根": Path(config_root).resolve(),
-            "状态根": Path(state_root).resolve(),
-        }
-        install = Path(install_root).resolve()
-    except (OSError, RuntimeError) as error:
-        raise ValueError(f"无法解析运行时路径布局: {error}") from error
-    for role in ("配置根", "状态根"):
-        if _paths_overlap(roots[role], install):
-            raise ValueError(f"{role}与程序安装目录重叠: {roots[role]}")
-    for first, second in (("数据根", "配置根"), ("数据根", "状态根"),
-                          ("配置根", "状态根")):
-        if _paths_overlap(roots[first], roots[second]):
-            raise ValueError(f"{first}与{second}不能重叠: {roots[first]} / {roots[second]}")
-    workspace = (roots["数据根"] / "workspace").resolve()
-    if workspace == install or install.is_relative_to(workspace):
-        raise ValueError(f"工作区不能包含程序安装目录: {workspace}")
-
-
-def data_root(install_root: Path | None = None):
-    override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
-    saved = saved_data_root(install_root)
-    if override and saved is not None:
-        requested = Path(override).expanduser().absolute()
-        if requested.resolve() != saved.resolve():
-            raise ValueError(
-                "CODEX_WECHAT_DATA_ROOT 与已安装布局不一致；"
-                "已安装实例的数据根固定，请清除环境变量"
-            )
-        return requested
-    if override:
-        return Path(override).expanduser().absolute()
-    if saved is not None:
-        return saved
-    return default_data_root()
-
-
-def symlink_component(path: Path) -> Path | None:
-    """Return the first symlink in a configured path's complete parent chain."""
-    path = Path(path).expanduser()
-    for component in (path, *path.parents):
-        try:
-            if component.is_symlink():
-                return component
-        except OSError:
-            return component
-    return None
-
-
-def reject_symlink_path(path: Path) -> None:
-    component = symlink_component(path)
-    if component is not None:
-        raise ValueError(f"拒绝操作经过符号链接的路径: {path}（{component}）")
+def _platform() -> str:
+    return "windows" if IS_WINDOWS else "linux"
 
 
 def runtime_paths(install_root: Path | None = None) -> RuntimePaths:
-    """Resolve one complete installed layout, or source-tree defaults."""
-    layout = None if IS_WINDOWS else _saved_linux_layout(install_root)
-    data = data_root(install_root)
-    if IS_WINDOWS:
-        return RuntimePaths(
-            data_root=data,
-            config_file=data / "config.json",
-            state_dir=data / ".state",
-            workspace_dir=data / "workspace",
-            logs_dir=data / "logs",
-            shared_dir=data / "shared",
-        )
-    config = layout["config"] if layout is not None else default_config_root()
-    state = layout["state"] if layout is not None else default_state_root()
-    validate_runtime_roots(
-        data,
-        config,
-        state,
-        INSTALL_ROOT if install_root is None else Path(install_root),
-    )
+    """Resolve the installed contract, or validated source-tree defaults."""
+    root = INSTALL_ROOT if install_root is None else Path(install_root)
+    layout = InstalledLayout.load(root, platform=_platform())
+    if layout is not None:
+        return layout.runtime_paths()
+    data, config, state = default_roots(_platform())
+    validate_roots(_platform(), root, data, config, state)
     return RuntimePaths(
         data_root=data,
         config_file=config / "config.json",

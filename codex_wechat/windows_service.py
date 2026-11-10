@@ -4,7 +4,7 @@ The Task Scheduler starts this process for the current interactive user.  The
 supervisor owns one bridge child, restarts it after a crash, and keeps the
 child in a kill-on-close Job Object so stopping the task cannot leave an orphan.
 A user restart returns 76 so the bootstrap supervisor re-resolves the active
-release; this module never parses the install layout itself.
+release. This module only consumes paths supplied by that outer supervisor.
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .log_rotation import (DEFAULT_KEEP, KeepSource, append as append_log,
                           keep_from_config)
+from .platform_support import runtime_paths
 
 RESTART_EXIT_CODE = 75
 RELEASE_SWITCH_EXIT_CODE = 76
@@ -31,23 +32,6 @@ MAX_FAILURES = 5
 OWNER_STATUS_NAME = "service-owner.json"
 SUPERVISOR_LOCK_NAME = "supervisor.lock"
 OUTPUT_DRAIN_TIMEOUT_SECONDS = 5.0
-
-
-def data_root() -> Path:
-    """Resolve the configured data root; the marker is the only source of truth."""
-    try:
-        from .platform_support import data_root as resolve_data_root
-    except ImportError:
-        pass
-    else:
-        try:
-            return resolve_data_root()
-        except RuntimeError:
-            pass
-    local = os.environ.get("LOCALAPPDATA")
-    if local:
-        return Path(local) / "codex-wechat"
-    return Path.home() / "AppData" / "Local" / "codex-wechat"
 
 
 def owner_status_path(state_dir: Path) -> Path:
@@ -465,10 +449,10 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
-    root = data_root()
-    state_dir = args.state_dir or root / ".state"
-    config = args.config or root / "config.json"
-    log_path = args.log or root / "logs" / "service.log"
+    paths = runtime_paths()
+    state_dir = args.state_dir or paths.state_dir
+    config = args.config or paths.config_file
+    log_path = args.log or paths.logs_dir / "service.log"
 
     def log_keep():
         return keep_from_config(config)

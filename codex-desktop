@@ -11,35 +11,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; t
     esac
 fi
 INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
-PROJECT_DIR="$INSTALL_ROOT"
-if [ -L "$INSTALL_ROOT/current" ]; then
-    echo "codex-desktop: 当前版本指针 current 不能是符号链接或重解析点: $INSTALL_ROOT/current" >&2
-    exit 1
-fi
-if [ -e "$INSTALL_ROOT/current" ] && [ ! -f "$INSTALL_ROOT/current" ]; then
-    echo "codex-desktop: 当前版本指针 current 必须是普通文件: $INSTALL_ROOT/current" >&2
-    exit 1
-fi
-if [ ! -f "$INSTALL_ROOT/current" ]; then
-    echo "codex-desktop: 当前版本指针 current 缺失: $INSTALL_ROOT/current" >&2
-    exit 1
-fi
-if [ -f "$INSTALL_ROOT/current" ]; then
-    IFS= read -r VERSION < "$INSTALL_ROOT/current" || true
-    if [[ ! "$VERSION" =~ ^[a-f0-9]{16}$ ]]; then
-        echo "codex-desktop: 当前版本指针 current 包含无效版本标识: $INSTALL_ROOT/current" >&2
-        exit 1
-    fi
-    PROJECT_DIR="$INSTALL_ROOT/releases/$VERSION"
-    export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"
-fi
-if [ ! -f "$PROJECT_DIR/codex_wechat/desktop.py" ]; then
-    echo "codex-desktop: 当前版本不完整: $PROJECT_DIR" >&2
-    echo '请从新源码重新运行 update。' >&2
-    exit 1
-fi
 export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
-PYTHON=python3
-if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then PYTHON="$PROJECT_DIR/.venv/bin/python"; fi
-exec env PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
-    "$PYTHON" -u -m codex_wechat.desktop "$@"
+exec env PYTHONPATH="$INSTALL_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -u -m codex_wechat.launcher \
+    --install-root "$INSTALL_ROOT" --module codex_wechat.desktop -- "$@"

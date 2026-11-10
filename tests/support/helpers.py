@@ -1,20 +1,14 @@
 """Capability guards and process-wide isolation for offline fixtures."""
 from functools import wraps
 import atexit
-import json
 import os
 from pathlib import Path
 import shutil
 import tempfile
 
 from codex_wechat import diagnostics
+from codex_wechat.install_layout import InstalledLayout, current_platform
 from codex_wechat.platform_support import RuntimePaths
-
-
-def xdg_user_data_dir(name, appauthor=False):
-    """Stand in for platformdirs' Linux branch so Linux cases run on any host."""
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return str(Path(base) / name)
 
 
 def runtime_paths_at(root, *, config_file=None, state_dir=None):
@@ -29,16 +23,42 @@ def runtime_paths_at(root, *, config_file=None, state_dir=None):
     )
 
 
-def write_runtime_roots_manifest(install_root, *, data_root, config_root, state_root):
+def write_installation_layout(
+    install_root,
+    *,
+    release_id="a" * 16,
+    data_root,
+    config_root,
+    state_root,
+    platform=None,
+    release_files=False,
+    create_release=True,
+):
     install_root = Path(install_root)
-    (install_root / ".runtime-roots").write_text(
-        json.dumps({
-            "version": 1,
-            "data": str(data_root),
-            "config": str(config_root),
-            "state": str(state_root),
-        }, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    release = install_root / "releases" / release_id
+    if create_release:
+        package = release / "codex_wechat"
+        package.mkdir(parents=True, exist_ok=True)
+        (package / "app.py").write_text("", encoding="utf-8")
+        if release_files:
+            (package / "windows_service.py").write_text("", encoding="utf-8")
+            python = (release / ".venv/Scripts/python.exe"
+                      if (platform or current_platform()) == "windows"
+                      else release / ".venv/bin/python")
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.write_text("", encoding="utf-8")
+    InstalledLayout.create(
+        install_root,
+        release_id,
+        platform=platform or current_platform(),
+        data_root=data_root,
+        config_root=config_root,
+        state_root=state_root,
+    ).publish()
+    return InstalledLayout.load(
+        install_root,
+        platform=platform or current_platform(),
+        required=True,
     )
 
 

@@ -1,10 +1,5 @@
 """Static contracts for the thin cross-platform command entries."""
-import json
-import os
 from pathlib import Path
-import shutil
-import subprocess
-import tempfile
 import unittest
 
 
@@ -19,65 +14,32 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn("不要使用 root/sudo", text)
         self.assertNotIn("desktop)", text)
 
-    def test_linux_uninstall_bypasses_a_broken_current_release(self):
+    def test_linux_uninstall_bypasses_the_release_launcher(self):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
         self.assertIn('if [ "$ACTION" = "uninstall" ]', text)
         self.assertIn('"$INSTALL_ROOT/codex_wechat/uninstall.py"', text)
         self.assertIn("-m codex_wechat.uninstall", text)
         self.assertLess(
             text.index('if [ "$ACTION" = "uninstall" ]'),
-            text.index('[ -L "$CURRENT_FILE" ]'),
+            text.index("-m codex_wechat.launcher"),
         )
         self.assertIn("CODEX_WECHAT_INSTALL_ROOT", text)
 
-    def test_linux_entry_requires_the_single_runtime_manifest(self):
+    def test_linux_entry_delegates_layout_resolution_to_the_launcher(self):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
-        self.assertIn("RUNTIME_ROOTS_FILE", text)
-        self.assertIn(".runtime-roots", text)
+        self.assertIn("-m codex_wechat.launcher", text)
+        self.assertIn("--module codex_wechat", text)
+        self.assertNotIn("CURRENT_FILE", text)
+        self.assertNotIn(".runtime-roots", text)
         self.assertNotIn(".data-root", text)
-        self.assertIn("已安装布局缺少运行清单", text)
-
-    @unittest.skipIf(os.name == "nt", "POSIX launcher integration")
-    def test_linux_entry_accepts_the_atomic_manifest_without_legacy_markers(self):
-        with tempfile.TemporaryDirectory() as directory:
-            install = Path(directory) / "install"
-            release_id = "a" * 16
-            release = install / "releases" / release_id
-            (release / "codex_wechat").mkdir(parents=True)
-            (release / "codex_wechat/app.py").write_text("", encoding="utf-8")
-            (install / "current").write_text(release_id + "\n", encoding="utf-8")
-            (install / ".runtime-roots").write_text(json.dumps({
-                "version": 1,
-                "data": str(Path(directory) / "custom-data"),
-                "config": str(Path(directory) / "config/codex-wechat"),
-                "state": str(Path(directory) / "state/codex-wechat"),
-            }) + "\n", encoding="utf-8")
-            fake_python = release / ".venv/bin/python"
-            fake_python.parent.mkdir(parents=True)
-            fake_python.write_text(
-                "#!/bin/sh\n"
-                "printf '%s\\n' \"${CODEX_WECHAT_DATA_ROOT-<unset>}\"\n",
-                encoding="utf-8",
-            )
-            fake_python.chmod(0o755)
-            shutil.copy2(ROOT / "codex-wechat", install / "codex-wechat")
-            environment = {key: value for key, value in os.environ.items()
-                           if key != "CODEX_WECHAT_DATA_ROOT"}
-            result = subprocess.run(
-                [install / "codex-wechat", "status"],
-                env=environment,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), "<unset>")
 
     def test_linux_stable_uninstaller_has_its_runtime_dependencies(self):
         import installer
         stable = set(installer._stable_files(ROOT))
         for path in (
             Path("codex_wechat/uninstall.py"),
+            Path("codex_wechat/install_layout.py"),
+            Path("codex_wechat/launcher.py"),
             Path("codex_wechat/platform_support.py"),
             Path("codex_wechat/service_adapter.py"),
             Path("codex_wechat/service_control.py"),
@@ -99,7 +61,8 @@ class EntryContractTests(unittest.TestCase):
 
     def test_windows_public_entry_is_a_python_router(self):
         text = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
-        self.assertIn("@('-m', 'codex_wechat', $Command", text)
+        self.assertIn("'codex_wechat.launcher'", text)
+        self.assertIn("'--module', 'codex_wechat'", text)
         self.assertNotIn("Get-ScheduledTask", text)
         self.assertNotIn("'service-stop'", text)
         self.assertNotIn("'service-status'", text)
@@ -108,7 +71,8 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn("windows/task-service.ps1",
                       (ROOT / "codex_wechat/service_adapter.py").read_text(
             encoding="utf-8"))
-        self.assertIn("已安装布局缺少数据根标记", text)
+        self.assertNotIn("Read-SavedDataRoot", text)
+        self.assertNotIn("当前版本指针 current", text)
 
     def test_task_helper_is_internal_and_owns_native_operations(self):
         text = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
