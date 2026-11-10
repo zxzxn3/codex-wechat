@@ -1,12 +1,13 @@
 """Shared WeChat credential state and cross-chat transition policy."""
 import time
 import shlex
+from .records import FailedOutboxStatus
 from .platform_support import IS_WINDOWS, INSTALL_ROOT
 
 AUTH_UNKNOWN = "unknown"
 AUTH_VALID = "valid"
 AUTH_REQUIRED = "reauth_required"
-IDENTITY_CHANGED = "identity_changed"
+IDENTITY_CHANGED = FailedOutboxStatus.IDENTITY_CHANGED.value
 
 
 def _entry_command(action):
@@ -81,7 +82,7 @@ def prepare_identity_change(bridge_state, account):
     quarantined_output = []
     for entry in old_outbox:
         saved = dict(entry)
-        saved["status"] = IDENTITY_CHANGED
+        saved["status"] = FailedOutboxStatus.IDENTITY_CHANGED.value
         quarantined_output.append(saved)
     if quarantined_output:
         bridge_state["failedOutbox"] = (

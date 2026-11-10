@@ -2,6 +2,7 @@
 import unittest
 
 from codex_wechat import wechat_auth
+from codex_wechat.records import FailedOutboxStatus
 
 
 class WeChatAuthTests(unittest.TestCase):
@@ -92,6 +93,10 @@ class WeChatAuthTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in state["failedOutbox"]],
                          ["historical", "unsent"])
         self.assertEqual(state["failedOutbox"][-1]["user"], "old-user")
+        self.assertEqual(
+            state["failedOutbox"][-1]["status"],
+            FailedOutboxStatus.IDENTITY_CHANGED.value,
+        )
         self.assertEqual(state["wechatAuth"]["user"], "new-user")
 
     def test_same_user_rebind_refreshes_pending_media_context(self):

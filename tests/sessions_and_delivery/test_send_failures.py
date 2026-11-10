@@ -8,7 +8,13 @@ from unittest.mock import patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.profiles import restore
-from codex_wechat.records import AcceptedUnknown, Delivered, Rejected, Retryable
+from codex_wechat.records import (
+    AcceptedUnknown,
+    Delivered,
+    FailedOutboxStatus,
+    Rejected,
+    Retryable,
+)
 from codex_wechat.storage import Store
 
 
@@ -23,6 +29,17 @@ class SendFailureTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.store.lock.close()
         self.temp.cleanup()
+
+    def test_failed_outbox_statuses_own_their_health_effects(self):
+        expected = (
+            (FailedOutboxStatus.PARTIAL, True, False),
+            (FailedOutboxStatus.DELIVERY_UNKNOWN, True, True),
+            (FailedOutboxStatus.IDENTITY_CHANGED, False, False),
+        )
+        for status, counts, pauses in expected:
+            with self.subTest(status=status):
+                self.assertEqual(status.counts_as_send_failure, counts)
+                self.assertEqual(status.pauses_current_delivery, pauses)
 
     async def test_exhausted_retry_counts_until_confirmed_send_and_keeps_history(self):
         bridge = self.bridge

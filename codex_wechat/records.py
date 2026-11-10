@@ -12,6 +12,22 @@ class InputPhase(StrEnum):
     CANCELLED = "cancelled"
 
 
+class FailedOutboxStatus(StrEnum):
+    """Terminal state retained after an outbound entry leaves the queue."""
+
+    PARTIAL = "partial"
+    DELIVERY_UNKNOWN = "delivery_unknown"
+    IDENTITY_CHANGED = "identity_changed"
+
+    @property
+    def counts_as_send_failure(self):
+        return self in (self.PARTIAL, self.DELIVERY_UNKNOWN)
+
+    @property
+    def pauses_current_delivery(self):
+        return self is self.DELIVERY_UNKNOWN
+
+
 @dataclass(frozen=True)
 class Source:
     backend: str

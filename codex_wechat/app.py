@@ -16,7 +16,7 @@ from . import service_adapter
 from . import service_control
 from . import wechat_auth
 from .backend import CodexBackend
-from .records import Delivered, Source
+from .records import Delivered, FailedOutboxStatus, Source
 from .output_delivery import DELIVERY_DEGRADED_THRESHOLD, OutputDelivery
 from .input_delivery import InputDelivery
 from .ingress import Ingress
@@ -734,7 +734,13 @@ class Bridge:
     async def external_result_worker(self):
         return await self.output.external_result_worker()
 
-    def fail_output(self, entry, *, notify=True, status="partial"):
+    def fail_output(
+        self,
+        entry,
+        *,
+        notify=True,
+        status=FailedOutboxStatus.PARTIAL,
+    ):
         return self.output.fail_output(entry, notify=notify, status=status)
 
     async def sender(self):
@@ -881,7 +887,7 @@ def status_payload(store):
     auth = wechat_auth.state(state)
     unknown_retained = sum(1 for entry in state.get("failedOutbox", [])
                            if isinstance(entry, dict)
-                           and entry.get("status") == "delivery_unknown")
+                           and entry.get("status") == FailedOutboxStatus.DELIVERY_UNKNOWN.value)
     unknown_total = state["deliveryUnknownTotal"]
     payload = {
         "bound": bool(store.load("account")),

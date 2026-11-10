@@ -102,6 +102,8 @@
   不再从异常文本和原始响应推断投递状态。
 - 服务端返回有效消息 ID 才算成功。HTTP 成功但没有 ID 时标记 delivery unknown，暂停当前
   运行时出站，保留队列和新增输出；下一条被接受的入站消息恢复发送，`/discard` 可主动清空。
+- 代码写入的持久失败记录只使用 `partial`、`delivery_unknown` 和 `identity_changed`；只有
+  `delivery_unknown` 暂停当前运行时出站，只有前两者计入连续发送失败。
 - 连续发送间隔、回复预算和 `delivery=unconfirmed` 阈值由代码定义，当前值只在
   [生成参考](REFERENCE.generated.md#出站保护) 维护。回复预算按服务端处理请求计数，不按用户
   是否看见计数。

@@ -10,7 +10,7 @@ import time
 import uuid
 from .configuration import completion_template
 from .records import (AcceptedUnknown, AuthenticationRequired, Delivered,
-                      Rejected, Retryable, TurnResult)
+                      FailedOutboxStatus, Rejected, Retryable, TurnResult)
 from .slicing import split_text
 from .media import MediaError, MAX_ATTACHMENTS, split_answer
 from .wechat_content import entry_summary, remember_quote
@@ -193,7 +193,13 @@ class OutputDelivery:
             finally:
                 bridge.external_results.task_done()
 
-    def fail_output(self, entry, *, notify=True, status="partial"):
+    def fail_output(
+        self,
+        entry,
+        *,
+        notify=True,
+        status=FailedOutboxStatus.PARTIAL,
+    ):
         """Freeze a partial group; never present a suffix as a complete answer."""
         bridge = self.bridge
         bridge.state["outbox"].pop(0)
@@ -210,9 +216,10 @@ class OutputDelivery:
             bridge.state["outbox"] = kept
         for removed in (entry, *skipped):
             self._queued_at.pop(removed.get("id"), None)
-        failed = {**entry, "status": status, "skipped": skipped}
+        failed = {**entry, "status": status.value, "skipped": skipped}
         bridge.state["failedOutbox"] = (bridge.state.get("failedOutbox", []) + [failed])[-20:]
-        bridge.state["consecutiveSendFailures"] += 1
+        if status.counts_as_send_failure:
+            bridge.state["consecutiveSendFailures"] += 1
         log_event("output.failed", level="warning", component="output",
                   send_failures=bridge.state["consecutiveSendFailures"],
                   role=entry.get("role", "body"), attempt=entry.get("attempts", 0),
@@ -388,14 +395,19 @@ class OutputDelivery:
             self.charge_reply(entry)
             entry["attempts"] = entry.get("attempts", 0) + 1
             bridge.state["deliveryUnknownTotal"] += 1
-            if entry.get("replySeq") == bridge.state.get("inboundSeq", 0):
+            if (FailedOutboxStatus.DELIVERY_UNKNOWN.pauses_current_delivery
+                    and entry.get("replySeq") == bridge.state.get("inboundSeq", 0)):
                 self.paused = True
             log_event("output.delivery_unknown", level="warning", component="output",
                       role=entry.get("role", "body"), attempt=entry["attempts"],
                       error_type="AcceptedUnknown", error_code=outcome.ret,
                       queued=len(bridge.state["outbox"]), job_id=entry.get("group"),
                       request_id=entry.get("requestId"))
-            bridge.fail_output(entry, notify=False, status="delivery_unknown")
+            bridge.fail_output(
+                entry,
+                notify=False,
+                status=FailedOutboxStatus.DELIVERY_UNKNOWN,
+            )
             self._in_flight_id = None
             log_event("output.send_paused", level="warning", component="output",
                       reason="not_acknowledged", release="next_inbound",
