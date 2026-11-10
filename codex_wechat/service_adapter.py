@@ -5,6 +5,7 @@ only reports service state and requests native start/stop operations.
 """
 import asyncio
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,7 @@ STABLE_STATES = {"", "active", "running"}
 STARTING_STATES = {"activating", "queued", "reloading"}
 STOPPING_STATES = {"deactivating"}
 FAILED_STATES = {"failed"}
+STOP_TIMEOUT_GRACE_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,8 @@ class ServiceState:
     # Native host state and last exit code, when the platform exposes them.
     state: str = ""
     last_result: int | None = None
+    # Effective Linux force-stop timeout, used to observe the post-kill state.
+    stop_timeout: float | None = None
 
     @property
     def stable_running(self):
@@ -104,7 +108,7 @@ async def status():
     output = await systemctl(
         "show", UNIT,
         "--property=LoadState", "--property=ActiveState", "--property=FragmentPath",
-        "--property=ExecMainStatus",
+        "--property=ExecMainStatus", "--property=TimeoutStopUSec",
     )
     fields = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
     fragment = fields.get("FragmentPath", "")
@@ -122,7 +126,29 @@ async def status():
     exit_code = fields.get("ExecMainStatus", "").strip()
     return ServiceState(True, active in {"active", "activating", "reloading", "deactivating"},
                         state=active,
-                        last_result=int(exit_code) if exit_code.isdigit() else None)
+                        last_result=int(exit_code) if exit_code.isdigit() else None,
+                        stop_timeout=_duration_seconds(fields.get("TimeoutStopUSec", "")))
+
+
+def _duration_seconds(value):
+    """Parse systemd's TimeoutStopUSec property without depending on locale."""
+    text = value.strip()
+    if not text or text == "infinity":
+        return None
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
+        return float(text) / 1_000_000
+    units = {"us": 0.000001, "ms": 0.001, "s": 1.0,
+             "min": 60.0, "h": 3600.0, "d": 86400.0}
+    total = 0.0
+    end = 0
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(us|ms|min|s|h|d)", text):
+        if text[end:match.start()].strip():
+            return None
+        total += float(match.group(1)) * units[match.group(2)]
+        end = match.end()
+    if end == 0 or text[end:].strip():
+        return None
+    return total
 
 
 async def stop_and_wait(timeout=20):
@@ -130,7 +156,15 @@ async def stop_and_wait(timeout=20):
     if not current.installed or not current.running:
         return current
     await _request_stop(timeout=timeout)
-    return await _wait_stopped(timeout=timeout)
+    wait_timeout = timeout
+    if not IS_WINDOWS:
+        # systemd kills at its effective stop timeout. Observe the resulting
+        # inactive/failed state after that boundary instead of racing it.
+        wait_timeout = max(
+            timeout,
+            (current.stop_timeout or timeout) + STOP_TIMEOUT_GRACE_SECONDS,
+        )
+    return await _wait_stopped(timeout=wait_timeout)
 
 
 async def _request_stop(*, timeout=20):

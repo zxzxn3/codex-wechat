@@ -48,6 +48,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SERVICE_CHILD_ENV = "CODEX_WECHAT_SERVICE_CHILD"
 # Enough for a queued notice to leave; the saved outbox carries the rest across.
 RESTART_DRAIN_GRACE_SECONDS = 3.0
+SHUTDOWN_TIMEOUT_SECONDS = 15.0
+SHUTDOWN_WORKER_GRACE_SECONDS = 2.0
 __all__ = ["Bridge", "parse_control"]
 
 # The bridge assumes these keys always exist. A state file can be written before
@@ -116,6 +118,60 @@ def configure_log_retention(keep):
         prune_rotations(log_path().with_name("service.log"), keep)
     except (OSError, ValueError):
         pass
+
+
+def _record_shutdown_task(task, label):
+    if task.cancelled():
+        return
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return
+    if error is not None:
+        log_event("bridge.shutdown_step_failed", level="warning", component="bridge",
+                  step=label, **error_fields(error))
+
+
+async def _wait_shutdown_tasks(tasks, deadline):
+    """Wait only until the shared deadline, then cancel without extending it."""
+    if not tasks:
+        return
+    remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+    done, pending = await asyncio.wait(tuple(tasks), timeout=remaining)
+    for task in done:
+        _record_shutdown_task(task, tasks[task])
+    for task in pending:
+        label = tasks[task]
+        task.cancel()
+        task.add_done_callback(
+            lambda finished, step=label: _record_shutdown_task(finished, step))
+        log_event("bridge.shutdown_step_timeout", level="warning", component="bridge",
+                  step=label)
+
+
+async def _bounded_shutdown(tasks, steps):
+    """Cancel bridge workers, then attempt every close step within one budget."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + SHUTDOWN_TIMEOUT_SECONDS
+    if tasks:
+        for task in tasks:
+            task.cancel()
+        worker_deadline = min(
+            deadline,
+            loop.time() + min(
+                SHUTDOWN_WORKER_GRACE_SECONDS,
+                SHUTDOWN_TIMEOUT_SECONDS / 4,
+            ),
+        )
+        await _wait_shutdown_tasks({task: "worker" for task in tasks}, worker_deadline)
+    cleanup = {}
+    for label, operation in steps:
+        try:
+            cleanup[asyncio.create_task(operation())] = label
+        except Exception as error:
+            log_event("bridge.shutdown_step_failed", level="warning", component="bridge",
+                      step=label, **error_fields(error))
+    await _wait_shutdown_tasks(cleanup, deadline)
 
 
 class Bridge:
@@ -753,16 +809,11 @@ class Bridge:
             show_log_path()
             await asyncio.gather(*tasks)
         finally:
-            for task in tasks:
-                if not task.done() and not task.cancelling():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            try:
-                await self.backend.close()
-            finally:
-                close_channel = getattr(self.channel, "close", None)
-                if close_channel is not None:
-                    await close_channel()
+            close_channel = getattr(self.channel, "close", None)
+            steps = [("backend", self.backend.close)]
+            if close_channel is not None:
+                steps.append(("wechat", close_channel))
+            await _bounded_shutdown(tasks, steps)
             log_event("bridge.stop", component="bridge")
 
 

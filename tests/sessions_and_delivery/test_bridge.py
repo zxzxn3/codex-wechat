@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from codex_wechat.app import Bridge, parse_control
+from codex_wechat.app import Bridge, _bounded_shutdown, parse_control
 from codex_wechat.backend import CodexBackend, CodexRpcError
 from codex_wechat.media import OUTPUT_HINT, MediaError
 from codex_wechat.latency import Latency
@@ -132,6 +132,36 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(answer.completed)
         finally:
             await backend.close()
+
+    async def test_bounded_shutdown_cancels_workers_and_attempts_every_close_step(self):
+        worker_entered = asyncio.Event()
+        worker_cancelled = asyncio.Event()
+        cleanup_started = []
+
+        async def worker():
+            worker_entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                worker_cancelled.set()
+                raise
+
+        async def slow_backend():
+            cleanup_started.append("backend")
+            await asyncio.sleep(10)
+
+        async def close_channel():
+            cleanup_started.append("wechat")
+
+        task = asyncio.create_task(worker())
+        await worker_entered.wait()
+        with patch("codex_wechat.app.SHUTDOWN_TIMEOUT_SECONDS", 0.08):
+            await asyncio.wait_for(_bounded_shutdown(
+                [task],
+                [("backend", slow_backend), ("wechat", close_channel)],
+            ), 1)
+        self.assertTrue(worker_cancelled.is_set())
+        self.assertEqual(cleanup_started, ["backend", "wechat"])
 
     async def test_credential_redirect_boundary(self):
         for value in ("http://ilinkai.weixin.qq.com", "https://evil.example",

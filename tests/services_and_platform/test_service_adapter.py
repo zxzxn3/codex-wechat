@@ -81,6 +81,26 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((state.state, state.last_result), ("failed", 78))
         self.assertIn("--property=ExecMainStatus", command.await_args.args)
 
+    async def test_linux_status_reports_the_effective_stop_timeout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            unit = root / "codex-wechat.service"
+            unit.write_text("", encoding="utf-8")
+            command = AsyncMock(return_value=(
+                f"LoadState=loaded\nActiveState=active\nFragmentPath={unit}\n"
+                "ExecMainStatus=\nTimeoutStopUSec=20s"))
+            with patch.object(service_adapter, "IS_WINDOWS", False), \
+                    patch.object(service_adapter, "INSTALL_ROOT", root), \
+                    patch.object(service_adapter, "systemctl", command):
+                state = await service_adapter.status()
+        self.assertEqual(state.stop_timeout, 20.0)
+        self.assertIn("--property=TimeoutStopUSec", command.await_args.args)
+
+    def test_timeout_stop_property_accepts_numeric_and_compound_durations(self):
+        self.assertEqual(service_adapter._duration_seconds("20000000"), 20.0)
+        self.assertEqual(service_adapter._duration_seconds("1min 30s"), 90.0)
+        self.assertIsNone(service_adapter._duration_seconds("infinity"))
+
     async def test_linux_status_leaves_the_exit_code_empty_before_the_first_run(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -202,6 +222,32 @@ class ServiceAdapterTests(unittest.IsolatedAsyncioTestCase):
             await service_adapter.stop_and_wait()
         request.assert_awaited_once_with(["stop"], timeout=25)
         stopped.assert_awaited_once_with(timeout=20)
+
+    async def test_linux_stop_waits_past_the_systemd_kill_boundary(self):
+        status = AsyncMock(return_value=service_adapter.ServiceState(
+            True, True, state="active", stop_timeout=20.0))
+        request = AsyncMock()
+        stopped = AsyncMock(return_value=service_adapter.ServiceState(
+            True, False, state="failed"))
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter, "IS_WINDOWS", False), \
+                patch.object(service_adapter, "_request_stop", request), \
+                patch.object(service_adapter, "_wait_stopped", stopped):
+            result = await service_adapter.stop_and_wait()
+        self.assertEqual(result.state, "failed")
+        request.assert_awaited_once_with(timeout=20)
+        stopped.assert_awaited_once_with(timeout=25.0)
+
+    async def test_wait_stopped_accepts_failed_state_after_forced_stop(self):
+        status = AsyncMock(side_effect=[
+            service_adapter.ServiceState(True, True, state="deactivating"),
+            service_adapter.ServiceState(True, False, state="failed"),
+        ])
+        with patch.object(service_adapter, "status", status), \
+                patch.object(service_adapter.asyncio, "sleep", AsyncMock()):
+            result = await service_adapter._wait_stopped(timeout=1)
+        self.assertEqual((result.running, result.state), (False, "failed"))
+        self.assertEqual(status.await_count, 2)
 
     async def test_restart_rejects_an_unregistered_service(self):
         command = AsyncMock()
