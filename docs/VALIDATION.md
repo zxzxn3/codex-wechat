@@ -6,7 +6,10 @@
 ## 当前证据
 
 - Linux 检查入口：`scripts/check.sh` 包含 Ruff、Pyright、ShellCheck、分支覆盖单元测试和
-  生成文档漂移检查。具体结果以命令输出或专用测试会话回信为准，不在文档维护副本。
+  生成文档漂移检查。结果按日期与提交记录，不作为永久测试数基线。
+- 2026-11-10 Linux `141afe5`：`./scripts/check.sh` 执行 1049 项，1028 通过、21 跳过、
+  0 失败/错误；Ruff、ShellCheck 和生成文档检查通过，Pyright 0 errors / 5 个可选依赖
+  warning，分支覆盖率 79%。真实 Windows、systemd、微信和 CDN 不在这次结果范围内。
 - 2026-11-10 Linux 当前树新增了状态损坏隔离、不完整运行时布局拒绝、只读 status 诊断和
   Git `HEAD` release 边界。解析器资源上限与极深状态复制明确采用 fail-fast，不维护隔离
   承诺；原地换根参数和旧标记兼容已移除。Windows 嵌套重解析点清理只有静态回归，目标
