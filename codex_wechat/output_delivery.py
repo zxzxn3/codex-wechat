@@ -506,6 +506,9 @@ class OutputDelivery:
                 if bridge.wechat_paused:
                     self._in_flight_id = None
                     continue
+                # Budget follows the window in which the request starts. Entries
+                # already awaiting the channel keep their old window.
+                entry["replySeq"] = bridge.state.get("inboundSeq", 0)
                 queued_at = self._queued_at.get(entry.get("id"))
                 waiting = ({"queue_wait_ms": max(0, (time.perf_counter() - queued_at) * 1000)}
                            if queued_at is not None and not entry.get("attempts", 0) else {})

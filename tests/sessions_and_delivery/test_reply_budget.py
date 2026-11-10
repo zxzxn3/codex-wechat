@@ -122,6 +122,32 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
+    async def test_old_backlog_started_after_a_new_inbound_spends_the_new_budget(self):
+        bridge = self.bridge
+        for text in ("old one", "old two", "old three"):
+            bridge.reply(text)
+        bridge.refresh_reply_budget()
+        sent = []
+
+        async def send(entry):
+            sent.append(entry)
+            return Delivered(str(len(sent)))
+
+        bridge.channel.send = send
+        with patch("codex_wechat.output_delivery.SEND_SPACING_SECONDS", 0):
+            task = asyncio.create_task(bridge.sender())
+            try:
+                self.assertTrue(await self.wait_for(
+                    lambda: any(entry.get("budgetNotice") for entry in sent)))
+                self.assertEqual([entry["text"] for entry in sent[:2]],
+                                 ["old one", "old two"])
+                self.assertEqual(bridge.budget_state()["used"], 2)
+                self.assertEqual([entry["text"] for entry in sent[2:]], [
+                    "还有 1 段待发，回复 `/` 继续，或 `/d` 清空。"])
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
     async def test_stale_unknown_delivery_does_not_repause_after_new_inbound(self):
         bridge = self.bridge
         bridge.reply("old")
