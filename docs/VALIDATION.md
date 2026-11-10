@@ -14,6 +14,11 @@
   `./scripts/check.sh`，1020 项中 999 通过、21 跳过、0 失败；Ruff、ShellCheck 和生成文档
   检查通过，Pyright 0 errors / 5 个平台依赖 warning，分支覆盖率 78%。该快照覆盖
   SelectionLease、SendOutcome、turn/interaction lease 和 writer identity 收口。
+- 2026-11-10 Linux 代码快照 `b60313a` / `399c9a6`：完整 `./scripts/check.sh` 仍为
+  1020 项中 999 通过、21 跳过、0 失败，覆盖率 78%。前者验证 turn/interaction 内部模块
+  （`backend_interactions.py` 93%、`backend_turns.py` 92%）；后者验证声明式 typed settings
+  及现有别名、提示和读回语义，定向 41/41 通过。Ruff、Pyright、ShellCheck 和生成文档检查
+  均通过。
 - 2026-11-10 Linux 当前树新增了状态损坏隔离、不完整运行时布局拒绝、只读 status 诊断和
   Git `HEAD` release 边界。解析器资源上限与极深状态复制明确采用 fail-fast，不维护隔离
   承诺；原地换根参数和旧标记兼容已移除。Windows 嵌套重解析点清理只有静态回归，目标
