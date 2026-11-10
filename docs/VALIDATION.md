@@ -1,6 +1,6 @@
 # 验证状态
 
-更新：2026-11-09。文档、源码核对和 Linux mock 不能替代真实 Windows、微信、CDN 或模型验收。
+更新：2026-11-10。文档、源码核对和 Linux mock 不能替代真实 Windows、微信、CDN 或模型验收。
 Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据；否则只算历史/Windows 侧报告。
 本页只记录当前状态和缺口；详细历史日志见 git 提交历史。
 
@@ -18,6 +18,7 @@ Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据
 | App / CLI / 微信三端并发 | 2026-11-06 实机：App 侧发起后 `backend.writer_kept status=followed` 成功跟随 App 会话，App 回复经 `output.enqueued`（body + completion）进入发件箱，即"跟随 + 转发"跑通；但这几条出站被服务端静默丢弃（见下一行）；微信↔CLI 双向不在本次范围——该能力此前已在 `sharedDaemon: true` 的窗口里验证过（微信→CLI 与 CLI→微信均通，见会话记录），Windows 默认关闭是设计选择（面向偏好 App 的用户，且避免影响 App）；此后改动很多，重新启用需复测 | 历史证据，无提交号；部分覆盖，当前 HEAD 待复测 |
 | 出站投递确认 | 2026-11-06 实机正面撞上：bot 文本出站被服务端静默丢弃，`sendmessage` 一律返回 HTTP 200 + `{"ret":0}` 且无消息 id，同期 `sendtyping`、`getconfig` 全程正常，重启服务无效，手工直连 API 也全部未送达。原实现只看 HTTP 状态，`output.sent` 照记，回复离开发件箱而用户看不到任何东西。历史修复先改为"无消息 id 即未投递"，并实机验证了当时的 3 次重试策略：`send_ack no_id` → `output.send_failed error_type=WeChatNotAcknowledged` ×3 → `output.failed`。2026-11-07 当前策略改为：首次 no-id 即隔离当前条目为 `delivery_unknown`，运行时暂停出站，不发失败通知、不自动重试；剩余 outbox 保留，不自动清空，用户可 `/discard` 主动清空。暂停不跨重启持久化，重启后的新进程会把现存 outbox 当作一次重试机会。只有传输错误按 1s/3s 重试。该策略目前只有离线单测，尚未在真实微信上复测。**19:27Z 用另一个微信（小号）`rebind` 后立即恢复**：19:27:41Z 起连续 7 条全部 `acked` → `output.sent`，`unsent` 归零；附件同一判据也成立：19:35Z 与 19:37Z 两条 `role=asset` 均为 `acked` → `output.sent` | 历史重试行为与换号恢复已实机验证；当前 no-id 保留队列、运行时暂停与 `/discard` 策略待实机；封禁按"账号 + 时间"生效，不是永久标记 |
 | CDN 上传重试幂等 | 只有客户端超时会在同一 `filekey` 上重试；RST 与服务端非 200 都会换 key 重传。固定 `filekey` + 固定 AES 密钥连传两次得到两个不同引用，且 bot 侧回读恒 400，故幂等未证实 | 已实测，结论为"未证实" |
+| 出站原生语音气泡 | 2026-11-10 Linux 实机分别发送 MP3（`encode_type=7`）、AMR-NB（`5`）和 SILK（`6`）：CDN 上传均为 HTTP 200，服务端均返回消息 id 并记录 `role=asset` 已发送，但接收端三次都没有文件或语音气泡。公开测试也报告真实 SILK 转码后仍被 iLink 静默丢弃，参考 [Hermes #9971](https://github.com/NousResearch/hermes-agent/issues/9971) 和 [Hermes #106425](https://github.com/NousResearch/hermes-agent/issues/106425)。实验代码保存在本地分支 `archive/voice-bubble-probe`（`8824b57`），稳定分支继续将音频作为普通文件发送 | 已验证失败；出站原生语音受上游/客户端限制 |
 | WMI 凭据路径 | 替身进程和直接 helper 已验证；本机计划任务的 Job 允许 breakaway，`daemon start` 直连成功，真实 daemon 走 WMI 的路径不可触发 | 部分验证，条件不可复现 |
 
 ## 已知缺口
