@@ -11,6 +11,7 @@ from codex_wechat.app import Bridge, status_payload
 from codex_wechat.errors import WeChatAuthExpired
 from codex_wechat.records import AuthenticationRequired
 from codex_wechat.storage import Store
+from tests.support.helpers import outbox_entry
 
 
 async def wait_until(predicate, timeout=1):
@@ -81,7 +82,7 @@ class WeChatReauthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("rebind", notify.call_args.args[1])
 
     async def test_local_status_exposes_recovery_command(self):
-        self.bridge.state["outbox"] = [{"id": "still-unsent"}]
+        self.bridge.state["outbox"] = [outbox_entry("still-unsent")]
         wechat_auth.require_rebind(
             self.bridge.state, pending=1, now=123
         )

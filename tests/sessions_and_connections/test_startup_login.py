@@ -73,7 +73,8 @@ class StartupLoginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_existing_binding_never_triggers_login_even_without_terminal(self):
         account = {"token": "fixture", "user": "owner"}
-        store = Mock(load=Mock(side_effect=lambda name, default=None: account if name == "account" else {}))
+        store = Mock(load=Mock(side_effect=lambda name, default=None: (
+            account if name == "account" else {"version": 1})))
         with patch("codex_wechat.app.login", AsyncMock()) as login, \
              patch("codex_wechat.app.sys.stdin.isatty", return_value=False):
             self.assertEqual(await startup_account(store), account)
