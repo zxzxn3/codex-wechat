@@ -1,7 +1,7 @@
 # 安装、更新与卸载
 
-本文是安装生命周期的单一说明。命令参数见 [COMMANDS](COMMANDS.md)，平台差异见
-[PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md)，运行期边界见 [ARCHITECTURE](ARCHITECTURE.md)。
+本文是安装生命周期的单一说明。命令入口见 [COMMANDS](COMMANDS.md)，平台操作与支持面见
+[PLATFORMS](PLATFORMS.md)，运行期边界见 [ARCHITECTURE](ARCHITECTURE.md)。
 
 ## 前提
 
@@ -102,8 +102,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 最后才切换 `current`。项目不提供安装回滚命令。
 
 每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
-release 通过 `current` / `active-release` 保留。详细阶段边界见
-[CONFIGURATION](CONFIGURATION.md#安装与服务边界)。
+release 通过 `current` / `active-release` 保留。安装器不初始化账户、不默认开启自启、不重启
+业务，也不提供安装回滚。
 
 ## 卸载
 
@@ -160,5 +160,5 @@ Windows 保持原布局：程序位于 `%LOCALAPPDATA%\codex-wechat\app`，用�
 supervisor 都从同一个标记解析数据根，不把数据根复制进 unit/task action。当前版本不迁移
 Linux 旧布局；旧版统一数据根中的配置和状态不会被新版本读取。
 
-配置、状态、日志、共享后台和工作区各有独立职责，不复制供应商凭据或会话历史。配置与提示的
-细节见 [CONFIGURATION](CONFIGURATION.md)。
+配置、状态、日志、共享后台和工作区各有独立职责，不复制供应商凭据或会话历史。热配置和提示
+的运行边界见 [ARCHITECTURE](ARCHITECTURE.md#配置与提示)。

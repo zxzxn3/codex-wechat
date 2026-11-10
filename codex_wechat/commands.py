@@ -17,7 +17,7 @@ from .errors import UserFacingError, attachment_reason, backend_reason, writer_c
 from .codex_transport import CodexRpcError
 from .codex_connection import ConnectionSpec
 from .backend import WRITER_BUSY, WRITER_NATIVE
-from .media import MEDIA_MAX_MIB_MAX, MEDIA_MAX_MIB_MIN, MediaError
+from .media import DEFAULT_MAX_MIB, MEDIA_MAX_MIB_MAX, MEDIA_MAX_MIB_MIN, MediaError
 from .records import InputPhase
 from .latency import provider_latency
 from .diagnostics import error_fields, log_event, request_context
@@ -32,6 +32,8 @@ from .command_specs import REGISTRY, COMMANDS, command_name, command_usage, help
 from .version import APP_VERSION, release_id
 from .configuration import (
     CONNECTION_IDLE_MAX, CONNECTION_IDLE_MIN, HotSettings,
+    DEFAULT_CONNECTION_IDLE_SECONDS, DEFAULT_LOG_KEEP, DEFAULT_REPLY_BUDGET,
+    DEFAULT_SLICING_TARGET_CHARS,
     LOG_KEEP_MAX, LOG_KEEP_MIN,
     REPLY_BUDGET_MAX, REPLY_BUDGET_MIN,
     SOURCE_HINT_LIMIT_BYTES,
@@ -159,15 +161,16 @@ def backend_section(config, name):
 
 @dataclass(frozen=True)
 class Setting:
-    """One /settings name: where it lives in config.json, plus numeric bounds.
+    """One /settings name: config path, numeric bounds, and the code-owned default.
 
     A single table keeps the write path, the read-back and the limits from drifting
-    apart; `numeric` replaces the old second table that only carried bounds.
+    apart; generated reference documentation reads this table.
     """
 
     path: tuple[str, ...]
     minimum: int | None = None
     maximum: int | None = None
+    default: int | None = None
 
     @property
     def numeric(self):
@@ -179,16 +182,20 @@ SETTINGS = {
     "sourceHint": Setting(("sourceHint",)),
     "slicing.smart": Setting(("slicing", "smart")),
     "connectionIdleSeconds": Setting(("connectionIdleSeconds",),
-                                      CONNECTION_IDLE_MIN, CONNECTION_IDLE_MAX),
-    "media.maxMiB": Setting(("media", "maxMiB"), MEDIA_MAX_MIB_MIN, MEDIA_MAX_MIB_MAX),
+                                      CONNECTION_IDLE_MIN, CONNECTION_IDLE_MAX,
+                                      DEFAULT_CONNECTION_IDLE_SECONDS),
+    "media.maxMiB": Setting(("media", "maxMiB"), MEDIA_MAX_MIB_MIN, MEDIA_MAX_MIB_MAX,
+                            DEFAULT_MAX_MIB),
     "slicing.targetChars": Setting(("slicing", "targetChars"),
-                                   SLICING_TARGET_MIN, SLICING_TARGET_MAX),
-    "logs.keep": Setting(("logs", "keep"), LOG_KEEP_MIN, LOG_KEEP_MAX),
+                                   SLICING_TARGET_MIN, SLICING_TARGET_MAX,
+                                   DEFAULT_SLICING_TARGET_CHARS),
+    "logs.keep": Setting(("logs", "keep"), LOG_KEEP_MIN, LOG_KEEP_MAX, DEFAULT_LOG_KEEP),
     # Not advertised in the panel or in /help settings: an operator who knows the
     # name may raise it past the observed platform ceiling on purpose.
-    "budgets": Setting(("sending", "replyBudget"), REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
+    "budgets": Setting(("sending", "replyBudget"), REPLY_BUDGET_MIN, REPLY_BUDGET_MAX,
+                       DEFAULT_REPLY_BUDGET),
     "sending.replyBudget": Setting(("sending", "replyBudget"),
-                                   REPLY_BUDGET_MIN, REPLY_BUDGET_MAX),
+                                   REPLY_BUDGET_MIN, REPLY_BUDGET_MAX, DEFAULT_REPLY_BUDGET),
 }
 
 

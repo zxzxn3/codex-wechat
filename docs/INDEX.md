@@ -1,42 +1,34 @@
 # 文档索引
 
-README 用于项目介绍和公开推广；本文是 agent、维护者和测试者的文档入口。代码是实现事实的
-来源；文档解释当前契约、操作方式和已验证边界。先按任务定位文档，再只读相关章节。
+代码是实现事实的唯一来源。文档只解释用户操作、跨模块不变量、外部依据和验证证据；
+命令、别名、默认值和范围由生成参考维护，不在别处复制。
+
+## 文档
+
+| 文档 | 用途 |
+| --- | --- |
+| [README](../README.md) | 项目介绍、快速开始和用户 FAQ |
+| [INSTALL](INSTALL.md) | 安装、更新、卸载、目录和数据根 |
+| [COMMANDS](COMMANDS.md) | 公开入口、生命周期和命令语义 |
+| [REFERENCE.generated](REFERENCE.generated.md) | 从代码生成的命令、设置默认值、范围和出站保护参数 |
+| [ARCHITECTURE](ARCHITECTURE.md) | 术语、模块职责、所有权、交付、配置、诊断和文案不变量 |
+| [PLATFORMS](PLATFORMS.md) | Linux/Windows 操作、平台差异、支持面和故障排查 |
+| [DEVELOPMENT](DEVELOPMENT.md) | 测试、静态检查、依赖、变更检查和发布门 |
+| [VALIDATION](VALIDATION.md) | 离线、实机和外部协议的验证状态与缺口 |
+| [SOURCES](SOURCES.md) | Codex、App、微信和外部协议的版本依据 |
+| [事件档案](incidents/2026-11-06-wechat-silent-drop.md) | 微信下行静默丢弃的冻结时间线和样本 |
 
 ## 按任务查找
 
-| 要查什么 | 先读 |
-| --- | --- |
-| 模块职责、后台/App/CLI 所有权、认证与重绑边界 | [ARCHITECTURE](ARCHITECTURE.md) |
-| 稳定术语、命名约定和易混概念 | [CONTEXT](CONTEXT.md) |
-| 用户可见文案、隐式约定和提示边界 | [USER-MESSAGES](USER-MESSAGES.md) |
-| 公开命令、参数、平台入口和微信短别名 | [COMMANDS](COMMANDS.md) |
-| 由代码生成的命令别名、完整命令和数值设置范围 | [REFERENCE.generated](REFERENCE.generated.md) |
-| 安装、更新、卸载、目录和数据根 | [INSTALL](INSTALL.md) |
-| 热配置、提示模板、资源清理和后台回落 | [CONFIGURATION](CONFIGURATION.md) |
-| 输入提交、会话切换、outbox、发送确认、额度和恢复 | [DELIVERY](DELIVERY.md) |
-| 日志字段、脱敏、微信轮询、连接池和网络计时 | [DIAGNOSTICS](DIAGNOSTICS.md) |
-| 当前支持面、能力边界和实验性项 | [SUPPORT-MATRIX](SUPPORT-MATRIX.md) |
-| 实机覆盖、历史局限和剩余缺口 | [VALIDATION](VALIDATION.md) |
-| Linux/Windows 行为差异、二维码和桌面通知 | [PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md) |
-| Windows 操作、IPC、共享 daemon 和故障排查 | [WINDOWS](WINDOWS.md) |
-| Codex/App/微信协议、版本和外部依据 | [SOURCES](SOURCES.md) |
-| 测试隔离、静态检查、依赖和发布退出标准 | [DEVELOPMENT](DEVELOPMENT.md)、[AGENTS](../AGENTS.md) |
-| 公开安装入口、更新来源和分发边界 | [INSTALL](INSTALL.md) |
-| 发布检查、维护成本和重构取舍 | [DEVELOPMENT](DEVELOPMENT.md) |
-| 历史性能采样和当前网络诊断 | [DIAGNOSTICS](DIAGNOSTICS.md) |
-
-## 推荐阅读顺序
-
-- 第一次接手：README → 本文 → [ARCHITECTURE](ARCHITECTURE.md) → [DELIVERY](DELIVERY.md)。
-- 修改命令或微信交互：本文 → [COMMANDS](COMMANDS.md) → [REFERENCE.generated](REFERENCE.generated.md) → 对应测试。
-- 修改安装、服务或平台入口：本文 → [INSTALL](INSTALL.md) → [PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md)。
-- 修改配置、日志或恢复边界：本文 → [CONFIGURATION](CONFIGURATION.md) → [DIAGNOSTICS](DIAGNOSTICS.md)。
-- 判断一项能力是否可发布：本文 → [SUPPORT-MATRIX](SUPPORT-MATRIX.md) → [VALIDATION](VALIDATION.md)。
+- 第一次接手：README → 本文 → ARCHITECTURE → DEVELOPMENT。
+- 修改命令或微信交互：COMMANDS → REFERENCE.generated → ARCHITECTURE → 对应测试。
+- 修改安装或平台入口：INSTALL → PLATFORMS → COMMANDS。
+- 修改配置、交付或诊断：ARCHITECTURE → 对应源码 → 测试。
+- 判断能力是否可发布：PLATFORMS → VALIDATION → SOURCES。
 
 ## 文档原则
 
-- 当前行为写进契约文档；历史证据和未验证项写进 `VALIDATION`，不混写成“已通过”。
-- 命令、别名和数值设置由 `scripts/reference_docs.py` 生成，不手工维护第二份表。
-- 文档之间用链接复用，不复制同一张能力表；改名或移动文件时同时更新 `scripts/check.sh` 的检查。
-- 面向用户的推广内容放在 README；面向 agent 的入口放在本文。
+- 代码能表达的机械事实不复制到文档；使用源码链接或生成参考。
+- 文档保留代码本身难以表达的“为什么”、跨模块不变量、用户操作和外部依据。
+- 当前行为、历史证据和未验证项分开记录，不把一次样本写成全平台承诺。
+- 修改生成器后运行 `scripts/reference_docs.py --check`；`scripts/check.sh` 会检查漂移。

@@ -8,6 +8,10 @@ sys.path.insert(0, str(ROOT))
 
 from codex_wechat.command_specs import COMMANDS  # noqa: E402
 from codex_wechat.commands import SETTINGS  # noqa: E402
+from codex_wechat.output_delivery import (  # noqa: E402
+    DELIVERY_DEGRADED_THRESHOLD,
+    SEND_SPACING_SECONDS,
+)
 
 TARGET = ROOT / "docs" / "REFERENCE.generated.md"
 PUBLIC_NUMERIC_SETTINGS = (
@@ -15,6 +19,7 @@ PUBLIC_NUMERIC_SETTINGS = (
     "media.maxMiB",
     "slicing.targetChars",
     "logs.keep",
+    "sending.replyBudget",
 )
 
 
@@ -49,12 +54,28 @@ def render() -> str:
         "",
         "## 数值设置",
         "",
-        "| 设置 | 范围 |",
-        "| --- | --- |",
+        "| 设置 | 默认值 | 范围 |",
+        "| --- | ---: | --- |",
     ])
     for name in PUBLIC_NUMERIC_SETTINGS:
         setting = SETTINGS[name]
-        lines.append(f"| `{name}` | {setting.minimum}–{setting.maximum} |")
+        lines.append(
+            f"| `{name}` | {setting.default} | {setting.minimum}–{setting.maximum} |"
+        )
+
+    lines.extend([
+        "",
+        "## 出站保护",
+        "",
+        "| 保护 | 当前值 |",
+        "| --- | ---: |",
+        f"| 连续出站回复间隔 | {SEND_SPACING_SECONDS:g}s |",
+        f"| `delivery=unconfirmed` 的连续失败阈值 | {DELIVERY_DEGRADED_THRESHOLD} |",
+        "",
+        "> 以上数值由 `codex_wechat.configuration`、",
+        "> `codex_wechat.output_delivery` 和 `codex_wechat.commands` 提供，",
+        "> 不在手写文档中维护副本。",
+    ])
     return "\n".join(lines) + "\n"
 
 

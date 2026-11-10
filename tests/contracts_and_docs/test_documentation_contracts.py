@@ -43,7 +43,18 @@ class DocumentationContractTests(unittest.TestCase):
         index_path = ROOT / "docs" / "INDEX.md"
         index = index_path.read_text(encoding="utf-8")
         targets = re.findall(r"\[[^]]+\]\(([^)#]+)", index)
-        self.assertGreater(len(targets), 10)
+        self.assertGreaterEqual(len(targets), 8)
         for target in targets:
             with self.subTest(target=target):
                 self.assertTrue((index_path.parent / target).is_file())
+
+    def test_all_relative_markdown_links_exist(self):
+        paths = [ROOT / "README.md", *(ROOT / "docs").rglob("*.md")]
+        for path in paths:
+            for target in re.findall(
+                r"\[[^]]+\]\(([^)#]+)", path.read_text(encoding="utf-8")
+            ):
+                if "://" in target or target.startswith("mailto:"):
+                    continue
+                with self.subTest(document=path.relative_to(ROOT), target=target):
+                    self.assertTrue((path.parent / target).resolve().is_file())

@@ -55,9 +55,21 @@
 
 ## 数值设置
 
-| 设置 | 范围 |
-| --- | --- |
-| `connectionIdleSeconds` | 0–3600 |
-| `media.maxMiB` | 1–100 |
-| `slicing.targetChars` | 80–20000 |
-| `logs.keep` | 1–100 |
+| 设置 | 默认值 | 范围 |
+| --- | ---: | --- |
+| `connectionIdleSeconds` | 60 | 0–3600 |
+| `media.maxMiB` | 20 | 1–100 |
+| `slicing.targetChars` | 600 | 80–20000 |
+| `logs.keep` | 3 | 1–100 |
+| `sending.replyBudget` | 9 | 1–100 |
+
+## 出站保护
+
+| 保护 | 当前值 |
+| --- | ---: |
+| 连续出站回复间隔 | 2.5s |
+| `delivery=unconfirmed` 的连续失败阈值 | 3 |
+
+> 以上数值由 `codex_wechat.configuration`、
+> `codex_wechat.output_delivery` 和 `codex_wechat.commands` 提供，
+> 不在手写文档中维护副本。

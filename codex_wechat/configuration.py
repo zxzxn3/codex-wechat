@@ -27,6 +27,7 @@ DEFAULT_COMPLETION_TEMPLATE = (
 DEFAULT_ACK_TEMPLATE = "`IN < ~{turn_total_tokens} ({ingress_ms}ms)`"
 SLICING_TARGET_MIN = 80
 SLICING_TARGET_MAX = 20000
+DEFAULT_SLICING_TARGET_CHARS = 600
 TEXT_LIMIT_BYTES = 3000
 SOURCE_HINT_LIMIT_BYTES = 4000
 LOG_KEEP_MIN = KEEP_MIN
@@ -82,7 +83,7 @@ class Notifications:
 @dataclass(frozen=True)
 class Slicing:
     mode: str = "smart"
-    target_chars: int = 600
+    target_chars: int = DEFAULT_SLICING_TARGET_CHARS
 
     @classmethod
     def from_config(cls, value=None):

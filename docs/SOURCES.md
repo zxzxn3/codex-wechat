@@ -1,9 +1,8 @@
 # 依据与兼容边界
 
 2026-11-06。文档/源码核对不等于功能验收；实际执行见 [VALIDATION](VALIDATION.md)。
-本文是外部依据和兼容性证据，当前运行契约以 [ARCHITECTURE](ARCHITECTURE.md)、
-[CONFIGURATION](CONFIGURATION.md)、[DELIVERY](DELIVERY.md) 和
-[PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md) 为准。
+本文是外部依据和兼容性证据，当前运行契约以 [ARCHITECTURE](ARCHITECTURE.md) 和
+[PLATFORMS](PLATFORMS.md) 为准。
 
 | 范围 | 依据 |
 | --- | --- |
@@ -13,7 +12,7 @@
 | Windows App | 交接记录 App 26.1027.3384.0 / CLI 0.166.0-alpha.5.1；[对应 App Server 源码](https://github.com/openai/codex/blob/rust-v0.166.0-alpha.5.1/codex-rs/app-server/src/lib.rs)；Windows 实测覆盖见 [VALIDATION](VALIDATION.md) |
 | 微信 | [Tencent openclaw-weixin 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)及项目此前使用的2.4.10实现；认证、媒体参数以该协议为准 |
 | 网络与媒体 | [curl](https://curl.se/docs/manpage.html)、[websockets](https://websockets.readthedocs.io/en/stable/reference/asyncio/client.html)、[cryptography](https://cryptography.io/en/latest/hazmat/primitives/symmetric-encryption/)；采用成熟传输和密码实现 |
-| 原生服务与 UI | systemd 用户服务、Windows ScheduledTasks；二维码/通知的具体官方依据见 [PLATFORM-DIFFERENCES](PLATFORM-DIFFERENCES.md) |
+| 原生服务与 UI | systemd 用户服务、Windows ScheduledTasks；二维码和通知依据见 [PLATFORMS](PLATFORMS.md#平台适配) |
 | 诊断日志 | Python 标准库 `os.open`/`os.replace`/`contextvars`；仅写本机文件，不上传 |
 
 公开协议提供 stdio、WebSocket 和 Unix socket；CLI --remote 可接指定共享后台。

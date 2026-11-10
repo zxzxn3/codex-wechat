@@ -172,8 +172,7 @@ thread，没有远程聚焦接口。
 - Linux 使用同 `CODEX_HOME` 的私有 Unix socket；Windows 使用本机命名管道并核对身份。
 - 会话切换会请求旧 thread 的 `thread/unsubscribe`，交还 Bridge 持有的写入者。
 
-架构、所有权和恢复边界见 [ARCHITECTURE](docs/ARCHITECTURE.md) 与
-[DELIVERY](docs/DELIVERY.md)。
+架构、所有权和恢复边界见 [ARCHITECTURE](docs/ARCHITECTURE.md)。
 
 ## 安全与信任
 
@@ -187,7 +186,7 @@ thread，没有远程聚焦接口。
 
 | | Linux | Windows |
 | --- | --- | --- |
-| 状态 | 当前树有完整离线回归 | 当前版本已实机复测 |
+| 状态 | 当前树有完整离线回归 | 已通过历史实机验证，当前提交待复测 |
 | 后台 | systemd 用户服务 | Scheduled Task + supervisor |
 | 服务日志 | `journalctl --user -u codex-wechat` | `logs/service.log`，按 5 MiB 轮转 |
 | App IPC | 私有 Unix socket | 本机命名管道，只跟随主 `CODEX_HOME` |
@@ -246,9 +245,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 **回复太多会被微信限流吗？**
 
 当桥接短时间向微信发送大量回复时，微信可能静默丢弃下行消息：接口可能返回成功但没有消息
-ID，接收端什么也看不到。codex-wechat 默认把每条入站消息触发的出站回复限制为 9 条，并在
-连续出站回复之间至少间隔 2.5 秒；首次发现无消息 ID 时会暂停出站并保留待发内容。这是本地
-保护机制，不是微信对限流阈值的承诺。
+ID，接收端什么也看不到。codex-wechat 会限制每条入站消息触发的出站回复数量，并在连续回复
+之间留出间隔；首次发现无消息 ID 时会暂停出站并保留待发内容。当前数值见
+[生成参考](docs/REFERENCE.generated.md#出站保护)。这是本地保护机制，不是微信对限流阈值的
+承诺。
 
 **会不会重复发送，或者告诉我“已完成”但其实没收到？**
 
@@ -263,10 +263,10 @@ ID，接收端什么也看不到。codex-wechat 默认把每条入站消息触�
 README 用于项目介绍；agent、维护者和测试者从 [文档索引](docs/INDEX.md) 开始。
 
 - 安装、更新、卸载：[INSTALL](docs/INSTALL.md)
-- 用户提示与文案边界：[USER-MESSAGES](docs/USER-MESSAGES.md)
 - 微信命令和短别名：[COMMANDS](docs/COMMANDS.md)、[生成参考](docs/REFERENCE.generated.md)
-- 架构、配置、交付、诊断：[ARCHITECTURE](docs/ARCHITECTURE.md)、[CONFIGURATION](docs/CONFIGURATION.md)、[DELIVERY](docs/DELIVERY.md)、[DIAGNOSTICS](docs/DIAGNOSTICS.md)
-- 支持面与验证证据：[SUPPORT-MATRIX](docs/SUPPORT-MATRIX.md)、[VALIDATION](docs/VALIDATION.md)
+- 架构、配置、交付、诊断和用户文案：[ARCHITECTURE](docs/ARCHITECTURE.md)
+- 平台操作与支持面：[PLATFORMS](docs/PLATFORMS.md)
+- 验证证据：[VALIDATION](docs/VALIDATION.md)
 - 开发检查：`scripts/check.sh`；测试与静态检查约定见 [DEVELOPMENT](docs/DEVELOPMENT.md) 和 [AGENTS](AGENTS.md)
 
 ## License

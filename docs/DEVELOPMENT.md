@@ -1,9 +1,8 @@
 # 开发与检查
 
-本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md) 及其关联的
-[CONFIGURATION](CONFIGURATION.md)、[DELIVERY](DELIVERY.md)、[DIAGNOSTICS](DIAGNOSTICS.md)，
-能力边界和支持面见 [SUPPORT-MATRIX](SUPPORT-MATRIX.md)，命令词表与平台差异见
-[COMMANDS](COMMANDS.md)，外部依据见 [SOURCES](SOURCES.md)。跨平台协作约定与已踩过的坑
+本文是 codex-wechat 的开发入口；运行契约见 [ARCHITECTURE](ARCHITECTURE.md)，平台操作和
+支持面见 [PLATFORMS](PLATFORMS.md)，命令入口见 [COMMANDS](COMMANDS.md)，外部依据见
+[SOURCES](SOURCES.md)。跨平台协作约定与已踩过的坑
 （Windows 编码、`.ps1` BOM、提交姿势、测试隔离）见仓库根的 [AGENTS](../AGENTS.md)。
 
 ## 兼容策略
@@ -72,7 +71,7 @@ Windows、真实微信/CDN、App/daemon 联调不属于离线测试；mock 通�
 
 指定测试会话从固定源码副本执行。全部状态、配置、进程与 RPC 均使用临时目录或模拟，
 不接入生产账户、服务、模型和微信。除测试通过外，独立核对
-[SUPPORT-MATRIX](SUPPORT-MATRIX.md) 中的两侧能力；文档、源码、离线结果与实机证据分别报告，
+[PLATFORMS](PLATFORMS.md) 中的两侧支持面；文档、源码、离线结果与实机证据分别报告，
 无法验证的组合不写成通过。协议来源见 [SOURCES](SOURCES.md)。
 
 ## 静态检查、覆盖率与依赖审计
@@ -113,13 +112,10 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 
 ## 依赖版本
 
-运行时依赖在 `requirements.txt` 中用兼容范围声明，安装器不锁死到单一版本；升级依赖后必须
-跑完整离线测试。`curl-cffi` 当前要求 `>=0.17,<0.18`，0.17.0 已通过完整测试并包含安全修复。
-`pywin32` 尚未在 Windows 实机复核，暂不收紧版本。开发工具在 `requirements-dev.txt` 中固定
-版本，避免不同机器上的 coverage/pip-audit 结果漂移。安装器在 release 环境内用
-`packaging` 的 PEP 440 `Version` / `SpecifierSet` 校验直接依赖；预发布、post 和本地版本
-仍视为不稳定，不允许通过。默认用户数据目录由 `platformdirs.user_data_dir` 计算；stable
-入口在 release 环境建立前缺少该包时，使用等价的 XDG / `LOCALAPPDATA` fallback。
+依赖版本只以 `requirements*.txt` 为准，不在文档复制版本范围。升级依赖后必须跑完整离线
+测试；安装器会在 release 环境内校验声明的版本。默认用户数据目录由
+`platformdirs.user_data_dir` 计算；stable 入口在 release 环境建立前缺少该包时，使用等价的
+XDG / `LOCALAPPDATA` fallback。
 
 更新运行时依赖使用 `.venv/bin/python -m pip install -r requirements.txt`；更新后需要重启
 服务才会让新依赖生效，运行中的进程不会自动换包。
@@ -128,8 +124,8 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 
 - 改持久状态：同步恢复逻辑和恢复测试；发布版本变更时维护跨版本迁移与旧格式 fixture。
 - 改协议字段：同步 SOURCES、ARCHITECTURE、诊断事件和失败边界。
-- 改提示或配置：先读 [USER-MESSAGES](USER-MESSAGES.md)，保持 `prompts.py` 默认目录和
-  英文 snake_case 字段；无效配置整组保留旧值。
+- 改提示或配置：先读本文的“用户可见文案”，保持 `prompts.py` 默认目录和英文 snake_case
+  字段；无效配置整组保留旧值。
 - 改 Windows/服务/安装：至少做静态入口检查；有实机时再跑真实回归。
 - 改 `*.ps1`：`codex-wechat.ps1`、`codex-desktop.ps1`、`install.ps1` 与 `uninstall.ps1`
   含中文，必须保持 **UTF-8 with BOM**。
@@ -160,7 +156,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 ## 复杂度与重构边界
 
 下表是按职责边界判断的维护成本，不是工时预算或代码占比。能力范围见
-[SUPPORT-MATRIX](SUPPORT-MATRIX.md)，运行契约见 [ARCHITECTURE](ARCHITECTURE.md)。
+[PLATFORMS](PLATFORMS.md)，运行契约见 [ARCHITECTURE](ARCHITECTURE.md)。
 
 | 部分 | 成本 | 主要负担 |
 | --- | --- | --- |
@@ -190,6 +186,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 `tests/install_and_release/test_release_layout.py` 会检查 stable payload
 是否包含完整包文件，并验证脱离源码树的导入。
 
+## 用户可见文案
+
+- 先回答用户要求的结果，再给可行动信息；成功回执不叙述队列、worker、writer 或重连实现。
+- 可能重复执行、静默丢失、旧连接未清理、能力回落或需要桌面处理的风险必须保留。
+- 设置成功显示生效后的当前值；失败给出下一步。参数形态不明显时，错误提示可以附一个例子。
+- `/new`、`/switch` 只显示会话结果，不重复播报旧回合 detach 和旧输入输出作废。
+- 生命周期通知优先于额外的“请求已提交”回执；默认文案只在 `prompts.py` 维护。
+
 ## 审查与发布退出标准
 
 - P0/P1 必须修复；P2/P3 只有在支持矩阵内的主路径、数据损坏或安全边界上才阻断发布，
@@ -199,7 +203,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
   mock 和 Linux 上的 PowerShell 静态检查不能替代平台验收。
 - 未在真实平台验证的能力只能标为“待验证/实验性”，不能写成已验收；无法保证的配置在安装
   或启动时 fail closed。
-- 文档、命令表和 VALIDATION 必须与当前树同步；完成以上条件后停止继续穷举边缘分支。
+- 文档、生成参考和 VALIDATION 必须与当前树同步；完成以上条件后停止继续穷举边缘分支。
 
 ### 开源发布门
 

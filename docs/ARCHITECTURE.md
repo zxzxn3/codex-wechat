@@ -1,84 +1,122 @@
-# 架构与所有权
+# 架构与运行契约
 
-安装、更新和卸载的用户流程见 [INSTALL](INSTALL.md)。本文保留模块职责、连接所有权和认证
-边界；输入输出与恢复见 [DELIVERY](DELIVERY.md)，热配置与资源见
-[CONFIGURATION](CONFIGURATION.md)，日志与隐私见 [DIAGNOSTICS](DIAGNOSTICS.md)。
+代码是实现事实的唯一来源。本文只记录跨模块的所有权、不能从单个函数直接看出的运行时
+不变量，以及用户可观察的行为边界；命令、别名、默认值和范围由
+[生成参考](REFERENCE.generated.md) 提供。安装与路径见 [INSTALL](INSTALL.md)，平台差异见
+[PLATFORMS](PLATFORMS.md)，外部协议依据见 [SOURCES](SOURCES.md)。
 
-## 职责
+## 术语
 
-- codex_connection：唯一连接意图和校验；native_codex：CLI/App 可执行入口发现。
-- backend_runtime：后台准备与所有权；codex_transport：字节连接、JSON-RPC 和关闭；backend：原生会话/轮次/事件。
-- app_ipc：App 的有界帧、持有者发现、会话快照/增量和 follower 请求适配；app_ipc_windows 只负责本机管道连接与身份核对。
-- desktop：内部 CLI 接入和共享后台准备；不启动 App、不改写桌面入口，也不作为公开命令。
-- wechat / media：微信和 CDN 协议；wechat_auth / rebind：认证状态、身份与重绑编排。
-- ingress：微信入站过滤、去重、引用归一化和命令路由；不复制 Bridge 状态。
-- backend_session：连接建立和后台恢复循环；不承载微信或交付策略。
-- input_delivery / output_delivery：输入提交和有序输出；Bridge 是组合根和持久化入口。
-- lifecycle：按操作维护会话变更、重启、输入准备和 steer 的准入条件；调用方仍持有锁及提交屏障。
-- commands / command_specs / prompts / configuration：唯一命令目录、展示快照和配置；不重复业务状态。
-- diagnostics 写入安全事件，log_viewer 读取和跟随日志；命令行入口只负责调用。
-- platform_ui / platform_support / service_adapter：二维码、通知、平台路径与原生服务操作。
-- subprocess_io / storage：有界子进程收尾、私有 JSON 与原生单实例锁。
-- installer：安装策略和依赖声明；系统脚本仅适配入口与原生服务。安装器必须是单文件可运行，
-  运行期代码集中在 `codex_wechat/`，根目录只保留安装器、supervisor 薄入口和平台入口脚本；
-  stable payload 与包内导入由测试校验。release 目录清理并入安装器，active-release 标记
-  保留正在运行的版本。Windows Mutex/Job Object 使用 pywin32 封装原生 API。
-  每个版本建独立虚拟环境；pip 默认复用本机缓存，设置 `PIP_NO_CACHE_DIR=1` 可禁用缓存；
-  重复更新因此不再重下同版本 wheel，缓存未命中时才联网。
+| 术语 | 含义 | 不要混淆 |
+| --- | --- | --- |
+| bridge / 桥接 | 连接微信消息和本机 Codex App Server 的进程 | 不是 Codex 后端 |
+| backend / 后端 | `backends.<name>` 定义的连接目标 | 不是模型或 provider |
+| thread / 会话 | Codex 的持久会话，拥有独立历史和目录 | 不是 turn |
+| turn / 回合 | 一次从输入到完成或中断的执行 | 不是一条微信消息 |
+| writer / 写入者 | 当前持有 thread 写权的客户端 | 同一 thread 同时只有一个 writer |
+| shared daemon | App、CLI 和桥接复用的 Codex App Server 后台 | 不是微信桥接服务 |
+| steer / queue | 追加到运行中的 turn / 等 turn 结束后执行 | 两者不能互换 |
+| detach | 切换或新建会话时放弃旧回合的本地交付 | 不是 stop |
+| inbox / outbox | 尚未开始的输入 / 等待发给微信的输出 | 不是同一个队列 |
+| delivery unknown | 请求被接受但没有返回消息 ID | 不是已送达，也不是明确失败 |
+| reply budget | 每条入站消息允许桥接发出的回复预算 | 不是微信服务端配额 |
+| release ID | 不可变安装版本的内容标识 | 不是产品版本或 Git commit |
 
-共享后台与微信服务是两种所有权：前者可以被 App/CLI 继续使用，后者只管理桥接。
-连接失败不删除写入锁、不抢停桌面、不静默另开独立写入后台。App 的共享 WS 仅回环，
-原生daemon优先；平台缺口不通过伪造跨平台实现隐藏。`active-release` 只由取得 bridge
-状态锁并完成启动的 `start` 进程写入；只读 `status`/`logs` 不改变运行版本标记。
-backend 的事件入口保留来源过滤、早到事件缓冲和轮次检查；用量、设置、消息及轮次收口
-分开处理，仍共用同一 Backend 状态，不增加事件总线或第二份会话状态。
-CLI 和微信继续复用原生 daemon 或显式 WebSocket；App 使用系统正常入口。
-已独立启动的 App 在 resume 明确报告 active writer 时走 App IPC：Linux 使用同用户私有 socket，
-Windows 使用本机命名管道，依据已连接句柄查服务 PID，核对同用户和当前已注册 App 可执行文件。
-Windows 管道不是按 CODEX_HOME 隔离，只允许主 home；独立后端仍走自己的原生连接。
-按后端 CODEX_HOME 发现持有者并固定 owner，收到初始快照后才提交选择。非写入冲突不回退，
-不删除锁、不接管 App 进程。只有选定 owner/thread/host/version 的事件可更新会话；
-快照作为历史基线，增量按 revision 应用，缺口重取快照；旧正文不回发。
-App 请求结果超时/断连仍为投递不确定，不切回原生后台重发；审批/问题答案始终返回原 App owner，
-已失效请求不落入另一个后台。关闭桥接只关闭 follower 连接。
-IPC steer 在发出前核对快照中的 expectedTurnId；App 内部 follower 接口没有同名原子前置条件，
-因此不能承诺与原生 turn/steer 相同的跨客户端竞态保证。项目不再维护专用 App 启动入口。
-默认使用正常 App 入口时，微信发起的回合仍跑在同一个 thread 上：App 停在该会话时，
-微信里的输入与回复会出现在 App 里，本机已观测到这种用法。"反向接入"只指另一件事——
-让 App 跳到它没打开的会话。follower 接口只有 start-turn、steer、interrupt 和 stream 状态，
-没有打开或聚焦会话的方法，所以桥不承诺这一条。
-切换会话时会请求旧会话的 `thread/unsubscribe`，交还 Bridge 持有的写入者；这是 app-server
-暴露的唯一释放手段（没有 `thread/unload`），失败只记日志、不阻断切换。
-后台与代理职责仍各自独立，不把微信后台是否就绪作为普通 App 启动的前置条件。
+## 模块职责
 
-错误处置使用多轴标记：`retryable`、`user_action`、`fallback`、`terminal` 可以并存，
-调用方按 fallback → retryable → user_action → terminal 选择即时策略；`retry_after`
-只作为重试提示，不与用户操作互斥。Writer conflict、共享后台回落和本地回合中止分别保留
-各自语义，不压成互斥错误类别。
+| 模块 | 边界 |
+| --- | --- |
+| [app.py](../codex_wechat/app.py) | 组合根、状态保存和启动生命周期 |
+| [backend.py](../codex_wechat/backend.py) | Codex 会话、回合、事件和设置 |
+| [backend_runtime.py](../codex_wechat/backend_runtime.py) / [codex_transport.py](../codex_wechat/codex_transport.py) | 后台所有权、JSON-RPC 连接和关闭 |
+| [app_ipc.py](../codex_wechat/app_ipc.py) / [app_ipc_windows.py](../codex_wechat/app_ipc_windows.py) | 跟随 App 已持有的 thread；不抢 writer |
+| [ingress.py](../codex_wechat/ingress.py) | 微信入站过滤、去重、引用归一化和命令路由 |
+| [input_delivery.py](../codex_wechat/input_delivery.py) | 输入保存、提交、steer/queue 和恢复 |
+| [output_delivery.py](../codex_wechat/output_delivery.py) | 有序出站、附件、发送确认、节流和投递未知 |
+| [command_specs.py](../codex_wechat/command_specs.py) / [commands.py](../codex_wechat/commands.py) | 唯一命令目录、设置边界和命令实现 |
+| [prompts.py](../codex_wechat/prompts.py) | 默认用户文案和模板渲染 |
+| [diagnostics.py](../codex_wechat/diagnostics.py) | 白名单结构化事件；不记录正文和凭据 |
+| [platform_support.py](../codex_wechat/platform_support.py) / [service_adapter.py](../codex_wechat/service_adapter.py) | 平台路径、权限和原生服务 |
+| [installer.py](../installer.py) | 安装策略、依赖和 release 激活 |
 
-## 并发与认证
+模块可以独立重构；跨模块的所有权、持久状态和有外部依赖的格式属于兼容边界。
 
-收信、发信、模型工作、后台恢复和命令调度独立；慢后端不阻塞本地帮助/状态/停止。
-重启在首次await前关提交屏障，未提交输入可退回待办；已提交任务仍受busy保护。
-未发出的回复在保存的发件箱里，重启后由新进程继续发送，因此重启只给回执一个很短的先机
-（`RESTART_DRAIN_GRACE_SECONDS`）就继续，不等待发件箱排空——通道被暂停或静默丢弃时
-排空永远不会发生，等待只会把重启卡住。
-原生问题/审批使用各自响应格式，只回应本连接实际收到的请求，不自动选择答案。
-App async 问题只在结构化 `agentMessage.questions` 上识别；多题依次收齐后按原
-连接、会话和轮次用版本相关包装文本补充到原轮次，不解析Agent正文冒充题目。
-等待期间切换连接、会话、轮次或桌面已作答会使手机端提示失效；已发出的答案不重放。
+## 会话与连接所有权
 
-确定认证失效保存reauth_required并暂停收发和新提交，一次系统提醒；不将临时断网误判
-为失效，也不擅自中断已运行Agent。同一微信用户重绑沿用聊天并保留交付；bot变化时重置
-游标、上下文及上传引用，保留去重记录，收到新的上下文后恢复待办和发件箱。等待期间的新结果仍保存。
-扫码等待不持有状态锁、不停止服务；收到确认后才短暂停服，持锁重读最新状态并核对绑定未被其它进程更改。
-停服前和拿锁后均复核活动任务，扫码期间新增的任务也需要显式 --stop-active；拒绝提交时恢复原服务。
-换微信用户以手机扫码授权为准，自动隔离旧交付，不在终端重复确认。变更先持久保存未完成标记，再提交凭据，成功后清标记。
-半完成状态禁止启动业务，等待显式继续。
-用户会话选择和提示偏好不属于微信token，不因换bot清空。
+- CLI 和微信优先复用原生 daemon 或显式 WebSocket。App 使用正常启动入口，项目不改写桌面入口。
+- App 已持有 thread 且原生 resume 报告 writer 冲突时，桥接才尝试 App IPC follower。连接失败
+  不会删除锁、停止 App 或另开一个写入后台。
+- Linux App IPC 使用同用户私有 socket；Windows 使用本机命名管道并核对用户与已注册 App
+  身份。Windows 管道只跟随主 `CODEX_HOME`。版本相关的接口依据见 [SOURCES](SOURCES.md)。
+- 切换 thread 时会请求旧 thread 的 `thread/unsubscribe`，把 writer 交还 App。app-server
+  没有卸载接口，释放失败只记日志，不阻断切换。
+- 请求结果超时或断连仍是投递不确定，不切到另一个后台自动重发。审批和问题答案只返回原
+  连接、会话和回合的 owner。
+
+## 认证与重绑
+
+- 确认认证失效后进入持久 `reauth_required`，暂停收发和新提交，并只提醒一次；临时断网不会
+  被当作认证失效，也不会中断已运行的 Agent。
+- 同号重绑保留聊天、交付和偏好。bot 变化时重新取得游标、上下文和上传引用，保留去重记录。
+- 换微信账号以扫码授权结果为准，先持久化未完成标记，再隔离旧账号交付。半完成状态禁止
+  继续启动业务。
+- 扫码等待不持有状态锁；收到确认后才短暂停服，并在拿锁后重新核对绑定和活动回合。
+
+## 输入与会话切换
+
+- 输入从 inbox 进入 currentInput；RPC 前记录 dispatching，接受后记录 accepted。
+  preparing 可恢复；dispatching 结果未知和 accepted 均不自动重放，用客户端消息 ID 仅追踪，
+  不承诺服务端持久幂等。
+- 明确不能 steer 时按 queue 排队。进入 service 前，输入和控制在有界队列内；异常恢复不会
+  变成无界队列。
+- `/switch` 和 `/new` 可以在回合运行时执行：旧回合只在本地 detach，后台继续；旧来源未发送
+  输出、当前输入和排队输入作废。已经进入发送 API 的一条无法撤回。
+- `/model`、`/effort` 和 `/cwd` 只修改后续回合。目标准备失败时旧输入、输出和当前回合不变。
+- `/new` 已创建 thread 但本地提交失败时，只尝试删除该空 thread；`/switch` 不删除用户原有
+  会话。真实服务端的删除行为仍属于待验证能力。
+
+## 输出、附件与恢复
+
+- 每份输出携带来源、thread、turn 和目录；旧 selection 或晚到事件不能写入新会话。
+- 正文、附件和完成提示成组排队。正文失败停止本组后续正文；附件可以部分失败；微信接受后、
+  本机保存前崩溃仍可能重复送达，不承诺恰好一次。
+- 自动回传和 `/get` 只接受当前会话 cwd 内的普通文件。该检查是保守近似，不等价于 Codex
+  sandbox；附件说明 skill 是行为约束，不是强制隔离。
+- 服务端返回有效消息 ID 才算成功。HTTP 成功但没有 ID 时标记 delivery unknown，暂停当前
+  运行时出站，保留队列和新增输出；下一条被接受的入站消息恢复发送，`/discard` 可主动清空。
+- 连续发送间隔、回复预算和 `delivery=unconfirmed` 阈值由代码定义，当前值只在
+  [生成参考](REFERENCE.generated.md#出站保护) 维护。回复预算按服务端处理请求计数，不按用户
+  是否看见计数。
+
+## 配置与提示
+
+- `config.json` 按文件身份、时间和大小检测变化，整组校验成功后应用；无效文件保留最后生效
+  的配置并写一条安全事件。
+- 数值设置、默认值和范围只在 `commands.SETTINGS` 与 `configuration.py` 中定义；
+  [生成参考](REFERENCE.generated.md#数值设置) 从代码渲染。
+- 默认用户文案只来自 `prompts.py` 的 `DEFAULT_PROMPTS`，`config.prompts` 只保存覆盖。
+  展示标签与审批 token、语义字段键和交付分组解耦。
+- 删除配置键恢复代码默认值。模板字段统一使用英文 `snake_case`，不维护旧中文字段映射。
+- Linux 配置、状态、日志和工作区按 XDG 分工；Windows 保持统一本地数据布局。具体位置和
+  数据根规则见 [INSTALL](INSTALL.md)。
+
+## 诊断与隐私
+
+- 结构化日志每行一个 JSON 事件，只写字段白名单；正文、prompt、回复、文件名、账号、token、
+  Authorization、请求体、响应体和绝对路径不得进入日志。
+- 事件名、字段和计时含义以 `diagnostics.py`、`latency.py` 和 `log_viewer.py` 为准。文档不
+  再维护事件字段副本。
+- 服务控制台日志不是结构化脱敏日志，不能原样公开。平台日志来源见 [PLATFORMS](PLATFORMS.md)。
+- 诊断写盘失败或锁被占用时丢弃该条诊断，不等待、不阻断消息收发。
+
+## 用户可见文案
+
+- 先给用户要求的结果，再说明可行动信息；成功回执不叙述队列、worker、writer 或重连实现。
+- 可能重复执行、静默丢失、旧连接未清理、能力回落或需要桌面处理的风险必须保留。
+- 设置成功显示生效后的当前值；失败给出下一步。参数形态不明显时，错误提示可以附一个例子。
+- 生命周期通知优先于额外的“请求已提交”回执。默认文案以 `prompts.py` 为唯一来源。
 
 ## 验证边界
 
-运行期状态的验证命令、隔离方式和证据归档见 [DEVELOPMENT](DEVELOPMENT.md) 与
-[VALIDATION](VALIDATION.md)。文档、源码、离线结果与实机证据分别报告；无法验证的组合
-不写成通过。外部协议和版本依据见 [SOURCES](SOURCES.md)。
+`scripts/check.sh` 证明当前树通过离线检查；真实 Windows、微信、CDN、App 和模型行为见
+[VALIDATION](VALIDATION.md)。文档、源码、离线结果和实机证据分别报告，不能互相替代。
