@@ -218,6 +218,7 @@ class PlatformTests(unittest.TestCase):
             with patch.object(platform_support, "IS_WINDOWS", False), \
                     patch.object(platform_support, "INSTALL_ROOT", install), \
                     patch.dict(os.environ, {
+                        "CODEX_WECHAT_DATA_ROOT": "",
                         "XDG_CONFIG_HOME": str(base / "default-config"),
                         "XDG_STATE_HOME": str(base / "default-state"),
                     }, clear=False):
