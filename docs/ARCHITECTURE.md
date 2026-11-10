@@ -73,8 +73,8 @@
 
 ## 输入与会话切换
 
-- `/new`、`/switch` 和启动恢复都先生成 `PreparedSelection`，再按原连接和 selection
-  epoch 提交。连接或选择已变化时拒绝提交，旧选择保持不变。
+- `/new`、`/switch`、启动恢复和后台 App follower 重连都先生成 `PreparedSelection`，
+  再按原连接和 selection epoch 提交。连接或选择已变化时拒绝提交，旧选择保持不变。
 - 提交产生一个 `SelectionLease`；回合、审批、问题和输出必须携带该 lease 对应的
   `Source`。旧 selection 的晚到事件不能写入新会话。
 - question 和 approval 还记录创建时的 lease；connection、selection epoch、thread 或 writer

@@ -576,20 +576,32 @@ class WindowsTransportTests(unittest.IsolatedAsyncioTestCase):
         backend.transport.proc = SimpleNamespace(returncode=None)
         backend.transport.reader = SimpleNamespace(done=lambda: False)
         backend.set_writer(WRITER_RELEASED, "thread-1")
+        backend.attach_error = "previous attach failure"
         backend.app_available = lambda: False
         backend.attach_app = AsyncMock()
         self.assertFalse(await backend.follow_app("thread-1"))
         backend.attach_app.assert_not_awaited()
         self.assertEqual(backend.writer_state("thread-1"), WRITER_RELEASED)
 
-        candidate = SimpleNamespace(thread_id="thread-1", enabled=False,
-                                    activate=Mock(), close=AsyncMock())
+        candidate = SimpleNamespace(
+            thread_id="thread-1",
+            enabled=False,
+            activate=Mock(),
+            close=AsyncMock(),
+            thread_result=Mock(return_value={"thread": {"id": "thread-1"}}),
+        )
         backend.app_available = lambda: True
         backend.attach_app = AsyncMock(return_value=candidate)
+        backend.refresh_runtime = AsyncMock()
+        backend.refresh_usage = AsyncMock()
         self.assertTrue(await backend.follow_app("thread-1"))
         self.assertIs(backend.app, candidate)
+        self.assertIsNone(backend.attach_error)
+        self.assertEqual(backend.info["id"], "thread-1")
         self.assertEqual(backend.writer_state("thread-1"), WRITER_FOLLOWED)
         self.assertEqual(backend.selected_thread, "thread-1")
+        backend.refresh_runtime.assert_awaited_once_with()
+        backend.refresh_usage.assert_awaited_once_with()
         # Without activate() the follower never publishes state changes.
         candidate.activate.assert_called_once_with()
 

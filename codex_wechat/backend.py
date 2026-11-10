@@ -323,37 +323,6 @@ class CodexBackend:
         self.runtime_generation = snapshot.runtime_generation
         self.attach_error = snapshot.attach_error
 
-    async def attach_follower(self, thread_id, options, *, activate=True):
-        """Attach an App follower only if the selection did not change meanwhile."""
-        expected_connection = self.connection_id
-        expected_epoch = self.selection_epoch
-        expected_thread = self.selected_thread
-        expected_app = self.app
-        expected_active = self.active
-        app = await self.attach_app(thread_id, options)
-        if app is None:
-            return None
-        if (self.connection_id != expected_connection
-                or self.selection_epoch != expected_epoch
-                or self.selected_thread != expected_thread
-                or self.app is not expected_app
-                or self.active is not expected_active):
-            await app.close()
-            return None
-        previous_app, self.app = self.app, app
-        if self.selected_thread != thread_id:
-            self.selection_epoch += 1
-            self.active = None
-            self.interactions.clear()
-        self.selected_thread = thread_id
-        self.attach_error = None
-        self.set_writer(WRITER_FOLLOWED, thread_id)
-        if activate:
-            self.activate_follower(app)
-        if previous_app and previous_app is not app:
-            await previous_app.close()
-        return app
-
     @staticmethod
     def activate_follower(app):
         if not app.enabled:
@@ -855,6 +824,7 @@ class CodexBackend:
                 self.active = None
                 self.interactions.clear()
         self.selected_thread = thread["id"]
+        self.attach_error = None
         if app is None:
             # Native writer path: any follower from the previous selection is gone.
             previous_app, self.app = self.app, None
@@ -1164,8 +1134,14 @@ class CodexBackend:
             return False
         if not self.app_available():
             return False
+        expected_connection = self.connection_id
+        expected_epoch = self.selection_epoch
+        expected_thread = self.selected_thread
+        expected_writer = self.writer_state(thread_id)
+        expected_app = self.app
+        expected_active = self.active
         try:
-            app = await self.attach_follower(thread_id, {})
+            app = await self.attach_app(thread_id, {})
         except (TimeoutError, CodexRpcError, OSError, RuntimeError) as error:
             # Following is best effort: it must never fail the caller's turn or
             # the bridge startup.
@@ -1175,6 +1151,36 @@ class CodexBackend:
             return False
         if app is None:
             return False
+        if (self.connection_id != expected_connection
+                or self.selection_epoch != expected_epoch
+                or self.selected_thread != expected_thread
+                or self.writer_state(thread_id) != expected_writer
+                or self.app is not expected_app
+                or self.active is not expected_active):
+            await app.close()
+            return False
+        try:
+            result = app.thread_result()
+            target = result["thread"]
+            prepared = PreparedSelection(
+                expected_connection,
+                expected_epoch,
+                thread_id,
+                PreparedSelectionKind.FOLLOWER,
+                result=result,
+                thread=target,
+                app=app,
+                desktop=target.get("status", {}).get("type") == "active",
+            )
+            commit = await self.commit_prepared(prepared, defer_cleanup=True)
+        except (TimeoutError, CodexRpcError, OSError, RuntimeError, KeyError,
+                TypeError, ValueError) as error:
+            await app.close()
+            self.writer_event("backend.app_attach_failed", level="warning",
+                              thread=thread_id, status="failed",
+                              error_type=type(error).__name__)
+            return False
+        await self.finish_prepared(commit)
         self.writer_event("backend.app_followed", thread=thread_id, status="followed")
         return True
 
