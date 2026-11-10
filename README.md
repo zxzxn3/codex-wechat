@@ -1,15 +1,12 @@
 <p align="center">
   <img src="assets/branding/codex-wechat-pixel-mascots.png" alt="codex-wechat" width="360">
+  <br>
+  <sub><a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>
+  <a href="assets/branding/README.md">素材说明</a></sub>
 </p>
 
 <p align="center">
   <img src="assets/branding/codex-wechat-wechat-contact.jpg" alt="codex-wechat 微信联系人" width="640">
-</p>
-
-<p align="center">
-  <sub>品牌形象由 GPT 基于 Bilibili 来源图生成；原角色上善无形、二创 ZipZipPipe，相关素材按
-  <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>
-  使用；详见<a href="assets/branding/README.md">素材说明</a>。</sub>
 </p>
 
 <h1 align="center">codex-wechat</h1>
@@ -45,54 +42,31 @@
 
 ## 快速开始
 
-前提：Python 3.11+、Git、Codex、`curl` 和微信客户端。Linux 可选 `qrencode`；没有时会使用
-轻量 Python 回退。完整前提和卸载说明见 [INSTALL](docs/INSTALL.md)。
+前提：Python 3.11+、Git、Codex、`curl`。完整前提和卸载说明见 [INSTALL](docs/INSTALL.md)。
 
-### 一行安装
-
-<details>
-<summary>Linux 一行安装</summary>
+Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zxzxn3/codex-wechat/main/bootstrap.sh | bash
 ```
 
-</details>
-
-<details>
-<summary>Windows 一行安装</summary>
+Windows:
 
 ```powershell
 irm https://raw.githubusercontent.com/zxzxn3/codex-wechat/main/bootstrap.ps1 | iex
 ```
 
-也可以直接分发仓库中的 `bootstrap.ps1`。接收方在原文件所在目录运行：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
-```
-
-</details>
-
 ### 第一次启动
 
-Linux：
+Linux/Windows:
 
-```bash
+```sh
 codex-wechat service-start
-codex-wechat status
 ```
 
-Windows：
-
-```powershell
-codex-wechat service-start
-codex-wechat status
-```
-
-未绑定时终端会显示二维码，使用微信扫码并确认授权。微信只处理扫码账号的私聊，群聊不会
-响应；发送 `/help` 查看命令。Windows 如果没有生成短入口，使用安装器给出的完整
-`codex-wechat.ps1` 路径。
+未绑定时终端会显示二维码，使用微信扫码并确认授权。
+发送 `/help` 查看命令。Windows 如果没有生成短入口，使用安装器给出的完整
+`codex-wechat.ps1` 路径。连接上 Codex 后，也可以直接让 Agent 教你使用（通过原生技能）。
 
 ## 它解决什么问题
 
@@ -118,12 +92,12 @@ codex-wechat 把微信变成这台电脑上 Codex 的远程入口。你在微信
 
 | 能力 | 说明 |
 | --- | --- |
-| 同一份工作 | 继续同一个 Codex 会话，不复制上下文、账户或历史 |
+| 同一个会话 | 继续同一个 Codex 会话，不复制上下文、账户或历史 |
 | 手机控制面 | 会话切换、新建、模型、强度、目录、压缩、审批、停止和重启 |
 | 运行中切换 | `/switch`、`/new` 可切换会话，旧回合留在后台但不再显示；`/model`、`/effort`、`/cwd` 从下一回合生效 |
 | 微信原生 I/O | 文本、语音转写、图片、视频、文件和引用消息；结果可回传微信 |
 | 投递可靠性 | 无法确认送达时暂停发送并保留内容，不假报成功；`/discard` 可清空待发消息 |
-| 多后端 | 内置 `codex` 与 `deepseek` 后端，同一个 App Server 接口 |
+| 自定义多后端 | 内置 `codex` 与 `deepseek` 后端（`deepseek` 仅供 Linux，见[codex-deepseek](https://github.com/zxzxn3/codex-deepseek)），同一个 App Server 接口 |
 | 跨平台 | Linux systemd 用户服务；Windows Scheduled Task |
 | 本地优先 | 文件、工具、审批和模型认证继续由本机 Codex 处理 |
 
@@ -135,19 +109,7 @@ codex-wechat 把微信变成这台电脑上 Codex 的远程入口。你在微信
 - 在多个项目或会话之间切换，不必回到电脑前。
 - Codex 需要审批、选择方案或回答问题时，直接拿手机处理。
 - 生成的图片、视频或文件直接回传微信，不必打开电脑查看。
-
-## 和直接在电脑上使用有什么不同
-
-> 对比口径：2026-11-09，按当前仓库能力。这里是类别对比，不是“功能总冠军”排名；
-> 外部项目会变化，具体能力以对方文档和源码为准。
-
-| | 只在电脑上使用 Codex | codex-wechat |
-| --- | --- | --- |
-| 入口 | 桌面 App 或终端 | 微信私聊，电脑继续执行 |
-| 离开电脑后 | 只能等回来再查看 | 可以补充要求、处理审批、查看结果 |
-| 上下文 | 当前会话 | 继续同一个会话，不另起一份 |
-| 文件 | 在电脑上打开或发送 | 手机发送，结果可以回传微信 |
-| 适合 | 全程在电脑前 | 任务开始后需要临时离开 |
+- 躺在床上，不想起身去电脑前。（我开发的主要原因之一）
 
 ## 与其它项目的能力矩阵
 
@@ -285,6 +247,9 @@ README 用于项目介绍；agent、维护者和测试者从 [文档索引](docs
 社区二创角色的改编，按 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 单独提供，不适用 Apache-2.0；署名、来源和修改记录见
 [品牌素材说明](assets/branding/README.md)。
+
+品牌形象由 GPT 基于 Bilibili 来源图生成；原角色上善无形、二创 ZipZipPipe，相关素材按
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 使用。
 
 “Codex”“OpenAI”“DeepSeek”“微信”“WeChat”“Tencent”等名称与商标归各自权利人所有。
 本项目是第三方独立开发，与 OpenAI、DeepSeek、腾讯及其关联方没有隶属、合作、授权或背书关系。
