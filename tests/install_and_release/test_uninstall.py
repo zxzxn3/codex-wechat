@@ -236,10 +236,13 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             root = Path(directory)
             install = root / "install"
             install.mkdir()
+            config = root / "config.json"
+            config.write_text("{}", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "范围过大"):
                 uninstall._purge_linux_data(runtime_paths_at(
-                    install, config_file=root / "config.json",
+                    install, config_file=config,
                     state_dir=Path.home().parent))
+            self.assertTrue(config.exists())
 
     async def test_purge_refuses_while_a_bridge_holds_the_state_lock(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -268,6 +271,12 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             with patch.dict(uninstall.os.environ, {"XDG_CONFIG_HOME": directory}):
                 self.assertEqual(uninstall._unit_link(),
                                  (Path(directory).resolve() / "systemd/user" / uninstall.UNIT))
+
+    def test_unit_link_ignores_a_relative_xdg_config_home(self):
+        with patch.dict(uninstall.os.environ, {"XDG_CONFIG_HOME": "relative/config"}):
+            self.assertEqual(
+                uninstall._unit_link(),
+                Path.home().resolve() / ".config/systemd/user" / uninstall.UNIT)
 
     async def test_unregistered_service_skips_an_unreachable_manager(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -298,10 +307,15 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((install / ".data-root").exists())
 
     async def test_uninstall_refuses_when_service_state_is_unreadable(self):
-        with patch.object(uninstall.service_adapter, "status",
-                          AsyncMock(side_effect=RuntimeError("manager unavailable"))):
-            with self.assertRaisesRegex(RuntimeError, "无法确认后台服务状态"):
-                await uninstall._linux_service_removal()
+        with tempfile.TemporaryDirectory() as directory:
+            unit = Path(directory) / "systemd/user" / uninstall.UNIT
+            unit.parent.mkdir(parents=True)
+            unit.write_text("[Unit]\n", encoding="utf-8")
+            with patch.object(uninstall, "_unit_link", return_value=unit), \
+                    patch.object(uninstall.service_adapter, "status",
+                                 AsyncMock(side_effect=RuntimeError("manager unavailable"))):
+                with self.assertRaisesRegex(RuntimeError, "无法确认后台服务状态"):
+                    await uninstall._linux_service_removal()
 
     async def test_windows_path_is_not_handled_by_the_linux_helper(self):
         with patch.object(uninstall, "IS_WINDOWS", True):

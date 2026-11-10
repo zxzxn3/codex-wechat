@@ -7,7 +7,7 @@ import sys
 
 from . import service_adapter
 from .platform_support import (DATA_ROOT_FILE, INSTALL_ROOT, IS_WINDOWS,
-                               runtime_paths)
+                               runtime_paths, xdg_config_home)
 from .service_control import UNIT, systemctl
 from .storage import Store
 
@@ -19,8 +19,7 @@ def _command_link() -> Path:
 
 
 def _unit_link() -> Path:
-    config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return config.expanduser().resolve() / "systemd/user" / UNIT
+    return xdg_config_home() / "systemd/user" / UNIT
 
 
 def _unit_dropin() -> Path:
@@ -119,11 +118,13 @@ def _linux_command_removal() -> None:
 
 def _purge_linux_data(paths=None) -> None:
     paths = runtime_paths() if paths is None else paths
-    for path in (paths.config_file, paths.state_dir, paths.workspace_dir):
+    targets = (paths.config_file, paths.state_dir, paths.workspace_dir)
+    home = Path.home().resolve()
+    for path in targets:
         target = Path(path).expanduser().resolve()
-        home = Path.home().resolve()
         if target in {Path(target.anchor), home} or home.is_relative_to(target):
             raise ValueError(f"拒绝删除范围过大的数据目录: {target}")
+    for path in targets:
         _remove_path(path)
     try:
         paths.config_file.parent.rmdir()

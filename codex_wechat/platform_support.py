@@ -77,9 +77,12 @@ def _xdg_root(variable: str, fallback: Path) -> Path:
     return fallback.expanduser().resolve()
 
 
+def xdg_config_home() -> Path:
+    return _xdg_root("XDG_CONFIG_HOME", Path.home() / ".config")
+
+
 def default_config_root() -> Path:
-    return (_xdg_root("XDG_CONFIG_HOME", Path.home() / ".config") /
-            "codex-wechat").resolve()
+    return (xdg_config_home() / "codex-wechat").resolve()
 
 
 def default_state_root() -> Path:
