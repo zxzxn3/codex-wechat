@@ -2,6 +2,7 @@
 import ast
 from dataclasses import dataclass
 import ipaddress
+import json
 import os
 from pathlib import Path
 import shutil
@@ -25,6 +26,12 @@ INSTALL_ROOT = Path(
 DATA_ROOT_FILE = ".data-root"
 CONFIG_ROOT_FILE = ".config-root"
 STATE_ROOT_FILE = ".state-root"
+RUNTIME_ROOTS_FILE = ".runtime-roots"
+RUNTIME_ROOT_ROLES = {
+    "data": DATA_ROOT_FILE,
+    "config": CONFIG_ROOT_FILE,
+    "state": STATE_ROOT_FILE,
+}
 
 
 @dataclass(frozen=True)
@@ -57,16 +64,70 @@ def _saved_root(filename: str, install_root: Path | None = None) -> Path | None:
     return root
 
 
+def _saved_role(role: str, install_root: Path | None = None) -> Path | None:
+    manifest = _saved_manifest(install_root)
+    if manifest is not None:
+        return manifest[role]
+    return _saved_root(RUNTIME_ROOT_ROLES[role], install_root)
+
+
 def saved_data_root(install_root: Path | None = None) -> Path | None:
-    return _saved_root(DATA_ROOT_FILE, install_root)
+    return _saved_role("data", install_root)
 
 
 def saved_config_root(install_root: Path | None = None) -> Path | None:
-    return _saved_root(CONFIG_ROOT_FILE, install_root)
+    return _saved_role("config", install_root)
 
 
 def saved_state_root(install_root: Path | None = None) -> Path | None:
-    return _saved_root(STATE_ROOT_FILE, install_root)
+    return _saved_role("state", install_root)
+
+
+def _saved_manifest(install_root: Path | None = None) -> dict[str, Path] | None:
+    path = (INSTALL_ROOT if install_root is None else Path(install_root)) / RUNTIME_ROOTS_FILE
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"运行时路径清单不是普通文件: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"无法读取运行时路径清单: {path}") from error
+    if (not isinstance(value, dict) or type(value.get("version")) is not int
+            or value["version"] != 1):
+        raise ValueError(f"运行时路径清单格式无效: {path}")
+    roots = {}
+    for role in RUNTIME_ROOT_ROLES:
+        text = value.get(role)
+        if (not isinstance(text, str) or not text or "\n" in text
+                or "\r" in text or "\x00" in text):
+            raise ValueError(f"运行时路径清单缺少有效的 {role}: {path}")
+        root = Path(text).expanduser()
+        if not root.is_absolute():
+            raise ValueError(f"运行时路径清单中的 {role} 必须是绝对路径: {path}")
+        roots[role] = root
+    return roots
+
+
+def saved_runtime_roots(install_root: Path | None = None, *, require_complete=False):
+    """Return the complete Linux roots from the manifest or legacy markers."""
+    manifest = _saved_manifest(install_root)
+    if manifest is not None:
+        return manifest
+    roots = {}
+    missing = []
+    for role, filename in RUNTIME_ROOT_ROLES.items():
+        root = _saved_root(filename, install_root)
+        if root is None:
+            missing.append(filename)
+        else:
+            roots[role] = root
+    if require_complete and missing:
+        paths = (INSTALL_ROOT if install_root is None else Path(install_root))
+        raise ValueError(
+            f"Linux 运行时路径标记不完整，拒绝继续: {paths}（缺少 {', '.join(missing)}）"
+        )
+    return roots
 
 
 def default_data_root() -> Path:
@@ -110,6 +171,33 @@ def config_root(install_root: Path | None = None) -> Path:
 
 def state_root(install_root: Path | None = None) -> Path:
     return saved_state_root(install_root) or default_state_root()
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return first == second or first.is_relative_to(second) or second.is_relative_to(first)
+
+
+def validate_runtime_roots(data_root, config_root, state_root, install_root) -> None:
+    """Reject ambiguous role ownership before data is written or purged."""
+    try:
+        roots = {
+            "数据根": Path(data_root).resolve(),
+            "配置根": Path(config_root).resolve(),
+            "状态根": Path(state_root).resolve(),
+        }
+        install = Path(install_root).resolve()
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"无法解析运行时路径布局: {error}") from error
+    for role in ("配置根", "状态根"):
+        if _paths_overlap(roots[role], install):
+            raise ValueError(f"{role}与程序安装目录重叠: {roots[role]}")
+    for first, second in (("数据根", "配置根"), ("数据根", "状态根"),
+                          ("配置根", "状态根")):
+        if _paths_overlap(roots[first], roots[second]):
+            raise ValueError(f"{first}与{second}不能重叠: {roots[first]} / {roots[second]}")
+    workspace = (roots["数据根"] / "workspace").resolve()
+    if workspace == install or install.is_relative_to(workspace):
+        raise ValueError(f"工作区不能包含程序安装目录: {workspace}")
 
 
 def data_root(install_root: Path | None = None):
@@ -162,6 +250,12 @@ def runtime_paths(install_root: Path | None = None) -> RuntimePaths:
         )
     config = config_root(install_root)
     state = state_root(install_root)
+    validate_runtime_roots(
+        data,
+        config,
+        state,
+        INSTALL_ROOT if install_root is None else Path(install_root),
+    )
     return RuntimePaths(
         data_root=data,
         config_file=config / "config.json",

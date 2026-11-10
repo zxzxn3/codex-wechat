@@ -1,5 +1,10 @@
 """Static contracts for the thin cross-platform command entries."""
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 
@@ -30,10 +35,48 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn('export CODEX_WECHAT_DATA_ROOT="${CODEX_WECHAT_DATA_ROOT:-$INSTALL_ROOT}"', text)
         self.assertNotIn('export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"', text)
         self.assertIn("DATA_ROOT_FILE", text)
+        self.assertIn("RUNTIME_ROOTS_FILE", text)
+        self.assertIn(".runtime-roots", text)
         self.assertIn(".data-root", text)
         self.assertIn("不一致", text)
         self.assertLess(text.index("不一致"), text.index('if [ "$ACTION" = "uninstall" ]'))
-        self.assertIn("已安装布局缺少数据根标记", text)
+        self.assertIn("已安装布局缺少运行时路径标记", text)
+
+    @unittest.skipIf(os.name == "nt", "POSIX launcher integration")
+    def test_linux_entry_accepts_the_atomic_manifest_without_legacy_markers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            release_id = "a" * 16
+            release = install / "releases" / release_id
+            (release / "codex_wechat").mkdir(parents=True)
+            (release / "codex_wechat/app.py").write_text("", encoding="utf-8")
+            (install / "current").write_text(release_id + "\n", encoding="utf-8")
+            (install / ".runtime-roots").write_text(json.dumps({
+                "version": 1,
+                "data": str(Path(directory) / "custom-data"),
+                "config": str(Path(directory) / "config/codex-wechat"),
+                "state": str(Path(directory) / "state/codex-wechat"),
+            }) + "\n", encoding="utf-8")
+            fake_python = release / ".venv/bin/python"
+            fake_python.parent.mkdir(parents=True)
+            fake_python.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' \"${CODEX_WECHAT_DATA_ROOT-<unset>}\"\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            shutil.copy2(ROOT / "codex-wechat", install / "codex-wechat")
+            environment = {key: value for key, value in os.environ.items()
+                           if key != "CODEX_WECHAT_DATA_ROOT"}
+            result = subprocess.run(
+                [install / "codex-wechat", "status"],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "<unset>")
 
     def test_linux_stable_uninstaller_has_its_runtime_dependencies(self):
         import installer

@@ -2,6 +2,7 @@
 from tests.support.helpers import requires_symlinks, xdg_user_data_dir
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import shutil
@@ -544,6 +545,9 @@ class InstallerTests(unittest.TestCase):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), current)
         self.assertEqual(installer.saved_data_root(self.target), old_root)
+        manifest = json.loads(
+            (self.target / installer.RUNTIME_ROOTS_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["data"], str(old_root))
 
     def test_same_version_update_repairs_a_missing_release_runtime(self):
         with patch("builtins.input", return_value="y"):
@@ -946,6 +950,14 @@ class DataRootMarkerTests(unittest.TestCase):
                 (target / installer.DATA_ROOT_FILE).read_text(encoding="utf-8"),
                 str(data_home.resolve()) + "\n",
             )
+            manifest = json.loads(
+                (target / installer.RUNTIME_ROOTS_FILE).read_text(encoding="utf-8"))
+            self.assertEqual(manifest, {
+                "version": 1,
+                "data": str(data_home.resolve()),
+                "config": str((config_home / "codex-wechat").resolve()),
+                "state": str((state_home / "codex-wechat").resolve()),
+            })
 
     @requires_symlinks
     def test_linux_runtime_markers_keep_symlinked_xdg_roots(self):
@@ -1006,6 +1018,20 @@ class DataRootMarkerTests(unittest.TestCase):
                         patch.dict(os.environ, {variable: str(target)}, clear=False):
                     with self.assertRaisesRegex(ValueError, "程序安装目录重叠"):
                         installer.check_runtime_root_layout(target)
+
+    def test_linux_layout_rejects_overlapping_runtime_roles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "install"
+            target.mkdir()
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.dict(os.environ, {
+                        "XDG_CONFIG_HOME": str(base / "config"),
+                        "XDG_STATE_HOME": str(base),
+                        "CODEX_WECHAT_DATA_ROOT": str(base / "codex-wechat"),
+                    }, clear=False):
+                with self.assertRaisesRegex(ValueError, "不能重叠"):
+                    installer.check_runtime_root_layout(target)
 
     def test_invalid_marker_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

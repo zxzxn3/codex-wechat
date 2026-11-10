@@ -5,13 +5,15 @@ INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 PROJECT_DIR="$INSTALL_ROOT"
 CURRENT_FILE="$INSTALL_ROOT/current"
 DATA_ROOT_FILE="$INSTALL_ROOT/.data-root"
+RUNTIME_ROOTS_FILE="$INSTALL_ROOT/.runtime-roots"
 export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
 ACTION="${1:-status}"
 case "$ACTION" in
     install|update|menu|components) INSTALLER_ACTION=1 ;;
     *) INSTALLER_ACTION=0 ;;
 esac
-if { [ -e "$DATA_ROOT_FILE" ] || [ -L "$DATA_ROOT_FILE" ]; } &&
+if [ ! -e "$RUNTIME_ROOTS_FILE" ] &&
+        { [ -e "$DATA_ROOT_FILE" ] || [ -L "$DATA_ROOT_FILE" ]; } &&
         { [ "$INSTALLER_ACTION" -eq 0 ] || [ -z "${CODEX_WECHAT_DATA_ROOT:-}" ]; }; then
     if [ -L "$DATA_ROOT_FILE" ] || [ ! -f "$DATA_ROOT_FILE" ]; then
         echo "codex-wechat: 数据根标记不是普通文件: $DATA_ROOT_FILE" >&2
@@ -35,9 +37,10 @@ if { [ -e "$DATA_ROOT_FILE" ] || [ -L "$DATA_ROOT_FILE" ]; } &&
     fi
 fi
 if [ "$INSTALLER_ACTION" -eq 0 ] && [ "$ACTION" != "uninstall" ] &&
+        [ ! -e "$RUNTIME_ROOTS_FILE" ] &&
         [ ! -e "$DATA_ROOT_FILE" ] && [ ! -L "$DATA_ROOT_FILE" ] &&
         [ -f "$CURRENT_FILE" ]; then
-    echo "codex-wechat: 已安装布局缺少数据根标记: $DATA_ROOT_FILE；请重新运行安装器" >&2
+    echo "codex-wechat: 已安装布局缺少运行时路径标记；请重新运行安装器" >&2
     exit 1
 fi
 if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; then
@@ -94,7 +97,9 @@ if [ -f "$CURRENT_FILE" ]; then
         echo "请从新源码重新运行 update。" >&2
         exit 1
     fi
-    export CODEX_WECHAT_DATA_ROOT="${CODEX_WECHAT_DATA_ROOT:-$INSTALL_ROOT}"
+    if [ ! -e "$RUNTIME_ROOTS_FILE" ]; then
+        export CODEX_WECHAT_DATA_ROOT="${CODEX_WECHAT_DATA_ROOT:-$INSTALL_ROOT}"
+    fi
 fi
 export PATH="$HOME/.local/bin:$PATH"
 PYTHON=python3

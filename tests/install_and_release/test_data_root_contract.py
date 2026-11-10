@@ -9,7 +9,8 @@ import installer
 from codex_wechat import platform_support
 from codex_wechat import windows_service
 
-from tests.support.helpers import requires_symlinks, xdg_user_data_dir
+from tests.support.helpers import (requires_symlinks, write_runtime_root_markers,
+                                   xdg_user_data_dir)
 
 
 class DataRootContractTests(unittest.TestCase):
@@ -79,6 +80,52 @@ class DataRootContractTests(unittest.TestCase):
         }, clear=False), patch.object(platform_support, "INSTALL_ROOT", target):
             self.assertEqual(platform_support.data_root(target), expected)
             self.assertEqual(installer.configured_data_root(target), expected)
+
+    def test_runtime_manifest_is_canonical_over_legacy_markers(self):
+        target = self.base / "install"
+        target.mkdir()
+        data = self.base / "manifest-data"
+        config = self.base / "manifest-config/codex-wechat"
+        state = self.base / "manifest-state/codex-wechat"
+        write_runtime_root_markers(
+            target, data_root=data, config_root=config, state_root=state, manifest=True)
+        (target / platform_support.DATA_ROOT_FILE).write_text(
+            str(self.base / "legacy-data") + "\n", encoding="utf-8")
+        with self.environment(""), patch.object(platform_support, "INSTALL_ROOT", target):
+            self.assertEqual(platform_support.saved_data_root(target), data)
+            self.assertEqual(platform_support.saved_config_root(target), config)
+            self.assertEqual(platform_support.saved_state_root(target), state)
+            self.assertEqual(installer.saved_data_root(target), data)
+            self.assertEqual(installer.saved_config_root(target), config)
+            self.assertEqual(installer.saved_state_root(target), state)
+            self.assertEqual(
+                platform_support.saved_runtime_roots(target, require_complete=True),
+                {"data": data, "config": config, "state": state},
+            )
+
+    def test_incomplete_legacy_runtime_markers_fail_the_strict_reader(self):
+        target = self.base / "install"
+        target.mkdir()
+        (target / platform_support.DATA_ROOT_FILE).write_text(
+            str(self.base / "data") + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "路径标记不完整"):
+            platform_support.saved_runtime_roots(target, require_complete=True)
+
+    def test_invalid_runtime_manifest_fails_closed(self):
+        target = self.base / "install"
+        target.mkdir()
+        manifest = target / platform_support.RUNTIME_ROOTS_FILE
+        for contents in (
+                "[]\n",
+                '{"version": true}\n',
+                '{"version": 1, "data": "relative"}\n',
+        ):
+            with self.subTest(contents=contents):
+                manifest.write_text(contents, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "运行时路径清单"):
+                    platform_support.saved_runtime_roots(target, require_complete=True)
+                with self.assertRaisesRegex(ValueError, "运行时路径清单"):
+                    installer.saved_data_root(target)
 
     def test_installer_can_replace_a_marker_but_runtime_rejects_unapplied_conflict(self):
         target = self.base / "install"

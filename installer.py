@@ -56,7 +56,13 @@ SERVICE_UNIT = "codex-wechat.service"
 DATA_ROOT_FILE = ".data-root"
 CONFIG_ROOT_FILE = ".config-root"
 STATE_ROOT_FILE = ".state-root"
-RUNTIME_ROOT_FILES = (DATA_ROOT_FILE, CONFIG_ROOT_FILE, STATE_ROOT_FILE)
+RUNTIME_ROOTS_FILE = ".runtime-roots"
+RUNTIME_ROOT_ROLES = {
+    "data": DATA_ROOT_FILE,
+    "config": CONFIG_ROOT_FILE,
+    "state": STATE_ROOT_FILE,
+}
+RUNTIME_ROOT_FILES = (RUNTIME_ROOTS_FILE, DATA_ROOT_FILE, CONFIG_ROOT_FILE, STATE_ROOT_FILE)
 PACKAGE_ROOT = Path("codex_wechat")
 # A directory handle held for a moment - by a scanner or a just-exited process -
 # blocks the rename that makes a release deletable; one retry covers it.
@@ -256,16 +262,49 @@ def _saved_root(target: Path, filename: str) -> Path | None:
     return root
 
 
+def _saved_manifest(target: Path) -> dict[str, Path] | None:
+    path = Path(target) / RUNTIME_ROOTS_FILE
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"运行时路径清单不是普通文件: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"无法读取运行时路径清单: {path}") from error
+    if (not isinstance(value, dict) or type(value.get("version")) is not int
+            or value["version"] != 1):
+        raise ValueError(f"运行时路径清单格式无效: {path}")
+    roots = {}
+    for role in RUNTIME_ROOT_ROLES:
+        text = value.get(role)
+        if (not isinstance(text, str) or not text or "\n" in text
+                or "\r" in text or "\x00" in text):
+            raise ValueError(f"运行时路径清单缺少有效的 {role}: {path}")
+        root = Path(text).expanduser()
+        if not root.is_absolute():
+            raise ValueError(f"运行时路径清单中的 {role} 必须是绝对路径: {path}")
+        roots[role] = root
+    return roots
+
+
+def _saved_role(target: Path, role: str) -> Path | None:
+    manifest = _saved_manifest(target)
+    if manifest is not None:
+        return manifest[role]
+    return _saved_root(target, RUNTIME_ROOT_ROLES[role])
+
+
 def saved_data_root(target: Path) -> Path | None:
-    return _saved_root(target, DATA_ROOT_FILE)
+    return _saved_role(target, "data")
 
 
 def saved_config_root(target: Path) -> Path | None:
-    return _saved_root(target, CONFIG_ROOT_FILE)
+    return _saved_role(target, "config")
 
 
 def saved_state_root(target: Path) -> Path | None:
-    return _saved_root(target, STATE_ROOT_FILE)
+    return _saved_role(target, "state")
 
 
 def _default_data_root() -> Path:
@@ -346,6 +385,16 @@ def _write_root_marker(target: Path, filename: str, root: Path) -> None:
     )
 
 
+def _write_runtime_roots_manifest(target: Path, roots: dict[str, Path]) -> None:
+    value = {"version": 1, **{role: str(root) for role, root in roots.items()}}
+    _atomic_write(
+        Path(target) / RUNTIME_ROOTS_FILE,
+        (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"),
+        0o600,
+        root=target,
+    )
+
+
 def _write_data_root_marker(target: Path) -> None:
     _write_root_marker(target, DATA_ROOT_FILE, configured_data_root(target))
 
@@ -379,17 +428,34 @@ def _restore_marker_snapshot(target: Path, snapshot: dict[str, bytes | None]) ->
             _atomic_write(path, contents, 0o600, root=target)
 
 
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return first == second or first.is_relative_to(second) or second.is_relative_to(first)
+
+
 def check_runtime_root_layout(target: Path) -> None:
-    """Reject configuration/state roots that could overlap program files."""
+    """Reject ambiguous runtime-root ownership before publishing markers."""
     if IS_WINDOWS:
         return
-    install = Path(target).resolve()
-    for filename, role in ((CONFIG_ROOT_FILE, "配置"), (STATE_ROOT_FILE, "状态")):
-        path = _runtime_roots(target)[filename]
-        resolved = path.resolve()
-        if (resolved == install or install.is_relative_to(resolved)
-                or resolved.is_relative_to(install)):
-            raise ValueError(f"{role}路径与程序安装目录重叠: {path}")
+    try:
+        install = Path(target).resolve()
+        values = _runtime_roots(target)
+        roots = {
+            "数据根": values[DATA_ROOT_FILE].resolve(),
+            "配置根": values[CONFIG_ROOT_FILE].resolve(),
+            "状态根": values[STATE_ROOT_FILE].resolve(),
+        }
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"无法解析运行时路径布局: {error}") from error
+    for role in ("配置根", "状态根"):
+        if _paths_overlap(roots[role], install):
+            raise ValueError(f"{role}与程序安装目录重叠: {roots[role]}")
+    for first, second in (("数据根", "配置根"), ("数据根", "状态根"),
+                          ("配置根", "状态根")):
+        if _paths_overlap(roots[first], roots[second]):
+            raise ValueError(f"{first}与{second}不能重叠: {roots[first]} / {roots[second]}")
+    workspace = (roots["数据根"] / "workspace").resolve()
+    if workspace == install or install.is_relative_to(workspace):
+        raise ValueError(f"工作区不能包含程序安装目录: {workspace}")
 
 
 def _publish_runtime_roots(target: Path) -> None:
@@ -397,6 +463,10 @@ def _publish_runtime_roots(target: Path) -> None:
     values = _runtime_roots(target)
     previous = _marker_snapshot(target)
     try:
+        if not IS_WINDOWS:
+            _write_runtime_roots_manifest(target, {
+                role: values[filename] for role, filename in RUNTIME_ROOT_ROLES.items()
+            })
         for filename, root in values.items():
             _write_root_marker(target, filename, root)
     except BaseException:

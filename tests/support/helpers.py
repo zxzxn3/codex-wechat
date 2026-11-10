@@ -1,6 +1,7 @@
 """Capability guards and process-wide isolation for offline fixtures."""
 from functools import wraps
 import atexit
+import json
 import os
 from pathlib import Path
 import shutil
@@ -26,6 +27,25 @@ def runtime_paths_at(root, *, config_file=None, state_dir=None):
         logs_dir=root / "logs",
         shared_dir=root / "shared",
     )
+
+
+def write_runtime_root_markers(install_root, *, data_root, config_root, state_root,
+                               manifest=False):
+    install_root = Path(install_root)
+    if manifest:
+        (install_root / ".runtime-roots").write_text(
+            json.dumps({
+                "version": 1,
+                "data": str(data_root),
+                "config": str(config_root),
+                "state": str(state_root),
+            }, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return
+    (install_root / ".data-root").write_text(str(data_root) + "\n", encoding="utf-8")
+    (install_root / ".config-root").write_text(str(config_root) + "\n", encoding="utf-8")
+    (install_root / ".state-root").write_text(str(state_root) + "\n", encoding="utf-8")
 
 
 def isolate_diagnostics():

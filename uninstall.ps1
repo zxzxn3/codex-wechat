@@ -72,6 +72,23 @@ function Fail([string]$Message) {
     throw "uninstall.ps1: $Message"
 }
 
+function Test-ReparsePointPath([string]$Path) {
+    $current = [IO.Path]::GetFullPath($Path)
+    while ($current) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        if ($item -and
+                (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            return $true
+        }
+        $parent = [IO.Path]::GetDirectoryName($current)
+        if (-not $parent -or $parent -eq $current) {
+            break
+        }
+        $current = $parent
+    }
+    return $false
+}
+
 function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
@@ -227,11 +244,13 @@ if ($PurgeData) {
             $resolvedUser.StartsWith($resolvedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
         Fail "拒绝清理范围过大的数据目录: $DataRoot"
     }
-    if (Test-Path $DataRoot) {
+    if (Test-ReparsePointPath $DataRoot) {
+        Fail "拒绝清理经过重解析点的数据目录: $DataRoot"
+    }
+    if (Test-Path -LiteralPath $DataRoot) {
         $dataItem = Get-Item -LiteralPath $DataRoot -Force
-        if ((-not $dataItem.PSIsContainer) -or
-                ((($dataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
-            Fail "拒绝清理非目录或重解析点数据目录: $DataRoot"
+        if (-not $dataItem.PSIsContainer) {
+            Fail "拒绝清理非目录数据目录: $DataRoot"
         }
         Stop-SharedBackends
         foreach ($name in $DataPaths) {

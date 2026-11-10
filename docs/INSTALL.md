@@ -166,14 +166,15 @@ Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是�
 `--purge-data` / `-PurgeData` 只删除已知用户数据项，不递归删除自定义数据根目录。Linux
 分别删除配置文件、状态目录和数据根下的 `workspace`；Windows 继续删除统一数据根中的已知项。
 前台桥接仍持有状态锁时，卸载会拒绝继续；先按 `Ctrl+C` 退出。自定义数据目录通过
-`CODEX_WECHAT_DATA_ROOT` 指定，Windows 内部 helper 另外接受 `-DataRoot`。
+`CODEX_WECHAT_DATA_ROOT` 指定，Windows 内部 helper 另外接受 `-DataRoot`。Linux purge 还会
+停止本应用命名空间中的共享 Codex 后台；任何一步无法确认时先保留数据。
 
 卸载结束时会把程序文件、数据根以及 Linux 的配置和状态位置打印出来；需要在卸载后彻底删除，
 由用户自己决定。
 
-不带 purge 的卸载会保留 `.data-root`：安装树仍在（卸载只移除服务与入口），所以重新运行安装器
-会解析为 update，并继续使用原来的数据根。想让重装改判到平台默认目录，删除该标记或显式设置
-`CODEX_WECHAT_DATA_ROOT` 即可。
+不带 purge 的卸载会保留 `.runtime-roots` 和旧路径标记：安装树仍在（卸载只移除服务与入口），
+所以重新运行安装器会解析为 update，并继续使用原来的根。想让重装改判到平台默认目录，删除
+这些标记或显式设置 `CODEX_WECHAT_DATA_ROOT` 即可。
 
 ## 目录和配置
 
@@ -187,22 +188,25 @@ Linux 按 XDG 职责拆分：
 | 工作区 | `~/.local/share/codex-wechat/workspace` |
 
 Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` 的其他路径会被拒绝。
-安装器把解析后的数据根、配置根和状态根写入安装根的 `.data-root`、`.config-root` 和
-`.state-root`。公开入口和 systemd 服务都从这些标记读取同一组路径，不依赖交互 shell 或
-systemd manager 是否导出了 XDG 变量。
+安装器把解析后的数据根、配置根和状态根作为一组原子写入 `.runtime-roots`，同时保留
+`.data-root`、`.config-root` 和 `.state-root` 供旧版本迁移。读取方优先使用 `.runtime-roots`；
+在已安装布局中，它缺失时才要求三个旧标记完整存在。公开入口和 systemd 服务都读取同一组
+路径，不依赖交互 shell 或 systemd manager 是否导出了 XDG 变量。
 
 `XDG_CONFIG_HOME`、`XDG_STATE_HOME` 和 `XDG_DATA_HOME` 只决定下一次安装时解析出的根；
 安装后修改 XDG 环境变量不会移动现有数据，需要重跑安装器持久化新根。`CODEX_WECHAT_DATA_ROOT`
 只覆盖数据根，因此工作区随数据根移动，配置和状态仍遵循 XDG。
 `CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口和源码副本的运行定位。配置根或状态根与程序安装根
-重叠时安装和 purge 都会 fail closed；默认的 `$data_root/workspace` 是唯一允许位于安装根下的
-purge 目标。purge 也会拒绝经过符号链接的配置、状态、数据根或工作区路径，避免删除链接指向
-的外部目录；遇到这种布局时请先手动处理链接。
+重叠，或数据、配置、状态三个角色互相重叠时，安装和 purge 都会 fail closed；默认的
+`$data_root/workspace` 是唯一允许位于安装根下的 purge 目标。purge 也会拒绝经过符号链接的
+配置、状态、数据根或工作区路径，避免删除链接指向的外部目录；遇到这种布局时请先手动处理
+链接。
 
 Windows 保持原布局：程序位于 `%LOCALAPPDATA%\codex-wechat\app`，用户数据根为
 `%LOCALAPPDATA%\codex-wechat`，配置、状态、工作区、日志和共享后台仍位于该数据根。
+Windows purge 还会拒绝数据根本身及其已有父链中的任何重解析点。
 
-Windows 继续只使用 `.data-root`；Linux 使用三个根标记。当前版本不迁移 Linux 旧布局；
+Windows 继续只使用 `.data-root`；Linux 使用原子运行时根清单并兼容三个旧标记。当前版本不迁移 Linux 旧布局；
 旧版统一数据根中的配置和状态不会被新版本读取。
 
 配置、状态、日志、共享后台和工作区各有独立职责，不复制供应商凭据或会话历史。热配置和提示

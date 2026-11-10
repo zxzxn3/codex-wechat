@@ -1,4 +1,5 @@
 """Uninstall keeps data by default and only purges explicit user state."""
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -6,7 +7,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from codex_wechat import platform_support
 from codex_wechat import uninstall
-from tests.support.helpers import requires_symlinks, runtime_paths_at
+from tests.support.helpers import (requires_symlinks, runtime_paths_at,
+                                   write_runtime_root_markers)
 
 
 class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
@@ -33,13 +35,15 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             custom = Path(directory) / "custom"
             install.mkdir()
             custom.mkdir()
-            marker = install / uninstall.DATA_ROOT_FILE
-            marker.write_text(str(custom) + "\n", encoding="utf-8")
             config = Path(directory) / "config" / "config.json"
             config.parent.mkdir()
             config.write_text("{}", encoding="utf-8")
             state = Path(directory) / "state"
             state.mkdir()
+            write_runtime_root_markers(
+                install, data_root=custom, config_root=config.parent, state_root=state,
+                manifest=True)
+            marker = install / uninstall.RUNTIME_ROOTS_FILE
             paths = runtime_paths_at(
                 custom, config_file=config, state_dir=state)
             with patch.object(uninstall, "IS_WINDOWS", False), \
@@ -48,8 +52,9 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_command_removal", Mock()), \
+                    patch.object(uninstall, "_linux_shared_backend_removal", AsyncMock()), \
                     patch.object(uninstall, "runtime_paths", return_value=paths), \
-                    patch.dict(uninstall.os.environ,
+                    patch.dict(os.environ,
                                {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
                 await uninstall.uninstall()
                 self.assertTrue(marker.is_file())
@@ -64,12 +69,13 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             custom = Path(directory) / "custom"
             install.mkdir()
             custom.mkdir()
-            (install / uninstall.DATA_ROOT_FILE).write_text(str(custom) + "\n", encoding="utf-8")
             config = Path(directory) / "config" / "config.json"
             config.parent.mkdir()
             config.write_text("{}", encoding="utf-8")
             state = Path(directory) / "state"
             state.mkdir()
+            write_runtime_root_markers(
+                install, data_root=custom, config_root=config.parent, state_root=state)
             paths = runtime_paths_at(
                 custom, config_file=config, state_dir=state)
             out = io.StringIO()
@@ -79,8 +85,9 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_command_removal", Mock()), \
+                    patch.object(uninstall, "_linux_shared_backend_removal", AsyncMock()), \
                     patch.object(uninstall, "runtime_paths", return_value=paths), \
-                    patch.dict(uninstall.os.environ,
+                    patch.dict(os.environ,
                                {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
                 with contextlib.redirect_stdout(out):
                     await uninstall.uninstall(purge=True)
@@ -116,7 +123,7 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_command_removal", Mock()), \
                     patch.object(uninstall, "runtime_paths", return_value=paths), \
-                    patch.dict(uninstall.os.environ,
+                    patch.dict(os.environ,
                                {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
                 with contextlib.redirect_stdout(out):
                     await uninstall.uninstall()
@@ -149,13 +156,15 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             custom = Path(directory) / "custom"
             install.mkdir()
             custom.mkdir()
-            (install / ".data-root").write_text(str(custom) + "\n", encoding="utf-8")
             config = Path(directory) / "config-home/config.json"
             config.parent.mkdir()
             config.write_text("{}", encoding="utf-8")
             (install / "config.json").write_text("{}", encoding="utf-8")
             state = Path(directory) / "state-home"
             state.mkdir()
+            write_runtime_root_markers(
+                install, data_root=custom, config_root=config.parent, state_root=state,
+                manifest=True)
             paths = runtime_paths_at(
                 custom, config_file=config, state_dir=state)
             with patch.object(uninstall, "IS_WINDOWS", False), \
@@ -164,8 +173,9 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_command_removal", Mock()), \
+                    patch.object(uninstall, "_linux_shared_backend_removal", AsyncMock()), \
                     patch.object(uninstall, "runtime_paths", return_value=paths), \
-                    patch.dict(uninstall.os.environ,
+                    patch.dict(os.environ,
                                {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
                 await uninstall.uninstall(purge=True)
             self.assertFalse(config.exists())
@@ -177,9 +187,9 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             install.mkdir()
             with patch.object(uninstall, "IS_WINDOWS", False), \
                     patch.object(uninstall, "INSTALL_ROOT", install), \
-                    patch.dict(uninstall.os.environ,
+                    patch.dict(os.environ,
                                {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
-                with self.assertRaisesRegex(RuntimeError, "缺少数据根标记"):
+                with self.assertRaisesRegex(RuntimeError, "路径标记不完整"):
                     await uninstall.uninstall(purge=True)
 
     async def test_failed_purge_keeps_the_marker_for_retry(self):
@@ -188,12 +198,13 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             custom = Path(directory) / "custom"
             install.mkdir()
             custom.mkdir()
-            (install / ".data-root").write_text(str(custom) + "\n", encoding="utf-8")
             config = Path(directory) / "config-home/config.json"
             config.parent.mkdir()
             config.write_text("{}", encoding="utf-8")
             state = Path(directory) / "state-home"
             state.mkdir()
+            write_runtime_root_markers(
+                install, data_root=custom, config_root=config.parent, state_root=state)
             paths = runtime_paths_at(
                 custom, config_file=config, state_dir=state)
             with patch.object(uninstall, "IS_WINDOWS", False), \
@@ -202,10 +213,11 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_command_removal", Mock()), \
+                    patch.object(uninstall, "_linux_shared_backend_removal", AsyncMock()), \
                     patch.object(uninstall, "_purge_linux_data",
                                  side_effect=RuntimeError("purge failed")), \
                     patch.object(uninstall, "runtime_paths", return_value=paths), \
-                    patch.dict(uninstall.os.environ,
+                    patch.dict(os.environ,
                                {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
                 with self.assertRaisesRegex(RuntimeError, "purge failed"):
                     await uninstall.uninstall(purge=True)
@@ -248,6 +260,38 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 root, config_file=config, state_dir=Path(directory) / "state"))
             self.assertTrue((root / "unrelated.txt").exists())
             self.assertFalse(config.exists())
+
+    def test_purge_refuses_state_root_overlapping_the_custom_data_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            install = base / "install"
+            data = base / "custom-data"
+            config = base / "config/config.json"
+            install.mkdir()
+            data.mkdir()
+            config.parent.mkdir()
+            (data / "unrelated.txt").write_text("keep", encoding="utf-8")
+            (data / "workspace").mkdir()
+            with patch.object(uninstall, "INSTALL_ROOT", install):
+                with self.assertRaisesRegex(ValueError, "不能重叠"):
+                    uninstall._purge_linux_data(runtime_paths_at(
+                        data, config_file=config, state_dir=data))
+            self.assertTrue((data / "unrelated.txt").exists())
+
+    async def test_partial_runtime_markers_are_rejected_before_service_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install = Path(directory) / "install"
+            install.mkdir()
+            (install / ".data-root").write_text("/tmp/custom-data\n", encoding="utf-8")
+            service = AsyncMock()
+            with patch.object(uninstall, "IS_WINDOWS", False), \
+                    patch.object(uninstall, "INSTALL_ROOT", install), \
+                    patch.object(uninstall, "_linux_service_removal", service), \
+                    patch.dict(os.environ,
+                               {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "路径标记不完整"):
+                    await uninstall.uninstall(purge=True)
+            service.assert_not_awaited()
 
     @requires_symlinks
     def test_purge_refuses_a_symlinked_state_root(self):
@@ -359,10 +403,11 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             data.mkdir()
             config.parent.mkdir()
             config.write_text("{}", encoding="utf-8")
-            (install / uninstall.DATA_ROOT_FILE).write_text(
-                str(data) + "\n", encoding="utf-8")
             paths = runtime_paths_at(
                 data, config_file=config, state_dir=install / "codex-wechat")
+            write_runtime_root_markers(
+                install, data_root=data, config_root=config.parent,
+                state_root=install / "codex-wechat")
             remove = AsyncMock()
             with patch.object(uninstall, "IS_WINDOWS", False), \
                     patch.object(uninstall, "INSTALL_ROOT", install), \
@@ -396,11 +441,15 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             root.mkdir()
             install = Path(directory) / "install"
             install.mkdir()
-            (install / uninstall.DATA_ROOT_FILE).write_text(f"{root}\n", encoding="utf-8")
+            config = Path(directory) / "config/config.json"
+            config.parent.mkdir()
             state = Path(directory) / "state"
             store = uninstall.Store(state)
             paths = runtime_paths_at(
-                root, config_file=Path(directory) / "config.json", state_dir=state)
+                root, config_file=config, state_dir=state)
+            write_runtime_root_markers(
+                install, data_root=root,
+                config_root=config.parent, state_root=state)
             try:
                 with patch.object(uninstall, "IS_WINDOWS", False), \
                         patch.object(uninstall, "INSTALL_ROOT", install), \
@@ -414,12 +463,12 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
 
     def test_unit_link_uses_xdg_config_home(self):
         with tempfile.TemporaryDirectory() as directory:
-            with patch.dict(uninstall.os.environ, {"XDG_CONFIG_HOME": directory}):
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}):
                 self.assertEqual(uninstall._unit_link(),
                                  (Path(directory).resolve() / "systemd/user" / uninstall.UNIT))
 
     def test_unit_link_ignores_a_relative_xdg_config_home(self):
-        with patch.dict(uninstall.os.environ, {"XDG_CONFIG_HOME": "relative/config"}):
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": "relative/config"}):
             self.assertEqual(
                 uninstall._unit_link(),
                 Path.home().resolve() / ".config/systemd/user" / uninstall.UNIT)
@@ -468,23 +517,42 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 [("disable", uninstall.UNIT), ("daemon-reload",)],
             )
 
+    async def test_shared_backend_removal_stops_only_exact_app_units(self):
+        first = "codex-wechat-codex-" + "a" * 20 + ".service"
+        second = "codex-wechat-codex-" + "b" * 20 + ".service"
+        output = (
+            f"{first} loaded active running shared backend\n"
+            "codex-wechat-codex-not-a-unit.service loaded active running foreign\n"
+            f"{second} loaded failed failed shared backend\n"
+        )
+        systemctl = AsyncMock(side_effect=[output, None, None])
+        with patch.object(uninstall.shutil, "which", return_value="/usr/bin/systemctl"), \
+                patch.object(uninstall, "systemctl", systemctl):
+            await uninstall._linux_shared_backend_removal()
+        systemctl.assert_any_call("stop", first, timeout=20)
+        systemctl.assert_any_call("stop", second, timeout=20)
+        self.assertEqual(
+            systemctl.await_count, 3,
+            "expected one list request and two unit stops",
+        )
+
     def test_managed_systemd_data_root_dropin_is_removed(self):
         with tempfile.TemporaryDirectory() as directory:
             dropin = Path(directory) / "systemd/user/codex-wechat.service.d/data-root.conf"
             dropin.parent.mkdir(parents=True)
             dropin.write_text(uninstall.UNIT_DROPIN_MARKER + "\n", encoding="utf-8")
-            with patch.dict(uninstall.os.environ, {"XDG_CONFIG_HOME": directory}):
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}):
                 uninstall._remove_unit_dropin()
             self.assertFalse(dropin.exists())
 
     def test_runtime_root_markers_are_removed(self):
         with tempfile.TemporaryDirectory() as directory:
             install = Path(directory)
-            for filename in (".data-root", ".config-root", ".state-root"):
+            for filename in (".runtime-roots", ".data-root", ".config-root", ".state-root"):
                 (install / filename).write_text("/custom\n", encoding="utf-8")
             with patch.object(uninstall, "INSTALL_ROOT", install):
                 uninstall._remove_runtime_root_markers()
-            for filename in (".data-root", ".config-root", ".state-root"):
+            for filename in (".runtime-roots", ".data-root", ".config-root", ".state-root"):
                 self.assertFalse((install / filename).exists())
 
     async def test_uninstall_refuses_when_service_state_is_unreadable(self):

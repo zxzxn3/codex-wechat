@@ -9,6 +9,7 @@ releases/
 current
 previous
 .install-lock
+.runtime-roots
 .data-root
 .config-root
 .state-root

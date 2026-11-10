@@ -356,6 +356,13 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("Assert-NoForegroundBridge", text)
 
+    def test_uninstall_rejects_reparse_points_in_the_data_root_parent_chain(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Test-ReparsePointPath", text)
+        self.assertIn("[IO.Path]::GetDirectoryName($current)", text)
+        self.assertIn("if (Test-ReparsePointPath $DataRoot)", text)
+        self.assertIn("if (Test-Path -LiteralPath $DataRoot)", text)
+
     def test_uninstall_validates_the_saved_data_root_before_task_changes(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("$SavedDataRoot = Read-SavedDataRoot $InstallRoot", text)
