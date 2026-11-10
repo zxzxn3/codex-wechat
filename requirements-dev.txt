@@ -1,4 +1,4 @@
 # Local development checks; the runtime installer does not install this file.
 bandit==1.9.4
-coverage==7.17.0
+coverage==7.17.2
 pip-audit==2.10.1
