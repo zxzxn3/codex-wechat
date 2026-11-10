@@ -252,11 +252,6 @@ def current_setting(bridge, name):
     return node
 
 
-def current_numeric_setting(bridge, name):
-    """Compatibility name for callers that read numeric settings directly."""
-    return current_setting(bridge, name)
-
-
 def parse_setting_value(bridge, name, argument):
     """Validate one typed setting and return (should_apply, value)."""
     setting = SETTINGS[name]

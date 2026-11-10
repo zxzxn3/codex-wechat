@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from codex_wechat.app import Bridge
-from codex_wechat.commands import SETTINGS, current_numeric_setting, dispatch, handle, notice
+from codex_wechat.commands import SETTINGS, current_setting, dispatch, handle, notice
 from codex_wechat.configuration import HotSettings, Notifications, completion_template
 from codex_wechat.storage import Store
 
@@ -112,7 +112,7 @@ class NumericSettingsTests(unittest.IsolatedAsyncioTestCase):
                     with self.subTest(name=name):
                         value = setting.minimum + 1
                         await handle(bridge, "/settings", f"{name} {value}")
-                        self.assertEqual(current_numeric_setting(bridge, name), value)
+                        self.assertEqual(current_setting(bridge, name), value)
                         section = json.loads(path.read_text())
                         for part in setting.path[:-1]:
                             section = section[part]
