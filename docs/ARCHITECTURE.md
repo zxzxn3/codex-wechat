@@ -21,6 +21,7 @@
 | delivery unknown | 请求被接受但没有返回消息 ID | 不是已送达，也不是明确失败 |
 | reply budget | 每条入站消息允许桥接发出的回复预算 | 不是微信服务端配额 |
 | release ID | 不可变安装版本的内容标识 | 不是产品版本或 Git commit |
+| installation layout / 安装布局 | `.installation.json` 中以同一记录保存的平台、release 和三个运行时根 | 不是 `active-release` 运行租约或第二份配置 |
 
 ## 模块职责
 
@@ -36,8 +37,10 @@
 | [command_specs.py](../codex_wechat/command_specs.py) / [commands.py](../codex_wechat/commands.py) | 唯一命令目录、设置边界和命令实现 |
 | [prompts.py](../codex_wechat/prompts.py) | 默认用户文案和模板渲染 |
 | [diagnostics.py](../codex_wechat/diagnostics.py) | 白名单结构化事件；不记录正文和凭据 |
-| [platform_support.py](../codex_wechat/platform_support.py) / [service_adapter.py](../codex_wechat/service_adapter.py) | 平台路径、权限和原生服务 |
-| [installer.py](../installer.py) | 安装策略、依赖和 release 激活 |
+| [install_layout.py](../codex_wechat/install_layout.py) | 唯一安装清单、路径、release 选择和 purge owned leaves |
+| [launcher.py](../codex_wechat/launcher.py) | stable 入口到已选 release 的唯一转换 |
+| [platform_support.py](../codex_wechat/platform_support.py) / [service_adapter.py](../codex_wechat/service_adapter.py) | 消费安装布局；平台权限和原生服务 |
+| [installer.py](../installer.py) | 安装策略、依赖和布局提交 |
 
 模块可以独立重构；跨模块的所有权、持久状态和有外部依赖的格式属于兼容边界。
 
@@ -116,8 +119,9 @@ Linux 卸载器读取 unit 实际的 `TimeoutStopUSec`，等 systemd 强制停�
 - 默认用户文案只来自 `prompts.py` 的 `DEFAULT_PROMPTS`，`config.prompts` 只保存覆盖。
   展示标签与审批 token、语义字段键和交付分组解耦。
 - 删除配置键恢复代码默认值。模板字段统一使用英文 `snake_case`，不维护旧中文字段映射。
-- Linux 安装器把配置、状态和数据根持久化到安装根标记中，公开入口和 systemd 服务读取同一
-  组路径；Windows 保持统一本地数据布局。具体位置和改根规则见 [INSTALL](INSTALL.md)。
+- 安装器把平台、release ID、数据根、配置根和状态根一次写入 `.installation.json`。stable
+  入口、systemd 和 Windows supervisor 只通过该契约取路径；`active-release` 只表示仍在运行
+  的 release 租约。具体位置和改根规则见 [INSTALL](INSTALL.md)。
 
 ## 诊断与隐私
 

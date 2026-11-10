@@ -51,7 +51,7 @@ PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests
 `tests/support/helpers.py` 在导入时把
 `diagnostics` 指向临时 sink，并在每次 `reset()` 后重新套用，所以直接跑测试不会把夹具事件
 写进已安装实例正在使用的日志；上面的隔离目录仍然推荐，因为它同时挡住其它副作用。这里把源码
-导出到没有 `current` / `.runtime-roots` 的临时根，避免源码树本身被识别为已安装布局。
+导出到没有 `.installation.json` 的临时根，避免源码树本身被识别为已安装布局。
 Windows PowerShell 同样应使用源码副本，并设置 `CODEX_WECHAT_INSTALL_ROOT` 指向该副本：
 
 ```powershell
@@ -117,9 +117,9 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 ## 依赖版本
 
 依赖版本只以 `requirements*.txt` 为准，不在文档复制版本范围。升级依赖后必须跑完整离线
-测试；安装器会在 release 环境内校验声明的版本。默认用户数据目录由
-`platformdirs.user_data_dir` 计算；stable 入口在 release 环境建立前缺少该包时，使用等价的
-XDG / `LOCALAPPDATA` fallback。
+测试；安装器会在 release 环境内校验声明的版本。默认运行时根由
+`install_layout.default_roots()` 计算；已安装实例只读取 `.installation.json`，不根据当前
+shell 的 XDG 或 `LOCALAPPDATA` 重新推断。
 
 更新运行时依赖使用 `.venv/bin/python -m pip install -r requirements.txt`；更新后需要重启
 服务才会让新依赖生效，运行中的进程不会自动换包。

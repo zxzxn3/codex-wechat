@@ -33,9 +33,10 @@ Windows `.cmd` 是薄启动器，内部调用 stable `codex-wechat.ps1`，最终
 `python -m codex_wechat`。`.ps1` 不在 `PATHEXT` 中且受执行策略限制，不能作为 `cmd.exe`
 短入口；安装器不会修改 PATH。
 
-Linux 用 `.runtime-roots` 原子保存数据、配置和状态三个根；公开入口和 systemd 服务读取同一
-组路径。Windows 由 `.data-root` 唯一解析数据根。两套布局都在首次安装后固定，普通更新只沿用
-已保存的根；不提供原地换根命令。需要搬迁时先备份，再 purge 并从目标环境重新安装。
+Linux 和 Windows 都用 `.installation.json` 一次保存平台、release ID 和运行时根。公开入口、
+systemd 与 Windows supervisor 读取同一契约；shell 和 PowerShell 入口只把它交给 Python
+launcher。布局在首次安装后固定，普通更新只沿用已保存的根；不提供原地换根命令。需要搬迁时
+先备份，再 purge 并从目标环境重新安装。
 
 ## Windows 操作
 
@@ -62,7 +63,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 检查当前用户能否实际读取入口和 release。
 
 Windows supervisor 使用 Mutex、Job Object 和 owner token。子桥接以退出码 `75` 请求重启；
-supervisor 将它转换为 `76` 交回 bootstrap supervisor，后者重新读取 `current` 并加载对应
+supervisor 将它转换为 `76` 交回 bootstrap supervisor，后者重新读取安装布局并加载对应
 release。配置错误通常以 `78` 结束。
 
 ## App IPC
@@ -121,7 +122,8 @@ Windows 命名管道按用户单例，只跟随主 `CODEX_HOME`，不承诺跨 h
 `uninstall.ps1` 是内部 helper，不是用户命令。
 
 服务未安装时 `autostart` 查询返回 `false`。版本化入口只接受 16 位小写十六进制 release ID；
-拒绝路径穿越、短 ID、大写和非法长度。损坏的 `current` 必须给出修复指引，不能猜测其它版本。
+拒绝路径穿越、短 ID、大写和非法长度。安装布局损坏或含旧标记时必须 fail closed，不能猜测
+其它版本。
 
 ## 明确边界
 

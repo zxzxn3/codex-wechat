@@ -137,11 +137,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 再次运行同一个网络入口或本地入口即可更新已有安装。公开网络入口会保存公开仓库作为可复用
 更新来源，也可以继续重跑同一个网络入口。更新会保留配置、登录、待办、工作目录、日志和已有
 的登录自启状态，不重启正在运行的桥接；新版本先进入独立 release 并完成检查和运行时准备，
-最后才切换 `current`。项目不提供安装回滚命令。
+最后才原子提交 `.installation.json`。项目不提供安装回滚命令。
 
 每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
-release 通过 `current` / `active-release` 保留。安装器不初始化账户、不默认开启自启、不重启
-业务，也不提供安装回滚。
+release 通过安装布局中的 release ID 和 `active-release` 租约保留。安装器不初始化账户、
+不默认开启自启、不重启业务，也不提供安装回滚。
 
 ## 卸载
 
@@ -159,7 +159,7 @@ codex-wechat uninstall              # 保留数据
 codex-wechat uninstall -PurgeData   # 删除已知用户数据
 ```
 
-卸载不依赖 `current` 指向的 release；版本指针损坏或 release 不完整时仍可移除服务和入口。
+卸载只依赖 `.installation.json`；release 不完整时仍可移除服务和入口。
 Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是内部实现，正常用户不应直接调用；
 它们只在维护者排查损坏入口时使用。
 
@@ -172,9 +172,9 @@ Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是�
 卸载结束时会把程序文件、数据根以及 Linux 的配置和状态位置打印出来；需要在卸载后彻底删除，
 由用户自己决定。
 
-不带 purge 的卸载会保留 Linux `.runtime-roots` 或 Windows `.data-root`：安装树仍在
-（卸载只移除服务与入口），所以重新运行安装器会解析为 update，并继续使用原来的根。purge
-会删除对应布局标记；之后重新安装会按当时的 XDG/数据根环境建立新契约。
+不带 purge 的卸载会保留 `.installation.json`：安装树仍在（卸载只移除服务与入口），所以
+重新运行安装器会解析为 update，并继续使用原来的根。purge 处理完计划中的用户数据后才删除
+布局；之后重新安装会按当时的 XDG/数据根环境建立新布局。
 
 ## 目录和配置
 
@@ -182,15 +182,15 @@ Linux 按 XDG 职责拆分：
 
 | 内容 | 默认位置 |
 |---|---|
-| 程序 | `~/.local/share/codex-wechat/{releases,current,active-release}` |
+| 程序 | `~/.local/share/codex-wechat/{.installation.json,releases,active-release}` |
 | 配置 | `~/.config/codex-wechat/config.json` |
 | 状态、日志和共享后台 | `~/.local/state/codex-wechat/{logs,shared}` |
 | 工作区 | `~/.local/share/codex-wechat/workspace` |
 
 Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` 的其他路径会被拒绝。
-安装器把解析后的数据根、配置根和状态根作为一组原子写入 `.runtime-roots`。Linux 的公开入口
-和 systemd 服务只读取这一份清单，不依赖交互 shell 或 systemd manager 是否导出了 XDG 变量。
-旧的 `.data-root`、`.config-root`、`.state-root` 不作为 Linux 兼容契约。
+安装器把平台、release ID、数据根、配置根和状态根作为一条记录原子写入
+`.installation.json`。公开入口、systemd 和 Windows supervisor 都通过 `InstalledLayout`
+读取这份契约；shell 入口本身不再解析安装状态。
 
 `XDG_CONFIG_HOME`、`XDG_STATE_HOME` 和 `XDG_DATA_HOME` 在首次安装时决定路径根。普通更新
 始终沿用已保存的根，不受当前 shell 中这些变量影响。项目不提供原地换根命令；需要搬迁时先
@@ -212,8 +212,8 @@ Windows purge 还会拒绝数据根本身及其已有父链中的任何重解析
 未发送消息。更高 schema 版本的文件不会被自动移动或覆盖。人为构造到解析器或对象复制资源
 上限的文件直接 fail fast，不属于损坏隔离承诺。
 
-Windows 只使用 `.data-root`；Linux 只使用原子运行时根清单。当前版本不迁移 Linux 旧布局；
-旧版分散标记或统一数据根中的配置和状态不会被新版本读取。
+Linux 和 Windows 都只使用 `.installation.json`。当前版本不迁移 `current`、
+`.runtime-roots`、`.data-root` 等旧布局；这些标记存在时直接拒绝启动，避免混用两套根。
 
 配置、状态、日志、共享后台和工作区各有独立职责，不复制供应商凭据或会话历史。热配置和提示
 的运行边界见 [ARCHITECTURE](ARCHITECTURE.md#配置与提示)。

@@ -53,6 +53,6 @@ Windows 使用管理员令牌。除只读 `status`、`logs` 和显式 `uninstall
 
 ## 版本与卸载
 
-stable 入口只执行 `current` 指向的完整 release。Linux 和 Windows 都在读取 `current` 之前
-分派 `uninstall`，所以版本指针损坏时仍可移除服务和入口。release ID、数据根和平台参数见
-[PLATFORMS](PLATFORMS.md)，完整安装流程见 [INSTALL](INSTALL.md)。
+stable 入口通过 `.installation.json` 选择完整 release。Linux 和 Windows 都在加载 release
+之前分派 `uninstall`，所以 release 不完整时仍可按同一安装布局移除服务和入口。release ID、
+数据根和平台参数见 [PLATFORMS](PLATFORMS.md)，完整安装流程见 [INSTALL](INSTALL.md)。

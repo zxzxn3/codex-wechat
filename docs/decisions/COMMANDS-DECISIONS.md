@@ -23,7 +23,7 @@
 - `start` 与 `service-start` 的前置互斥检查统一在 Python 层，平台脚本只负责入口适配。
 - `service-start` / `service-restart` 以稳定运行作为成功条件，不能只提交异步请求。
 - `uninstall` 默认保留用户数据，显式 purge 才删除；卸载从 stable 入口分派，不依赖
-  `current` 或活动 release 的完整性。
+  release 或活动 release 的完整性。
 
 ## 投递语义
 
@@ -44,9 +44,14 @@
 
 ## 2026-11-10 补充决策
 
-- 安装布局只有两个持久契约：Linux 使用 `.runtime-roots` 一次性保存数据、配置和状态根；
-  Windows 使用 `.data-root`。不读取或迁移旧开发版的分散标记；缺少对应契约的已安装树在
-  运行时 fail closed，重新安装则建立新契约。
+- 安装布局只有一个持久契约：`.installation.json` 同时保存 schema、平台、release ID、
+  数据根、配置根和状态根。stable 入口只调用 `launcher.py`，卸载器和平台服务控制只通过
+  `InstalledLayout` 读取同一记录；`active-release` 仅是运行期 release 租约。
+- 不读取或迁移 `current`、`.runtime-roots`、`.data-root` 等旧标记；旧标记即使与新清单
+  同时出现也 fail closed。重装建立新契约，不维护原地迁移分支。
+- `PurgePlan` 是安装契约给出的精确 owned leaves。Linux 和 Windows 只执行该计划，不分别
+  重新解释“数据根下哪些东西属于应用”。这样可以删除调用点的重叠、链接和根目录 guard，
+  把安全检查集中在不可构造非法状态的契约里。
 - 已安装实例的运行时根固定。普通更新忽略当前 shell 中变化的 XDG 变量，冲突的
   `CODEX_WECHAT_DATA_ROOT` fail closed，不提供 `--reconfigure-roots` 或换根事务。
 - 需要搬迁运行时根时，用户先备份数据，再执行 purge 并从新环境重新安装。通过引入服务停止、
