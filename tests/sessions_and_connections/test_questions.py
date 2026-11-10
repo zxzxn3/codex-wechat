@@ -123,6 +123,9 @@ class QuestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await self.backend.answer_question("approval", "1"))
 
     async def test_writer_change_invalidates_question_and_approval(self):
+        # An observed desktop turn intentionally does not take approval
+        # ownership; make this turn owned so the lease path is exercised.
+        self.backend.active["owned"] = True
         await self.backend.server_request(self.request(identity=1))
         await self.backend.server_request(self.approval(identity=2))
         question_token = next(token for token, request in self.backend.pending.items()
