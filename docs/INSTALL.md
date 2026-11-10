@@ -149,9 +149,11 @@ Linux 按 XDG 职责拆分：
 | 工作区 | `~/.local/share/codex-wechat/workspace` |
 
 Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` 的其他路径会被拒绝。
-`XDG_CONFIG_HOME`、`XDG_STATE_HOME` 和 `XDG_DATA_HOME` 会分别改变上述基础目录。
-`CODEX_WECHAT_DATA_ROOT` 只覆盖数据根，因此工作区随数据根移动，配置和状态仍遵循 XDG。
-`CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口和源码副本的运行定位。
+`XDG_CONFIG_HOME` 和 `XDG_STATE_HOME` 分别改变配置和状态目录；`XDG_DATA_HOME` 改变默认
+数据根及工作区，但不移动固定的程序安装根。安装后数据根由安装根 `.data-root` 唯一解析，
+直接改变相关环境变量造成冲突时会 fail closed。`CODEX_WECHAT_DATA_ROOT` 只覆盖数据根，
+因此工作区随数据根移动，配置和状态仍遵循 XDG。`CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口
+和源码副本的运行定位。
 
 Windows 保持原布局：程序位于 `%LOCALAPPDATA%\codex-wechat\app`，用户数据根为
 `%LOCALAPPDATA%\codex-wechat`，配置、状态、工作区、日志和共享后台仍位于该数据根。

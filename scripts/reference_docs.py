@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the code-owned command and numeric-setting reference."""
+"""Render the code-owned command, setting, and delivery-guard reference."""
 from pathlib import Path
 import sys
 
@@ -72,9 +72,10 @@ def render() -> str:
         f"| 连续出站回复间隔 | {SEND_SPACING_SECONDS:g}s |",
         f"| `delivery=unconfirmed` 的连续失败阈值 | {DELIVERY_DEGRADED_THRESHOLD} |",
         "",
-        "> 以上数值由 `codex_wechat.configuration`、",
-        "> `codex_wechat.output_delivery` 和 `codex_wechat.commands` 提供，",
-        "> 不在手写文档中维护副本。",
+        "> 命令来自 `codex_wechat.command_specs`；设置由 `codex_wechat.commands.SETTINGS`",
+        "> 汇总，默认值和范围常量由 `codex_wechat.configuration`、",
+        "> `codex_wechat.media` 和 `codex_wechat.log_rotation` 定义；出站保护值来自",
+        "> `codex_wechat.output_delivery`。不在手写文档中维护副本。",
     ])
     return "\n".join(lines) + "\n"
 

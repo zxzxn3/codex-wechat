@@ -61,8 +61,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 管理 DACL，不套用 POSIX `0700` 语义。提权安装可能导致任务归属或入口 ACL 错误，安装器会
 检查当前用户能否实际读取入口和 release。
 
-Windows supervisor 使用 Mutex、Job Object 和 owner token。退出码 `75` 表示请求重启，
-supervisor 重新读取 `current`；配置错误通常以 `78` 结束。
+Windows supervisor 使用 Mutex、Job Object 和 owner token。子桥接以退出码 `75` 请求重启；
+supervisor 将它转换为 `76` 交回 bootstrap supervisor，后者重新读取 `current` 并加载对应
+release。配置错误通常以 `78` 结束。
 
 ## App IPC
 

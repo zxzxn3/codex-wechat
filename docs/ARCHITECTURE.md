@@ -92,8 +92,10 @@
 
 - `config.json` 按文件身份、时间和大小检测变化，整组校验成功后应用；无效文件保留最后生效
   的配置并写一条安全事件。
-- 数值设置、默认值和范围只在 `commands.SETTINGS` 与 `configuration.py` 中定义；
-  [生成参考](REFERENCE.generated.md#数值设置) 从代码渲染。
+- 设置名称和生成行由 `commands.SETTINGS` 汇总；默认值与范围常量分别由
+  `configuration.py`、`media.py` 和 `log_rotation.py` 定义，出站保护值由
+  `output_delivery.py` 定义。[生成参考](REFERENCE.generated.md#数值设置) 通过这些代码来源
+  渲染，不维护手写副本。
 - 默认用户文案只来自 `prompts.py` 的 `DEFAULT_PROMPTS`，`config.prompts` 只保存覆盖。
   展示标签与审批 token、语义字段键和交付分组解耦。
 - 删除配置键恢复代码默认值。模板字段统一使用英文 `snake_case`，不维护旧中文字段映射。
