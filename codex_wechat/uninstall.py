@@ -61,6 +61,13 @@ def _remove_path(path: Path) -> None:
 
 
 async def _linux_service_removal() -> None:
+    link = _unit_link()
+    if not link.exists() and not link.is_symlink():
+        # Installations that cannot reach a user service manager never create
+        # this unit link and run in the documented foreground-only mode.
+        _remove_unit_dropin()
+        print("后台服务未注册；跳过服务移除。")
+        return
     try:
         current = await service_adapter.status()
     except FileNotFoundError:
@@ -81,7 +88,6 @@ async def _linux_service_removal() -> None:
     except (OSError, RuntimeError):
         # The unit may only have been linked for on-demand starts.
         pass
-    link = _unit_link()
     expected = (INSTALL_ROOT / UNIT).resolve()
     try:
         owns_link = link.is_symlink() and link.resolve() == expected

@@ -236,6 +236,17 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(uninstall._unit_link(),
                                  (Path(directory).resolve() / "systemd/user" / uninstall.UNIT))
 
+    async def test_unregistered_service_skips_an_unreachable_manager(self):
+        with tempfile.TemporaryDirectory() as directory:
+            unit = Path(directory) / "systemd/user" / uninstall.UNIT
+            status = AsyncMock(side_effect=RuntimeError("manager unavailable"))
+            with patch.object(uninstall, "_unit_link", return_value=unit), \
+                    patch.object(uninstall.service_adapter, "status", status), \
+                    patch.object(uninstall, "_remove_unit_dropin") as dropin:
+                await uninstall._linux_service_removal()
+        status.assert_not_awaited()
+        dropin.assert_called_once_with()
+
     def test_managed_systemd_data_root_dropin_is_removed(self):
         with tempfile.TemporaryDirectory() as directory:
             dropin = Path(directory) / "systemd/user/codex-wechat.service.d/data-root.conf"
