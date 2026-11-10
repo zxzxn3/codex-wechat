@@ -324,7 +324,7 @@ class Bridge:
     def make_backend(self, name):
         backend = self.backend_factory(self.backend_configs[name],
             str(Path(self.config.get("cwd", runtime_paths().workspace_dir)).expanduser().resolve()),
-            lambda text: self.reply(text, source=backend.source())
+            lambda text: self.reply(text, source=backend.selection_lease().source)
             if getattr(self, "backend", None) is backend else None)
         backend.on_activity = self.backend_activity
         backend.on_connection = lambda connected, error=None: self.backend_connection(
@@ -521,10 +521,14 @@ class Bridge:
 
     def media_origin(self):
         return {"cwd": self.backend.info.get("cwd") or self.backend.cwd,
-                "context": self.state["context"], "source": self.backend.source(self.state["thread"])}
+                "context": self.state["context"], "source": self.current_lease().source}
+
+    def current_lease(self):
+        """Return the committed identity used by runtime output and media."""
+        return self.backend.selection_lease(self.state.get("thread"))
 
     def current_source(self, source):
-        return source == self.backend.source(self.state["thread"])
+        return source == self.current_lease().source
 
     async def deliver_answer(self, answer, *, finish_running=True, cwd=None,
                              notify_completion=False, source=None, require_current=False,

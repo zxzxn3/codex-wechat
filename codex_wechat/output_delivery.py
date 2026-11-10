@@ -223,7 +223,7 @@ class OutputDelivery:
         # notice gets the same treatment: its replacement would be a notice about
         # a notice, and the queue is already waiting for the user.
         source = entry.get("source")
-        if source and source != asdict(bridge.backend.source(bridge.state["thread"])):
+        if source and source != asdict(bridge.current_lease().source):
             notify = False
         if notify and not entry.get("failureNotice") and not entry.get("budgetNotice"):
             text = (bridge.prompt("ATTACHMENT_SEND_FAILED", {
