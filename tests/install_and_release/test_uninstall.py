@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from codex_wechat import platform_support
 from codex_wechat import uninstall
-from tests.support.helpers import runtime_paths_at
+from tests.support.helpers import requires_symlinks, runtime_paths_at
 
 
 class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
@@ -248,6 +248,56 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 root, config_file=config, state_dir=Path(directory) / "state"))
             self.assertTrue((root / "unrelated.txt").exists())
             self.assertFalse(config.exists())
+
+    @requires_symlinks
+    def test_purge_refuses_a_symlinked_state_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            install = root / "install"
+            data = root / "data"
+            external = root / "external"
+            config = root / "config/config.json"
+            install.mkdir()
+            data.mkdir()
+            external.mkdir()
+            config.parent.mkdir()
+            (data / "workspace").mkdir()
+            (external / "keep.txt").write_text("keep", encoding="utf-8")
+            config.write_text("{}", encoding="utf-8")
+            state = root / "state"
+            state.symlink_to(external, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "符号链接"):
+                uninstall._purge_linux_data(runtime_paths_at(
+                    data, config_file=config, state_dir=state))
+            self.assertTrue((external / "keep.txt").exists())
+            self.assertTrue(config.exists())
+
+    @requires_symlinks
+    def test_purge_refuses_a_state_path_through_a_symlinked_xdg_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            install = root / "install"
+            data = root / "data"
+            external = root / "external"
+            config = root / "config/config.json"
+            install.mkdir()
+            data.mkdir()
+            external.mkdir()
+            config.parent.mkdir()
+            config.write_text("{}", encoding="utf-8")
+            (data / "workspace").mkdir()
+            external_state = external / "codex-wechat"
+            external_state.mkdir()
+            (external_state / "keep.txt").write_text("keep", encoding="utf-8")
+            state_home = root / "state-home"
+            state_home.symlink_to(external, target_is_directory=True)
+            with patch.object(uninstall, "INSTALL_ROOT", install), \
+                    self.assertRaisesRegex(ValueError, "符号链接"):
+                uninstall._purge_linux_data(runtime_paths_at(
+                    data, config_file=config,
+                    state_dir=state_home / "codex-wechat"))
+            self.assertTrue((external_state / "keep.txt").exists())
+            self.assertTrue(config.exists())
 
     def test_purge_refuses_a_target_that_contains_the_home_directory(self):
         with tempfile.TemporaryDirectory() as directory:

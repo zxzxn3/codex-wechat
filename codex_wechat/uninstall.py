@@ -7,8 +7,8 @@ import sys
 
 from . import service_adapter
 from .platform_support import (CONFIG_ROOT_FILE, DATA_ROOT_FILE, INSTALL_ROOT,
-                               IS_WINDOWS, STATE_ROOT_FILE, runtime_paths,
-                               xdg_config_home)
+                               IS_WINDOWS, STATE_ROOT_FILE, reject_symlink_path,
+                               runtime_paths, xdg_config_home)
 from .service_control import UNIT, systemctl
 from .storage import Store
 
@@ -58,6 +58,7 @@ def _remove_runtime_root_markers() -> None:
 
 
 def _remove_path(path: Path) -> None:
+    reject_symlink_path(path)
     if path.is_symlink():
         path.unlink()
     elif path.is_dir():
@@ -141,6 +142,7 @@ def _validated_purge_targets(paths):
     install = INSTALL_ROOT.resolve()
     expected_workspace = (paths.data_root / "workspace").resolve()
     for role, path in targets:
+        reject_symlink_path(path)
         target = Path(path).expanduser().resolve()
         if target in {Path(target.anchor), home} or home.is_relative_to(target):
             raise ValueError(f"拒绝删除范围过大的数据目录: {target}")

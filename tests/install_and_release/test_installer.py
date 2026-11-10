@@ -947,6 +947,37 @@ class DataRootMarkerTests(unittest.TestCase):
                 str(data_home.resolve()) + "\n",
             )
 
+    @requires_symlinks
+    def test_linux_runtime_markers_keep_symlinked_xdg_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "install"
+            target.mkdir()
+            for name in ("data", "config", "state"):
+                (base / f"{name}-target").mkdir()
+                (base / f"{name}-home").symlink_to(
+                    base / f"{name}-target", target_is_directory=True)
+            with patch.object(installer, "IS_WINDOWS", False), \
+                    patch.dict(os.environ, {
+                        "XDG_DATA_HOME": str(base / "data-home"),
+                        "XDG_CONFIG_HOME": str(base / "config-home"),
+                        "XDG_STATE_HOME": str(base / "state-home"),
+                        "CODEX_WECHAT_DATA_ROOT": "",
+                    }, clear=False):
+                installer._publish_runtime_roots(target)
+            self.assertEqual(
+                (target / installer.DATA_ROOT_FILE).read_text(encoding="utf-8"),
+                str(base / "data-home/codex-wechat") + "\n",
+            )
+            self.assertEqual(
+                (target / installer.CONFIG_ROOT_FILE).read_text(encoding="utf-8"),
+                str(base / "config-home/codex-wechat") + "\n",
+            )
+            self.assertEqual(
+                (target / installer.STATE_ROOT_FILE).read_text(encoding="utf-8"),
+                str(base / "state-home/codex-wechat") + "\n",
+            )
+
     def test_linux_layout_rejects_config_or_state_inside_the_install_root(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

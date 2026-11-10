@@ -29,7 +29,7 @@ STATE_ROOT_FILE = ".state-root"
 
 @dataclass(frozen=True)
 class RuntimePaths:
-    """Resolved storage locations for one installation."""
+    """Persistent storage locations using their configured, unresolved paths."""
 
     data_root: Path
     config_file: Path
@@ -54,7 +54,7 @@ def _saved_root(filename: str, install_root: Path | None = None) -> Path | None:
     root = Path(text).expanduser()
     if not root.is_absolute():
         raise ValueError(f"路径标记必须是绝对路径: {path}")
-    return root.resolve()
+    return root
 
 
 def saved_data_root(install_root: Path | None = None) -> Path | None:
@@ -72,23 +72,23 @@ def saved_state_root(install_root: Path | None = None) -> Path | None:
 def default_data_root() -> Path:
     """Return the platform user-data directory, with a pre-venv fallback."""
     if _platform_user_data_dir is not None:
-        return Path(_platform_user_data_dir("codex-wechat", appauthor=False)).expanduser().resolve()
+        return Path(_platform_user_data_dir("codex-wechat", appauthor=False)).expanduser()
     if IS_WINDOWS:
         local = os.environ.get("LOCALAPPDATA")
         if not local:
             raise RuntimeError("Windows 缺少 LOCALAPPDATA，无法定位当前用户数据目录")
-        return (Path(local) / "codex-wechat").expanduser().resolve()
+        return (Path(local) / "codex-wechat").expanduser()
     data_home = os.environ.get("XDG_DATA_HOME")
     if data_home and Path(data_home).is_absolute():
-        return (Path(data_home).expanduser() / "codex-wechat").resolve()
-    return (Path.home() / ".local" / "share" / "codex-wechat").resolve()
+        return Path(data_home).expanduser() / "codex-wechat"
+    return Path.home() / ".local" / "share" / "codex-wechat"
 
 
 def _xdg_root(variable: str, fallback: Path) -> Path:
     value = os.environ.get(variable)
     if value and Path(value).is_absolute():
-        return Path(value).expanduser().resolve()
-    return fallback.expanduser().resolve()
+        return Path(value).expanduser()
+    return fallback.expanduser()
 
 
 def xdg_config_home() -> Path:
@@ -96,12 +96,11 @@ def xdg_config_home() -> Path:
 
 
 def default_config_root() -> Path:
-    return (xdg_config_home() / "codex-wechat").resolve()
+    return xdg_config_home() / "codex-wechat"
 
 
 def default_state_root() -> Path:
-    return (_xdg_root("XDG_STATE_HOME", Path.home() / ".local" / "state") /
-            "codex-wechat").resolve()
+    return _xdg_root("XDG_STATE_HOME", Path.home() / ".local" / "state") / "codex-wechat"
 
 
 def config_root(install_root: Path | None = None) -> Path:
@@ -117,18 +116,36 @@ def data_root(install_root: Path | None = None):
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     saved = saved_data_root(install_root)
     if override and saved is not None:
-        requested = Path(override).expanduser().resolve()
-        if requested != saved:
+        requested = Path(override).expanduser()
+        if requested.resolve() != saved.resolve():
             raise ValueError(
                 "CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；"
                 "请清除环境变量，或重新运行安装器更新数据根"
             )
         return requested
     if override:
-        return Path(override).expanduser().resolve()
+        return Path(override).expanduser()
     if saved is not None:
         return saved
     return default_data_root()
+
+
+def symlink_component(path: Path) -> Path | None:
+    """Return the first symlink in a configured path's complete parent chain."""
+    path = Path(path).expanduser()
+    for component in (path, *path.parents):
+        try:
+            if component.is_symlink():
+                return component
+        except OSError:
+            return component
+    return None
+
+
+def reject_symlink_path(path: Path) -> None:
+    component = symlink_component(path)
+    if component is not None:
+        raise ValueError(f"拒绝操作经过符号链接的路径: {path}（{component}）")
 
 
 def runtime_paths(install_root: Path | None = None) -> RuntimePaths:

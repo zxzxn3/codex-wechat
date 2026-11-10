@@ -253,7 +253,7 @@ def _saved_root(target: Path, filename: str) -> Path | None:
     root = Path(text).expanduser()
     if not root.is_absolute():
         raise ValueError(f"路径标记必须是绝对路径: {path}")
-    return root.resolve()
+    return root
 
 
 def saved_data_root(target: Path) -> Path | None:
@@ -275,7 +275,7 @@ def _default_data_root() -> Path:
         default_data_root = None
     if default_data_root is not None:
         try:
-            return Path(default_data_root()).resolve()
+            return Path(default_data_root())
         except RuntimeError as error:
             raise ValueError(str(error)) from error
     # Standalone installer fallback for a source tree without platform_support.
@@ -283,32 +283,32 @@ def _default_data_root() -> Path:
         local = os.environ.get("LOCALAPPDATA")
         if not local:
             raise ValueError("Windows 缺少 LOCALAPPDATA，无法确定数据目录")
-        return (Path(local) / "codex-wechat").resolve()
+        return Path(local) / "codex-wechat"
     data_home = os.environ.get("XDG_DATA_HOME")
     if data_home and Path(data_home).is_absolute():
-        return (Path(data_home).expanduser() / "codex-wechat").resolve()
-    return (Path.home() / ".local" / "share" / "codex-wechat").resolve()
+        return Path(data_home).expanduser() / "codex-wechat"
+    return Path.home() / ".local" / "share" / "codex-wechat"
 
 
 def _default_config_root() -> Path:
     config_home = os.environ.get("XDG_CONFIG_HOME")
     if config_home and Path(config_home).is_absolute():
-        return (Path(config_home).expanduser() / "codex-wechat").resolve()
-    return (Path.home() / ".config" / "codex-wechat").resolve()
+        return Path(config_home).expanduser() / "codex-wechat"
+    return Path.home() / ".config" / "codex-wechat"
 
 
 def _default_state_root() -> Path:
     state_home = os.environ.get("XDG_STATE_HOME")
     if state_home and Path(state_home).is_absolute():
-        return (Path(state_home).expanduser() / "codex-wechat").resolve()
-    return (Path.home() / ".local" / "state" / "codex-wechat").resolve()
+        return Path(state_home).expanduser() / "codex-wechat"
+    return Path.home() / ".local" / "state" / "codex-wechat"
 
 
 def configured_data_root(target: Path) -> Path:
     """Resolve one explicit root without repairing old installation layouts."""
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     if override:
-        return Path(override).expanduser().resolve()
+        return Path(override).expanduser()
     saved = saved_data_root(target)
     if saved is not None:
         return saved
@@ -326,14 +326,14 @@ def configured_config_root(target: Path) -> Path:
     """The installer accepts an explicit XDG change and persists it."""
     config_home = os.environ.get("XDG_CONFIG_HOME")
     if config_home and Path(config_home).is_absolute():
-        return (Path(config_home).expanduser() / "codex-wechat").resolve()
+        return Path(config_home).expanduser() / "codex-wechat"
     return saved_config_root(target) or _default_config_root()
 
 
 def configured_state_root(target: Path) -> Path:
     state_home = os.environ.get("XDG_STATE_HOME")
     if state_home and Path(state_home).is_absolute():
-        return (Path(state_home).expanduser() / "codex-wechat").resolve()
+        return Path(state_home).expanduser() / "codex-wechat"
     return saved_state_root(target) or _default_state_root()
 
 

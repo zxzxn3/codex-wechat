@@ -17,6 +17,7 @@ from codex_wechat.pipe_websocket import PipeWebSocket
 from codex_wechat.profiles import definitions, resume_or_adopt
 from codex_wechat.storage import Store
 from codex_wechat import platform_support
+from tests.support.helpers import requires_symlinks
 from websockets.server import ServerProtocol
 from websockets.http11 import Request
 from websockets.frames import Frame, Opcode
@@ -139,6 +140,66 @@ class PlatformTests(unittest.TestCase):
                              (base / "state/codex-wechat/logs").resolve())
             self.assertEqual(paths.shared_dir,
                              (base / "state/codex-wechat/shared").resolve())
+
+    @requires_symlinks
+    def test_linux_runtime_paths_keep_a_symlink_for_purge_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            home = base / "home"
+            install = base / "install"
+            external = base / "external"
+            home.mkdir()
+            install.mkdir()
+            external.mkdir()
+            (home / ".local/state").mkdir(parents=True)
+            state = home / ".local/state/codex-wechat"
+            state.symlink_to(external, target_is_directory=True)
+            with patch.object(platform_support, "IS_WINDOWS", False), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.dict(os.environ, {
+                        "HOME": str(home),
+                        "CODEX_WECHAT_DATA_ROOT": str(base / "data"),
+                        "XDG_CONFIG_HOME": "",
+                        "XDG_STATE_HOME": "",
+                    }, clear=False):
+                paths = platform_support.runtime_paths()
+            self.assertEqual(paths.state_dir, state)
+            self.assertTrue(paths.state_dir.is_symlink())
+
+    @requires_symlinks
+    def test_linux_runtime_paths_keep_symlinked_xdg_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            install = base / "install"
+            install.mkdir()
+            data_target = base / "data-target"
+            config_target = base / "config-target"
+            state_target = base / "state-target"
+            data_target.mkdir()
+            config_target.mkdir()
+            state_target.mkdir()
+            data_home = base / "data-home"
+            config_home = base / "config-home"
+            state_home = base / "state-home"
+            data_home.symlink_to(data_target, target_is_directory=True)
+            config_home.symlink_to(config_target, target_is_directory=True)
+            state_home.symlink_to(state_target, target_is_directory=True)
+            with patch.object(platform_support, "IS_WINDOWS", False), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
+                    patch.dict(os.environ, {
+                        "CODEX_WECHAT_DATA_ROOT": "",
+                        "XDG_DATA_HOME": str(data_home),
+                        "XDG_CONFIG_HOME": str(config_home),
+                        "XDG_STATE_HOME": str(state_home),
+                    }, clear=False):
+                paths = platform_support.runtime_paths()
+            self.assertEqual(paths.data_root, data_home / "codex-wechat")
+            self.assertEqual(paths.config_file,
+                             config_home / "codex-wechat/config.json")
+            self.assertEqual(paths.state_dir, state_home / "codex-wechat")
+            self.assertTrue(paths.data_root.parent.is_symlink())
+            self.assertTrue(paths.config_file.parent.parent.is_symlink())
+            self.assertTrue(paths.state_dir.parent.is_symlink())
 
     def test_linux_persisted_xdg_roots_win_over_service_manager_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
