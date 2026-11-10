@@ -37,12 +37,14 @@ Windows 入口最终调用同一个 `installer.py`。依赖声明集中在 `inst
 
 ```bash
 repo=$(pwd)
-src=$(mktemp -d)
-trap 'rm -rf "$src"' EXIT
+sandbox=$(mktemp -d)
+src="$sandbox/src"
+trap 'rm -rf "$sandbox"' EXIT
+mkdir -p "$src"
 git archive HEAD | tar -x -f - -C "$src"
 cd "$src"
-CODEX_WECHAT_INSTALL_ROOT="$src" CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" \
-XDG_CONFIG_HOME="$src/test-config" XDG_STATE_HOME="$src/test-state" \
+CODEX_WECHAT_INSTALL_ROOT="$src" CODEX_WECHAT_DATA_ROOT="$sandbox/data" \
+XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state" \
 PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests -v
 ```
 
