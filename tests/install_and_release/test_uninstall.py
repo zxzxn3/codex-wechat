@@ -9,10 +9,15 @@ from unittest.mock import AsyncMock, Mock, patch
 from codex_wechat import platform_support
 from codex_wechat import uninstall
 from codex_wechat.install_layout import INSTALLATION_FILE, InstalledLayout
-from tests.support.helpers import write_installation_layout
+from tests.support.helpers import linux_install_platform, write_installation_layout
 
 
 class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Every fixture here is a Linux layout; pin the platform the code under
+        # test resolves instead of inheriting the host.
+        self.enterContext(linux_install_platform())
+
     def make_layout(self, directory):
         base = Path(directory)
         install = base / "install"

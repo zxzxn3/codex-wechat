@@ -98,8 +98,6 @@ class BootstrapEntryTests(unittest.TestCase):
             self.target,
             release_id=identifier,
             data_root=self.root / "data",
-            config_root=self.root / "config",
-            state_root=self.root / "state",
             create_release=False,
         )
         saved = self.target / installer.UPDATE_SOURCE_FILE

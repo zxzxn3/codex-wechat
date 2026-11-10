@@ -10,7 +10,8 @@ from unittest.mock import patch
 from codex_wechat import platform_support
 from codex_wechat.install_layout import (INSTALLATION_FILE, InstallLayoutError,
                                          InstalledLayout)
-from tests.support.helpers import requires_symlinks, write_installation_layout
+from tests.support.helpers import (linux_install_platform, requires_symlinks,
+                                   write_installation_layout)
 
 
 RELEASE_ID = "a" * 16
@@ -18,6 +19,7 @@ RELEASE_ID = "a" * 16
 
 class InstalledLayoutTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(linux_install_platform())
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)

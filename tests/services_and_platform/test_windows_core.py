@@ -67,17 +67,18 @@ class PlatformTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(platform_support, "IS_WINDOWS", True), \
              patch.object(platform_support, "INSTALL_ROOT", Path(directory)), \
-             patch.dict("os.environ", {"LOCALAPPDATA": "/tmp/local",
+             patch.dict("os.environ", {"LOCALAPPDATA": str(Path(directory) / "local"),
                                        "CODEX_WECHAT_DATA_ROOT": ""}):
             # An ambient override (a test-isolated run sets one) must not leak in.
             self.assertEqual(platform_support.runtime_paths().data_root,
-                             (Path("/tmp/local/codex-wechat")).resolve())
+                             Path(directory) / "local" / "codex-wechat")
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(platform_support, "IS_WINDOWS", False), \
                 patch.object(platform_support, "INSTALL_ROOT", Path(directory)), \
-                patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": "/tmp/stable-data"}):
+                patch.dict("os.environ",
+                           {"CODEX_WECHAT_DATA_ROOT": str(Path(directory) / "stable-data")}):
             self.assertEqual(platform_support.runtime_paths().data_root,
-                             Path("/tmp/stable-data").resolve())
+                             (Path(directory) / "stable-data").absolute())
         with patch("codex_wechat.profiles.IS_WINDOWS", True):
             self.assertEqual(set(definitions({})), {"codex"})
             self.assertEqual(set(definitions({"backends": {"deepseek": {

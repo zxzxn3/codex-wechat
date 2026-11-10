@@ -1,14 +1,47 @@
 """Capability guards and process-wide isolation for offline fixtures."""
+from contextlib import ExitStack, contextmanager
 from functools import wraps
 import atexit
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
+from unittest.mock import patch
 
 from codex_wechat import diagnostics
 from codex_wechat.install_layout import InstalledLayout, current_platform
 from codex_wechat.platform_support import RuntimePaths
+
+
+@contextmanager
+def linux_install_platform():
+    """Model a Linux installation on any host.
+
+    The fixtures below shape Linux roots (separate data/config/state) while the
+    code under test resolves the platform from the host, so a Windows run would
+    compare a Windows expectation against a Linux manifest. Pinning both sides
+    here keeps one rule: a test states the platform it models.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(patch("codex_wechat.install_layout.current_platform",
+                                  return_value="linux"))
+        stack.enter_context(patch("tests.support.helpers.current_platform",
+                                  return_value="linux"))
+        # The installer and uninstaller each keep their own host flag, and the
+        # uninstaller imported current_platform by name; pin every binding that
+        # exists rather than assuming one module owns the decision.
+        for name in ("installer", "codex_wechat.uninstall",
+                     "codex_wechat.platform_support"):
+            module = sys.modules.get(name)
+            if module is None:
+                continue
+            if hasattr(module, "IS_WINDOWS"):
+                stack.enter_context(patch(name + ".IS_WINDOWS", False))
+            if hasattr(module, "current_platform"):
+                stack.enter_context(
+                    patch(name + ".current_platform", return_value="linux"))
+        yield
 
 
 def runtime_paths_at(root, *, config_file=None, state_dir=None):
@@ -42,12 +75,16 @@ def write_installation_layout(
     *,
     release_id="a" * 16,
     data_root,
-    config_root,
-    state_root,
+    config_root=None,
+    state_root=None,
     platform=None,
     release_files=False,
     create_release=True,
 ):
+    # Omitted roots follow the platform contract: Windows keeps one root, Linux
+    # splits config and state. Callers that model Linux pass all three.
+    config_root = data_root if config_root is None else config_root
+    state_root = data_root if state_root is None else state_root
     install_root = Path(install_root)
     release = install_root / "releases" / release_id
     if create_release:

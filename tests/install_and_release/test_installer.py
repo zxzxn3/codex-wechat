@@ -329,7 +329,10 @@ class InstallerTests(unittest.TestCase):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), first)
         self.assertEqual(
-            InstalledLayout.load(self.target, platform="linux").data_root,
+            InstalledLayout.load(
+                self.target,
+                platform="windows" if installer.IS_WINDOWS else "linux",
+            ).data_root,
             old_root,
         )
 
@@ -528,7 +531,8 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "service failed"):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), current)
-        layout = InstalledLayout.load(self.target, platform="linux")
+        layout = InstalledLayout.load(
+            self.target, platform="windows" if installer.IS_WINDOWS else "linux")
         self.assertEqual(layout.data_root, old_root)
 
     def test_same_version_update_repairs_a_missing_release_runtime(self):
