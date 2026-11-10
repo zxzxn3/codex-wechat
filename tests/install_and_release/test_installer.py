@@ -253,16 +253,6 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "普通用户"):
                 installer.main(["install", "--dir", str(self.target), "--non-interactive"])
 
-    def test_main_rejects_root_reconfiguration_on_windows(self):
-        with patch.object(installer, "IS_WINDOWS", True), \
-                patch.object(installer, "_elevated", return_value=False), \
-                patch.object(installer, "install", side_effect=AssertionError("installed")):
-            with self.assertRaisesRegex(ValueError, "仅支持 Linux"):
-                installer.main([
-                    "update", "--dir", str(self.target),
-                    "--reconfigure-roots", "--non-interactive",
-                ])
-
     def test_root_override_allows_disposable_containers(self):
         with patch.object(installer, "_elevated", return_value=True), \
                 patch.dict(os.environ, {"CODEX_WECHAT_ALLOW_ROOT": "1"}), \
@@ -328,22 +318,16 @@ class InstallerTests(unittest.TestCase):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), first)
 
-    def test_failed_update_before_activation_keeps_the_old_data_root(self):
+    def test_changed_data_root_is_rejected_before_the_update_changes_state(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
         first = self.current()
         old_root = (self.base / "data").resolve()
         new_root = self.base / "new-data"
         self.make_project(self.source, version="two")
-        with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": str(new_root)}), \
-                patch("builtins.input", return_value="y"), \
-                patch.object(installer, "_linux_service_snapshot",
-                             return_value=("missing", "")), \
-                patch.object(installer, "install_bootstrap",
-                             side_effect=OSError("entry failed")):
-            with self.assertRaisesRegex(OSError, "entry failed"):
-                installer.update(
-                    self.source, self.target, reconfigure_roots=True)
+        with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": str(new_root)}):
+            with self.assertRaisesRegex(ValueError, "固定"):
+                installer.update(self.source, self.target)
         self.assertEqual(self.current(), first)
         self.assertEqual(installer.saved_data_root(self.target), old_root)
 
@@ -368,7 +352,7 @@ class InstallerTests(unittest.TestCase):
         with patch("builtins.input", return_value="y"):
             self.assertEqual(installer.install(self.source, self.target), 0)
         self.assertIsNotNone(self.current())
-        self.assertTrue((self.target / installer.DATA_ROOT_FILE).is_file())
+        self.assertTrue((self.target / installer.RUNTIME_ROOTS_FILE).is_file())
 
     def test_source_change_after_confirmation_is_rejected(self):
         def change_source(_):
@@ -556,20 +540,15 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(release, self.target / "releases" / current)
         self.assertEqual(configure.call_args.kwargs, {"update": True})
 
-    def test_same_version_service_failure_restores_the_old_data_root(self):
+    def test_same_version_service_failure_keeps_pointer_and_manifest(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
         current = self.current()
         old_root = (self.base / "data").resolve()
-        with patch.dict(os.environ, {
-                "CODEX_WECHAT_DATA_ROOT": str(self.base / "new-data")}), \
-                patch.object(installer, "_linux_service_snapshot",
-                             return_value=("missing", "")), \
-                patch.object(installer, "configure_platform_service",
+        with patch.object(installer, "configure_platform_service",
                              side_effect=OSError("service failed")):
             with self.assertRaisesRegex(OSError, "service failed"):
-                installer.update(
-                    self.source, self.target, reconfigure_roots=True)
+                installer.update(self.source, self.target)
         self.assertEqual(self.current(), current)
         self.assertEqual(installer.saved_data_root(self.target), old_root)
         manifest = json.loads(
@@ -929,27 +908,6 @@ class DataRootMarkerTests(unittest.TestCase):
                 self.assertEqual(installer._default_data_root(),
                                  (data_home / "codex-wechat").resolve())
 
-    def test_default_root_is_also_persisted_in_the_marker(self):
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "install"
-            target.mkdir()
-            expected = installer._default_data_root()
-            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
-                installer._write_data_root_marker(target)
-            self.assertTrue((target / installer.DATA_ROOT_FILE).is_file())
-            self.assertEqual(installer.saved_data_root(target), expected.resolve())
-
-    def test_marker_is_persisted_and_used_without_the_environment(self):
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "install"
-            target.mkdir()
-            data = Path(directory) / "data root"
-            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": str(data)}, clear=False):
-                installer._write_data_root_marker(target)
-            self.assertEqual(installer.saved_data_root(target), data.resolve())
-            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
-                self.assertEqual(installer.configured_data_root(target), data.resolve())
-
     def test_linux_runtime_roots_are_persisted_for_systemd(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -965,18 +923,6 @@ class DataRootMarkerTests(unittest.TestCase):
                         "CODEX_WECHAT_DATA_ROOT": str(data_home),
                     }, clear=False):
                 installer._publish_runtime_roots(target)
-            self.assertEqual(
-                (target / installer.CONFIG_ROOT_FILE).read_text(encoding="utf-8"),
-                str((config_home / "codex-wechat").resolve()) + "\n",
-            )
-            self.assertEqual(
-                (target / installer.STATE_ROOT_FILE).read_text(encoding="utf-8"),
-                str((state_home / "codex-wechat").resolve()) + "\n",
-            )
-            self.assertEqual(
-                (target / installer.DATA_ROOT_FILE).read_text(encoding="utf-8"),
-                str(data_home.resolve()) + "\n",
-            )
             manifest = json.loads(
                 (target / installer.RUNTIME_ROOTS_FILE).read_text(encoding="utf-8"))
             self.assertEqual(manifest, {
@@ -985,8 +931,11 @@ class DataRootMarkerTests(unittest.TestCase):
                 "config": str((config_home / "codex-wechat").resolve()),
                 "state": str((state_home / "codex-wechat").resolve()),
             })
+            self.assertFalse((target / installer.DATA_ROOT_FILE).exists())
+            self.assertFalse((target / ".config-root").exists())
+            self.assertFalse((target / ".state-root").exists())
 
-    def test_update_keeps_saved_xdg_roots_without_explicit_reconfiguration(self):
+    def test_update_keeps_saved_xdg_roots(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             target = base / "install"
@@ -1002,7 +951,6 @@ class DataRootMarkerTests(unittest.TestCase):
                     }, clear=False):
                 installer._publish_runtime_roots(target)
             with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.object(installer, "RECONFIGURE_ROOTS", False), \
                     patch.dict(os.environ, {
                         "CODEX_WECHAT_DATA_ROOT": "",
                         "XDG_CONFIG_HOME": str(base / "ambient-config"),
@@ -1012,17 +960,6 @@ class DataRootMarkerTests(unittest.TestCase):
                                  (old_config / "codex-wechat").resolve())
                 self.assertEqual(installer.configured_state_root(target),
                                  (old_state / "codex-wechat").resolve())
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.object(installer, "RECONFIGURE_ROOTS", True), \
-                    patch.dict(os.environ, {
-                        "CODEX_WECHAT_DATA_ROOT": "",
-                        "XDG_CONFIG_HOME": str(base / "ambient-config"),
-                        "XDG_STATE_HOME": str(base / "ambient-state"),
-                    }, clear=False):
-                self.assertEqual(installer.configured_config_root(target),
-                                 (base / "ambient-config/codex-wechat").resolve())
-                self.assertEqual(installer.configured_state_root(target),
-                                 (base / "ambient-state/codex-wechat").resolve())
 
     def test_windows_update_rejects_a_different_data_root(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1032,53 +969,14 @@ class DataRootMarkerTests(unittest.TestCase):
             (target / installer.DATA_ROOT_FILE).write_text(
                 str(base / "old-data") + "\n", encoding="utf-8")
             with patch.object(installer, "IS_WINDOWS", True), \
-                    patch.object(installer, "RECONFIGURE_ROOTS", False), \
                     patch.dict(os.environ, {
                         "CODEX_WECHAT_DATA_ROOT": str(base / "new-data"),
                     }, clear=False):
-                with self.assertRaisesRegex(ValueError, "不能通过更新自动切换"):
+                with self.assertRaisesRegex(ValueError, "固定"):
                     installer.configured_data_root(target)
 
-    def test_linux_root_change_guard_stops_service_and_restarts_on_failure(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            target = base / "install"
-            target.mkdir()
-            old_data = base / "old-data"
-            old_config = base / "old-config"
-            old_state = base / "old-state"
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.dict(os.environ, {
-                        "CODEX_WECHAT_DATA_ROOT": str(old_data),
-                        "XDG_CONFIG_HOME": str(old_config),
-                        "XDG_STATE_HOME": str(old_state),
-                    }, clear=False):
-                installer._publish_runtime_roots(target)
-            with patch.object(installer, "IS_WINDOWS", False), \
-                    patch.object(installer, "RECONFIGURE_ROOTS", True), \
-                    patch.dict(os.environ, {
-                        "CODEX_WECHAT_DATA_ROOT": str(base / "new-data"),
-                        "XDG_CONFIG_HOME": str(base / "new-config"),
-                        "XDG_STATE_HOME": str(base / "new-state"),
-                    }, clear=False), \
-                    patch.object(installer.shutil, "which",
-                                 return_value="/usr/bin/systemctl"), \
-                    patch.object(installer, "_linux_service_snapshot",
-                                 return_value=("owned", "active")), \
-                    patch.object(installer, "_stop_linux_service_for_root_change") as stop, \
-                    patch.object(
-                        installer,
-                        "_restart_linux_service_after_failed_root_change",
-                    ) as restart:
-                with self.assertRaisesRegex(RuntimeError, "integration failed"):
-                    with installer._linux_root_change_guard(target, update=True) as changed:
-                        self.assertTrue(changed)
-                        raise RuntimeError("integration failed")
-            stop.assert_called_once()
-            restart.assert_called_once()
-
     @requires_symlinks
-    def test_linux_runtime_markers_keep_symlinked_xdg_roots(self):
+    def test_linux_runtime_manifest_keeps_symlinked_xdg_roots(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             target = base / "install"
@@ -1095,18 +993,11 @@ class DataRootMarkerTests(unittest.TestCase):
                         "CODEX_WECHAT_DATA_ROOT": "",
                     }, clear=False):
                 installer._publish_runtime_roots(target)
-            self.assertEqual(
-                (target / installer.DATA_ROOT_FILE).read_text(encoding="utf-8"),
-                str(base / "data-home/codex-wechat") + "\n",
-            )
-            self.assertEqual(
-                (target / installer.CONFIG_ROOT_FILE).read_text(encoding="utf-8"),
-                str(base / "config-home/codex-wechat") + "\n",
-            )
-            self.assertEqual(
-                (target / installer.STATE_ROOT_FILE).read_text(encoding="utf-8"),
-                str(base / "state-home/codex-wechat") + "\n",
-            )
+            manifest = json.loads(
+                (target / installer.RUNTIME_ROOTS_FILE).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["data"], str(base / "data-home/codex-wechat"))
+            self.assertEqual(manifest["config"], str(base / "config-home/codex-wechat"))
+            self.assertEqual(manifest["state"], str(base / "state-home/codex-wechat"))
 
     @requires_symlinks
     def test_linux_layout_rejects_a_symlinked_root_into_install(self):
@@ -1151,13 +1042,14 @@ class DataRootMarkerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "不能重叠"):
                     installer.check_runtime_root_layout(target)
 
-    def test_invalid_marker_fails_closed(self):
+    def test_invalid_windows_marker_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "install"
             target.mkdir()
             (target / installer.DATA_ROOT_FILE).write_text(
                 "relative/path\n", encoding="utf-8")
-            with patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
+            with patch.object(installer, "IS_WINDOWS", True), \
+                    patch.dict(os.environ, {"CODEX_WECHAT_DATA_ROOT": ""}, clear=False):
                 with self.assertRaisesRegex(ValueError, "绝对路径"):
                     installer.configured_data_root(target)
 

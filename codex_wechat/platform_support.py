@@ -24,14 +24,8 @@ INSTALL_ROOT = Path(
     os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(PROJECT_ROOT))
 ).expanduser().resolve()
 DATA_ROOT_FILE = ".data-root"
-CONFIG_ROOT_FILE = ".config-root"
-STATE_ROOT_FILE = ".state-root"
 RUNTIME_ROOTS_FILE = ".runtime-roots"
-RUNTIME_ROOT_ROLES = {
-    "data": DATA_ROOT_FILE,
-    "config": CONFIG_ROOT_FILE,
-    "state": STATE_ROOT_FILE,
-}
+RUNTIME_ROOT_ROLES = ("data", "config", "state")
 CURRENT_FILE = "current"
 
 
@@ -65,23 +59,21 @@ def _saved_root(filename: str, install_root: Path | None = None) -> Path | None:
     return root
 
 
-def _saved_role(role: str, install_root: Path | None = None) -> Path | None:
-    manifest = _saved_manifest(install_root)
-    if manifest is not None:
-        return manifest[role]
-    return _saved_root(RUNTIME_ROOT_ROLES[role], install_root)
-
-
 def saved_data_root(install_root: Path | None = None) -> Path | None:
-    return _saved_role("data", install_root)
+    if IS_WINDOWS:
+        return _saved_root(DATA_ROOT_FILE, install_root)
+    layout = _saved_linux_layout(install_root)
+    return layout["data"] if layout is not None else None
 
 
 def saved_config_root(install_root: Path | None = None) -> Path | None:
-    return _saved_role("config", install_root)
+    layout = _saved_linux_layout(install_root)
+    return layout["config"] if layout is not None else None
 
 
 def saved_state_root(install_root: Path | None = None) -> Path | None:
-    return _saved_role("state", install_root)
+    layout = _saved_linux_layout(install_root)
+    return layout["state"] if layout is not None else None
 
 
 def _saved_manifest(install_root: Path | None = None) -> dict[str, Path] | None:
@@ -110,35 +102,22 @@ def _saved_manifest(install_root: Path | None = None) -> dict[str, Path] | None:
     return roots
 
 
-def saved_runtime_roots(install_root: Path | None = None, *, require_complete=False):
-    """Return the complete Linux roots from the manifest or legacy markers."""
-    manifest = _saved_manifest(install_root)
-    if manifest is not None:
-        return manifest
-    roots = {}
-    missing = []
-    for role, filename in RUNTIME_ROOT_ROLES.items():
-        root = _saved_root(filename, install_root)
-        if root is None:
-            missing.append(filename)
-        else:
-            roots[role] = root
-    if require_complete and missing:
-        paths = (INSTALL_ROOT if install_root is None else Path(install_root))
-        raise ValueError(
-            f"Linux 运行时路径标记不完整，拒绝继续: {paths}（缺少 {', '.join(missing)}）"
-        )
-    return roots
+def saved_runtime_roots(install_root: Path | None = None) -> dict[str, Path] | None:
+    """Return the single Linux installation-layout object, if present."""
+    return _saved_manifest(install_root)
 
 
 def _saved_linux_layout(install_root: Path | None = None):
     """Return installed roots, or None only when this is not an installed tree."""
     root = INSTALL_ROOT if install_root is None else Path(install_root)
-    indicators = (CURRENT_FILE, RUNTIME_ROOTS_FILE, *RUNTIME_ROOT_ROLES.values())
+    indicators = (CURRENT_FILE, RUNTIME_ROOTS_FILE)
     if not any((root / name).exists() or (root / name).is_symlink()
                for name in indicators):
         return None
-    return saved_runtime_roots(install_root, require_complete=True)
+    layout = saved_runtime_roots(install_root)
+    if layout is None:
+        raise ValueError(f"Linux 已安装布局缺少运行清单: {root / RUNTIME_ROOTS_FILE}")
+    return layout
 
 
 def default_data_root() -> Path:
@@ -219,15 +198,9 @@ def data_root(install_root: Path | None = None):
     if override and saved is not None:
         requested = Path(override).expanduser().absolute()
         if requested.resolve() != saved.resolve():
-            if IS_WINDOWS:
-                raise ValueError(
-                    "CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；"
-                    "Windows 已安装数据根不能自动切换，请清除环境变量"
-                )
             raise ValueError(
-                "CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；"
-                "请清除环境变量；如需切换已安装根，请设置目标环境后运行 "
-                "codex-wechat update --reconfigure-roots"
+                "CODEX_WECHAT_DATA_ROOT 与已安装布局不一致；"
+                "已安装实例的数据根固定，请清除环境变量"
             )
         return requested
     if override:

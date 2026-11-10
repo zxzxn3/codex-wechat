@@ -6,11 +6,9 @@ import shutil
 import sys
 
 from . import service_adapter
-from .platform_support import (CONFIG_ROOT_FILE, DATA_ROOT_FILE, INSTALL_ROOT,
-                               IS_WINDOWS, RUNTIME_ROOTS_FILE, STATE_ROOT_FILE,
+from .platform_support import (INSTALL_ROOT, IS_WINDOWS, RUNTIME_ROOTS_FILE,
                                reject_symlink_path, runtime_paths,
-                               saved_runtime_roots, validate_runtime_roots,
-                               xdg_config_home)
+                               validate_runtime_roots, xdg_config_home)
 from .service_control import UNIT, systemctl
 from .storage import Store
 
@@ -52,12 +50,11 @@ def _remove_unit_dropin(link: Path | None = None) -> None:
         pass
 
 
-def _remove_runtime_root_markers() -> None:
-    for filename in (RUNTIME_ROOTS_FILE, DATA_ROOT_FILE, CONFIG_ROOT_FILE, STATE_ROOT_FILE):
-        try:
-            (INSTALL_ROOT / filename).unlink()
-        except FileNotFoundError:
-            pass
+def _remove_runtime_roots_manifest() -> None:
+    try:
+        (INSTALL_ROOT / RUNTIME_ROOTS_FILE).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _remove_path(path: Path) -> None:
@@ -165,8 +162,8 @@ def _validated_purge_targets(paths):
     return targets
 
 
-async def _linux_shared_backend_removal() -> None:
-    """Stop only the transient units launched by this application."""
+async def _linux_shared_backend_removal(paths) -> None:
+    """Stop only units whose working directory belongs to this data root."""
     if shutil.which("systemctl") is None:
         return
     output = await systemctl(
@@ -181,7 +178,18 @@ async def _linux_shared_backend_removal() -> None:
             if SHARED_UNIT_PATTERN.fullmatch(field) and field not in units:
                 units.append(field)
                 break
+    data_root = paths.data_root.resolve()
     for unit in units:
+        try:
+            workdir = await systemctl(
+                "show", unit, "--property=WorkingDirectory", "--value")
+            if not workdir:
+                continue
+            cwd = Path(workdir).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if cwd != data_root and not cwd.is_relative_to(data_root):
+            continue
         await systemctl("stop", unit, timeout=20)
         print(f"已停止共享后台: {unit}")
 
@@ -215,14 +223,6 @@ def _require_no_bridge(state_dir: Path | None = None) -> None:
 async def uninstall(*, purge: bool = False) -> None:
     if IS_WINDOWS:
         raise RuntimeError("Windows 卸载请使用 stable uninstall.ps1；uninstall.py 仅用于 Linux。")
-    # Validate the data-root contract before removing the service or touching
-    # any user data. The stable entry checks this too, but a direct helper
-    # invocation must not be able to skip the check.
-    if purge:
-        try:
-            saved_runtime_roots(INSTALL_ROOT, require_complete=True)
-        except ValueError as error:
-            raise RuntimeError(str(error)) from None
     paths = runtime_paths()
     if purge:
         # All destructive targets are validated before service or command
@@ -231,13 +231,11 @@ async def uninstall(*, purge: bool = False) -> None:
     await _linux_service_removal()
     _require_no_bridge(paths.state_dir)
     if purge:
-        await _linux_shared_backend_removal()
+        await _linux_shared_backend_removal(paths)
     _linux_command_removal()
     if purge:
         _purge_linux_data(paths)
-        # Only a purge forgets the roots. A data-preserving uninstall keeps the
-        # markers so the next installation resolves the same directories.
-        _remove_runtime_root_markers()
+        _remove_runtime_roots_manifest()
     # Actions report above; this summary names what is left, in one order shared
     # with the Windows helper: program files, data, how to keep using it, then the
     # decision about removing the rest. The uninstaller runs out of the install

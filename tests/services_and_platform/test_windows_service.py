@@ -366,20 +366,29 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_uninstall_validates_the_saved_data_root_before_task_changes(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn("$SavedDataRoot = Read-SavedDataRoot $InstallRoot", text)
-        self.assertIn("拒绝卸载", text)
-        self.assertIn("没有显式数据根时清理数据", text)
-        self.assertLess(text.index("拒绝卸载"), text.index("$task = Get-ScheduledTask"))
+        self.assertIn("拒绝清理无法确认的数据", text)
+        self.assertLess(
+            text.index("拒绝清理无法确认的数据"),
+            text.index("$task = Get-ScheduledTask"),
+        )
         self.assertIn("[IO.FileShare]::None", text)
         check = text.index("Assert-NoForegroundBridge\n\n# Data removal")
         self.assertLess(text.index("未安装计划任务"), check)
         self.assertLess(check, text.index("if ($PurgeData)"))
 
-    def test_uninstall_treats_an_empty_data_root_as_missing(self):
+    def test_uninstall_has_no_second_data_root_override(self):
+        text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+        self.assertNotIn("[string]$DataRoot", text)
+        self.assertNotIn("CODEX_WECHAT_DATA_ROOT", text)
+
+    def test_uninstall_does_not_follow_nested_reparse_points(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
         self.assertIn(
-            "$HasExplicitDataRoot = -not [string]::IsNullOrWhiteSpace($DataRoot)", text)
+            "function Remove-TreeWithoutFollowingLinks([string]$Path)", text)
         self.assertIn(
-            "$RequestedDataRoot = if (-not [string]::IsNullOrWhiteSpace($DataRoot))", text)
+            "Remove-TreeWithoutFollowingLinks $child.FullName", text)
+        self.assertIn("[IO.Directory]::Delete($Path, $false)", text)
+        self.assertNotIn("Remove-Item -LiteralPath $path -Recurse -Force", text)
 
     def test_uninstall_only_forgets_the_data_root_when_purging(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
@@ -426,16 +435,14 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("-cnotmatch", desktop)
 
     def test_powershell_entry_splats_uninstall_by_name_not_position(self):
-        # An array splat binds positionally and switches are skipped, so
-        # @('-PurgeData') landed in -DataRoot: the purge silently did nothing
-        # and the data root became a relative path. Only a hashtable binds by
-        # name.
+        # An array splat binds positionally and switches are skipped. Only a
+        # hashtable binds the purge switch by name.
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
         block = entry[entry.index("$Command -eq 'uninstall'"):]
         block = block[:block.index("exit 0")]
         self.assertIn("$UninstallerArguments = @{}", block)
         self.assertIn("$UninstallerArguments.PurgeData = $true", block)
-        self.assertIn("$UninstallerArguments.DataRoot =", block)
+        self.assertNotIn("$UninstallerArguments.DataRoot =", block)
         self.assertNotIn("$UninstallerArguments += '-PurgeData'", block)
         self.assertNotIn("$UninstallerArguments += @('-DataRoot'", block)
 

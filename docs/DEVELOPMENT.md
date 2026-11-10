@@ -51,7 +51,7 @@ PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests
 `tests/support/helpers.py` 在导入时把
 `diagnostics` 指向临时 sink，并在每次 `reset()` 后重新套用，所以直接跑测试不会把夹具事件
 写进已安装实例正在使用的日志；上面的隔离目录仍然推荐，因为它同时挡住其它副作用。这里把源码
-导出到没有 `.data-root` 的临时根，避免源码树本身是安装根时与新的 fail-closed 冲突。
+导出到没有 `current` / `.runtime-roots` 的临时根，避免源码树本身被识别为已安装布局。
 Windows PowerShell 同样应使用源码副本，并设置 `CODEX_WECHAT_INSTALL_ROOT` 指向该副本：
 
 ```powershell
@@ -184,10 +184,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 
 重构优先解决已观察到的边界问题，不按行数拆文件，不为跨平台强行统一平台适配层。这些取舍
 不代表已取消任何能力。
-
-补丁债务雷达从 fix 提交和当前生产文件的历史变更中生成候选：
-`.venv/bin/python scripts/patch_debt.py --days 90`。它只发现历史热点，不会自动判断债务是否
-仍然存在；确认前必须核对当前源码和测试。`--format json` 可用于后续导入 Taskwarrior。
 
 安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；运行期模块位于
 `codex_wechat/`，包内使用相对导入。

@@ -33,10 +33,9 @@ Windows `.cmd` 是薄启动器，内部调用 stable `codex-wechat.ps1`，最终
 `python -m codex_wechat`。`.ps1` 不在 `PATHEXT` 中且受执行策略限制，不能作为 `cmd.exe`
 短入口；安装器不会修改 PATH。
 
-Linux 用 `.runtime-roots` 原子保存数据、配置和状态三个根，并兼容三个旧标记；公开入口和
-systemd 服务读取同一组路径。Windows 继续由 `.data-root` 唯一解析数据根。安装后修改数据根或
-XDG 根在 Linux 必须使用 `--reconfigure-roots` 显式切换；普通更新沿用已保存的根。Windows
-只在首次安装时接受 `CODEX_WECHAT_DATA_ROOT`，已安装实例不能自动切换数据根。
+Linux 用 `.runtime-roots` 原子保存数据、配置和状态三个根；公开入口和 systemd 服务读取同一
+组路径。Windows 由 `.data-root` 唯一解析数据根。两套布局都在首次安装后固定，普通更新只沿用
+已保存的根；不提供原地换根命令。需要搬迁时先备份，再 purge 并从目标环境重新安装。
 
 ## Windows 操作
 

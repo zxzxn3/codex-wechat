@@ -4,7 +4,6 @@ set -euo pipefail
 INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 PROJECT_DIR="$INSTALL_ROOT"
 CURRENT_FILE="$INSTALL_ROOT/current"
-DATA_ROOT_FILE="$INSTALL_ROOT/.data-root"
 RUNTIME_ROOTS_FILE="$INSTALL_ROOT/.runtime-roots"
 export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
 ACTION="${1:-status}"
@@ -12,35 +11,9 @@ case "$ACTION" in
     install|update|menu|components) INSTALLER_ACTION=1 ;;
     *) INSTALLER_ACTION=0 ;;
 esac
-if [ ! -e "$RUNTIME_ROOTS_FILE" ] &&
-        { [ -e "$DATA_ROOT_FILE" ] || [ -L "$DATA_ROOT_FILE" ]; } &&
-        { [ "$INSTALLER_ACTION" -eq 0 ] || [ -z "${CODEX_WECHAT_DATA_ROOT:-}" ]; }; then
-    if [ -L "$DATA_ROOT_FILE" ] || [ ! -f "$DATA_ROOT_FILE" ]; then
-        echo "codex-wechat: 数据根标记不是普通文件: $DATA_ROOT_FILE" >&2
-        exit 1
-    fi
-    saved_data_root=$(<"$DATA_ROOT_FILE")
-    if [[ -z "$saved_data_root" || "$saved_data_root" != /* ||
-          "$saved_data_root" == *$'\n'* || "$saved_data_root" == *$'\r'* ]]; then
-        echo "codex-wechat: 数据根标记内容无效: $DATA_ROOT_FILE" >&2
-        exit 1
-    fi
-    if [ -n "${CODEX_WECHAT_DATA_ROOT:-}" ]; then
-        requested_data_root=$(realpath -m -- "$CODEX_WECHAT_DATA_ROOT")
-        saved_data_root=$(realpath -m -- "$saved_data_root")
-        if [ "$requested_data_root" != "$saved_data_root" ]; then
-            echo "codex-wechat: CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；请清除环境变量，或运行 codex-wechat update --reconfigure-roots 显式切换" >&2
-            exit 78
-        fi
-    else
-        export CODEX_WECHAT_DATA_ROOT="$saved_data_root"
-    fi
-fi
-if [ "$INSTALLER_ACTION" -eq 0 ] && [ "$ACTION" != "uninstall" ] &&
-        [ ! -e "$RUNTIME_ROOTS_FILE" ] &&
-        [ ! -e "$DATA_ROOT_FILE" ] && [ ! -L "$DATA_ROOT_FILE" ] &&
+if [ "$INSTALLER_ACTION" -eq 0 ] && [ ! -e "$RUNTIME_ROOTS_FILE" ] &&
         [ -f "$CURRENT_FILE" ]; then
-    echo "codex-wechat: 已安装布局缺少运行时路径标记；请重新运行安装器" >&2
+    echo "codex-wechat: 已安装布局缺少运行清单；请重新运行安装器" >&2
     exit 1
 fi
 if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; then
@@ -96,9 +69,6 @@ if [ -f "$CURRENT_FILE" ]; then
         echo "codex-wechat: 当前版本不完整: $PROJECT_DIR" >&2
         echo "请从新源码重新运行 update。" >&2
         exit 1
-    fi
-    if [ ! -e "$RUNTIME_ROOTS_FILE" ]; then
-        export CODEX_WECHAT_DATA_ROOT="${CODEX_WECHAT_DATA_ROOT:-$INSTALL_ROOT}"
     fi
 fi
 export PATH="$HOME/.local/bin:$PATH"

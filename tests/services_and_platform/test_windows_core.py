@@ -17,7 +17,7 @@ from codex_wechat.pipe_websocket import PipeWebSocket
 from codex_wechat.profiles import definitions, resume_or_adopt
 from codex_wechat.storage import Store
 from codex_wechat import platform_support
-from tests.support.helpers import requires_symlinks
+from tests.support.helpers import requires_symlinks, write_runtime_roots_manifest
 from websockets.server import ServerProtocol
 from websockets.http11 import Request
 from websockets.frames import Frame, Opcode
@@ -209,12 +209,8 @@ class PlatformTests(unittest.TestCase):
             data = base / "custom-data/codex-wechat"
             config = base / "custom-config/codex-wechat"
             state = base / "custom-state/codex-wechat"
-            (install / platform_support.DATA_ROOT_FILE).write_text(
-                str(data) + "\n", encoding="utf-8")
-            (install / platform_support.CONFIG_ROOT_FILE).write_text(
-                str(config) + "\n", encoding="utf-8")
-            (install / platform_support.STATE_ROOT_FILE).write_text(
-                str(state) + "\n", encoding="utf-8")
+            write_runtime_roots_manifest(
+                install, data_root=data, config_root=config, state_root=state)
             with patch.object(platform_support, "IS_WINDOWS", False), \
                     patch.object(platform_support, "INSTALL_ROOT", install), \
                     patch.dict(os.environ, {
@@ -253,7 +249,8 @@ class PlatformTests(unittest.TestCase):
             data.mkdir()
             (install / platform_support.DATA_ROOT_FILE).write_text(
                 str(data) + "\n", encoding="utf-8")
-            with patch.object(platform_support, "INSTALL_ROOT", install), \
+            with patch.object(platform_support, "IS_WINDOWS", True), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
                     patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": ""},
                                clear=False):
                 self.assertEqual(platform_support.data_root(), data.resolve())
@@ -268,11 +265,13 @@ class PlatformTests(unittest.TestCase):
             other.mkdir()
             (install / platform_support.DATA_ROOT_FILE).write_text(
                 str(saved) + "\n", encoding="utf-8")
-            with patch.object(platform_support, "INSTALL_ROOT", install), \
+            with patch.object(platform_support, "IS_WINDOWS", True), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
                     patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": str(saved)},
                                clear=False):
                 self.assertEqual(platform_support.data_root(), saved.resolve())
-            with patch.object(platform_support, "INSTALL_ROOT", install), \
+            with patch.object(platform_support, "IS_WINDOWS", True), \
+                    patch.object(platform_support, "INSTALL_ROOT", install), \
                     patch.dict("os.environ", {"CODEX_WECHAT_DATA_ROOT": str(other)},
                                clear=False):
                 with self.assertRaisesRegex(ValueError, "不一致"):

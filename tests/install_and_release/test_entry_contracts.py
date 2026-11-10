@@ -30,17 +30,12 @@ class EntryContractTests(unittest.TestCase):
         )
         self.assertIn("CODEX_WECHAT_INSTALL_ROOT", text)
 
-    def test_linux_entry_preserves_an_explicit_data_root(self):
+    def test_linux_entry_requires_the_single_runtime_manifest(self):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
-        self.assertIn('export CODEX_WECHAT_DATA_ROOT="${CODEX_WECHAT_DATA_ROOT:-$INSTALL_ROOT}"', text)
-        self.assertNotIn('export CODEX_WECHAT_DATA_ROOT="$INSTALL_ROOT"', text)
-        self.assertIn("DATA_ROOT_FILE", text)
         self.assertIn("RUNTIME_ROOTS_FILE", text)
         self.assertIn(".runtime-roots", text)
-        self.assertIn(".data-root", text)
-        self.assertIn("不一致", text)
-        self.assertLess(text.index("不一致"), text.index('if [ "$ACTION" = "uninstall" ]'))
-        self.assertIn("已安装布局缺少运行时路径标记", text)
+        self.assertNotIn(".data-root", text)
+        self.assertIn("已安装布局缺少运行清单", text)
 
     @unittest.skipIf(os.name == "nt", "POSIX launcher integration")
     def test_linux_entry_accepts_the_atomic_manifest_without_legacy_markers(self):

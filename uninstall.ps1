@@ -2,8 +2,7 @@
 [CmdletBinding()]
 param(
     [switch]$PurgeData,
-    [switch]$Force,
-    [string]$DataRoot
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
@@ -40,10 +39,8 @@ function Read-SavedDataRoot([string]$Root) {
     return [IO.Path]::GetFullPath($Value)
 }
 $SavedDataRoot = Read-SavedDataRoot $InstallRoot
-$HasExplicitDataRoot = -not [string]::IsNullOrWhiteSpace($DataRoot) -or
-    -not [string]::IsNullOrWhiteSpace($env:CODEX_WECHAT_DATA_ROOT)
-if ($PurgeData -and -not $SavedDataRoot -and -not $HasExplicitDataRoot) {
-    throw 'uninstall.ps1: 缺少数据根标记；拒绝在没有显式数据根时清理数据'
+if ($PurgeData -and -not $SavedDataRoot) {
+    throw 'uninstall.ps1: 缺少数据根标记；拒绝清理无法确认的数据'
 }
 $StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $ExpectedActionPrefixes = @(
@@ -53,17 +50,10 @@ $ExpectedActionExecutables = @(
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'),
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe')
 )
-$RequestedDataRoot = if (-not [string]::IsNullOrWhiteSpace($DataRoot)) {
-    [IO.Path]::GetFullPath($DataRoot)
-} elseif (-not [string]::IsNullOrWhiteSpace($env:CODEX_WECHAT_DATA_ROOT)) {
-    [IO.Path]::GetFullPath($env:CODEX_WECHAT_DATA_ROOT)
-} elseif ($SavedDataRoot) {
+$RequestedDataRoot = if ($SavedDataRoot) {
     $SavedDataRoot
 } else {
     Join-Path $env:LOCALAPPDATA 'codex-wechat'
-}
-if ($SavedDataRoot -and $RequestedDataRoot -ne $SavedDataRoot) {
-    throw 'uninstall.ps1: CODEX_WECHAT_DATA_ROOT 与安装根 .data-root 不一致；拒绝卸载'
 }
 $DataRoot = $RequestedDataRoot
 $DataPaths = @('config.json', '.state', 'workspace', 'logs', 'shared')
@@ -101,17 +91,38 @@ function Wait-TaskStopped([int]$TimeoutSeconds = 15) {
     Fail "计划任务 '$TaskName' 未在 $TimeoutSeconds 秒内停止"
 }
 
+function Remove-TreeWithoutFollowingLinks([string]$Path) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) {
+        return
+    }
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        # Remove the link itself. In PowerShell 5.1 a recursive removal can
+        # otherwise walk into an NTFS junction and delete its target contents.
+        if ($item.PSIsContainer) {
+            [IO.Directory]::Delete($Path, $false)
+        } else {
+            [IO.File]::Delete($Path)
+        }
+        return
+    }
+    if (-not $item.PSIsContainer) {
+        Remove-Item -LiteralPath $Path -Force
+        return
+    }
+    foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force)) {
+        Remove-TreeWithoutFollowingLinks $child.FullName
+    }
+    [IO.Directory]::Delete($Path, $false)
+}
+
 function Remove-DataPath([string]$Name) {
     $path = Join-Path $DataRoot $Name
     $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
     if (-not $item) {
         return
     }
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        Remove-Item -LiteralPath $path -Force
-    } else {
-        Remove-Item -LiteralPath $path -Recurse -Force
-    }
+    Remove-TreeWithoutFollowingLinks $path
 }
 
 function Assert-NoForegroundBridge {

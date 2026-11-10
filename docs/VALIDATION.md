@@ -5,12 +5,12 @@
 
 ## 当前证据
 
-- Linux 当前树：`scripts/check.sh` 通过，包含 Ruff、Pyright、ShellCheck、分支覆盖单元测试和
-  生成文档漂移检查。具体测试数量以命令输出为准，不在文档维护副本。
-- 2026-11-10 Linux 当前树新增了状态损坏隔离、解析器资源上限隔离、不完整运行时根标记拒绝、
-  只读 status 诊断、Git `HEAD` release 边界和 Windows 拒绝换根参数的离线回归；完整检查
-  通过。Windows 参数拒绝只验证了 Python 分支，目标 Windows 入口与真实 Scheduled Task
-  仍需实机复测。
+- Linux 检查入口：`scripts/check.sh` 包含 Ruff、Pyright、ShellCheck、分支覆盖单元测试和
+  生成文档漂移检查。具体结果以命令输出或专用测试会话回信为准，不在文档维护副本。
+- 2026-11-10 Linux 当前树新增了状态损坏隔离、不完整运行时布局拒绝、只读 status 诊断和
+  Git `HEAD` release 边界。解析器资源上限与极深状态复制明确采用 fail-fast，不维护隔离
+  承诺；原地换根参数和旧标记兼容已移除。Windows 嵌套重解析点清理只有静态回归，目标
+  Windows 入口、junction 行为和真实 Scheduled Task 仍需实机复测。
 - Windows 历史提交 `ab6ab61`：完整离线测试和 Ruff 通过；`057a96f` 也有较早的完整报告。
   这些结果不能证明当前树的 Windows 路径已复测。
 - Windows 服务生命周期曾实机验证 PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、

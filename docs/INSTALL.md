@@ -166,17 +166,15 @@ Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是�
 `--purge-data` / `-PurgeData` 只删除已知用户数据项，不递归删除自定义数据根目录。Linux
 分别删除配置文件、状态目录和数据根下的 `workspace`；Windows 继续删除统一数据根中的已知项。
 前台桥接仍持有状态锁时，卸载会拒绝继续；先按 `Ctrl+C` 退出。自定义数据目录通过
-`CODEX_WECHAT_DATA_ROOT` 指定，Windows 内部 helper 另外接受 `-DataRoot`。Linux purge 还会
-停止本应用命名空间中的共享 Codex 后台；任何一步无法确认时先保留数据。
+`CODEX_WECHAT_DATA_ROOT` 在首次安装时指定；卸载器没有第二套数据根参数。Linux purge 还会
+停止工作目录属于当前数据根的共享 Codex 后台；任何一步无法确认时先保留数据。
 
 卸载结束时会把程序文件、数据根以及 Linux 的配置和状态位置打印出来；需要在卸载后彻底删除，
 由用户自己决定。
 
-不带 purge 的卸载会保留 `.runtime-roots` 和旧路径标记：安装树仍在（卸载只移除服务与入口），
-所以重新运行安装器会解析为 update，并继续使用原来的根。想让重装改判到平台默认目录，删除
-这些标记或显式设置 `CODEX_WECHAT_DATA_ROOT` 即可。Linux 已安装实例也可以用
-`codex-wechat update --reconfigure-roots` 显式切换；Windows 当前不支持在已安装实例上自动
-切换数据根，需备份后全新安装。
+不带 purge 的卸载会保留 Linux `.runtime-roots` 或 Windows `.data-root`：安装树仍在
+（卸载只移除服务与入口），所以重新运行安装器会解析为 update，并继续使用原来的根。purge
+会删除对应布局标记；之后重新安装会按当时的 XDG/数据根环境建立新契约。
 
 ## 目录和配置
 
@@ -190,21 +188,14 @@ Linux 按 XDG 职责拆分：
 | 工作区 | `~/.local/share/codex-wechat/workspace` |
 
 Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` 的其他路径会被拒绝。
-安装器把解析后的数据根、配置根和状态根作为一组原子写入 `.runtime-roots`，同时保留
-`.data-root`、`.config-root` 和 `.state-root` 供旧版本迁移。读取方优先使用 `.runtime-roots`；
-在已安装布局中，它缺失时才要求三个旧标记完整存在。公开入口和 systemd 服务都读取同一组
-路径，不依赖交互 shell 或 systemd manager 是否导出了 XDG 变量。
+安装器把解析后的数据根、配置根和状态根作为一组原子写入 `.runtime-roots`。Linux 的公开入口
+和 systemd 服务只读取这一份清单，不依赖交互 shell 或 systemd manager 是否导出了 XDG 变量。
+旧的 `.data-root`、`.config-root`、`.state-root` 不作为 Linux 兼容契约。
 
 `XDG_CONFIG_HOME`、`XDG_STATE_HOME` 和 `XDG_DATA_HOME` 在首次安装时决定路径根。普通更新
-始终沿用已保存的根，不受当前 shell 中这些变量影响。需要换根时显式运行：
-
-```bash
-codex-wechat update --reconfigure-roots
-```
-
-安装器会先停止后台服务并确认旧状态没有前台进程，再原子切换三个根。切换成功后服务保持
-停止，避免用空的新状态自动启动；确认配置和登录后运行 `codex-wechat service-start`。
-`CODEX_WECHAT_DATA_ROOT` 只覆盖数据根，因此工作区随数据根移动，配置和状态仍遵循 XDG。
+始终沿用已保存的根，不受当前 shell 中这些变量影响。项目不提供原地换根命令；需要搬迁时先
+备份数据，再 purge 并从目标环境重新安装。`CODEX_WECHAT_DATA_ROOT` 只覆盖首次安装的数据根，
+因此工作区随数据根移动，配置和状态仍遵循 XDG；与已保存布局冲突时 fail closed。
 `CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口和源码副本的运行定位。配置根或状态根与程序安装根
 重叠，或数据、配置、状态三个角色互相重叠时，安装和 purge 都会 fail closed；默认的
 `$data_root/workspace` 是唯一允许位于安装根下的 purge 目标。purge 也会拒绝经过符号链接的
@@ -218,10 +209,11 @@ Windows purge 还会拒绝数据根本身及其已有父链中的任何重解析
 若 `bridge.json` 无法解析或字段类型无效，正常启动会先把它移动到
 `bridge.corrupt-*.json`，再以空状态启动。只读的 `codex-wechat status` 不会修改文件，而是
 返回 `state=recovery_required` 和具体诊断；先检查该输出及隔离文件，再决定是否恢复其中的
-未发送消息。更高 schema 版本的文件不会被自动移动或覆盖。
+未发送消息。更高 schema 版本的文件不会被自动移动或覆盖。人为构造到解析器或对象复制资源
+上限的文件直接 fail fast，不属于损坏隔离承诺。
 
-Windows 继续只使用 `.data-root`；Linux 使用原子运行时根清单并兼容三个旧标记。当前版本不迁移 Linux 旧布局；
-旧版统一数据根中的配置和状态不会被新版本读取。
+Windows 只使用 `.data-root`；Linux 只使用原子运行时根清单。当前版本不迁移 Linux 旧布局；
+旧版分散标记或统一数据根中的配置和状态不会被新版本读取。
 
 配置、状态、日志、共享后台和工作区各有独立职责，不复制供应商凭据或会话历史。热配置和提示
 的运行边界见 [ARCHITECTURE](ARCHITECTURE.md#配置与提示)。

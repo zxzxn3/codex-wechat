@@ -1,4 +1,4 @@
-"""Cross-implementation contract for the install-root data marker."""
+"""Cross-implementation contract for the platform-specific runtime layout."""
 import os
 from pathlib import Path
 import tempfile
@@ -8,8 +8,7 @@ from unittest.mock import patch
 import installer
 from codex_wechat import platform_support
 from codex_wechat import windows_service
-
-from tests.support.helpers import (requires_symlinks, write_runtime_root_markers,
+from tests.support.helpers import (requires_symlinks, write_runtime_roots_manifest,
                                    xdg_user_data_dir)
 
 
@@ -30,7 +29,7 @@ class DataRootContractTests(unittest.TestCase):
         return patch.object(platform_support, "_platform_user_data_dir",
                             xdg_user_data_dir)
 
-    def test_written_marker_round_trips_for_default_and_custom_roots(self):
+    def test_windows_marker_round_trips_for_default_and_custom_roots(self):
         cases = (
             ("default", "", self.xdg / "codex-wechat"),
             ("custom", str(self.base / "custom data"), self.base / "custom data"),
@@ -41,10 +40,13 @@ class DataRootContractTests(unittest.TestCase):
                 target = self.base / name
                 target.mkdir()
                 with self.environment(override), self.runtime_views(), \
+                        patch.object(installer, "IS_WINDOWS", True), \
+                        patch.object(platform_support, "IS_WINDOWS", True), \
                         patch.object(platform_support, "INSTALL_ROOT", target):
                     installer._write_data_root_marker(target)
                     self.assertEqual(installer.saved_data_root(target), expected.resolve())
                 with self.environment(""), self.runtime_views(), \
+                        patch.object(platform_support, "IS_WINDOWS", True), \
                         patch.object(platform_support, "INSTALL_ROOT", target):
                     self.assertEqual(platform_support.saved_data_root(target),
                                      expected.resolve())
@@ -53,10 +55,11 @@ class DataRootContractTests(unittest.TestCase):
                     self.assertEqual(installer.configured_data_root(target),
                                      expected.resolve())
 
-    def test_saved_marker_wins_over_a_changed_platform_default(self):
+    def test_saved_windows_marker_wins_over_a_changed_platform_default(self):
         target = self.base / "install"
         target.mkdir()
-        with self.environment(""), self.runtime_views():
+        with self.environment(""), self.runtime_views(), \
+                patch.object(installer, "IS_WINDOWS", True):
             installer._write_data_root_marker(target)
             saved = installer.saved_data_root(target)
 
@@ -65,6 +68,8 @@ class DataRootContractTests(unittest.TestCase):
                 "CODEX_WECHAT_DATA_ROOT": "",
                 "XDG_DATA_HOME": str(other_xdg),
         }, clear=False), self.runtime_views(), \
+                patch.object(installer, "IS_WINDOWS", True), \
+                patch.object(platform_support, "IS_WINDOWS", True), \
                 patch.object(platform_support, "INSTALL_ROOT", target):
             self.assertEqual(saved, (self.xdg / "codex-wechat").resolve())
             self.assertEqual(platform_support.data_root(target), saved)
@@ -81,16 +86,14 @@ class DataRootContractTests(unittest.TestCase):
             self.assertEqual(platform_support.data_root(target), expected)
             self.assertEqual(installer.configured_data_root(target), expected)
 
-    def test_runtime_manifest_is_canonical_over_legacy_markers(self):
+    def test_linux_manifest_is_the_only_linux_layout_contract(self):
         target = self.base / "install"
         target.mkdir()
         data = self.base / "manifest-data"
         config = self.base / "manifest-config/codex-wechat"
         state = self.base / "manifest-state/codex-wechat"
-        write_runtime_root_markers(
-            target, data_root=data, config_root=config, state_root=state, manifest=True)
-        (target / platform_support.DATA_ROOT_FILE).write_text(
-            str(self.base / "legacy-data") + "\n", encoding="utf-8")
+        write_runtime_roots_manifest(
+            target, data_root=data, config_root=config, state_root=state)
         with self.environment(""), \
                 patch.object(platform_support, "IS_WINDOWS", False), \
                 patch.object(platform_support, "INSTALL_ROOT", target):
@@ -98,52 +101,39 @@ class DataRootContractTests(unittest.TestCase):
             self.assertEqual(platform_support.saved_config_root(target), config)
             self.assertEqual(platform_support.saved_state_root(target), state)
             self.assertEqual(installer.saved_data_root(target), data)
-            self.assertEqual(installer.saved_config_root(target), config)
-            self.assertEqual(installer.saved_state_root(target), state)
+            self.assertEqual(installer.configured_config_root(target), config)
+            self.assertEqual(installer.configured_state_root(target), state)
             self.assertEqual(
-                platform_support.saved_runtime_roots(target, require_complete=True),
+                platform_support.saved_runtime_roots(target),
                 {"data": data, "config": config, "state": state},
             )
             paths = platform_support.runtime_paths()
             self.assertEqual(paths.data_root, data)
             self.assertEqual(paths.config_file, config / "config.json")
             self.assertEqual(paths.state_dir, state)
+        self.assertFalse((target / platform_support.DATA_ROOT_FILE).exists())
+        self.assertFalse((target / ".config-root").exists())
+        self.assertFalse((target / ".state-root").exists())
 
-    def test_incomplete_legacy_runtime_markers_fail_the_strict_reader(self):
+    def test_linux_legacy_markers_do_not_complete_an_installed_layout(self):
         target = self.base / "install"
         target.mkdir()
-        (target / platform_support.DATA_ROOT_FILE).write_text(
-            str(self.base / "data") + "\n", encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "路径标记不完整"):
-            platform_support.saved_runtime_roots(target, require_complete=True)
-
-    def test_runtime_paths_reject_incomplete_legacy_markers(self):
-        target = self.base / "install"
-        target.mkdir()
+        (target / platform_support.CURRENT_FILE).write_text("release\n", encoding="utf-8")
         (target / platform_support.DATA_ROOT_FILE).write_text(
             str(self.base / "data") + "\n", encoding="utf-8")
         with self.environment(""), self.runtime_views(), \
                 patch.object(platform_support, "IS_WINDOWS", False), \
                 patch.object(platform_support, "INSTALL_ROOT", target):
             for resolver in (
+                    platform_support.saved_data_root,
                     platform_support.runtime_paths,
                     platform_support.config_root,
                     platform_support.state_root):
                 with self.subTest(resolver=resolver.__name__):
-                    with self.assertRaisesRegex(ValueError, "路径标记不完整"):
+                    with self.assertRaisesRegex(ValueError, "缺少运行清单"):
                         resolver()
 
-    def test_runtime_paths_reject_an_installed_tree_without_root_markers(self):
-        target = self.base / "install"
-        target.mkdir()
-        (target / "current").write_text("release\n", encoding="utf-8")
-        with self.environment(""), self.runtime_views(), \
-                patch.object(platform_support, "IS_WINDOWS", False), \
-                patch.object(platform_support, "INSTALL_ROOT", target):
-            with self.assertRaisesRegex(ValueError, "路径标记不完整"):
-                platform_support.runtime_paths()
-
-    def test_invalid_runtime_manifest_fails_closed(self):
+    def test_invalid_linux_manifest_fails_closed(self):
         target = self.base / "install"
         target.mkdir()
         manifest = target / platform_support.RUNTIME_ROOTS_FILE
@@ -155,37 +145,53 @@ class DataRootContractTests(unittest.TestCase):
             with self.subTest(contents=contents):
                 manifest.write_text(contents, encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "运行时路径清单"):
-                    platform_support.saved_runtime_roots(target, require_complete=True)
+                    platform_support.saved_runtime_roots(target)
                 with self.assertRaisesRegex(ValueError, "运行时路径清单"):
                     installer.saved_data_root(target)
 
-    def test_installer_can_replace_a_marker_but_runtime_rejects_unapplied_conflict(self):
+    def test_linux_update_keeps_saved_roots_and_rejects_a_data_override(self):
         target = self.base / "install"
         target.mkdir()
-        old = self.base / "old-data"
-        new = self.base / "new-data"
-        (target / platform_support.DATA_ROOT_FILE).write_text(
-            str(old) + "\n", encoding="utf-8")
-
-        with self.environment(str(new)), self.runtime_views(), \
-                patch.object(platform_support, "INSTALL_ROOT", target):
-            with self.assertRaisesRegex(ValueError, "--reconfigure-roots"):
+        old_data = self.base / "old-data"
+        old_config = self.base / "old-config"
+        old_state = self.base / "old-state"
+        write_runtime_roots_manifest(
+            target,
+            data_root=old_data,
+            config_root=old_config / "codex-wechat",
+            state_root=old_state / "codex-wechat",
+        )
+        with patch.object(installer, "IS_WINDOWS", False), \
+                patch.dict(os.environ, {
+                    "CODEX_WECHAT_DATA_ROOT": "",
+                    "XDG_CONFIG_HOME": str(self.base / "ambient-config"),
+                    "XDG_STATE_HOME": str(self.base / "ambient-state"),
+                }, clear=False):
+            self.assertEqual(installer.configured_data_root(target), old_data)
+            self.assertEqual(installer.configured_config_root(target),
+                             old_config / "codex-wechat")
+            self.assertEqual(installer.configured_state_root(target),
+                             old_state / "codex-wechat")
+        with patch.object(installer, "IS_WINDOWS", False), \
+                patch.dict(os.environ, {
+                    "CODEX_WECHAT_DATA_ROOT": str(self.base / "new-data"),
+                }, clear=False):
+            with self.assertRaisesRegex(ValueError, "固定"):
                 installer.configured_data_root(target)
-        with self.environment(str(new)), self.runtime_views(), \
-                patch.object(platform_support, "INSTALL_ROOT", target), \
-                patch.object(installer, "RECONFIGURE_ROOTS", True):
-            self.assertEqual(installer.configured_data_root(target), new.resolve())
-            with self.assertRaisesRegex(ValueError, "不一致"):
-                platform_support.data_root(target)
-            installer._write_data_root_marker(target)
 
-        with self.environment(""), self.runtime_views(), \
-                patch.object(platform_support, "INSTALL_ROOT", target):
-            self.assertEqual(installer.saved_data_root(target), new.resolve())
-            self.assertEqual(platform_support.data_root(target), new.resolve())
-            self.assertEqual(windows_service.data_root(), new.resolve())
+    def test_windows_update_rejects_a_different_data_root(self):
+        target = self.base / "install"
+        target.mkdir()
+        (target / installer.DATA_ROOT_FILE).write_text(
+            str(self.base / "old-data") + "\n", encoding="utf-8")
+        with patch.object(installer, "IS_WINDOWS", True), \
+                patch.dict(os.environ, {
+                    "CODEX_WECHAT_DATA_ROOT": str(self.base / "new-data"),
+                }, clear=False):
+            with self.assertRaisesRegex(ValueError, "固定"):
+                installer.configured_data_root(target)
 
-    def test_invalid_markers_fail_closed_in_every_reader(self):
+    def test_invalid_windows_marker_fails_closed_in_every_reader(self):
         target = self.base / "install"
         target.mkdir()
         marker = target / platform_support.DATA_ROOT_FILE
@@ -200,6 +206,8 @@ class DataRootContractTests(unittest.TestCase):
             with self.subTest(name=name):
                 marker.write_bytes(contents)
                 with self.environment(""), self.runtime_views(), \
+                        patch.object(installer, "IS_WINDOWS", True), \
+                        patch.object(platform_support, "IS_WINDOWS", True), \
                         patch.object(platform_support, "INSTALL_ROOT", target):
                     with self.assertRaises(ValueError):
                         installer.saved_data_root(target)
@@ -213,6 +221,8 @@ class DataRootContractTests(unittest.TestCase):
         marker.unlink()
         marker.mkdir()
         with self.environment(""), self.runtime_views(), \
+                patch.object(installer, "IS_WINDOWS", True), \
+                patch.object(platform_support, "IS_WINDOWS", True), \
                 patch.object(platform_support, "INSTALL_ROOT", target):
             with self.assertRaises(ValueError):
                 installer.saved_data_root(target)
@@ -222,7 +232,7 @@ class DataRootContractTests(unittest.TestCase):
                 windows_service.data_root()
 
     @requires_symlinks
-    def test_symlink_marker_fails_closed_in_every_reader(self):
+    def test_symlink_windows_marker_fails_closed_in_every_reader(self):
         target = self.base / "install"
         target.mkdir()
         outside = self.base / "outside"
@@ -230,6 +240,8 @@ class DataRootContractTests(unittest.TestCase):
         marker = target / platform_support.DATA_ROOT_FILE
         marker.symlink_to(outside)
         with self.environment(""), self.runtime_views(), \
+                patch.object(installer, "IS_WINDOWS", True), \
+                patch.object(platform_support, "IS_WINDOWS", True), \
                 patch.object(platform_support, "INSTALL_ROOT", target):
             with self.assertRaises(ValueError):
                 installer.saved_data_root(target)
