@@ -6,7 +6,7 @@ Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据
 
 | 范围 | 当前证据 | 状态 |
 |---|---|---|
-| 离线单测 | `python -m unittest discover -s tests`：Linux 当前工作树 996 项、975 通过、21 跳过、0 失败（2026-11-09）；Windows 在 `ab6ab61` 实测 979 项、958 通过、21 跳过、0 失败，`ruff check .` 通过（2026-11-09，含本批修复与新增回归测试）；Windows 在 `057a96f` 实测 941 项、920 通过、21 跳过、0 失败（2026-11-07 历史报告）；更早的 Windows 894 项报告无提交号，不再作为证据；覆盖 `codex_wechat/` 包化后的 stable payload/import 烟测、动态 release 包加载、数据根跨实现契约矩阵、Bridge 状态不变量与保存边界故障注入、平台用户目录回退和服务状态矩阵；套件把诊断写入临时 sink，不污染数据根下的 `logs/bridge.jsonl` | 已验证 |
+| 离线单测 | `python -m unittest discover -s tests`：Linux 当前工作树 1006 项、985 通过、21 跳过、0 失败（2026-11-10）；Windows 在 `ab6ab61` 实测 979 项、958 通过、21 跳过、0 失败，`ruff check .` 通过（2026-11-09，含本批修复与新增回归测试）；Windows 在 `057a96f` 实测 941 项、920 通过、21 跳过、0 失败（2026-11-07 历史报告）；更早的 Windows 894 项报告无提交号，不再作为证据；覆盖 `codex_wechat/` 包化后的 stable payload/import 烟测、动态 release 包加载、Linux XDG config/state/data 分工、Windows 旧布局保持、Bridge 状态不变量与保存边界故障注入、平台用户目录回退和服务状态矩阵；套件把诊断写入临时 sink，不污染真实日志 | 已验证 |
 | 静态检查 | ruff、shellcheck、`py_compile`、pyright（0 errors、5 个环境导入 warning） | 已验证 |
 | Windows 服务基础生命周期 | PowerShell 5.1、Scheduled Task、Job Object 清理、单实例、通知 | 历史证据，无当前提交号；不作为当前 HEAD 证据 |
 | Windows App IPC | writer 冲突连接、身份核对、无 App / App 已持有 / App 后启动三种命名管道状态 | 历史证据，无当前提交号；仍受 App 版本影响 |
@@ -26,8 +26,8 @@ Windows 行只有明确记录可核对的提交号时才作为当前 HEAD 证据
 - Windows 命名管道存在性、App 版本更新后的 IPC 兼容和三端并发需要在目标机器复测；
 - Windows `service.log` 的 5 MiB 连续轮转、`logs.keep` 热改后的轮转链修剪，以及
   `logs -Service` 跟随多份轮转文件目前只有 Linux 离线单测覆盖；需在 Windows 实机验证。
-- Linux systemd 自定义数据根现在通过安装根 `.data-root` 解析，服务不再保存第二份路径；
-  仍需在真实 systemd 用户管理器下验证 service-start 和 marker 更新后的服务启动。
+- Linux 自定义数据根继续通过安装根 `.data-root` 解析；配置和状态使用 XDG 默认目录。
+  仍需在真实 systemd 用户管理器下验证 service-start、配置/状态路径和 marker 更新后的服务启动。
 - 出站静默丢弃在本机已发生两次，序列是：更早的开发期用**小号**时被封 → 换**大号**继续开发 →
   2026-11-06 18:53Z 大号被封 → 19:27Z 换回**小号**，此时小号已自愈可用；
   2026-11-06 11:49 CST 大号也已解封，`/s` 等消息可正常收发。可见这不是永久的账号标记：

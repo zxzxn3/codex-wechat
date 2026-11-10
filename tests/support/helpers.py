@@ -7,12 +7,25 @@ import shutil
 import tempfile
 
 from codex_wechat import diagnostics
+from codex_wechat.platform_support import RuntimePaths
 
 
 def xdg_user_data_dir(name, appauthor=False):
     """Stand in for platformdirs' Linux branch so Linux cases run on any host."""
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return str(Path(base) / name)
+
+
+def runtime_paths_at(root, *, config_file=None, state_dir=None):
+    root = Path(root)
+    return RuntimePaths(
+        data_root=root,
+        config_file=Path(config_file) if config_file is not None else root / "config.json",
+        state_dir=Path(state_dir) if state_dir is not None else root / ".state",
+        workspace_dir=root / "workspace",
+        logs_dir=root / "logs",
+        shared_dir=root / "shared",
+    )
 
 
 def isolate_diagnostics():

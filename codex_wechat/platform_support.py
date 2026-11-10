@@ -1,5 +1,6 @@
 """Small OS boundaries; Linux keeps its existing paths and defaults."""
 import ast
+from dataclasses import dataclass
 import ipaddress
 import os
 from pathlib import Path
@@ -22,6 +23,18 @@ INSTALL_ROOT = Path(
     os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(PROJECT_ROOT))
 ).expanduser().resolve()
 DATA_ROOT_FILE = ".data-root"
+
+
+@dataclass(frozen=True)
+class RuntimePaths:
+    """Resolved storage locations for one installation."""
+
+    data_root: Path
+    config_file: Path
+    state_dir: Path
+    workspace_dir: Path
+    logs_dir: Path
+    shared_dir: Path
 
 
 def saved_data_root(install_root: Path | None = None) -> Path | None:
@@ -57,6 +70,23 @@ def default_data_root() -> Path:
     return (Path.home() / ".local" / "share" / "codex-wechat").resolve()
 
 
+def _xdg_root(variable: str, fallback: Path) -> Path:
+    value = os.environ.get(variable)
+    if value and Path(value).is_absolute():
+        return Path(value).expanduser().resolve()
+    return fallback.expanduser().resolve()
+
+
+def default_config_root() -> Path:
+    return (_xdg_root("XDG_CONFIG_HOME", Path.home() / ".config") /
+            "codex-wechat").resolve()
+
+
+def default_state_root() -> Path:
+    return (_xdg_root("XDG_STATE_HOME", Path.home() / ".local" / "state") /
+            "codex-wechat").resolve()
+
+
 def data_root(install_root: Path | None = None):
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
     saved = saved_data_root(install_root)
@@ -73,6 +103,29 @@ def data_root(install_root: Path | None = None):
     if saved is not None:
         return saved
     return default_data_root()
+
+
+def runtime_paths(install_root: Path | None = None) -> RuntimePaths:
+    """Resolve each persistent-data role once for the active platform."""
+    data = data_root(install_root)
+    if IS_WINDOWS:
+        return RuntimePaths(
+            data_root=data,
+            config_file=data / "config.json",
+            state_dir=data / ".state",
+            workspace_dir=data / "workspace",
+            logs_dir=data / "logs",
+            shared_dir=data / "shared",
+        )
+    state = default_state_root()
+    return RuntimePaths(
+        data_root=data,
+        config_file=default_config_root() / "config.json",
+        state_dir=state,
+        workspace_dir=data / "workspace",
+        logs_dir=state / "logs",
+        shared_dir=state / "shared",
+    )
 
 
 def subprocess_options():

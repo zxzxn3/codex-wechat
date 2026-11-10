@@ -75,17 +75,19 @@ Linux 以实际 `euid == 0` 判断 root，Windows 以管理员令牌判断提权
 
 Windows 的公开入口把 `uninstall` 直接交给稳定的 `uninstall.ps1`，因此不依赖活动 release；
 原生计划任务和共享后台清理仍由该 helper 负责。
-Linux 停止并移除用户 unit、命令软链；默认保留 `config.json`、`.state`、`workspace`、
-`logs` 和 `shared`。`--purge-data` 才删除这些用户数据；不会递归删除自定义数据根目录，
-只清理上述已知项。卸载前会检查前台桥接的状态锁；仍在运行时要求先 `Ctrl+C` 退出。
+Linux 停止并移除用户 unit、命令软链；默认保留配置、状态、工作区、日志和共享后台。
+`--purge-data` 才删除 `~/.config/codex-wechat/config.json`、状态目录和数据根下的
+`workspace`；不会递归删除自定义数据根目录。卸载前会检查前台桥接的状态锁；仍在运行时要求
+先 `Ctrl+C` 退出。
 若无法读取后台服务状态，卸载会 fail-closed 而不是继续删除；没有 systemd 客户端时视为
 没有可移除的服务。
 Windows 自定义数据目录由 `CODEX_WECHAT_DATA_ROOT`（或原生 helper 的
 `-DataRoot`）传递；公开入口和 Python 命令使用同一个数据根，计划任务通过 stable supervisor
 读取安装根 `.data-root`。Python 不会忽略它。
-Linux 后台服务的数据根由安装根 `.data-root` 提供（包括默认根），systemd unit 不再保存第二份数据根；
-安装后修改环境变量必须通过安装器更新标记。公开入口、服务 supervisor 和卸载器在环境变量
-与标记不一致时 fail closed，而不是静默回退默认目录。
+Linux 后台服务的数据根由安装根 `.data-root` 提供（包括默认根），systemd unit 不再保存第二份
+数据根；配置和状态根由 `XDG_CONFIG_HOME` / `XDG_STATE_HOME` 的标准默认值解析。安装后修改
+数据根必须通过安装器更新标记。公开入口、服务 supervisor 和卸载器在环境变量与标记不一致时
+fail closed，而不是静默回退默认目录。
 安装后的 `current/release` 布局若缺少 marker，公开命令会 fail closed；`uninstall --purge-data`
 在既没有 marker 也没有显式数据根时拒绝清理。
 

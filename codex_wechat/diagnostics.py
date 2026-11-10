@@ -17,7 +17,7 @@ import re
 import sys
 import threading
 
-from .platform_support import data_root
+from .platform_support import runtime_paths
 from .storage import locked_file
 from .latency import NETWORK_TIMING_FIELDS
 from .log_rotation import DEFAULT_KEEP, KEEP_MIN, MAX_BYTES, prune_rotations, rotate
@@ -138,7 +138,8 @@ def reset():
 
 
 def log_path():
-    return Path(_path) if _path is not None else data_root() / "logs" / "bridge.jsonl"
+    return (Path(_path) if _path is not None
+            else runtime_paths().logs_dir / "bridge.jsonl")
 
 
 def new_request_id():

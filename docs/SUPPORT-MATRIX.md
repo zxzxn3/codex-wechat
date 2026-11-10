@@ -78,6 +78,8 @@ HTTPS 与禁止重定向的限制。此边界约束桥接自身，不限制 Agen
 ## 数据根与服务的硬约束
 
 - `CODEX_WECHAT_DATA_ROOT` 与安装根 `.data-root` 必须一致；安装器是更新标记的唯一入口。
+- Linux 的配置、状态和日志分别位于 XDG config/state 根，不写入工作区；Windows 仍使用
+  `%LOCALAPPDATA%\codex-wechat` 下的现有布局。
 - 服务状态按 `queued/activating → running → deactivating` 处理；过渡态必须经过稳定窗口，
   已处于 `running/active` 的服务可以直接复用。
 - 版本化稳定入口只执行 `current` 指向的完整 release；损坏的指针必须给出修复指引，不能猜测

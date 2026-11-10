@@ -36,7 +36,8 @@ from .media import Media
 from .latency import Latency
 from .typing_indicator import TypingIndicator
 from .errors import UserFacingError, WeChatAuthExpired, WeChatPollTimeout, backend_reason
-from .platform_support import IS_WINDOWS, data_root, is_elevated, root_override_enabled
+from .platform_support import (IS_WINDOWS, is_elevated, make_private,
+                               root_override_enabled, runtime_paths)
 from .diagnostics import configure as configure_diagnostics
 from .diagnostics import error_fields, log_event, log_path
 from .log_rotation import prune_rotations
@@ -287,7 +288,7 @@ class Bridge:
 
     def make_backend(self, name):
         backend = self.backend_factory(self.backend_configs[name],
-            str(Path(self.config.get("cwd", data_root() / "workspace")).expanduser().resolve()),
+            str(Path(self.config.get("cwd", runtime_paths().workspace_dir)).expanduser().resolve()),
             lambda text: self.reply(text, source=backend.source())
             if getattr(self, "backend", None) is backend else None)
         backend.on_activity = self.backend_activity
@@ -1021,13 +1022,14 @@ def require_regular_user(action):
 
 
 async def main():
+    paths = runtime_paths()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", nargs="?", default="status", choices=(
         "login", "start", "stop", "status", "rebind", "logs", "service-start",
         "service-restart", "autostart"))
     parser.add_argument("value", nargs="?", choices=("true", "false"))
-    parser.add_argument("--state-dir", type=Path, default=data_root() / ".state")
-    parser.add_argument("--config", type=Path, default=data_root() / "config.json")
+    parser.add_argument("--state-dir", type=Path, default=paths.state_dir)
+    parser.add_argument("--config", type=Path, default=paths.config_file)
     parser.add_argument("--stop-active", action="store_true")
     parser.add_argument("--follow", action="store_true")
     parser.add_argument("--service", action="store_true",
@@ -1089,12 +1091,16 @@ async def main():
             if not isinstance(config, dict):
                 raise ValueError("配置必须是 JSON 对象。")
             if ensure_backend_config(config):
+                if args.config == paths.config_file:
+                    make_private(args.config.parent)
+                else:
+                    args.config.parent.mkdir(parents=True, exist_ok=True)
                 write_config(args.config, config)
             configure_log_retention(Logs.from_config(config.get("logs")).keep)
             bridge = Bridge(store, account, config, config_path=args.config)
         except ValueError as error:
             raise ConfigurationError(str(error)) from None
-        cwd = Path(config.get("cwd", data_root() / "workspace")).expanduser()
+        cwd = Path(config.get("cwd", paths.workspace_dir)).expanduser()
         cwd.mkdir(parents=True, exist_ok=True)
         loop = asyncio.get_running_loop()
         main_task = asyncio.current_task()

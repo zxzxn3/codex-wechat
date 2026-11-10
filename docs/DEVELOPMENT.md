@@ -24,10 +24,13 @@ trap 'rm -rf "$src"' EXIT
 git archive HEAD | tar -x -f - -C "$src"
 cd "$src"
 CODEX_WECHAT_INSTALL_ROOT="$src" CODEX_WECHAT_DATA_ROOT="$(mktemp -d)" \
+XDG_CONFIG_HOME="$src/test-config" XDG_STATE_HOME="$src/test-state" \
 PYTHONDONTWRITEBYTECODE=1 "$repo/.venv/bin/python" -m unittest discover -s tests -v
 ```
 
-诊断日志默认写在 `data_root()/logs/bridge.jsonl`。`tests/support/helpers.py` 在导入时把
+诊断日志默认写在 `runtime_paths().logs_dir/bridge.jsonl`。Linux 默认是
+`$XDG_STATE_HOME/codex-wechat/logs`，Windows 保持数据根下的 `logs`。
+`tests/support/helpers.py` 在导入时把
 `diagnostics` 指向临时 sink，并在每次 `reset()` 后重新套用，所以直接跑测试不会把夹具事件
 写进已安装实例正在使用的日志；上面的隔离目录仍然推荐，因为它同时挡住其它副作用。这里把源码
 导出到没有 `.data-root` 的临时根，避免源码树本身是安装根时与新的 fail-closed 冲突。

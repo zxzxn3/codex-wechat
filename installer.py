@@ -275,6 +275,13 @@ def _default_data_root() -> Path:
     return (Path.home() / ".local" / "share" / "codex-wechat").resolve()
 
 
+def _default_config_root() -> Path:
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if config_home and Path(config_home).is_absolute():
+        return (Path(config_home).expanduser() / "codex-wechat").resolve()
+    return (Path.home() / ".config" / "codex-wechat").resolve()
+
+
 def configured_data_root(target: Path) -> Path:
     """Resolve one explicit root without repairing old installation layouts."""
     override = os.environ.get("CODEX_WECHAT_DATA_ROOT")
@@ -284,6 +291,13 @@ def configured_data_root(target: Path) -> Path:
     if saved is not None:
         return saved
     return _default_data_root()
+
+
+def configured_config_file(target: Path) -> Path:
+    """Resolve the active config without coupling the installer to runtime code."""
+    if IS_WINDOWS:
+        return configured_data_root(target) / "config.json"
+    return _default_config_root() / "config.json"
 
 
 def _write_data_root_marker(target: Path) -> None:
@@ -377,8 +391,7 @@ def check_runtime_compatibility(files, config):
 
 
 def check_config_compatibility(files, target):
-    root = configured_data_root(target)
-    path = root / "config.json"
+    path = configured_config_file(target)
     if not path.exists():
         return
     config = json.loads(path.read_text(encoding="utf-8-sig"))

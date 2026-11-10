@@ -12,6 +12,7 @@ from codex_wechat import app as codex_wechat
 from codex_wechat.prompts import SERVICE_STOPPING
 from codex_wechat.service_adapter import ServiceState
 from codex_wechat.storage import Store
+from tests.support.helpers import runtime_paths_at
 
 
 class TtyBuffer(StringIO):
@@ -140,13 +141,15 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_routes_stop_before_taking_the_bridge_lock(self):
         stop = AsyncMock()
         startup_store = AsyncMock()
-        with patch.object(sys, "argv", ["codex_wechat.py", "stop"]), \
-                patch.object(codex_wechat.os, "umask"), \
-                patch.object(codex_wechat, "stop_background_service", stop), \
-                patch.object(codex_wechat, "startup_store", startup_store):
-            await codex_wechat.main()
-        stop.assert_awaited_once_with(codex_wechat.data_root() / ".state",
-                                      codex_wechat.data_root() / "config.json")
+        with tempfile.TemporaryDirectory() as directory:
+            paths = runtime_paths_at(directory)
+            with patch.object(sys, "argv", ["codex_wechat.py", "stop"]), \
+                    patch.object(codex_wechat.os, "umask"), \
+                    patch.object(codex_wechat, "runtime_paths", return_value=paths), \
+                    patch.object(codex_wechat, "stop_background_service", stop), \
+                    patch.object(codex_wechat, "startup_store", startup_store):
+                await codex_wechat.main()
+        stop.assert_awaited_once_with(paths.state_dir, paths.config_file)
         startup_store.assert_not_awaited()
 
     async def test_status_and_logs_do_not_replace_the_active_release_marker(self):

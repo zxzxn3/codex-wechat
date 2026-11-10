@@ -11,7 +11,7 @@ from .backend_runtime import BackendRuntime
 from .codex_connection import ConnectionSpec
 from .configuration import write_config
 from .native_codex import discover_app_codex, discover_codex
-from .platform_support import IS_WINDOWS, INSTALL_ROOT, data_root
+from .platform_support import IS_WINDOWS, INSTALL_ROOT, runtime_paths
 from .profiles import definitions, ensure_backend_config
 
 
@@ -34,7 +34,7 @@ def runtime_root(name):
     # Stable, safe names even for user-defined backend labels.
     import hashlib
     key = hashlib.sha256(name.encode()).hexdigest()[:16]
-    return data_root() / "shared" / key
+    return runtime_paths().shared_dir / key
 
 
 def configure(name, config, path, *, url=None, executable=None, native=False):
@@ -87,7 +87,7 @@ def configure(name, config, path, *, url=None, executable=None, native=False):
 async def ensure(name, backend):
     spec = ConnectionSpec.from_config(backend)
     env = spec.environment(backend)
-    runtime = BackendRuntime(backend, str(data_root()))
+    runtime = BackendRuntime(backend, str(runtime_paths().data_root))
     if spec.endpoint:
         # The bridge's hook calls this entry. Do not invoke that same hook again.
         await runtime.ensure_websocket(spec.resolve(env, client=True), env, spec.endpoint,
@@ -119,7 +119,7 @@ async def main(argv=None):
         parser.error("只有 cli 接受附加参数")
     if args.action != "setup" and (args.url or args.executable or args.native):
         parser.error("--url / --executable / --native 仅用于 setup")
-    path = data_root() / "config.json"
+    path = runtime_paths().config_file
     config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
     if not isinstance(config, dict):
         raise ValueError("配置必须是对象")

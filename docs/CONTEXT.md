@@ -44,7 +44,8 @@
 | `current` | 指向当前激活 release 的指针文件 | 不是“正在运行的进程” |
 | `active-release` | 取得 bridge 状态锁并完成启动的进程写入的运行版本标记 | 不是 `current` 的副本 |
 | stable entry | Linux `codex-wechat`、Windows `codex-wechat.cmd` 等稳定入口 | 不是某个 release 内的临时脚本 |
-| install root / data root | 程序安装根与用户数据根；两者可分开 | 不是同一个目录 |
+| install root / data root | 程序安装根与用户数据根；Linux 默认值相同但职责不同，可用环境变量分开 | 不是同一份内容 |
+| config root / state root | Linux 分别位于 `~/.config` 与 `~/.local/state`；Windows 仍保存在数据根 | 不是工作区 |
 | hot config | `config.json` 变化后按整组校验并应用，不重载代码 | 不是重读后端定义 |
 | approval / question | Codex 原生审批与结构化提问；分别用 `/approve`、`/deny`、`/answer` 处理 | 不是普通聊天文本 |
 

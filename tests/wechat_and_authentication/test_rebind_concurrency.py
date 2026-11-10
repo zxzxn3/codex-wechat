@@ -10,6 +10,7 @@ from codex_wechat import wechat_auth
 from codex_wechat.storage import Store
 from codex_wechat.wechat import LoginResult
 from tests.support.fakes import FakeServiceAdapter
+from tests.support.helpers import runtime_paths_at
 
 
 class ScanRaceTests(unittest.IsolatedAsyncioTestCase):
@@ -36,7 +37,8 @@ class ScanRaceTests(unittest.IsolatedAsyncioTestCase):
         return store.load(name)
 
     async def run_rebind(self, login, adapter, *, stop_active=False):
-        with patch.object(rebind, "data_root", return_value=self.root):
+        with patch.object(rebind, "runtime_paths", return_value=runtime_paths_at(
+                self.root, config_file=self.config, state_dir=self.state_dir)):
             return await rebind.run_rebind(
                 self.state_dir, self.config, interactive=True,
                 adapter=adapter, login_runner=login, stop_active=stop_active)
@@ -151,7 +153,8 @@ class ScanFailureTests(unittest.IsolatedAsyncioTestCase):
         return store.load(name)
 
     async def run_rebind(self, login, adapter):
-        with patch.object(rebind, "data_root", return_value=self.root):
+        with patch.object(rebind, "runtime_paths", return_value=runtime_paths_at(
+                self.root, config_file=self.config, state_dir=self.state_dir)):
             return await rebind.run_rebind(
                 self.state_dir, self.config, interactive=True,
                 adapter=adapter, login_runner=login)
@@ -285,7 +288,8 @@ class LockReleaseTests(unittest.IsolatedAsyncioTestCase):
                 return LoginResult({"token": "new", "user": "u", "bot": "b2"},
                                    account, True)
 
-            with patch.object(rebind, "data_root", return_value=root):
+            with patch.object(rebind, "runtime_paths", return_value=runtime_paths_at(
+                    root, config_file=config, state_dir=state_dir)):
                 with self.assertRaisesRegex(RuntimeError, "扫码期间"):
                     await rebind.run_rebind(
                         state_dir, config, interactive=True,

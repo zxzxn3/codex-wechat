@@ -5,14 +5,15 @@ from pathlib import Path
 
 from . import service_adapter
 from . import wechat_auth
-from .platform_support import data_root
+from .platform_support import runtime_paths
 from .storage import Store
 from .wechat import login
 
 
 def validate_paths(state_dir, config_path):
-    expected_state = (data_root() / ".state").resolve()
-    expected_config = (data_root() / "config.json").resolve()
+    paths = runtime_paths()
+    expected_state = paths.state_dir.resolve()
+    expected_config = paths.config_file.resolve()
     if Path(state_dir).expanduser().resolve() != expected_state:
         raise ValueError("rebind 只操作默认状态目录；自定义状态请手动管理登录和服务。")
     if Path(config_path).expanduser().resolve() != expected_config:

@@ -49,3 +49,6 @@ Token优先原生事件，缺失时只读当前Thread.path的有界尾部，按�
 `logs --service` 保持平台原生来源：Windows 为 `service.log`，Linux 为
 `journalctl --user -u codex-wechat`。Windows 的 `service.log` 按 5 MiB 轮转，
 保留份数与 `bridge.jsonl` 共用 `logs.keep`；Linux 控制台日志的保留由 journald 管理。
+Linux 的结构化日志和共享后台状态位于 `$XDG_STATE_HOME/codex-wechat`，配置位于
+`$XDG_CONFIG_HOME/codex-wechat`，工作区留在 `$XDG_DATA_HOME/codex-wechat/workspace`。
+`CODEX_WECHAT_DATA_ROOT` 只覆盖数据根；Windows 内部 helper 另外接受 `-DataRoot`。

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from codex_wechat import desktop
 from codex_wechat.codex_connection import ConnectionSpec
+from tests.support.helpers import runtime_paths_at
 
 
 class DesktopEntryTests(unittest.IsolatedAsyncioTestCase):
@@ -15,7 +16,8 @@ class DesktopEntryTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.enterContext(patch.object(desktop, 'data_root', return_value=self.root))
+        self.enterContext(patch.object(
+            desktop, 'runtime_paths', return_value=runtime_paths_at(self.root)))
         self.enterContext(patch.object(desktop, 'discover_app_codex', return_value=None))
         self.config = {'backends': {'codex': {'websocketUrl': 'ws://127.0.0.1:12345',
                                              'runtime': 'app'}}}

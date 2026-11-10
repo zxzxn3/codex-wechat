@@ -16,6 +16,7 @@ from codex_wechat.configuration import ConfigurationError
 from codex_wechat.storage import Store
 from codex_wechat.wechat import LoginResult
 from tests.support.fakes import FakeServiceAdapter
+from tests.support.helpers import runtime_paths_at
 
 
 class RebindTests(unittest.IsolatedAsyncioTestCase):
@@ -43,7 +44,8 @@ class RebindTests(unittest.IsolatedAsyncioTestCase):
         return store.load("bridge"), store.load("account")
 
     async def run_rebind(self, adapter, login_runner, **kwargs):
-        with patch.object(rebind, "data_root", return_value=self.root):
+        with patch.object(rebind, "runtime_paths", return_value=runtime_paths_at(
+                self.root, config_file=self.config_path, state_dir=self.state_dir)):
             return await rebind.run_rebind(
                 self.state_dir,
                 self.config_path,
@@ -209,7 +211,8 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
         return store.load(name)
 
     async def run_rebind(self, adapter, login, **kwargs):
-        with patch.object(rebind, "data_root", return_value=self.root):
+        with patch.object(rebind, "runtime_paths", return_value=runtime_paths_at(
+                self.root, config_file=self.config, state_dir=self.state_dir)):
             return await rebind.run_rebind(
                 self.state_dir, self.config, interactive=True,
                 adapter=adapter, login_runner=login, **kwargs)
@@ -217,7 +220,8 @@ class RunRebindTests(unittest.IsolatedAsyncioTestCase):
     async def test_noninteractive_refuses_before_touching_state_or_service(self):
         adapter = FakeServiceAdapter(running=True)
         with self.assertRaisesRegex(ValueError, "交互终端"):
-            with patch.object(rebind, "data_root", return_value=self.root):
+            with patch.object(rebind, "runtime_paths", return_value=runtime_paths_at(
+                    self.root, config_file=self.config, state_dir=self.state_dir)):
                 await rebind.run_rebind(
                     self.state_dir, self.config, interactive=False, adapter=adapter)
         self.assertEqual(adapter.calls, [])

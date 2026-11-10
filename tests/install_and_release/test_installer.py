@@ -40,7 +40,11 @@ class InstallerTests(unittest.TestCase):
         # The compatibility gate reads the active install's config; keep the
         # developer's own data root out of these fixtures.
         self.enterContext(patch.dict(
-            os.environ, {"CODEX_WECHAT_DATA_ROOT": str(self.base / "data")}))
+            os.environ, {
+                "CODEX_WECHAT_DATA_ROOT": str(self.base / "data"),
+                "XDG_CONFIG_HOME": str(self.base / "config"),
+                "XDG_STATE_HOME": str(self.base / "state"),
+            }))
 
     def make_project(self, root, *, version="one"):
         root.mkdir(parents=True, exist_ok=True)
@@ -873,6 +877,16 @@ class RuntimeRepairTests(unittest.TestCase):
 
 
 class DataRootMarkerTests(unittest.TestCase):
+    def test_linux_config_path_uses_the_xdg_config_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            with patch.dict(os.environ, {
+                    "XDG_CONFIG_HOME": str(base / "config"),
+            }, clear=False), patch.object(installer, "IS_WINDOWS", False):
+                self.assertEqual(
+                    installer.configured_config_file(base / "install"),
+                    (base / "config/codex-wechat/config.json").resolve())
+
     def test_default_root_uses_the_platform_data_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             data_home = Path(directory) / "xdg"

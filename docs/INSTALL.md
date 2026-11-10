@@ -125,12 +125,13 @@ codex-wechat uninstall -PurgeData   # 删除已知用户数据
 Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是内部实现，正常用户不应直接调用；
 它们只在维护者排查损坏入口时使用。
 
-`--purge-data` / `-PurgeData` 只删除已知用户数据项，不递归删除自定义数据根目录。前台桥接仍
-持有状态锁时，卸载会拒绝继续；先按 `Ctrl+C` 退出。自定义数据目录通过
+`--purge-data` / `-PurgeData` 只删除已知用户数据项，不递归删除自定义数据根目录。Linux
+分别删除配置文件、状态目录和数据根下的 `workspace`；Windows 继续删除统一数据根中的已知项。
+前台桥接仍持有状态锁时，卸载会拒绝继续；先按 `Ctrl+C` 退出。自定义数据目录通过
 `CODEX_WECHAT_DATA_ROOT` 指定，Windows 内部 helper 另外接受 `-DataRoot`。
 
-卸载结束时会把两处残留打印出来：程序文件（安装树，含 `releases` 与 Python 环境）和数据文件
-（数据根）；需要在卸载后彻底删除，由用户自己决定。
+卸载结束时会把程序文件、数据根以及 Linux 的配置和状态位置打印出来；需要在卸载后彻底删除，
+由用户自己决定。
 
 不带 purge 的卸载会保留 `.data-root`：安装树仍在（卸载只移除服务与入口），所以重新运行安装器
 会解析为 update，并继续使用原来的数据根。想让重装改判到平台默认目录，删除该标记或显式设置
@@ -138,16 +139,26 @@ Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是�
 
 ## 目录和配置
 
-Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` 的其他路径会被拒绝。
-默认用户数据根由 `platformdirs.user_data_dir` 计算，通常也是
-`~/.local/share/codex-wechat`。Windows 程序位于 `%LOCALAPPDATA%\codex-wechat\app`，用户数据根为
-`%LOCALAPPDATA%\codex-wechat`。可用 `CODEX_WECHAT_DATA_ROOT` 分离数据根；
-`CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口和源码副本的运行定位，不是 Linux 自定义安装目标。
-安装器把当前数据根（包括默认根）写入安装根目录的 `.data-root`；公开入口、Linux systemd
-服务和 Windows supervisor 都从同一个标记解析数据根，不把数据根复制进 unit/task action。
-因此修改数据根只需通过安装器更新标记，不需要额外改服务配置。
-当前版本不保留旧安装布局、旧 marker 或旧持久状态的迁移路径。
+Linux 按 XDG 职责拆分：
 
-`current`、`active-release`、`releases/`、`.state/`、`logs/`、`workspace/`、`shared/` 和
-`config.json` 各有独立职责，不复制供应商凭据或会话历史。配置与提示的细节见
-[CONFIGURATION](CONFIGURATION.md)。
+| 内容 | 默认位置 |
+|---|---|
+| 程序 | `~/.local/share/codex-wechat/{releases,current,active-release}` |
+| 配置 | `~/.config/codex-wechat/config.json` |
+| 状态、日志和共享后台 | `~/.local/state/codex-wechat/{logs,shared}` |
+| 工作区 | `~/.local/share/codex-wechat/workspace` |
+
+Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` 的其他路径会被拒绝。
+`XDG_CONFIG_HOME`、`XDG_STATE_HOME` 和 `XDG_DATA_HOME` 会分别改变上述基础目录。
+`CODEX_WECHAT_DATA_ROOT` 只覆盖数据根，因此工作区随数据根移动，配置和状态仍遵循 XDG。
+`CODEX_WECHAT_INSTALL_ROOT` 只用于稳定入口和源码副本的运行定位。
+
+Windows 保持原布局：程序位于 `%LOCALAPPDATA%\codex-wechat\app`，用户数据根为
+`%LOCALAPPDATA%\codex-wechat`，配置、状态、工作区、日志和共享后台仍位于该数据根。
+
+安装器把当前数据根写入安装根目录的 `.data-root`；公开入口、Linux systemd 服务和 Windows
+supervisor 都从同一个标记解析数据根，不把数据根复制进 unit/task action。当前版本不迁移
+Linux 旧布局；旧版统一数据根中的配置和状态不会被新版本读取。
+
+配置、状态、日志、共享后台和工作区各有独立职责，不复制供应商凭据或会话历史。配置与提示的
+细节见 [CONFIGURATION](CONFIGURATION.md)。

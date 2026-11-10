@@ -5,7 +5,8 @@
 
 ## 结构化日志
 
-结构化诊断写入数据目录的`logs/bridge.jsonl`，按5 MiB轮转，旋转份数由 `logs.keep` 控制
+结构化诊断在 Linux 写入 `~/.local/state/codex-wechat/logs/bridge.jsonl`，在 Windows 写入
+数据根的 `logs/bridge.jsonl`。日志按5 MiB轮转，旋转份数由 `logs.keep` 控制
 （1–100，默认 3，可 `/settings logs.keep` 热改；结构化日志和 Windows 控制台日志各自约为
 5 MiB ×(keep+1)）。每行是一个
 JSON对象，用随机`request_id`关联由微信输入触发的接收、准备、提交、输出入队、发送和
