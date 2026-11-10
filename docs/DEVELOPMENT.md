@@ -15,6 +15,21 @@
 用户可见命令与配置语义，以及有外部依赖的文件格式。内部模块和实现可以自由重构，不属于
 兼容契约；上游 Codex/微信接口和当前版本化更新机制始终需要保持兼容。
 
+## 仓库与分发
+
+`codex-wechat` 是独立 Git 仓库，默认位于 `~/.local/share/codex-wechat`，不属于 cfg
+工作树。当前远端为 `https://github.com/zxzxn3/codex-wechat.git`；公开入口直接读取该仓库
+`main` 分支的 bootstrap，不需要额外引导库、GitHub 登录或访问凭据。Windows 开发从同一远端
+取得源码，切换环境前先同步，避免两份源码分叉。
+
+网络 bootstrap 只下载安装器，再由安装器把公开仓库 clone 到临时目录并执行安装；Linux、
+Windows 入口最终调用同一个 `installer.py`。依赖声明集中在 `installer.py` 和 requirements
+文件，二维码与附件 skill 只按需安装。完整用户流程见 [INSTALL](INSTALL.md)。
+
+新旧 release 按各自清单验证，不用新排除规则重新定义旧版身份。下载、构建与原子写临时文件
+会清理；仍可能被进程使用的旧版本和已保存附件不作为临时垃圾自动删除。发布产物不得包含用户
+账户、状态、代理、工作目录、日志或 `.venv`。
+
 ## 离线测试
 
 ```bash
@@ -142,10 +157,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 （`scheduled task 'CodexWeChat' is not owned by this project`）。那两条报错都是预期行为——
 一个克隆不是一次安装，安装/重启服务要用 `$app` 下的稳定入口。
 
-## 重构边界
+## 复杂度与重构边界
 
-见 [COMPLEXITY](COMPLEXITY.md)：优先解决已观察到的边界问题，不按行数拆文件，不为跨平台
-强行统一平台适配层。
+下表是按职责边界判断的维护成本，不是工时预算或代码占比。能力范围见
+[SUPPORT-MATRIX](SUPPORT-MATRIX.md)，运行契约见 [ARCHITECTURE](ARCHITECTURE.md)。
+
+| 部分 | 成本 | 主要负担 |
+| --- | --- | --- |
+| 桌面活动会话共享 | 高 | 多客户端、早到/迟到事件、请求归属、轮次竞争、App 内部接口变化 |
+| 交付与重连 | 高 | 提交结果不确定、崩溃恢复、去重、输出顺序及部分失败 |
+| 安装与更新 | 高 | 环境差异、版本构建、旧版清单、稳定入口和跨平台服务注册 |
+| Windows 托管 | 中高 | 计划任务、进程/Job Object、单实例、退出码、通知及实机验证 |
+| 媒体收发 | 中高 | CDN、加解密、快照、大小限制、文件权限和部分失败 |
+| 重绑与认证 | 中 | 扫码/服务并发、同号保留交付、换号隔离、半完成状态 |
+| 原生问题/审批 | 中 | 实际接收连接和回答归属、桌面与微信并发操作 |
+| 命令、提示、切片和状态 | 低至中 | 主要复用原生协议、快照与纯函数；网络探测另有子进程 |
+
+普通 CLI 和 App 共享大部分协议、连接与交付代码。App 内置 CLI 发现，以及接入桌面正在
+使用的会话，是两件不同的事；后者承担更多状态边界。
+
+- 单独去掉 Linux App 只能减少很薄的发现/入口代码；Windows App 仍需要公共共享逻辑。
+- 去掉 Windows App 可减少一部分内部接口维护，但若仍支持 Windows CLI，托管、安装和进程
+  层仍要保留。
+- 去掉整个 Windows 平台、桌面活动会话共享或媒体能力才会明显减负，同时也有直接功能损失。
+- 单独去掉一个后端名称、短命令或模板变量，收益很小。
+
+重构优先解决已观察到的边界问题，不按行数拆文件，不为跨平台强行统一平台适配层。这些取舍
+不代表已取消任何能力。
 
 安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；运行期模块位于
 `codex_wechat/`，包内使用相对导入。
@@ -162,3 +200,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 - 未在真实平台验证的能力只能标为“待验证/实验性”，不能写成已验收；无法保证的配置在安装
   或启动时 fail closed。
 - 文档、命令表和 VALIDATION 必须与当前树同步；完成以上条件后停止继续穷举边缘分支。
+
+### 开源发布门
+
+发布新版本或首次公开仓库时，维护者需要确认：
+
+- `LICENSE` 为 Apache-2.0，`NOTICE`、`TRADEMARKS.md` 和品牌素材说明存在；mascot 与代码
+  分开许可，并按 CC BY-NC-SA 4.0 标注来源和修改。
+- README、安装文档和 bootstrap 使用无需认证的公开入口；截图、二维码、路径和终端输出已
+  审阅，不含未获同意公开的个人信息。
+- `.env`、`config.json`、`.state/`、`logs/`、`workspace/`、用户状态目录、`releases/`、
+  私钥和证书从未进入任何提交。完整历史和提交邮箱已检查；已撤销的 PAT 继续保留在历史中。
+- 代码、Logo、角色图片、字体、图标、传递依赖和 Windows 运行时许可证已复核；项目自身
+  不携带字体文件。第三方 Actions 固定到提交 SHA，依赖审计无已知漏洞。
+- 在隔离环境中完成安装、状态、更新、配置保留和卸载烟测，并重新 clone 干净副本运行完整
+  测试、静态检查和安装烟测。
+
+公开前还要验证公开 raw 地址、仓库 clone 和更新源无需 GitHub 登录，检查 GitHub 许可证
+识别、README 渲染、图片和 Actions 状态。公开后继续监控 secret scanning、issues 和安全
+报告。

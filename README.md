@@ -207,7 +207,7 @@ thread，没有远程聚焦接口。
 
 可以围绕同一会话工作。桌面和微信看到的进展、结果和工作目录来自同一个 Codex 任务。
 
-**需要把 Codex 密码或 API Key 给微信吗？**
+**需要把 Codex 密码或 API Key 给微信桥吗？**
 
 不需要。认证继续由本机 Codex 管理，codex-wechat 不另存一份模型凭据。
 
@@ -219,6 +219,29 @@ thread，没有远程聚焦接口。
 
 支持围绕原生 Codex 会话工作。App 已打开目标会话时可跟随；仅使用 CLI 也能共享本机 Codex
 daemon。
+
+**安装后可以用 `cmd.exe` 启动吗？**
+
+可以。安装后直接在 `cmd.exe` 运行：
+
+```cmd
+codex-wechat service-start
+```
+
+**PowerShell 提示“在此系统上禁止运行脚本”怎么办？**
+
+这是 PowerShell 执行策略拦截了 `.ps1`。运行 `bootstrap.ps1` 时遇到该错误，可以只为这次
+执行临时绕过策略：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
+```
+
+如果已经安装但没有生成 `codex-wechat.cmd`，用同样方式运行稳定入口：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wechat\app\codex-wechat.ps1" service-start
+```
 
 **会不会重复发送，或者告诉我“已完成”但其实没收到？**
 
@@ -237,7 +260,6 @@ README 用于项目介绍；agent、维护者和测试者从 [文档索引](docs
 - 微信命令和短别名：[COMMANDS](docs/COMMANDS.md)、[生成参考](docs/REFERENCE.generated.md)
 - 架构、配置、交付、诊断：[ARCHITECTURE](docs/ARCHITECTURE.md)、[CONFIGURATION](docs/CONFIGURATION.md)、[DELIVERY](docs/DELIVERY.md)、[DIAGNOSTICS](docs/DIAGNOSTICS.md)
 - 支持面与验证证据：[SUPPORT-MATRIX](docs/SUPPORT-MATRIX.md)、[VALIDATION](docs/VALIDATION.md)
-- 决策记录：[决策索引](docs/decisions/README.md)
 - 开发检查：`scripts/check.sh`；测试与静态检查约定见 [DEVELOPMENT](docs/DEVELOPMENT.md) 和 [AGENTS](AGENTS.md)
 
 ## License

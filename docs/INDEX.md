@@ -22,11 +22,9 @@ README 用于项目介绍和公开推广；本文是 agent、维护者和测试�
 | Windows 操作、IPC、共享 daemon 和故障排查 | [WINDOWS](WINDOWS.md) |
 | Codex/App/微信协议、版本和外部依据 | [SOURCES](SOURCES.md) |
 | 测试隔离、静态检查、依赖和发布退出标准 | [DEVELOPMENT](DEVELOPMENT.md)、[AGENTS](../AGENTS.md) |
-| 公开分发、安装入口和更新来源 | [DISTRIBUTION](DISTRIBUTION.md) |
-| 开源前密钥、许可证和公开仓库检查 | [OPEN-SOURCE-CHECKLIST](OPEN-SOURCE-CHECKLIST.md) |
-| 性能采样和暂不实施的恢复增强 | [PERFORMANCE](PERFORMANCE.md) |
-| 维护成本与重构取舍 | [COMPLEXITY](COMPLEXITY.md) |
-| 已作出的命令、投递和权限决策 | [决策索引](decisions/README.md) |
+| 公开安装入口、更新来源和分发边界 | [INSTALL](INSTALL.md) |
+| 发布检查、维护成本和重构取舍 | [DEVELOPMENT](DEVELOPMENT.md) |
+| 历史性能采样和当前网络诊断 | [DIAGNOSTICS](DIAGNOSTICS.md) |
 
 ## 推荐阅读顺序
 

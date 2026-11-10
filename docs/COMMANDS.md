@@ -5,8 +5,6 @@
 `python -m codex_wechat`；原生计划任务操作只存在于内部 helper
 `windows/task-service.ps1`，不是用户命令。
 
-产品决策和已移除项见 [COMMANDS-DECISIONS](decisions/COMMANDS-DECISIONS.md)。
-
 ## 入口
 
 | | Linux | Windows |
@@ -55,6 +53,15 @@ Python，不再实现服务状态机。普通 CLI 直接使用 `codex` 或对应
 - `codex-wechat desktop`：内部 `codex-desktop` / `codex-desktop.ps1` 不作为用户命令。
 - `codex-wechat cli`：普通 CLI 使用 `codex` / `codex-deepseek`；共享后台准备留在内部 helper。
 - `autostart on|off`：只接受 `true|false`。
+
+### 投递状态决策
+
+服务端接受请求但没有返回消息 ID 时，结果只是“投递未知”，不能据此认为旧队列已经失效。
+因此首次 no-id 会暂停当前运行时的出站发送，积压仍按原顺序保留；暂停不跨重启持久化，
+下一条被接受的入站消息会恢复发送。需要主动清空时使用 `/discard`。
+
+不再保留 `staleOutbox` 自动隔离状态：恢复发送时无法证明旧队列必然过时，自动隔离会制造
+第二套交付语义。发送和恢复都不会自动丢弃剩余 outbox。
 
 ## 平台行为
 
