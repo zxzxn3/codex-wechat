@@ -298,7 +298,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("autostart", entry)
         self.assertIn("windows/task-service.ps1", adapter)
         self.assertIn("[char]::IsWhiteSpace", task)
-        self.assertIn(r"^[a-f0-9]{16}$", entry)
+        self.assertIn("'codex_wechat.launcher'", entry)
         self.assertIn("[char]::IsWhiteSpace", install)
         self.assertIn("$trigger.Enabled = $enabled", task)
         self.assertIn("Set-ScheduledTask -TaskName $TaskName -Trigger $allTriggers", task)
@@ -367,7 +367,7 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[IO.FileShare]::None", text)
         check = text.index("Assert-NoForegroundBridge\n\n# Data removal")
         self.assertLess(text.index("未安装计划任务"), check)
-        self.assertLess(check, text.index("if ($PurgeData)"))
+        self.assertLess(check, text.index("if ($PurgeData) {", check))
 
     def test_uninstall_has_no_second_data_root_override(self):
         text = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")

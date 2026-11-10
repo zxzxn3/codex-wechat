@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from urllib.request import getproxies
 
 from .install_layout import (InstalledLayout, RuntimePaths, default_roots,
-                             validate_roots)
+                             runtime_paths_for, validate_roots)
 from .native_codex import discover_codex
 
 IS_WINDOWS = os.name == "nt"
@@ -33,14 +33,7 @@ def runtime_paths(install_root: Path | None = None) -> RuntimePaths:
         return layout.runtime_paths()
     data, config, state = default_roots(_platform())
     validate_roots(_platform(), root, data, config, state)
-    return RuntimePaths(
-        data_root=data,
-        config_file=config / "config.json",
-        state_dir=state,
-        workspace_dir=data / "workspace",
-        logs_dir=state / "logs",
-        shared_dir=state / "shared",
-    )
+    return runtime_paths_for(_platform(), data, config, state)
 
 
 def subprocess_options():

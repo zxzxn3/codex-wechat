@@ -1292,6 +1292,8 @@ def _common_install(
         raise ValueError(f"安装布局契约缺失: {source / LAYOUT_CONTRACT_FILE}")
     existing = None
     if not dry_run:
+        if contract is None:
+            raise ValueError(f"安装布局契约缺失: {source / LAYOUT_CONTRACT_FILE}")
         check_install_target(source, target, update=update, contract=contract)
         existing = contract.InstalledLayout.load(
             target,
@@ -1325,6 +1327,8 @@ def _common_install(
     if dry_run:
         detail("因 --dry-run，真实安装目录与命令入口检查按通过处理；不代表实际安装条件已满足。")
     else:
+        if contract is None:
+            raise ValueError(f"安装布局契约缺失: {source / LAYOUT_CONTRACT_FILE}")
         planned = contract.InstalledLayout.planned(
             target,
             identifier,
@@ -1360,7 +1364,7 @@ def _common_install(
         print("演练完成，没有修改文件。")
         declaration(source, "complete")
         return 0
-    if files is None:
+    if files is None or contract is None or planned is None:
         # Not an assert: -O would drop the check and let a None manifest through.
         raise ValueError("安装清单尚未准备完成，未修改安装。")
 

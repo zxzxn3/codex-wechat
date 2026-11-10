@@ -191,6 +191,7 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
     def test_windows_entry_routes_stop_through_python(self):
         script = (Path(__file__).parents[2] / "codex-wechat.ps1").read_text(encoding="utf-8")
         self.assertIn("'stop'", script)
-        self.assertIn("@('-m', 'codex_wechat', $Command", script)
-        self.assertIn("& $VenvPython -u @Arguments", script)
+        self.assertIn("'codex_wechat.launcher'", script)
+        self.assertIn("'--module', 'codex_wechat'", script)
+        self.assertIn("& $EntryPython -u @Arguments", script)
         self.assertNotIn("'service-stop'", script)

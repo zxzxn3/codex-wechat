@@ -18,12 +18,15 @@ def _command_link() -> Path:
     return Path.home() / ".local/bin/codex-wechat"
 
 
-def _unit_link() -> Path:
-    return xdg_config_home() / "systemd/user" / UNIT
-
-
 def _default_unit_link() -> Path:
     return Path.home() / ".config/systemd/user" / UNIT
+
+
+def _unit_candidates(layout: InstalledLayout) -> tuple[Path, ...]:
+    """Possible systemd links for diagnostics when status is unavailable."""
+    configured = layout.config_root.parent / "systemd/user" / UNIT
+    default = _default_unit_link()
+    return (configured,) if configured == default else (configured, default)
 
 
 def _remove_path(path: Path) -> None:
@@ -35,8 +38,7 @@ def _remove_path(path: Path) -> None:
         path.unlink()
 
 
-async def _linux_service_removal() -> None:
-    link = _unit_link()
+async def _linux_service_removal(layout: InstalledLayout) -> None:
     try:
         current = await service_adapter.status()
     except FileNotFoundError:
@@ -44,10 +46,10 @@ async def _linux_service_removal() -> None:
         current = None
     except (OSError, RuntimeError) as error:
         # Preserve foreground-only installs, but never guess that an existing
-        # unit link in either standard location is absent.
+        # unit link in any configured location is absent.
         if not any(
                 candidate.exists() or candidate.is_symlink()
-                for candidate in (link, _default_unit_link())):
+                for candidate in _unit_candidates(layout)):
             print("systemd 用户服务不可用；跳过服务移除。")
             return
         raise RuntimeError(f"无法确认后台服务状态，拒绝卸载: {error}") from error
@@ -156,13 +158,13 @@ def _require_no_bridge(state_dir: Path | None = None) -> None:
 async def uninstall(*, purge: bool = False) -> None:
     if IS_WINDOWS:
         raise RuntimeError("Windows 卸载请使用 stable uninstall.ps1；uninstall.py 仅用于 Linux。")
-    layout = InstalledLayout.load(
-        INSTALL_ROOT, platform=current_platform(), required=True)
+    layout = InstalledLayout.load_required(
+        INSTALL_ROOT, platform=current_platform())
     paths = layout.runtime_paths()
     plan = None
     if purge:
         plan = layout.purge_plan()
-    await _linux_service_removal()
+    await _linux_service_removal(layout)
     _require_no_bridge(paths.state_dir)
     if purge:
         await _linux_shared_backend_removal(paths)

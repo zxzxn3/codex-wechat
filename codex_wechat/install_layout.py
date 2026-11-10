@@ -34,6 +34,32 @@ class RuntimePaths:
     shared_dir: Path
 
 
+def runtime_paths_for(
+    platform: str,
+    data_root: Path,
+    config_root: Path,
+    state_root: Path,
+) -> RuntimePaths:
+    """Map validated roots to the per-platform runtime locations."""
+    if platform == "windows":
+        return RuntimePaths(
+            data_root=data_root,
+            config_file=data_root / "config.json",
+            state_dir=data_root / ".state",
+            workspace_dir=data_root / "workspace",
+            logs_dir=data_root / "logs",
+            shared_dir=data_root / "shared",
+        )
+    return RuntimePaths(
+        data_root=data_root,
+        config_file=config_root / "config.json",
+        state_dir=state_root,
+        workspace_dir=data_root / "workspace",
+        logs_dir=state_root / "logs",
+        shared_dir=state_root / "shared",
+    )
+
+
 @dataclass(frozen=True)
 class OwnedPath:
     """One application-owned filesystem leaf selected for deletion."""
@@ -280,22 +306,11 @@ class InstalledLayout:
         return release
 
     def runtime_paths(self) -> RuntimePaths:
-        if self.platform == "windows":
-            return RuntimePaths(
-                data_root=self.data_root,
-                config_file=self.data_root / "config.json",
-                state_dir=self.data_root / ".state",
-                workspace_dir=self.data_root / "workspace",
-                logs_dir=self.data_root / "logs",
-                shared_dir=self.data_root / "shared",
-            )
-        return RuntimePaths(
-            data_root=self.data_root,
-            config_file=self.config_root / "config.json",
-            state_dir=self.state_root,
-            workspace_dir=self.data_root / "workspace",
-            logs_dir=self.state_root / "logs",
-            shared_dir=self.state_root / "shared",
+        return runtime_paths_for(
+            self.platform,
+            self.data_root,
+            self.config_root,
+            self.state_root,
         )
 
     def purge_plan(self) -> PurgePlan:
@@ -434,6 +449,19 @@ class InstalledLayout:
             state_root=_absolute_path(value["stateRoot"], "安装清单 stateRoot"),
         )
 
+    @classmethod
+    def load_required(
+        cls,
+        install_root=None,
+        *,
+        platform: str | None = None,
+    ) -> InstalledLayout:
+        """Load an installed layout or raise a typed contract error."""
+        layout = cls.load(install_root, platform=platform, required=True)
+        if layout is None:
+            raise AssertionError("required installed layout was not loaded")
+        return layout
+
 
 def main(argv=None) -> int:
     """Small stable CLI used by native entry adapters."""
@@ -443,8 +471,7 @@ def main(argv=None) -> int:
     parser.add_argument("action", choices=("show", "purge-plan", "remove"))
     parser.add_argument("--install-root", required=True)
     options = parser.parse_args(argv)
-    layout = InstalledLayout.load(
-        options.install_root, required=True)
+    layout = InstalledLayout.load_required(options.install_root)
     if options.action == "remove":
         layout.remove()
         return 0

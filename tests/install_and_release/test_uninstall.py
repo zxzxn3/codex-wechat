@@ -1,7 +1,6 @@
 """Uninstall keeps data by default and executes the contract's purge plan."""
 import contextlib
 import io
-import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -9,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from codex_wechat import platform_support
 from codex_wechat import uninstall
-from codex_wechat.install_layout import INSTALLATION_FILE
+from codex_wechat.install_layout import INSTALLATION_FILE, InstalledLayout
 from tests.support.helpers import write_installation_layout
 
 
@@ -50,7 +49,7 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_shared_backend_removal", AsyncMock()) as shared:
                 await uninstall.uninstall()
-            service.assert_awaited_once_with()
+            service.assert_awaited_once_with(layout)
             shared.assert_not_awaited()
             command.assert_called_once_with()
             self.assertTrue((install / INSTALLATION_FILE).is_file())
@@ -138,13 +137,21 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 store.close()
 
-    def test_unit_link_uses_xdg_config_home(self):
+    def test_unit_candidates_start_from_the_layout_config_root(self):
         with tempfile.TemporaryDirectory() as directory:
-            with patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}):
-                self.assertEqual(
-                    uninstall._unit_link(),
-                    Path(directory).resolve() / "systemd/user" / uninstall.UNIT,
-                )
+            root = Path(directory)
+            layout = InstalledLayout.create(
+                root / "install",
+                "a" * 16,
+                platform="linux",
+                data_root=root / "data",
+                config_root=root / "config/codex-wechat",
+                state_root=root / "state/codex-wechat",
+            )
+            self.assertEqual(
+                uninstall._unit_candidates(layout)[0],
+                root / "config/systemd/user" / uninstall.UNIT,
+            )
 
     async def test_removal_uses_the_registered_fragment_path(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -153,7 +160,6 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             install.mkdir()
             expected = install / uninstall.UNIT
             expected.write_text("[Unit]\n", encoding="utf-8")
-            shell_link = root / "custom/systemd/user" / uninstall.UNIT
             registered = root / "default/systemd/user" / uninstall.UNIT
             registered.parent.mkdir(parents=True)
             try:
@@ -163,12 +169,19 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             current = uninstall.service_adapter.ServiceState(
                 True, False, fragment_path=registered)
             systemctl = AsyncMock(side_effect=[None, None])
+            layout = InstalledLayout.create(
+                install,
+                "a" * 16,
+                platform="linux",
+                data_root=root / "data",
+                config_root=root / "config/codex-wechat",
+                state_root=root / "state/codex-wechat",
+            )
             with patch.object(uninstall, "INSTALL_ROOT", install), \
-                    patch.object(uninstall, "_unit_link", return_value=shell_link), \
                     patch.object(uninstall.service_adapter, "status",
                                  AsyncMock(return_value=current)), \
                     patch.object(uninstall, "systemctl", systemctl):
-                await uninstall._linux_service_removal()
+                await uninstall._linux_service_removal(layout)
             self.assertFalse(registered.exists())
 
     async def test_shared_backend_removal_stops_only_units_from_this_data_root(self):

@@ -55,10 +55,9 @@ def write_installation_layout(
         config_root=config_root,
         state_root=state_root,
     ).publish()
-    return InstalledLayout.load(
+    return InstalledLayout.load_required(
         install_root,
         platform=platform or current_platform(),
-        required=True,
     )
 
 

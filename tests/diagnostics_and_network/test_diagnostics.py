@@ -267,7 +267,8 @@ class DiagnosticsTests(unittest.TestCase):
 
     def test_windows_logs_command_uses_the_shared_viewer(self):
         script = (Path(__file__).parents[2] / "codex-wechat.ps1").read_text(encoding="utf-8")
-        self.assertIn("@('-m', 'codex_wechat', $Command", script)
+        self.assertIn("'codex_wechat.launcher'", script)
+        self.assertIn("'--module', 'codex_wechat'", script)
         self.assertIn("--follow", script)
         self.assertIn("--service", script)
         self.assertNotIn("Get-Content -LiteralPath $BridgeLog", script)

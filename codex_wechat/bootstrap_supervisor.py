@@ -24,8 +24,7 @@ RESTART_SETTLE_SECONDS = 0.2
 
 
 def active_release(install_root: Path) -> Path:
-    layout = InstalledLayout.load(
-        install_root, platform="windows", required=True)
+    layout = InstalledLayout.load_required(install_root, platform="windows")
     release = layout.release_dir()
     if not (release / "codex_wechat" / "windows_service.py").is_file():
         raise ValueError(f"当前版本不完整: {release}")
@@ -96,8 +95,7 @@ def main(argv=None) -> int:
     args = parser().parse_args(argv)
     install_root = args.install_root.expanduser().resolve()
     os.environ["CODEX_WECHAT_INSTALL_ROOT"] = str(install_root)
-    layout = InstalledLayout.load(
-        install_root, platform="windows", required=True)
+    layout = InstalledLayout.load_required(install_root, platform="windows")
     paths = layout.runtime_paths()
     state_dir = paths.state_dir
     config = paths.config_file

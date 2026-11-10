@@ -710,20 +710,36 @@ class InstallerCommandTests(unittest.TestCase):
 
     def test_unreadable_install_entry_is_reported(self):
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory)
+            root = Path(directory)
+            target = root / "install"
+            target.mkdir()
             files = installer._stable_files(installer.SOURCE_ROOT)
             contract = installer.install_layout(installer.SOURCE_ROOT)
+            data = root / "data"
+            if installer.IS_WINDOWS:
+                config = state = data
+            else:
+                config = root / "config"
+                state = root / "state"
+            layout = contract.InstalledLayout.create(
+                target,
+                "a" * 16,
+                platform="windows" if installer.IS_WINDOWS else "linux",
+                data_root=data,
+                config_root=config,
+                state_root=state,
+            )
             for name in (*files, contract.INSTALLATION_FILE):
                 path = target / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("x", encoding="utf-8")
             (target / "releases" / "abc").mkdir(parents=True)
-            installer.check_user_access(target, "abc", installer.SOURCE_ROOT, contract)
+            installer.check_user_access(target, "abc", installer.SOURCE_ROOT, layout)
             with patch.object(installer, "_readable",
                               side_effect=lambda path: path.name != contract.INSTALLATION_FILE):
                 with self.assertRaisesRegex(ValueError, "chmod|icacls") as caught:
                     installer.check_user_access(
-                        target, "abc", installer.SOURCE_ROOT, contract)
+                        target, "abc", installer.SOURCE_ROOT, layout)
             self.assertIn(contract.INSTALLATION_FILE, str(caught.exception))
 
 
