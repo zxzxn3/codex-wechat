@@ -151,7 +151,7 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
                             config_root=root,
                             state_root=root,
                             platform="windows",
-                foreign_platform=True,
+                            foreign_platform=True,
                             create_release=False,
                         )
                         return 76
