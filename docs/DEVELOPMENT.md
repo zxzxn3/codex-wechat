@@ -185,6 +185,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 重构优先解决已观察到的边界问题，不按行数拆文件，不为跨平台强行统一平台适配层。这些取舍
 不代表已取消任何能力。
 
+补丁债务雷达从 fix 提交和当前生产文件的历史变更中生成候选：
+`.venv/bin/python scripts/patch_debt.py --days 90`。它只发现历史热点，不会自动判断债务是否
+仍然存在；确认前必须核对当前源码和测试。`--format json` 可用于后续导入 Taskwarrior。
+
 安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；运行期模块位于
 `codex_wechat/`，包内使用相对导入。
 `tests/install_and_release/test_release_layout.py` 会检查 stable payload
