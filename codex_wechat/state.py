@@ -1,6 +1,5 @@
 """Versioned bridge state with strict loading and corrupt-file quarantine."""
 from copy import deepcopy
-import json
 import math
 import os
 from pathlib import Path
@@ -245,7 +244,7 @@ def load_bridge_state(store, *, recover=True):
         raise BridgeStateError("invalid_file", "状态路径不是普通文件", path)
     try:
         saved = store.load("bridge", _MISSING)
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+    except (ValueError, RecursionError) as error:
         state_error = BridgeStateError(
             "invalid_encoding" if isinstance(error, UnicodeDecodeError) else "invalid_json",
             str(error),

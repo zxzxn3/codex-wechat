@@ -77,6 +77,36 @@ class LoadBridgeStateTests(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertEqual(quarantined, raw)
 
+    def test_json_parser_limits_are_quarantined_byte_for_byte(self):
+        cases = {
+            "oversized-integer": '{"value":' + "1" * 5000 + "}",
+            "excessive-depth": "[" * 100000 + "0" + "]" * 100000,
+        }
+        for name, raw in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                store = Store(root, lock=False)
+                (root / "bridge.json").write_text(raw, encoding="utf-8")
+                state = load_bridge_state(store)
+                backups = list(root.glob("bridge.corrupt-*.json"))
+                quarantined = backups[0].read_text(encoding="utf-8") if backups else None
+                self.assertEqual(state["stateRecovery"]["kind"], "invalid_json")
+                self.assertEqual(len(backups), 1)
+                self.assertEqual(quarantined, raw)
+
+    def test_status_reports_json_parser_limits_without_modifying_the_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = Store(root, lock=False)
+            path = root / "bridge.json"
+            raw = '{"value":' + "1" * 5000 + "}"
+            path.write_text(raw, encoding="utf-8")
+            payload = codex_wechat.status_payload(store)
+            self.assertEqual(path.read_text(encoding="utf-8"), raw)
+            self.assertEqual(list(root.glob("bridge.corrupt-*.json")), [])
+        self.assertEqual(payload["state"], "recovery_required")
+        self.assertEqual(payload["state_diagnostic"]["kind"], "invalid_json")
+
     def test_nested_invalid_type_is_quarantined(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
