@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# One-line entry. A private repository is authenticated with CODEX_WECHAT_TOKEN.
+# Public one-line entry.
 set -euo pipefail
 
 main() {
-    local repo='https://github.com/zxzxn3/codex-wechat' source_ref=main dry_run=0 non_interactive=0 target='' component='' skills_dir='' python_command installer_url task_temporary auth git_config private_source=0 installer
+    local repo='https://github.com/zxzxn3/codex-wechat' source_ref=main dry_run=0 non_interactive=0 target='' component='' skills_dir='' python_command installer_url task_temporary installer
     while (($#)); do
         case "$1" in
             --repo|--ref|--dir|--component|--skills-dir)
@@ -42,9 +42,6 @@ print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
     installer_url="$installer_base_url/installer.py"
     if ((dry_run)); then
         printf '演练模式，不下载或修改文件。\n来源 %s\n分支或标签 %s\n' "$repo" "$source_ref"
-        if [[ -n "${CODEX_WECHAT_TOKEN:-}" ]]; then
-            echo '将使用 CODEX_WECHAT_TOKEN 认证私有仓库。'
-        fi
         echo '因 --dry-run，真实安装目录检查按通过处理；不代表安装环境已通过检查。'
         echo '1. 安装 / 更新  2. 附加组件  0. 退出'
         echo '正式执行会显示统一菜单，识别安装或更新，展示计划后执行；不扫码、不启用自启、不自动启动。'
@@ -60,48 +57,16 @@ print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
     # Freeze the safely quoted path now because task_temporary is local to main().
     # shellcheck disable=SC2064
     trap "$(printf 'rm -rf -- %q' "$task_temporary")" EXIT
-    if [[ -n "${CODEX_WECHAT_TOKEN:-}" ]]; then
-        private_source=1
-        auth=$("$python_command" -c '
-import base64, os, re, sys
-token = os.environ.get("CODEX_WECHAT_TOKEN", "")
-if not re.fullmatch(r"[A-Za-z0-9_]+", token):
-    sys.exit("CODEX_WECHAT_TOKEN 格式无效")
-print(base64.b64encode(("x-access-token:" + token).encode()).decode())
-' 2>/dev/null) || { echo 'CODEX_WECHAT_TOKEN 格式无效。' >&2; return 1; }
-        git_config="$task_temporary/gitconfig"
-        (umask 077; printf '[http]\n\textraHeader = Authorization: Basic %s\n' \
-            "$auth" > "$git_config")
-        # Keep the credential out of argv, the remote URL and the installer env.
-        if ! (
-            unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
-            unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
-            GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c core.hooksPath=/dev/null \
-                -c include.path="$git_config" clone --depth 1 --single-branch \
-                --branch "$source_ref" -- "$repo" "$task_temporary/source"
-        ); then
-            unset auth
-            echo '私有仓库下载失败；请检查 PAT 是否仍有效并具有该仓库的 Contents: Read-only 权限。' >&2
-            return 1
-        fi
-        rm -f -- "$git_config"
-        unset auth CODEX_WECHAT_TOKEN
-        installer="$task_temporary/source/installer.py"
-        local -a installer_arguments=("$installer" menu)
-    else
-        command -v curl >/dev/null || { echo '需要 curl，安装后重跑相同命令。' >&2; return 1; }
-        curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            --connect-timeout 15 --max-time 120 "$installer_url" -o "$task_temporary/installer.py"
-        installer="$task_temporary/installer.py"
-        local -a installer_arguments=("$installer" bootstrap --repo "$repo" --ref "$source_ref")
-    fi
+    command -v curl >/dev/null || { echo '需要 curl，安装后重跑相同命令。' >&2; return 1; }
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+        --connect-timeout 15 --max-time 120 "$installer_url" -o "$task_temporary/installer.py"
+    installer="$task_temporary/installer.py"
+    local -a installer_arguments=("$installer" bootstrap --repo "$repo" --ref "$source_ref")
     [[ -z "$target" ]] || installer_arguments+=(--dir "$target")
     if [[ -n "$component" ]]; then
         installer_arguments[1]=components
         installer_arguments+=(--component "$component")
-        if ((!private_source)); then
-            installer_arguments+=(--repo "$repo" --ref "$source_ref")
-        fi
+        installer_arguments+=(--repo "$repo" --ref "$source_ref")
     fi
     [[ -z "$skills_dir" ]] || installer_arguments+=(--skills-dir "$skills_dir")
     if ((non_interactive)); then

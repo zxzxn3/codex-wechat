@@ -22,9 +22,6 @@ if ($RepoUri.Scheme -ne 'https' -or $RepoUri.Authority -ne 'github.com' -or $Rep
 }
 if ($DryRun) {
     Write-Host "Dry run: no download or file changes. Source: $Repo ($Ref)"
-    if ($env:CODEX_WECHAT_TOKEN) {
-        Write-Host 'The private repository would be authenticated with CODEX_WECHAT_TOKEN.'
-    }
     Write-Host 'Target directory checks are bypassed because of -DryRun; this is not an environment preflight.'
     Write-Host '1. Install / Update  2. Components  0. Exit'
     Write-Host 'The installer will show the plan; no login, new autostart or service start.'
@@ -50,74 +47,14 @@ $TaskTemporary = Join-Path ([IO.Path]::GetTempPath()) ('codex-wechat-bootstrap-'
 New-Item -ItemType Directory -Path $TaskTemporary | Out-Null
 try {
     $Installer = Join-Path $TaskTemporary 'installer.py'
-    $PrivateSource = -not [string]::IsNullOrWhiteSpace($env:CODEX_WECHAT_TOKEN)
-    if ($PrivateSource) {
-        if ($env:CODEX_WECHAT_TOKEN -notmatch '^[A-Za-z0-9_]+$') {
-            throw 'CODEX_WECHAT_TOKEN has an invalid format.'
-        }
-        $Source = Join-Path $TaskTemporary 'source'
-        $Auth = [Convert]::ToBase64String(
-            [Text.Encoding]::UTF8.GetBytes("x-access-token:$env:CODEX_WECHAT_TOKEN"))
-        $GitConfig = Join-Path $TaskTemporary 'gitconfig'
-        [IO.File]::WriteAllText(
-            $GitConfig,
-            "[http]`n`textraHeader = Authorization: Basic $Auth`n",
-            [Text.UTF8Encoding]::new($false))
-        $PreviousGitPrompt = $env:GIT_TERMINAL_PROMPT
-        $PreviousHttpsProxy = $env:HTTPS_PROXY
-        $PreviousHttpProxy = $env:HTTP_PROXY
-        try {
-            $env:GIT_TERMINAL_PROMPT = '0'
-            if ([string]::IsNullOrWhiteSpace($env:HTTPS_PROXY)) {
-                $SystemProxy = [System.Net.WebRequest]::GetSystemWebProxy().GetProxy(
-                    [Uri]'https://github.com/')
-                if ($SystemProxy.Scheme -in @('http', 'https') -and
-                        $SystemProxy.Host -ne 'github.com') {
-                    $env:HTTPS_PROXY = $SystemProxy.AbsoluteUri
-                    if ([string]::IsNullOrWhiteSpace($env:HTTP_PROXY)) {
-                        $env:HTTP_PROXY = $SystemProxy.AbsoluteUri
-                    }
-                }
-            }
-            & git.exe -c credential.helper= -c "include.path=$GitConfig" `
-                clone --depth 1 --single-branch --branch $Ref -- $Repo $Source
-            if ($LASTEXITCODE -ne 0) {
-                throw 'Private repository clone failed. Check that CODEX_WECHAT_TOKEN is valid and has Contents: Read-only access.'
-            }
-        } finally {
-            if ($null -eq $PreviousGitPrompt) {
-                Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
-            } else {
-                $env:GIT_TERMINAL_PROMPT = $PreviousGitPrompt
-            }
-            if ($null -eq $PreviousHttpsProxy) {
-                Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
-            } else {
-                $env:HTTPS_PROXY = $PreviousHttpsProxy
-            }
-            if ($null -eq $PreviousHttpProxy) {
-                Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
-            } else {
-                $env:HTTP_PROXY = $PreviousHttpProxy
-            }
-            Remove-Item Env:CODEX_WECHAT_TOKEN -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $GitConfig -Force -ErrorAction SilentlyContinue
-            Remove-Variable Auth -ErrorAction SilentlyContinue
-        }
-        $Installer = Join-Path $Source 'installer.py'
-        $InstallerArguments = @($Installer, 'menu')
-    } else {
-        $InstallerBaseUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' + [Uri]::EscapeDataString($Ref)
-        $InstallerUri = $InstallerBaseUri + '/installer.py'
-        Invoke-WebRequest -UseBasicParsing -Uri $InstallerUri -OutFile $Installer -TimeoutSec 120
-        $InstallerArguments = @($Installer, 'bootstrap', '--repo', $Repo, '--ref', $Ref)
-    }
+    $InstallerBaseUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' + [Uri]::EscapeDataString($Ref)
+    $InstallerUri = $InstallerBaseUri + '/installer.py'
+    Invoke-WebRequest -UseBasicParsing -Uri $InstallerUri -OutFile $Installer -TimeoutSec 120
+    $InstallerArguments = @($Installer, 'bootstrap', '--repo', $Repo, '--ref', $Ref)
     if ($Component) {
         $InstallerArguments[1] = 'components'
         $InstallerArguments += @('--component', $Component)
-        if (-not $PrivateSource) {
-            $InstallerArguments += @('--repo', $Repo, '--ref', $Ref)
-        }
+        $InstallerArguments += @('--repo', $Repo, '--ref', $Ref)
     }
     if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }

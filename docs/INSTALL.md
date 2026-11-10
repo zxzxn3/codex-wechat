@@ -7,7 +7,7 @@
 
 - Python 3.11+。
 - 已安装并登录 Codex；独立 CLI 或已注册的 App 内置 Codex 均可。
-- Git；私有安装入口用它认证 clone，运行时网络测速和部分网络操作仍使用 `curl`。
+- Git；公开安装入口用它 clone 源码，运行时网络测速和部分网络操作仍使用 `curl`。
 - Linux 一行安装还需要 `curl`；Windows 一行安装使用 PowerShell `Invoke-WebRequest`。
 - Linux 可选 systemd 用户服务；没有 `systemctl --user` 时安装器会跳过服务注册，仍可使用前台
   `start`。
@@ -15,26 +15,20 @@
 
 ## 首次安装
 
-仓库保持私有。fine-grained PAT 只选择 `zxzxn3/codex-wechat`，Repository permissions
-仅授予 `Contents: Read-only`；`Metadata: Read-only` 由 GitHub 保留。PAT 直接写在命令中，
-会进入 shell 历史。
-
 Linux：
 
 ```bash
-env CODEX_WECHAT_TOKEN='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' bash -o pipefail -c 'if [[ -z ${HTTPS_PROXY:-} && -z ${https_proxy:-} ]] && command -v gsettings >/dev/null; then mode=$(gsettings get org.gnome.system.proxy mode 2>/dev/null || true); mode=${mode#?}; mode=${mode%?}; if [[ $mode == manual ]]; then host=$(gsettings get org.gnome.system.proxy.http host 2>/dev/null || true); host=${host#?}; host=${host%?}; port=$(gsettings get org.gnome.system.proxy.http port 2>/dev/null || true); if [[ -n $host && $port =~ ^[0-9]+$ && $port -gt 0 ]]; then export HTTPS_PROXY="http://$host:$port" HTTP_PROXY="http://$host:$port"; fi; fi; fi; curl -fsSL -H "Authorization: Bearer $CODEX_WECHAT_TOKEN" -H "Accept: application/vnd.github.raw+json" "https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.sh?ref=main" | bash'
+curl -fsSL https://raw.githubusercontent.com/zxzxn3/codex-wechat/main/bootstrap.sh | bash
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:CODEX_WECHAT_TOKEN='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'; $r = Invoke-WebRequest -UseBasicParsing -Headers @{Authorization="Bearer $env:CODEX_WECHAT_TOKEN"; Accept='application/vnd.github.raw+json'} 'https://api.github.com/repos/zxzxn3/codex-wechat/contents/bootstrap.ps1?ref=main'; $body = $r.Content; if ($body -is [byte[]]) { $body = [Text.Encoding]::UTF8.GetString($body) }; & ([scriptblock]::Create($body))
+irm https://raw.githubusercontent.com/zxzxn3/codex-wechat/main/bootstrap.ps1 | iex
 ```
 
-入口先从 GitHub Contents API 取得同仓库中的 bootstrap。bootstrap 使用 PAT 认证 clone
-到临时目录，再调用本地安装器；认证头只放在临时 git config 和进程环境中，不进入 argv、
-Git remote、`.update-source.json`、配置或日志。
-重跑同一入口即可安装或更新。
+入口从公开的 GitHub raw 地址取得 bootstrap。bootstrap 下载安装器，再由安装器把公开仓库
+clone 到临时目录。重跑同一入口即可安装或更新。
 
 也可以直接将完整源码目录或源码压缩包交给使用者，在源码目录运行本地入口：
 
@@ -95,11 +89,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 
 ## 更新
 
-再次运行同一个网络入口或本地入口即可更新已有安装。私有网络入口不会保存 PAT，也不会
-自动写入可复用的更新来源；安装后若要使用 `codex-wechat update`，请显式传
-`--source`（或重跑同一个网络入口）。更新会保留配置、登录、待办、工作目录、
-日志和已有的登录自启状态，不重启正在运行的桥接；新版本先进入独立 release 并完成检查和
-运行时准备，最后才切换 `current`。项目不提供安装回滚命令。
+再次运行同一个网络入口或本地入口即可更新已有安装。公开网络入口会保存公开仓库作为可复用
+更新来源，也可以继续重跑同一个网络入口。更新会保留配置、登录、待办、工作目录、日志和已有
+的登录自启状态，不重启正在运行的桥接；新版本先进入独立 release 并完成检查和运行时准备，
+最后才切换 `current`。项目不提供安装回滚命令。
 
 每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
 release 通过 `current` / `active-release` 保留。详细阶段边界见
@@ -146,7 +139,7 @@ Linux 安装根固定为 `~/.local/share/codex-wechat`；`installer.py --dir` �
 安装器把当前数据根（包括默认根）写入安装根目录的 `.data-root`；公开入口、Linux systemd
 服务和 Windows supervisor 都从同一个标记解析数据根，不把数据根复制进 unit/task action。
 因此修改数据根只需通过安装器更新标记，不需要额外改服务配置。
-项目尚未公开发布，不保留旧安装布局、旧 marker 或旧持久状态的迁移路径。
+当前版本不保留旧安装布局、旧 marker 或旧持久状态的迁移路径。
 
 `current`、`active-release`、`releases/`、`.state/`、`logs/`、`workspace/`、`shared/` 和
 `config.json` 各有独立职责，不复制供应商凭据或会话历史。配置与提示的细节见
