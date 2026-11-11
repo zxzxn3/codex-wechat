@@ -24,7 +24,7 @@ case "${1:-}" in
             echo "codex-wechat: 稳定安装器缺失: $INSTALLER" >&2
             exit 1
         fi
-        exec python3 -u "$INSTALLER" "$@"
+        exec env -u PYTHONPATH -u PYTHONHOME python3 -I -u "$INSTALLER" "$@"
         ;;
 esac
 if [ "$ACTION" = "uninstall" ]; then
@@ -35,10 +35,10 @@ if [ "$ACTION" = "uninstall" ]; then
     fi
     export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
     shift
-    exec env PYTHONPATH="$INSTALL_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-        python3 -B -u -m codex_wechat.uninstall "$@"
+    exec env -u PYTHONPATH -u PYTHONHOME PYTHONPATH="$INSTALL_ROOT" \
+        python3 -s -P -B -u -m codex_wechat.uninstall "$@"
 fi
 export PATH="$HOME/.local/bin:$PATH"
-exec env PYTHONPATH="$INSTALL_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-    python3 -u -m codex_wechat.launcher \
+exec env -u PYTHONPATH -u PYTHONHOME PYTHONPATH="$INSTALL_ROOT" \
+    python3 -s -P -u -m codex_wechat.launcher \
     --install-root "$INSTALL_ROOT" --module codex_wechat -- "$@"

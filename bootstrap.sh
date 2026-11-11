@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Public one-line entry.
 set -euo pipefail
+unset PYTHONPATH PYTHONHOME
 
 dependency_install_hint() {
     if command -v pacman >/dev/null 2>&1; then
@@ -42,7 +43,7 @@ find_python() {
     local candidate
     for candidate in python3 python3.13 python3.12 python3.11; do
         if command -v "$candidate" >/dev/null 2>&1 &&
-                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
+                "$candidate" -I -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
                     >/dev/null 2>&1; then
             command -v "$candidate"
             return 0
@@ -74,7 +75,7 @@ main() {
         esac
     done
     python_command=$(find_python) || { missing_python; return 1; }
-    installer_base_url=$("$python_command" -c '
+    installer_base_url=$("$python_command" -I -c '
 import re, sys
 from urllib.parse import quote, urlsplit
 url = urlsplit(sys.argv[1]); path = url.path.strip("/").removesuffix(".git")
@@ -116,9 +117,9 @@ print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
     [[ -z "$skills_dir" ]] || installer_arguments+=(--skills-dir "$skills_dir")
     if ((non_interactive)); then
         installer_arguments+=(--non-interactive)
-        "$python_command" -u "${installer_arguments[@]}"
+        "$python_command" -I -u "${installer_arguments[@]}"
     else
-        "$python_command" -u "${installer_arguments[@]}" <&3 >&3
+        "$python_command" -I -u "${installer_arguments[@]}" <&3 >&3
     fi
 }
 

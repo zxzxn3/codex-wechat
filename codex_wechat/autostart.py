@@ -95,7 +95,7 @@ def _owned_supervisor_action(action):
     """Match the exact stable supervisor action installed by this project."""
     action = _exec_action(action)
     root = Path(INSTALL_ROOT)
-    expected = f'"{root / SUPERVISOR_SCRIPT}" supervise'
+    expected = f'-I "{root / SUPERVISOR_SCRIPT}" supervise'
     arguments = str(getattr(action, "Arguments", "") or "")
     if not arguments.casefold().startswith(expected.casefold()):
         return False

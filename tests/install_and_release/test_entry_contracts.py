@@ -53,6 +53,17 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn("CODEX_WECHAT_ALLOW_ROOT", text)
         self.assertIn("不要使用 root/sudo", text)
 
+    def test_python_entries_ignore_ambient_import_paths(self):
+        for relative in ("codex-wechat", "codex-desktop"):
+            with self.subTest(relative=relative):
+                text = (ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn("-u PYTHONPATH", text)
+                self.assertIn("-u PYTHONHOME", text)
+                self.assertIn("-s -P", text)
+        text = (ROOT / "bootstrap.sh").read_text(encoding="utf-8")
+        self.assertIn("unset PYTHONPATH PYTHONHOME", text)
+        self.assertIn('"$python_command" -I', text)
+
     def test_public_entry_does_not_expose_the_internal_cli(self):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
         self.assertNotIn('exec "$INSTALL_ROOT/codex-desktop"', text)
@@ -92,6 +103,21 @@ class EntryContractTests(unittest.TestCase):
         self.assertIn("if ($Force -and $Command -ne 'uninstall')", text)
         self.assertIn("$UninstallerArguments.Force = $true", text)
         self.assertLess(text.index("if ($Help)"), text.index("if ($Command -notin"))
+
+    def test_windows_entries_ignore_ambient_python_environment(self):
+        text = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Invoke-IsolatedPython", text)
+        self.assertIn("Remove-Item Env:PYTHONPATH", text)
+        self.assertIn("Remove-Item Env:PYTHONHOME", text)
+        self.assertIn("& $Python -I @Arguments", text)
+        desktop = (ROOT / "codex-desktop.ps1").read_text(encoding="utf-8")
+        self.assertIn("Remove-Item Env:PYTHONPATH", desktop)
+        self.assertIn("Remove-Item Env:PYTHONHOME", desktop)
+        self.assertIn("-s -P", desktop)
+        bootstrap = (ROOT / "bootstrap.ps1").read_text(encoding="utf-8")
+        self.assertIn("Remove-Item Env:PYTHONPATH", bootstrap)
+        self.assertIn("Remove-Item Env:PYTHONHOME", bootstrap)
+        self.assertIn("-I -u @InstallerArguments", bootstrap)
 
     def test_task_helper_is_internal_and_owns_native_operations(self):
         text = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")

@@ -44,6 +44,40 @@ function Test-Elevated {
     }
 }
 
+function Invoke-IsolatedPython {
+    param(
+        [Parameter(Mandatory = $true)][string]$Python,
+        [AllowNull()][string]$SearchPath,
+        [switch]$IgnoreEnvironment,
+        [Parameter(Mandatory = $true)][object[]]$Arguments,
+        [Parameter(Mandatory = $true)][ref]$ExitCode
+    )
+    $previousPath = [Environment]::GetEnvironmentVariable('PYTHONPATH', 'Process')
+    $previousHome = [Environment]::GetEnvironmentVariable('PYTHONHOME', 'Process')
+    try {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+        if ($IgnoreEnvironment) {
+            & $Python -I @Arguments
+        } else {
+            $env:PYTHONPATH = $SearchPath
+            & $Python -s -P @Arguments
+        }
+        $ExitCode.Value = $LASTEXITCODE
+    } finally {
+        if ($null -eq $previousPath) {
+            Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONPATH = $previousPath
+        }
+        if ($null -eq $previousHome) {
+            Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONHOME = $previousHome
+        }
+    }
+}
+
 if ($Command -notin @('status', 'logs', 'uninstall') -and
         (Test-Elevated) -and $env:CODEX_WECHAT_ALLOW_ROOT -ne '1') {
     [Console]::Error.WriteLine('请以普通用户身份运行，不要使用 root/sudo 或管理员终端。')
@@ -87,8 +121,10 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
     if ($Component) { $InstallerArguments += @('--component', $Component) }
     if ($SkillsDir) { $InstallerArguments += @('--skills-dir', $SkillsDir) }
-    & $UpdatePython @InstallerArguments
-    exit $LASTEXITCODE
+    $installerExit = 0
+    Invoke-IsolatedPython -Python $UpdatePython -IgnoreEnvironment `
+        -Arguments $InstallerArguments -ExitCode ([ref]$installerExit)
+    exit $installerExit
 }
 
 if ($Repo -or $Ref -or $Source -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) {
@@ -153,20 +189,7 @@ if ($Command -eq 'rebind' -and $StopActive) {
 if ($Command -eq 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
     $Arguments += $Value
 }
-$PreviousPythonPath = $env:PYTHONPATH
-try {
-    $env:PYTHONPATH = if ($PreviousPythonPath) {
-        "$InstallRoot;$PreviousPythonPath"
-    } else {
-        $InstallRoot
-    }
-    & $EntryPython -u @Arguments
-    $Result = $LASTEXITCODE
-} finally {
-    if ($null -eq $PreviousPythonPath) {
-        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
-    } else {
-        $env:PYTHONPATH = $PreviousPythonPath
-    }
-}
+$Result = 0
+Invoke-IsolatedPython -Python $EntryPython -SearchPath $InstallRoot `
+    -Arguments $Arguments -ExitCode ([ref]$Result)
 exit $Result

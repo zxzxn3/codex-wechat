@@ -33,12 +33,10 @@ def command(
         if not python.is_file():
             raise ValueError(f"当前版本的 Python 环境缺失: {python}")
     environment = os.environ.copy()
-    prior = environment.get("PYTHONPATH")
-    environment["PYTHONPATH"] = (
-        str(project) + (os.pathsep + prior if prior else "")
-    )
+    environment.pop("PYTHONHOME", None)
+    environment["PYTHONPATH"] = str(project)
     environment["CODEX_WECHAT_INSTALL_ROOT"] = str(root)
-    return [str(python), "-u", "-m", module, *arguments], environment
+    return [str(python), "-s", "-P", "-u", "-m", module, *arguments], environment
 
 
 def main(argv=None) -> int:
@@ -46,6 +44,8 @@ def main(argv=None) -> int:
     parser.add_argument("--install-root")
     parser.add_argument("--module", default="codex_wechat")
     options, arguments = parser.parse_known_args(argv)
+    if arguments[:1] == ["--"]:
+        arguments = arguments[1:]
     root = _install_root(options.install_root)
     executable, environment = command(root, options.module, arguments)
     os.execvpe(executable[0], executable, environment)

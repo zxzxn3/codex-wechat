@@ -1,9 +1,11 @@
 """The stable launcher resolves releases only through InstalledLayout."""
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from codex_wechat.launcher import command
+from codex_wechat.launcher import command, main as launcher_main
 from tests.support.helpers import install_platform, write_installation_layout
 
 
@@ -27,19 +29,39 @@ class LauncherTests(unittest.TestCase):
             executable, environment = command(
                 install, "codex_wechat", ["status"])
 
-            self.assertEqual(executable[:4],
-                             [str(layout.python_executable), "-u", "-m", "codex_wechat"])
-            self.assertEqual(executable[4:], ["status"])
+            self.assertEqual(executable[:6],
+                             [str(layout.python_executable), "-s", "-P", "-u", "-m",
+                              "codex_wechat"])
+            self.assertEqual(executable[6:], ["status"])
             self.assertEqual(environment["CODEX_WECHAT_INSTALL_ROOT"], str(install))
-            self.assertTrue(environment["PYTHONPATH"].startswith(str(layout.release_path)))
+            self.assertEqual(environment["PYTHONPATH"], str(layout.release_path))
+            self.assertNotIn("PYTHONHOME", environment)
 
     def test_source_tree_uses_the_current_interpreter(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            executable, environment = command(root, "codex_wechat.desktop", [])
+            with patch.dict(os.environ, {
+                    "PYTHONPATH": str(root / "ambient"),
+                    "PYTHONHOME": str(root / "ambient-home"),
+            }):
+                executable, environment = command(root, "codex_wechat.desktop", [])
 
-            self.assertEqual(executable[2:], ["-m", "codex_wechat.desktop"])
+            self.assertEqual(executable[1:], ["-s", "-P", "-u", "-m", "codex_wechat.desktop"])
             self.assertEqual(environment["PYTHONPATH"], str(root))
+            self.assertNotIn("PYTHONHOME", environment)
+
+    def test_main_strips_the_launcher_argument_separator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch("codex_wechat.launcher.command",
+                       return_value=(["python"], {})) as resolve, \
+                    patch("codex_wechat.launcher.os.execvpe") as execute:
+                launcher_main([
+                    "--install-root", str(root), "--module", "codex_wechat",
+                    "--", "--help",
+                ])
+            self.assertEqual(resolve.call_args.args[2], ["--help"])
+            execute.assert_called_once_with("python", ["python"], {})
 
     def test_legacy_layout_is_not_guessed(self):
         with tempfile.TemporaryDirectory() as directory:

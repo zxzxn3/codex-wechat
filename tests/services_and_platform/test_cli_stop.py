@@ -197,5 +197,7 @@ class StopCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("'stop'", script)
         self.assertIn("'codex_wechat.launcher'", script)
         self.assertIn("'--module', 'codex_wechat'", script)
-        self.assertIn("& $EntryPython -u @Arguments", script)
+        self.assertIn("Invoke-IsolatedPython -Python $EntryPython", script)
+        self.assertIn("-s -P @Arguments", script)
+        self.assertIn("-ExitCode ([ref]$Result)", script)
         self.assertNotIn("'service-stop'", script)

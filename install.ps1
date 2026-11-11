@@ -23,6 +23,11 @@ Close and reopen this terminal, then rerun the same command.
 
 # Public local entry delegates to the same installer as the network entry.
 if (-not $PreparedRuntime) {
+    $PreviousPythonPath = [Environment]::GetEnvironmentVariable('PYTHONPATH', 'Process')
+    $PreviousPythonHome = [Environment]::GetEnvironmentVariable('PYTHONHOME', 'Process')
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    try {
     $py = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue
     $prefix = @('-3')
     if (-not $py) {
@@ -36,7 +41,7 @@ if (-not $PreparedRuntime) {
     if (-not $py) {
         throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
     }
-    & $py.Source @prefix -c 'import sys; sys.exit(sys.version_info < (3, 11))'
+    & $py.Source @prefix -I -c 'import sys; sys.exit(sys.version_info < (3, 11))'
     if ($LASTEXITCODE -ne 0) {
         throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
     }
@@ -46,8 +51,20 @@ if (-not $PreparedRuntime) {
     if ($NonInteractive) { $arguments += '--non-interactive' }
     if ($Repo) { $arguments += @('--repo', $Repo) }
     if ($Ref) { $arguments += @('--ref', $Ref) }
-    & $py.Source @prefix -u @arguments
+    & $py.Source @prefix -I -u @arguments
     exit $LASTEXITCODE
+    } finally {
+        if ($null -eq $PreviousPythonPath) {
+            Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONPATH = $PreviousPythonPath
+        }
+        if ($null -eq $PreviousPythonHome) {
+            Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONHOME = $PreviousPythonHome
+        }
+    }
 }
 # Internal integration only: Python has finished downloads and runtime checks.
 if (-not $InstallRoot -or (-not $env:LOCALAPPDATA -and -not $env:CODEX_WECHAT_DATA_ROOT)) {
@@ -67,13 +84,12 @@ if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
     $LayoutPython = $LayoutPythonCommand.Source
 }
 $PreviousPythonPath = $env:PYTHONPATH
+$PreviousPythonHome = $env:PYTHONHOME
 try {
-    $env:PYTHONPATH = if ($PreviousPythonPath) {
-        "$InstallRoot;$PreviousPythonPath"
-    } else {
-        $InstallRoot
-    }
-    $LayoutJson = & $LayoutPython -m codex_wechat.install_layout show `
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    $env:PYTHONPATH = $InstallRoot
+    $LayoutJson = & $LayoutPython -s -P -m codex_wechat.install_layout show `
         --install-root $InstallRoot
     if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
     $Layout = $LayoutJson | ConvertFrom-Json
@@ -82,6 +98,11 @@ try {
         Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
     } else {
         $env:PYTHONPATH = $PreviousPythonPath
+    }
+    if ($null -eq $PreviousPythonHome) {
+        Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONHOME = $PreviousPythonHome
     }
 }
 $DataRoot = [IO.Path]::GetFullPath([string]$Layout.dataRoot)
@@ -131,7 +152,7 @@ if ($existing) {
     $autostart = [bool]$existing.Settings.Enabled -and @($triggers | Where-Object { $_.Enabled }).Count -gt 0
 }
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$arguments = @((Quote-Arg $ServiceScript), 'supervise',
+$arguments = @('-I', (Quote-Arg $ServiceScript), 'supervise',
     '--install-root', (Quote-Arg $InstallRoot)) -join ' '
 $action = New-ScheduledTaskAction -Execute $Python -Argument $arguments -WorkingDirectory $InstallRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user

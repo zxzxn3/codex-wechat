@@ -39,6 +39,11 @@ if ($DryRun) {
     return
 }
 
+$PreviousPythonPath = [Environment]::GetEnvironmentVariable('PYTHONPATH', 'Process')
+$PreviousPythonHome = [Environment]::GetEnvironmentVariable('PYTHONHOME', 'Process')
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+try {
 $PythonCommand = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue
 $PythonPrefix = @('-3')
 if (-not $PythonCommand) {
@@ -52,7 +57,7 @@ if (-not $PythonCommand) {
 if (-not $PythonCommand) {
     throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
 }
-& $PythonCommand.Source @PythonPrefix -c 'import sys; sys.exit(sys.version_info < (3, 11))'
+& $PythonCommand.Source @PythonPrefix -I -c 'import sys; sys.exit(sys.version_info < (3, 11))'
 if ($LASTEXITCODE -ne 0) {
     throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
 }
@@ -77,8 +82,20 @@ try {
     if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
     if ($SkillsDir) { $InstallerArguments += @('--skills-dir', $SkillsDir) }
-    & $PythonCommand.Source @PythonPrefix -u @InstallerArguments
+    & $PythonCommand.Source @PythonPrefix -I -u @InstallerArguments
     if ($LASTEXITCODE -ne 0) { throw "Installer failed with exit code $LASTEXITCODE" }
 } finally {
     Remove-Item -LiteralPath $TaskTemporary -Recurse -Force
+}
+} finally {
+    if ($null -eq $PreviousPythonPath) {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONPATH = $PreviousPythonPath
+    }
+    if ($null -eq $PreviousPythonHome) {
+        Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONHOME = $PreviousPythonHome
+    }
 }
