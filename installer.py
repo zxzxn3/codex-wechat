@@ -644,11 +644,6 @@ def check_install_target(
         platform="windows" if IS_WINDOWS else "linux",
     )
     if source == target:
-        if layout is not None:
-            raise ValueError(
-                "版本化安装不能把安装根目录本身当作新源码；"
-                "请从另一份源码 checkout 运行 update。"
-            )
         return
     if update:
         if layout is None:
