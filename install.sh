@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Local adapter for the same interactive installer used by the network entry.
 set -euo pipefail
+unset PYTHONPATH PYTHONHOME
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 dependency_install_hint() {
@@ -37,7 +38,7 @@ find_python() {
     local candidate
     for candidate in python3 python3.13 python3.12 python3.11; do
         if command -v "$candidate" >/dev/null 2>&1 &&
-                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
+                "$candidate" -I -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
                     >/dev/null 2>&1; then
             command -v "$candidate"
             return 0
@@ -47,4 +48,4 @@ find_python() {
 }
 
 python_command=$(find_python) || { missing_python; exit 1; }
-exec "$python_command" -u "$PROJECT_DIR/installer.py" "$@"
+exec "$python_command" -I -u "$PROJECT_DIR/installer.py" "$@"

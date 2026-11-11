@@ -1,5 +1,8 @@
 """Static contracts for the thin cross-platform command entries."""
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 
@@ -63,6 +66,38 @@ class EntryContractTests(unittest.TestCase):
         text = (ROOT / "bootstrap.sh").read_text(encoding="utf-8")
         self.assertIn("unset PYTHONPATH PYTHONHOME", text)
         self.assertIn('"$python_command" -I', text)
+        install = (ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("unset PYTHONPATH PYTHONHOME", install)
+        self.assertIn('"$python_command" -I', install)
+
+    def test_install_sh_ignores_ambient_python_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ambient = root / "ambient"
+            ambient.mkdir()
+            (ambient / "sitecustomize.py").write_text(
+                "import os\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['CODEX_WECHAT_AMBIENT_MARKER']).write_text('hit')\n",
+                encoding="utf-8",
+            )
+            marker = root / "marker"
+            env = os.environ.copy()
+            env.update({
+                "PYTHONPATH": str(ambient),
+                "PYTHONHOME": str(root / "home"),
+                "CODEX_WECHAT_AMBIENT_MARKER": str(marker),
+            })
+            result = subprocess.run(
+                [str(ROOT / "install.sh"), "--dry-run"],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertFalse(marker.exists())
 
     def test_public_entry_does_not_expose_the_internal_cli(self):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
