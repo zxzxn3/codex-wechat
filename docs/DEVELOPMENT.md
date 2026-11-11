@@ -22,9 +22,8 @@
 取得源码，切换环境前先同步，避免两份源码分叉。
 
 网络 bootstrap 先以 uv 管理的 Python 运行下载到临时目录的安装器，再由安装器下载公开
-GitHub tar 归档，交给 uv 构建 wheel 并安装；Linux、Windows 入口最终调用同一个
-`installer.py`。宿主不需要 Python、pip 或 Git。应用版本、依赖、二维码回退与包内文件统一
-由 `pyproject.toml` 声明，附件 skill 仍按需安装。
+GitHub tar 归档并执行安装；Linux、Windows 入口最终调用同一个 `installer.py`。宿主不需要
+Python、pip 或 Git。依赖声明集中在 requirements 文件，二维码与附件 skill 只按需安装。
 完整用户流程见 [INSTALL](INSTALL.md)。
 
 新旧 release 按各自清单验证，不用新排除规则重新定义旧版身份。下载、构建与原子写临时文件
@@ -84,22 +83,24 @@ Windows、真实微信/CDN、App/daemon 联调不属于离线测试；mock 通�
 
 ## 静态检查、覆盖率与依赖审计
 
-在已有的开发虚拟环境中只安装项目与开发工具；它们不会进入运行时安装：
+在已有的运行时 `.venv` 中只安装开发工具；它们不会进入运行时安装：
 
 ```bash
 cd ~/.local/share/codex-wechat
-uv sync --group dev
+.venv/bin/python -m pip install -r requirements-dev.txt
 ```
+
+新建开发环境时，先安装 `requirements.txt`，再安装 `requirements-dev.txt`。
 
 `ruff`、`pyright`、`shellcheck` 仍由系统提供，版本以 `--version` 为准。一键检查：
 
 ```bash
 scripts/check.sh
-scripts/check.sh --audit   # 额外审计 pyproject 依赖，需要网络
+scripts/check.sh --audit   # 额外审计 requirements，需要网络
 ```
 
 脚本依次运行 ruff、pyright、shellcheck 和带分支覆盖的完整单元测试，最后输出覆盖率。
-`--audit` 再运行 pip-audit，检查 `pyproject.toml` 声明的依赖。
+`--audit` 再运行 pip-audit，检查 `requirements.txt` 和 `requirements-qr.txt` 的已知漏洞。
 它审计的是声明版本；当前 `.venv` 是否已同步，可用
 `.venv/bin/python -m pip_audit --local` 单独确认。
 
@@ -118,8 +119,8 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 
 ## 依赖版本
 
-依赖版本只以 `pyproject.toml` 为准，不在文档复制版本范围。升级依赖后必须跑完整离线
-测试；uv 会从 wheel 解析并安装依赖，安装器随后在 release 环境执行导入烟测。默认运行时根由
+依赖版本只以 `requirements*.txt` 为准，不在文档复制版本范围。升级依赖后必须跑完整离线
+测试；安装器会在 release 环境内校验声明的版本。默认运行时根由
 `install_layout.default_roots()` 计算；已安装实例只读取 `.installation.json`，不根据当前
 shell 的 XDG 或 `LOCALAPPDATA` 重新推断。
 
@@ -187,10 +188,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 重构优先解决已观察到的边界问题，不按行数拆文件，不为跨平台强行统一平台适配层。这些取舍
 不代表已取消任何能力。
 
-`installer.py` 必须保持单文件、仅依赖标准库，网络 bootstrap 只下载它；应用运行期模块
-由 uv 从 `codex_wechat/` 构建成 wheel，stable 入口使用安装在 `.bootstrap-venv` 的同一
-发行包。`tests/install_and_release/test_release_layout.py` 检查 wheel 元数据、stable
-脚本和运行时资源边界。
+安装器必须保持单文件可执行，网络 bootstrap 只下载 `installer.py`；运行期模块位于
+`codex_wechat/`，包内使用相对导入。
+`tests/install_and_release/test_release_layout.py` 会检查 stable payload
+是否包含完整包文件，并验证脱离源码树的导入。
 
 ## 用户可见文案
 

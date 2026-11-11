@@ -1,0 +1,2 @@
+# Installed only when no native qrencode is available.
+qrcode>=7.4,<9

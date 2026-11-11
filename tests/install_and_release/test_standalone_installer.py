@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import installer
 
@@ -26,3 +27,31 @@ class StandaloneInstallerTests(unittest.TestCase):
                     self.assertNotIn('ModuleNotFoundError', result.stderr)
             self.assertFalse((root/'target').exists())
             self.assertEqual({p.name for p in root.iterdir()}, {'installer.py'})
+
+    def test_native_qr_avoids_installing_the_fallback(self):
+        for native in (None, '/native/qrencode'):
+            with self.subTest(native=native), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for name in installer.REQUIRED_FILES:
+                    path=root/name
+                    path.parent.mkdir(parents=True,exist_ok=True)
+                    path.write_text('fixture')
+                python=installer._venv_python(root)
+                commands = []
+
+                def run_uv(target, arguments, *, cwd, commands=commands, python=python):
+                    commands.append(arguments)
+                    if arguments[0] == "venv":
+                        python.parent.mkdir(parents=True)
+                        python.touch()
+
+                with patch.object(installer, '_run_uv', side_effect=run_uv), \
+                        patch.object(installer, '_run'), \
+                        patch.object(installer, 'project_files', return_value={}), \
+                        patch.object(installer.shutil, 'which', return_value=native):
+                    installer.prepare_runtime(root)
+                fallback = [
+                    command for command in commands
+                    if str(root / installer.QR_FALLBACK_REQUIREMENTS) in command
+                ]
+                self.assertEqual(len(fallback), 0 if native else 1)

@@ -17,6 +17,6 @@ if [ ! -x "$PYTHON" ]; then
     echo "codex-desktop: 稳定 Python 环境缺失；请重新运行 bootstrap。" >&2
     exit 1
 fi
-exec env CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT" \
+exec env PYTHONPATH="$INSTALL_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
     "$PYTHON" -u -m codex_wechat.launcher \
     --install-root "$INSTALL_ROOT" --module codex_wechat.desktop -- "$@"

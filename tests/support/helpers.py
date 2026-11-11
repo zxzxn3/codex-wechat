@@ -117,18 +117,16 @@ def write_installation_layout(
     install_root = Path(install_root)
     release = install_root / "releases" / release_id
     if create_release:
-        python = (release / ".venv/Scripts/python.exe"
-                  if resolved == "windows"
-                  else release / ".venv/bin/python")
-        python.parent.mkdir(parents=True, exist_ok=True)
-        python.write_text("", encoding="utf-8")
+        package = release / "codex_wechat"
+        package.mkdir(parents=True, exist_ok=True)
+        (package / "app.py").write_text("", encoding="utf-8")
         if release_files:
-            package = (release / ".venv/Lib/site-packages/codex_wechat"
-                       if resolved == "windows"
-                       else release / ".venv/lib/python3.11/site-packages/codex_wechat")
-            package.mkdir(parents=True, exist_ok=True)
-            (package / "app.py").write_text("", encoding="utf-8")
             (package / "windows_service.py").write_text("", encoding="utf-8")
+            python = (release / ".venv/Scripts/python.exe"
+                      if resolved == "windows"
+                      else release / ".venv/bin/python")
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.write_text("", encoding="utf-8")
     InstalledLayout.create(
         install_root,
         release_id,

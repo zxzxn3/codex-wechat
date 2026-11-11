@@ -89,14 +89,10 @@ class BootstrapEntryTests(unittest.TestCase):
 
     def test_same_version_rerun_keeps_saved_source_and_repairs_missing_one(self):
         source = self.make_source(self.root / "source")
-        wheel = self.root / "codex_wechat-1.1.0-py3-none-any.whl"
-        wheel.write_bytes(b"wheel")
-        identifier = installer.wheel_identifier(wheel)
+        files = installer.project_files(source)
+        identifier = installer.release_identifier(files)
         with patch.object(installer, "prepare_runtime"):
-            installer.install_release(self.target, identifier, wheel)
-        python = self.target / "releases" / identifier / ".venv/bin/python"
-        python.parent.mkdir(parents=True)
-        python.write_text("", encoding="utf-8")
+            installer.install_release(self.target, identifier, files)
         write_installation_layout(
             self.target,
             release_id=identifier,

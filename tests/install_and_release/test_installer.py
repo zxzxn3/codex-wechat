@@ -34,15 +34,9 @@ class InstallerTests(unittest.TestCase):
             installer, "_managed_python", side_effect=lambda target: Path("/managed/python")))
         self.enterContext(patch.object(installer, "bootstrap_runtime_ready", return_value=True))
         self.enterContext(patch.object(installer, "release_runtime_ready", return_value=True))
-        self.enterContext(patch.object(
-            installer, "prepare_runtime", side_effect=self.prepare_runtime))
-        self.enterContext(patch.object(
-            installer,
-            "build_wheel",
-            side_effect=self.build_wheel,
-        ))
+        self.enterContext(patch.object(installer, "prepare_runtime"))
         self.enterContext(patch.object(installer, "report_dependencies"))
-        def bootstrap(target, wheel):
+        def bootstrap(target, *, requirements):
             if installer.IS_WINDOWS:
                 executable = target / ".bootstrap-venv/Scripts/python.exe"
                 executable.parent.mkdir(parents=True, exist_ok=True)
@@ -60,22 +54,6 @@ class InstallerTests(unittest.TestCase):
                 "XDG_CONFIG_HOME": str(self.base / "config"),
                 "XDG_STATE_HOME": str(self.base / "state"),
             }))
-
-    def build_wheel(self, target, source, output):
-        wheel = output / "codex_wechat-1.1.0-py3-none-any.whl"
-        wheel.write_bytes((source / "extra.py").read_bytes())
-        return wheel
-
-    def prepare_runtime(self, root, wheel):
-        del wheel
-        python = installer._venv_python(root)
-        python.parent.mkdir(parents=True, exist_ok=True)
-        python.write_bytes(b"fixture")
-
-    def fixture_wheel(self, content=b"wheel"):
-        wheel = self.base / "codex_wechat-1.1.0-py3-none-any.whl"
-        wheel.write_bytes(content)
-        return wheel
 
     def make_project(self, root, *, version="one"):
         root.mkdir(parents=True, exist_ok=True)
@@ -179,18 +157,18 @@ class InstallerTests(unittest.TestCase):
         identifier = self.current()
         self.assertIsNotNone(identifier)
         release = self.target / installer.RELEASES_DIR / identifier
-        self.assertTrue((release / installer.MANIFEST_FILE).is_file())
-        self.assertFalse((release / "extra.py").exists())
+        self.assertTrue((release / "extra.py").is_file())
+        self.assertTrue((release / "docs/guide.md").is_file())
         if not installer.IS_WINDOWS:
-            self.assertTrue((self.target / "codex-wechat").stat().st_mode & stat.S_IXUSR)
+            self.assertTrue((release / "codex-wechat").stat().st_mode & stat.S_IXUSR)
         self.assertTrue(installer.release_matches(self.target, identifier))
         self.assertTrue((self.target / installer._stable_files(self.source)[0]).is_file())
         self.assertTrue((self.target / "installer.py").is_file())
-        self.assertFalse((self.target / "codex_wechat/app.py").exists())
+        self.assertTrue((self.target / "codex_wechat/app.py").is_file())
         self.assertFalse((self.target / "config.json").exists())
         self.assertFalse((self.target / ".state").exists())
 
-    def test_stable_entries_are_copied_from_the_source_bundle(self):
+    def test_stable_entries_are_copied_from_the_release_snapshot(self):
         with patch("builtins.input", return_value="y"), \
                 patch.object(
                     installer,
@@ -199,7 +177,7 @@ class InstallerTests(unittest.TestCase):
                 ) as install_bootstrap:
             self.assertEqual(installer.install(self.source, self.target), 0)
         source = install_bootstrap.call_args.args[0]
-        self.assertEqual(source, self.source)
+        self.assertEqual(source, installer.release_path(self.target, self.current()))
 
     def test_windows_bootstrap_creates_nested_stable_directories(self):
         self.target.mkdir()
@@ -324,8 +302,7 @@ class InstallerTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertIsNone(self.previous())
         release = self.target / installer.RELEASES_DIR / second
-        self.assertTrue((release / installer.MANIFEST_FILE).is_file())
-        self.assertFalse((release / "new.py").exists())
+        self.assertTrue((release / "new.py").is_file())
         self.assertFalse((release / "removed-in-v2.py").exists())
         self.assertEqual(unknown.read_text(), "keep")
         self.assertEqual((self.target / "config.json").read_text(), "{}")
@@ -441,8 +418,8 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((releases / "aaa111").exists())
 
     def test_transiently_held_staging_tree_is_retried(self):
-        wheel = self.fixture_wheel(b"transient")
-        identifier = installer.wheel_identifier(wheel)
+        files = installer.project_files(self.source)
+        identifier = installer.release_identifier(files)
         final = self.target / installer.RELEASES_DIR / identifier
         real_replace = os.replace
         attempts = []
@@ -457,15 +434,15 @@ class InstallerTests(unittest.TestCase):
         with patch("installer.os.replace", side_effect=flaky_replace), \
                 patch.object(installer, "STAGING_REPLACE_RETRY_SECONDS", 0):
             release, created = installer.install_release(
-                self.target, identifier, wheel)
+                self.target, identifier, files)
         self.assertTrue(created)
         self.assertEqual(release, final)
         self.assertEqual(len(attempts), 2)
-        self.assertTrue(installer.release_matches(self.target, identifier))
+        self.assertTrue(installer.release_matches(self.target, identifier, files))
 
     def test_staging_rename_that_stays_locked_is_reported_and_cleaned(self):
-        wheel = self.fixture_wheel(b"locked")
-        identifier = installer.wheel_identifier(wheel)
+        files = installer.project_files(self.source)
+        identifier = installer.release_identifier(files)
         final = self.target / installer.RELEASES_DIR / identifier
         real_replace = os.replace
 
@@ -478,14 +455,14 @@ class InstallerTests(unittest.TestCase):
                 patch.object(installer, "STAGING_REPLACE_RETRY_SECONDS", 0), \
                 patch.object(installer, "STAGING_REPLACE_ATTEMPTS", 2):
             with self.assertRaisesRegex(ValueError, "暂存目录仍被占用"):
-                installer.install_release(self.target, identifier, wheel)
+                installer.install_release(self.target, identifier, files)
         self.assertFalse(final.exists())
         self.assertEqual(list((self.target / installer.RELEASES_DIR).glob(
             ".staging-*")), [])
 
     def test_release_published_by_another_installer_is_reused(self):
-        wheel = self.fixture_wheel(b"competing")
-        identifier = installer.wheel_identifier(wheel)
+        files = installer.project_files(self.source)
+        identifier = installer.release_identifier(files)
         final = self.target / installer.RELEASES_DIR / identifier
         real_replace = os.replace
 
@@ -498,10 +475,10 @@ class InstallerTests(unittest.TestCase):
         with patch("installer.os.replace", side_effect=competing_replace), \
                 patch.object(installer, "STAGING_REPLACE_RETRY_SECONDS", 0):
             release, created = installer.install_release(
-                self.target, identifier, wheel)
+                self.target, identifier, files)
         self.assertFalse(created)
         self.assertEqual(release, final)
-        self.assertTrue(installer.release_matches(self.target, identifier))
+        self.assertTrue(installer.release_matches(self.target, identifier, files))
 
     def test_rollback_is_not_an_installer_operation(self):
         with self.assertRaises(SystemExit):
@@ -544,6 +521,12 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Python 环境不完整"):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), current)
+
+    def test_update_rejects_same_versioned_root_as_source(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        with self.assertRaisesRegex(ValueError, "另一份源码"):
+            installer.update(self.target, self.target)
 
     def test_optional_logo_is_displayed_only_when_present(self):
         with contextlib.redirect_stdout(io.StringIO()) as output:
@@ -608,41 +591,27 @@ class InstallerTests(unittest.TestCase):
 
 
 class BootstrapRuntimeTests(unittest.TestCase):
-    def test_stable_runtime_probe_ignores_the_source_tree(self):
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory)
-            python = installer._bootstrap_python(target)
-            python.parent.mkdir(parents=True)
-            python.write_text("", encoding="utf-8")
-            with patch.object(
-                    installer.subprocess,
-                    "run",
-                    return_value=SimpleNamespace(returncode=0),
-            ) as run:
-                self.assertTrue(installer.bootstrap_runtime_ready(target))
-            self.assertEqual(run.call_args.args[0][1], "-I")
-
     def test_stable_runtime_repair_requires_bootstrap_or_first_install(self):
         with patch.object(installer, "ensure_uv"), \
                 patch.object(installer, "ensure_managed_python"), \
                 patch.object(installer, "bootstrap_runtime_ready", return_value=False), \
                 patch.object(installer, "prepare_bootstrap_runtime") as prepare:
-            wheel = Path("/codex_wechat-1.1.0-py3-none-any.whl")
             with self.assertRaisesRegex(ValueError, "重新运行 bootstrap"):
                 installer._ensure_stable_runtime(
-                    Path("/target"), wheel, create_runtime=False)
+                    Path("/target"), Path("/requirements"), create_runtime=False)
             prepare.assert_not_called()
 
             installer._ensure_stable_runtime(
-                Path("/target"), wheel, create_runtime=True)
-            prepare.assert_called_once_with(Path("/target"), wheel)
+                Path("/target"), Path("/requirements"), create_runtime=True)
+            prepare.assert_called_once_with(
+                Path("/target"), requirements=Path("/requirements"))
 
-    def test_stable_runtime_installs_the_wheel_with_uv(self):
+    def test_windows_stable_runtime_uses_uv_and_only_pywin32(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             python = target / ".bootstrap-venv/Scripts/python.exe"
-            wheel = target / "codex_wechat-1.1.0-py3-none-any.whl"
-            wheel.write_bytes(b"wheel")
+            requirements = target / "requirements-windows.txt"
+            requirements.write_text('pywin32; sys_platform == "win32"\n', encoding="utf-8")
             uv_calls = []
 
             def run_uv(current, arguments, *, cwd):
@@ -653,35 +622,15 @@ class BootstrapRuntimeTests(unittest.TestCase):
 
             with patch.object(installer, "IS_WINDOWS", True), \
                     patch.object(installer, "_run_uv", side_effect=run_uv), \
-                    patch.object(installer, "_run"), \
-                    patch.object(installer, "bootstrap_runtime_ready", return_value=True):
-                installer.prepare_bootstrap_runtime(target, wheel)
+                    patch.object(installer, "_run") as run:
+                installer.prepare_bootstrap_runtime(target, requirements=requirements)
             self.assertEqual(uv_calls[0][1][:4], [
                 "venv", "--no-project", "--managed-python", "--python",
             ])
-            self.assertEqual(uv_calls[1][1][-1], str(wheel))
-
-    def test_existing_stable_venv_is_reused_before_reinstalling_wheel(self):
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory)
-            python = target / ".bootstrap-venv/Scripts/python.exe"
-            python.parent.mkdir(parents=True)
-            python.write_bytes(b"fixture")
-            wheel = target / "codex_wechat-1.1.0-py3-none-any.whl"
-            wheel.write_bytes(b"wheel")
-            calls = []
-
-            with patch.object(installer, "IS_WINDOWS", True), \
-                    patch.object(
-                        installer,
-                        "_run_uv",
-                        side_effect=lambda *args, **kwargs: calls.append(args[1]),
-                    ), \
-                    patch.object(installer, "_run"), \
-                    patch.object(installer, "bootstrap_runtime_ready", return_value=True):
-                installer.prepare_bootstrap_runtime(target, wheel)
-            self.assertEqual(len(calls), 1)
-            self.assertEqual(calls[0][:3], ["pip", "install", "--python"])
+            self.assertIn("-r", uv_calls[1][1])
+            self.assertIn(str(requirements), uv_calls[1][1])
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertIn("import win32api, win32event, win32job", commands[-1][2])
 
 
 class RuntimeDiscoveryTests(unittest.TestCase):
@@ -864,7 +813,8 @@ class RuntimeRepairTests(unittest.TestCase):
     def test_manifest_publication_precedes_service_configuration(self):
         text = (Path(__file__).resolve().parents[2] / "installer.py").read_text(
             encoding="utf-8")
-        publication = text.index("planned.publish()")
+        start = text.index('phase("准备程序与依赖...")')
+        publication = text.index("planned.publish()", start)
         configuration = text.index("service_ready = configure_platform_service", publication)
         self.assertLess(publication, configuration)
 
@@ -907,17 +857,15 @@ class RuntimeRepairTests(unittest.TestCase):
 
             with patch.object(installer, "_run_uv", side_effect=run_uv), \
                     patch.object(installer, "_run"), \
+                    patch.object(installer.shutil, "which", return_value="/usr/bin/qrencode"), \
                     patch.object(installer, "project_files", return_value={}):
-                wheel = root / "codex_wechat-1.1.0-py3-none-any.whl"
-                wheel.write_bytes(b"wheel")
-                installer.prepare_runtime(root, wheel)
+                installer.prepare_runtime(root)
             self.assertEqual(calls[0][:5], [
                 "venv", "--no-project", "--managed-python", "--python", installer.UV_PYTHON,
             ])
             self.assertEqual(calls[1][:3], [
                 "pip", "install", "--python",
             ])
-            self.assertEqual(calls[1][-1], str(wheel))
 
 
 if __name__ == "__main__":

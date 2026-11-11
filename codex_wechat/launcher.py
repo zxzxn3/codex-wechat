@@ -25,13 +25,18 @@ def command(
     root = Path(install_root).expanduser().absolute()
     layout = InstalledLayout.load(root)
     if layout is None:
+        project = root
         python = Path(sys.executable)
     else:
-        layout.release_dir()
+        project = layout.release_dir()
         python = layout.python_executable
         if not python.is_file():
             raise ValueError(f"当前版本的 Python 环境缺失: {python}")
     environment = os.environ.copy()
+    prior = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = (
+        str(project) + (os.pathsep + prior if prior else "")
+    )
     environment["CODEX_WECHAT_INSTALL_ROOT"] = str(root)
     return [str(python), "-u", "-m", module, *arguments], environment
 

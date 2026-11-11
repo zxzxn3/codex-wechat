@@ -344,6 +344,9 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
     def log_keep():
         return keep_from_config(config)
 
+    if not (project / "codex_wechat" / "app.py").is_file():
+        raise FileNotFoundError("codex_wechat package was not found in the project directory")
+
     guard = SingleInstance(state_dir)
     try:
         guard.acquire()

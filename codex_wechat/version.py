@@ -3,26 +3,21 @@
 There is no product version to bump: an installed copy is identified by the
 release id its manifest records, and a source checkout reports ``dev``.
 """
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Union
 
-from .install_layout import InstalledLayout
-
 
 def release_id(root: Union[str, Path, None] = None) -> str:
     """Installed release identifier; empty when running from a source checkout."""
-    if root is None:
-        package_parent = Path(__file__).resolve().parent.parent
-        if (package_parent / ".git").is_dir():
-            return ""
-        from .platform_support import INSTALL_ROOT
-        root = INSTALL_ROOT
+    base = Path(root) if root is not None else Path(__file__).resolve().parents[1]
     try:
-        layout = InstalledLayout.load(Path(root))
+        manifest = json.loads((base / ".release.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return ""
-    return layout.release_id if layout is not None else ""
+    identifier = manifest.get("id") if isinstance(manifest, dict) else ""
+    return identifier if isinstance(identifier, str) else ""
 
 
 @lru_cache(maxsize=1)

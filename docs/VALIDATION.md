@@ -5,14 +5,6 @@
 
 ## 当前证据
 
-- 2026-11-11 Linux wheel 改造快照 `a947b49`：完整 `./scripts/check.sh` 执行 1034 项，
-  1013 通过、21 跳过、0 失败；Ruff、Pyright、ShellCheck 和生成文档检查通过，覆盖率 78%。
-  安装生命周期在隔离目录中真实执行 `uv build`、stable/release 两套环境安装、稳定入口
-  `status`、普通卸载和 purge；release 目录只保留 wheel 身份与独立环境。
-- 2026-11-11 本机 wheel 安装：stable `.bootstrap-venv` 从 `site-packages` 加载
-  `codex-wechat 1.1.0`；`.installation.json` 指向 release `0b19e801ccbb815e`，其
-  schema 2 清单记录 `codex_wechat-1.1.0-py3-none-any.whl`；稳定入口 `status` 返回
-  delivery/state ok 和 systemd active/running。更新未自动重启，服务仍运行旧 release。
 - Linux 检查入口：`scripts/check.sh` 包含 Ruff、Pyright、ShellCheck、分支覆盖单元测试和
   生成文档漂移检查。结果按日期与提交记录，不作为永久测试数基线。
 - 2026-11-10 Linux 代码快照 `3905a08`：专用测试会话从隔离副本执行完整

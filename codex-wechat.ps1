@@ -137,5 +137,20 @@ if ($Command -eq 'rebind' -and $StopActive) {
 if ($Command -eq 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
     $Arguments += $Value
 }
-& $EntryPython -u @Arguments
-exit $LASTEXITCODE
+$PreviousPythonPath = $env:PYTHONPATH
+try {
+    $env:PYTHONPATH = if ($PreviousPythonPath) {
+        "$InstallRoot;$PreviousPythonPath"
+    } else {
+        $InstallRoot
+    }
+    & $EntryPython -u @Arguments
+    $Result = $LASTEXITCODE
+} finally {
+    if ($null -eq $PreviousPythonPath) {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONPATH = $PreviousPythonPath
+    }
+}
+exit $Result
