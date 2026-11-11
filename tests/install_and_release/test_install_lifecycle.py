@@ -31,7 +31,13 @@ class InstallationLifecycleTests(unittest.TestCase):
         (self.outside / "keep.txt").write_text("keep\n", encoding="utf-8")
 
     def prepare_runtime(self, release):
-        python = release / ".venv/bin/python"
+        self.write_python(release / ".venv/bin/python")
+
+    def prepare_bootstrap_runtime(self, target, *, requirements=None):
+        del requirements
+        self.write_python(target / ".bootstrap-venv/bin/python")
+
+    def write_python(self, python):
         python.parent.mkdir(parents=True, exist_ok=True)
         python.write_text(
             f"#!/bin/sh\nexec {shlex.quote(sys.executable)} \"$@\"\n",
@@ -49,6 +55,17 @@ class InstallationLifecycleTests(unittest.TestCase):
         install_patches = (
             patch.object(installer, "introduction", return_value=True),
             patch.object(installer, "prepare_runtime", side_effect=self.prepare_runtime),
+            patch.object(
+                installer,
+                "ensure_uv",
+                return_value=self.target / ".bootstrap/uv/0.13.7/uv",
+            ),
+            patch.object(installer, "ensure_managed_python", return_value=sys.executable),
+            patch.object(
+                installer,
+                "prepare_bootstrap_runtime",
+                side_effect=self.prepare_bootstrap_runtime,
+            ),
             patch.object(installer, "report_dependencies"),
             patch.object(installer, "preflight_command_link"),
             patch.object(installer, "install_command_link"),
