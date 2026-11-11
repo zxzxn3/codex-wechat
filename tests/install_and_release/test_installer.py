@@ -660,6 +660,28 @@ class BootstrapRuntimeTests(unittest.TestCase):
             ])
             self.assertEqual(uv_calls[1][1][-1], str(wheel))
 
+    def test_existing_stable_venv_is_reused_before_reinstalling_wheel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            python = target / ".bootstrap-venv/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"fixture")
+            wheel = target / "codex_wechat-1.1.0-py3-none-any.whl"
+            wheel.write_bytes(b"wheel")
+            calls = []
+
+            with patch.object(installer, "IS_WINDOWS", True), \
+                    patch.object(
+                        installer,
+                        "_run_uv",
+                        side_effect=lambda *args, **kwargs: calls.append(args[1]),
+                    ), \
+                    patch.object(installer, "_run"), \
+                    patch.object(installer, "bootstrap_runtime_ready", return_value=True):
+                installer.prepare_bootstrap_runtime(target, wheel)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][:3], ["pip", "install", "--python"])
+
 
 class RuntimeDiscoveryTests(unittest.TestCase):
     """The dry-run report must not claim a missing runtime it never looked for."""

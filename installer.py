@@ -948,10 +948,11 @@ def prepare_bootstrap_runtime(target: Path, wheel: Path) -> None:
     if root.exists() and not root.is_dir():
         raise ValueError(f"稳定入口环境不是目录: {root}")
     created = not root.exists()
-    _run_uv(target, [
-        "venv", "--no-project", "--managed-python", "--python", UV_PYTHON,
-        str(root),
-    ], cwd=target)
+    if created:
+        _run_uv(target, [
+            "venv", "--no-project", "--managed-python", "--python", UV_PYTHON,
+            str(root),
+        ], cwd=target)
     python = _bootstrap_python(target)
     try:
         if not python.is_file():
