@@ -809,7 +809,8 @@ async def startup_store(args):
     managed = False
     while True:
         try:
-            return Store(args.state_dir, lock=args.action != "status")
+            return Store(args.state_dir, lock=args.action != "status",
+                         read_only=args.action == "status")
         except RuntimeError:
             if IS_WINDOWS or args.action != "start":
                 raise
