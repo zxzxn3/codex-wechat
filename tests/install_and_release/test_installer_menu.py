@@ -37,68 +37,6 @@ class InstallerMenuTests(unittest.TestCase):
             core.assert_called_once()
         self.assertFalse(installer.NON_INTERACTIVE)
 
-    def test_component_dry_run_bypasses_conflicts_and_missing_source(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            target = root/'skills'
-            target.write_text('keep')
-            self.assertEqual(installer.component_install(root/'absent', 'wechat-attachments', target, dry_run=True), 0)
-            self.assertEqual(target.read_text(), 'keep')
-
-    def test_component_install_is_atomic_idempotent_and_preserves_custom_content(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root/'source'
-            text = source/installer.COMPONENTS['wechat-attachments'][1]
-            text.parent.mkdir(parents=True)
-            text.write_text('approved skill')
-            target = root/'skills'
-            with patch('builtins.input', return_value='y'):
-                installer.component_install(source, 'wechat-attachments', target)
-            result = target/'wechat-attachments/SKILL.md'
-            self.assertEqual(result.read_text(), 'approved skill')
-            with patch('builtins.input', side_effect=AssertionError('noop prompt')):
-                installer.component_install(source, 'wechat-attachments', target)
-            result.write_text('user edit')
-            with self.assertRaisesRegex(ValueError, '保留原文件'):
-                installer.component_install(source, 'wechat-attachments', target)
-            self.assertEqual(result.read_text(), 'user edit')
-
-    def test_component_write_failure_cleans_empty_component_directory(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root/'source'
-            text = source/installer.COMPONENTS['wechat-attachments'][1]
-            text.parent.mkdir(parents=True)
-            text.write_text('skill')
-            def fail(path, *args, **kwargs):
-                path.parent.mkdir(parents=True)
-                raise OSError('disk full')
-            target = root/'skills'
-            with patch('builtins.input', return_value='y'), patch.object(installer, '_atomic_write', side_effect=fail):
-                with self.assertRaisesRegex(OSError, 'disk full'):
-                    installer.component_install(source, 'wechat-attachments', target)
-            self.assertFalse((target/'wechat-attachments').exists())
-
-    def test_guide_component_installs(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root/'source'
-            text = source/installer.COMPONENTS['codex-wechat-guide'][1]
-            text.parent.mkdir(parents=True)
-            text.write_text('guide skill')
-            target = root/'skills'
-            with patch('builtins.input', return_value='y'):
-                installer.component_install(source, 'codex-wechat-guide', target)
-            self.assertEqual(
-                (target/'codex-wechat-guide/SKILL.md').read_text(),
-                'guide skill')
-
-    def test_noninteractive_components_require_explicit_selection(self):
-        with patch('builtins.input', side_effect=AssertionError('prompt')):
-            with self.assertRaisesRegex(ValueError, '需要 --component'):
-                installer.main(['components', '--non-interactive'])
-
     def test_start_command_uses_the_stable_platform_entry(self):
         target = Path('/install/root')
         with patch.object(installer, 'IS_WINDOWS', False):

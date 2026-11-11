@@ -600,7 +600,8 @@ class InstallerTests(unittest.TestCase):
 
     def test_linux_wrapper_routes_release_commands_to_installer(self):
         text = (installer.SOURCE_ROOT / "codex-wechat").read_text(encoding="utf-8")
-        self.assertIn("install|update|menu|components", text)
+        self.assertIn("install|update|menu", text)
+        self.assertNotIn("components", text)
         self.assertIn('INSTALL_ROOT/installer.py', text)
         self.assertIn("codex_wechat.launcher", text)
         self.assertNotIn("CURRENT_FILE", text)

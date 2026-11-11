@@ -19,7 +19,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; t
     esac
 fi
 case "${1:-}" in
-    install|update|menu|components)
+    install|update|menu)
         INSTALLER="$INSTALL_ROOT/installer.py"
         if [ ! -f "$INSTALLER" ]; then
             echo "codex-wechat: 稳定安装器缺失: $INSTALLER" >&2

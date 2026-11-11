@@ -55,10 +55,6 @@ DEPENDENCIES = (
     ("qrencode", "qrencode", None, "原生终端二维码（缺少时使用轻量回退）", "warn"),
     ("systemd-run", "systemd-run", (254,), "Linux 共享后台", "warn"),
 )
-COMPONENTS = {
-    "wechat-attachments": ("微信附件说明 skill", Path("skills/wechat-attachments/SKILL.md")),
-    "codex-wechat-guide": ("微信使用说明 skill", Path("skills/codex-wechat-guide/SKILL.md")),
-}
 RELEASE_FORMAT = 2
 PREVIOUS_FILE = "previous"
 RELEASES_DIR = "releases"
@@ -212,7 +208,7 @@ def introduction() -> bool:
     ), "1;31"))
     print()
     print(styled(textwrap.fill(
-        "接下来展示操作计划，确认后执行；不启用新自启、默认不自动启动服务、不安装附加组件。",
+        "接下来展示操作计划，确认后执行；不启用新自启、默认不自动启动服务。",
         width=width,
     ), "2"))
     print()
@@ -1932,48 +1928,8 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
         detail("pyproject.toml 缺失；因 --dry-run 放行。")
 
 
-def component_install(source: Path, name: str, skills_dir: Path, *, dry_run: bool = False) -> int:
-    if source != SOURCE_ROOT and not dry_run:
-        logo_banner(source)
-        declaration(source, "start")
-    label, relative = COMPONENTS[name]
-    content = source / relative
-    destination = skills_dir.expanduser().absolute() / name / "SKILL.md"
-    print(f"{label}: {destination}")
-    if dry_run:
-        detail("因 --dry-run，来源及目标检查按通过处理；不安装组件。")
-        return 0
-    if not content.is_file() or content.is_symlink():
-        raise ValueError(f"组件源码缺失: {content}")
-    data = content.read_bytes()
-    if destination.exists():
-        if destination.is_symlink() or destination.read_bytes() != data:
-            raise ValueError(f"目标已有不同内容，保留原文件: {destination}")
-        print("组件已安装，没有修改。")
-        return 0
-    if not confirm("安装此组件？"):
-        return 0
-    # Atomic file replacement never leaves half a skill, even on a full disk.
-    created_directories = []
-    parent = destination.parent
-    while not parent.exists():
-        created_directories.append(parent)
-        parent = parent.parent
-    try:
-        _atomic_write(destination, data, 0o644, root=skills_dir.expanduser().absolute())
-    finally:
-        if not destination.exists():
-            for parent in created_directories:
-                try:
-                    parent.rmdir()
-                except OSError:
-                    break
-    print("组件已安装；Codex 将按请求需要读取 skill。")
-    return 0
-
-
 def menu_choice() -> str:
-    print("1. 安装 / 更新\n2. 附加组件\n0. 退出")
+    print("1. 安装 / 更新\n0. 退出")
     while True:
         try:
             answer = input("选择 [1]: ").strip()
@@ -1981,24 +1937,22 @@ def menu_choice() -> str:
             return "exit"
         if answer in ("", "1"):
             return "install"
-        if answer == "2":
-            return "components"
         if answer == "0":
             return "exit"
-        print("请输入 0、1 或 2。")
+        print("请输入 0 或 1。")
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description="安装 / 更新 codex-wechat 或安装附加组件。")
-    result.add_argument("command", nargs="?", default="menu", choices=("menu", "install", "update", "bootstrap", "components"))
+    result = argparse.ArgumentParser(description="安装或更新 codex-wechat。")
+    result.add_argument("command", nargs="?", default="menu",
+                        choices=("menu", "install", "update", "bootstrap"))
     result.add_argument("--dir", type=Path)
     result.add_argument("--dry-run", action="store_true")
-    result.add_argument("--non-interactive", action="store_true", help="执行指定操作，保留保守默认，不询问、不启动服务或安装额外组件")
+    result.add_argument("--non-interactive", action="store_true",
+                        help="执行指定操作，保留保守默认，不询问或启动服务")
     result.add_argument("--repo", help="公开 GitHub HTTPS 仓库")
     result.add_argument("--ref", help="分支或标签")
     result.add_argument("--source", type=Path, help="本地源码，不联网")
-    result.add_argument("--component", choices=tuple(COMPONENTS))
-    result.add_argument("--skills-dir", type=Path, default=Path.home() / ".agents/skills")
     return result
 
 
@@ -2049,38 +2003,6 @@ def main(argv: list[str] | None = None) -> int:
         if not options.non_interactive and not options.dry_run and not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise ValueError("交互安装需要终端；自动化请显式使用 --non-interactive。")
         target = (options.dir or default_target()).expanduser()
-        if command == "components":
-            name = options.component
-            if name is None:
-                if options.non_interactive:
-                    raise ValueError("非交互组件安装需要 --component。")
-                for number, (key, (label, _)) in enumerate(COMPONENTS.items(), 1):
-                    print(f"{number}. {label} ({key})")
-                print("0. 退出")
-                answer = input("选择 [0]: ").strip()
-                if answer in ("", "0"):
-                    return 0
-                keys = list(COMPONENTS)
-                if not answer.isdigit() or not 1 <= int(answer) <= len(keys):
-                    raise ValueError("组件编号无效")
-                name = keys[int(answer) - 1]
-            source = options.source or SOURCE_ROOT
-            if options.source is None and not options.repo and not options.dry_run:
-                if SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents:
-                    identifier = available_installed_release_id(SOURCE_ROOT, target)
-                    if identifier:
-                        source = release_path(target, identifier)
-            if options.repo:
-                choice = update_source(options.repo, options.ref or "main")
-                if options.dry_run:
-                    return component_install(source, name, options.skills_dir, dry_run=True)
-                with tempfile.TemporaryDirectory(prefix="codex-wechat-component-") as directory:
-                    source = Path(directory) / "source"
-                    fetch_update_source(choice, source)
-                    return component_install(source, name, options.skills_dir)
-            return component_install(source, name, options.skills_dir, dry_run=options.dry_run)
-        if options.component or options.skills_dir != Path.home() / ".agents/skills":
-            raise ValueError("组件参数只适用于 components。")
         if not options.dry_run and target.is_symlink():
             raise ValueError(f"安装目录不能是符号链接: {target}")
         target = target.absolute() if options.dry_run else target.resolve()

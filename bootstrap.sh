@@ -9,31 +9,27 @@ source_ref=main
 dry_run=0
 non_interactive=0
 target=''
-component=''
-skills_dir=''
 source_dir=''
 command_name=''
 
 usage() {
-    echo 'bootstrap.sh [--repo URL] [--ref main] [--dry-run] [--non-interactive] [--component NAME] [--skills-dir PATH]'
+    echo 'bootstrap.sh [--repo URL] [--ref main] [--dry-run] [--non-interactive]'
 }
 
 while (($#)); do
     case "$1" in
-        --repo|--ref|--dir|--component|--skills-dir|--source-dir)
+        --repo|--ref|--dir|--source-dir)
             (($# >= 2)) || { echo "缺少 $1 的参数" >&2; exit 2; }
             case "$1" in
                 --repo) repo=$2 ;;
                 --ref) source_ref=$2 ;;
                 --dir) target=$2 ;;
-                --component) component=$2 ;;
-                --skills-dir) skills_dir=$2 ;;
                 --source-dir) source_dir=$2 ;;
             esac
             shift 2 ;;
         --dry-run) dry_run=1; shift ;;
         --non-interactive) non_interactive=1; shift ;;
-        install|update|menu|components) command_name=$1; shift ;;
+        install|update|menu) command_name=$1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "未知参数 $1" >&2; exit 2 ;;
     esac
@@ -55,7 +51,7 @@ if ((dry_run)) && [[ -z "$source_dir" ]]; then
     printf '演练模式，不下载或修改文件。\n来源 https://github.com/%s\n分支或标签 %s\n' \
         "$repository" "$source_ref"
     echo '因 --dry-run，真实安装目录检查按通过处理；不代表安装环境已通过检查。'
-    echo '1. 安装 / 更新  2. 附加组件  0. 退出'
+    echo '1. 安装 / 更新  0. 退出'
     echo '正式执行会显示统一菜单，识别安装或更新，展示计划后执行；不扫码、不启用自启、不自动启动。'
     exit 0
 fi
@@ -115,11 +111,6 @@ fi
 [[ -f "$installer" ]] || { echo "安装器不存在: $installer" >&2; exit 1; }
 
 [[ -z "$target" ]] || installer_arguments+=(--dir "$target")
-if [[ -n "$component" ]]; then
-    installer_arguments[0]=components
-    installer_arguments+=(--component "$component")
-fi
-[[ -z "$skills_dir" ]] || installer_arguments+=(--skills-dir "$skills_dir")
 if ((dry_run)); then
     installer_arguments+=(--dry-run)
 fi

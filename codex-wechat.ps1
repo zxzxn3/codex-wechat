@@ -6,7 +6,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet('login', 'rebind', 'start', 'stop', 'status', 'service-start',
                  'service-restart', 'autostart', 'logs', 'uninstall',
-                 'update', 'install', 'menu', 'components')]
+                 'update', 'install', 'menu')]
     [string]$Command = 'status',
     [Parameter(Position = 1)]
     [ValidateSet('true', 'false')]
@@ -20,9 +20,7 @@ param(
     [string]$Source,
     [switch]$DryRun,
     [switch]$NonInteractive,
-    [switch]$StopActive,
-    [string]$Component,
-    [string]$SkillsDir
+    [switch]$StopActive
 )
 
 Set-StrictMode -Version Latest
@@ -30,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 
 if ($Help) {
     Write-Host 'Usage: codex-wechat <command> [options]'
-    Write-Host 'Commands: login, start, stop, status, service-start, service-restart, autostart, logs, uninstall, update, install, menu, components'
+    Write-Host 'Commands: login, start, stop, status, service-start, service-restart, autostart, logs, uninstall, update, install, menu'
     exit 0
 }
 
@@ -60,7 +58,7 @@ if ($Force -and $Command -ne 'uninstall') {
     throw '-Force is only valid with the uninstall command'
 }
 
-if ($Command -in @('update', 'install', 'menu', 'components')) {
+if ($Command -in @('update', 'install', 'menu')) {
     if ($PSBoundParameters.ContainsKey('Value') -or $Follow -or $Service -or $PurgeData -or
             $StopActive) {
         throw 'installer commands do not accept service or chat control parameters'
@@ -79,14 +77,12 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     if ($Source) { $InstallerArguments += @('--source', $Source) }
     if ($DryRun) { $InstallerArguments += '--dry-run' }
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
-    if ($Component) { $InstallerArguments += @('--component', $Component) }
-    if ($SkillsDir) { $InstallerArguments += @('--skills-dir', $SkillsDir) }
     & $UpdatePython @InstallerArguments
     exit $LASTEXITCODE
 }
 
-if ($Repo -or $Ref -or $Source -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) {
-    throw '-Repo, -Ref, -Source, -DryRun, -NonInteractive, -Component and -SkillsDir are only valid with installer commands'
+if ($Repo -or $Ref -or $Source -or $DryRun -or $NonInteractive) {
+    throw '-Repo, -Ref, -Source, -DryRun and -NonInteractive are only valid with installer commands'
 }
 if ($PSBoundParameters.ContainsKey('Value') -and $Command -ne 'autostart') {
     throw '-Value is only valid with the autostart command'

@@ -78,8 +78,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 交互式安装成功后，安装器会额外询问是否立即启动；直接回车即启动，输入 `n` 跳过。
 `--non-interactive` 不会询问或自动启动。
 
-桥接后端会自动读取项目自带的 `skills/`。如需把这些 skill 安装给其他 Codex agent，
-可从安装器的 `components` 入口单独安装；这不影响主安装。
+桥接后端会自动读取项目自带的 `skills/`；安装器不向其它 Codex agent 复制这些文件。
 
 ## 第一次启动
 

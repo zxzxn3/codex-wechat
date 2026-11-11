@@ -16,6 +16,7 @@
   可复用的连接、`ensure` 和 `setup` 能力继续留在内部 `codex_wechat/desktop.py` /
   `codex-desktop` / `codex-desktop.ps1`。
 - 删除 `codex-wechat desktop` 和 `codex-wechat cli`；内部 helper 不作为用户命令。
+- 不提供附加组件安装器；桥接继续读取随包 `skills/`，但不向其它 Codex agent 复制文件。
 
 ## 命令语义
 

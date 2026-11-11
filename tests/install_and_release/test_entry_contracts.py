@@ -28,6 +28,7 @@ class EntryContractTests(unittest.TestCase):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
         self.assertIn("-m codex_wechat.launcher", text)
         self.assertIn("--module codex_wechat", text)
+        self.assertNotIn("components", text)
         self.assertNotIn("CURRENT_FILE", text)
         self.assertNotIn(".runtime-roots", text)
         self.assertNotIn(".data-root", text)
@@ -58,6 +59,7 @@ class EntryContractTests(unittest.TestCase):
         self.assertNotIn("'service-status'", text)
         self.assertIn("'autostart'", text)
         self.assertIn("'uninstall'", text)
+        self.assertNotIn("'components'", text)
         self.assertIn("windows/task-service.ps1",
                       (ROOT / "codex_wechat/service_adapter.py").read_text(
             encoding="utf-8"))

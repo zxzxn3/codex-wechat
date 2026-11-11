@@ -29,7 +29,7 @@ Linux 使用 `-h` / `--help`，Windows PowerShell 使用 `-h` / `-Help` 查看�
 - `uninstall` 默认保留用户数据；只有显式 `--purge-data` / `-PurgeData` 才清数据。Windows
   仅在卸载器明确报告任务不属于当前安装或共享后台仍有客户端时，才按提示使用 `-Force`。
 
-`install`、`update`、`menu` 和 `components` 是 stable 入口转交 `installer.py` 的安装器动作，
+`install`、`update` 和 `menu` 是 stable 入口转交 `installer.py` 的安装器动作，
 不会作为微信聊天命令处理。网络 bootstrap 完成安装后会保存公开更新来源；此后
 `codex-wechat update` 从官方 GitHub tar 归档获取最新源码，由 uv 构建并安装 wheel，不需要
 宿主 Python 或 Git。

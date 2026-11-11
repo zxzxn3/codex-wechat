@@ -31,11 +31,3 @@ class DependencyPolicyTests(unittest.TestCase):
             run.reset_mock()
             installer.report_dependencies(Path(directory), dry_run=True)
             run.assert_not_called()
-
-    def test_component_absence_does_not_enter_core_install(self):
-        with patch.object(installer, "_common_install", return_value=0) as core, \
-             patch.object(installer, "component_install") as component, \
-             patch.object(installer, "default_target", return_value=Path('/unread/target')):
-            self.assertEqual(installer.main(["install", "--dry-run", "--non-interactive"]), 0)
-            core.assert_called_once()
-            component.assert_not_called()

@@ -6,8 +6,6 @@ param(
     [string]$Dir,
     [switch]$DryRun,
     [switch]$NonInteractive,
-    [string]$Component,
-    [string]$SkillsDir,
     [string]$SourceDir
 )
 
@@ -38,7 +36,7 @@ if (-not $SourceDir) {
 if ($DryRun -and -not $SourceDir) {
     Write-Host "Dry run: no download or file changes. Source: $Repo ($Ref)"
     Write-Host 'Target directory checks are bypassed because of -DryRun; this is not an environment preflight.'
-    Write-Host '1. Install / Update  2. Components  0. Exit'
+    Write-Host '1. Install / Update  0. Exit'
     Write-Host 'The installer will show the plan; no login, new autostart or service start.'
     return
 }
@@ -109,12 +107,6 @@ try {
         if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
         if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
     }
-    if ($Component) {
-        $InstallerArguments[1] = 'components'
-        $InstallerArguments += @('--component', $Component)
-    }
-    if ($SkillsDir) { $InstallerArguments += @('--skills-dir', $SkillsDir) }
-
     & $PythonCommand -u @InstallerArguments
     if ($LASTEXITCODE) { throw "Installer failed with exit code $LASTEXITCODE" }
 } finally {
