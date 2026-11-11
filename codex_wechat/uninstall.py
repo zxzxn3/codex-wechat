@@ -38,12 +38,12 @@ def _remove_path(path: Path) -> None:
         path.unlink()
 
 
-async def _linux_service_removal(layout: InstalledLayout) -> None:
+async def _linux_service_state(layout: InstalledLayout):
     try:
         current = await service_adapter.status()
     except FileNotFoundError:
         # No systemd client is installed; there cannot be a registered unit.
-        current = None
+        return None
     except (OSError, RuntimeError) as error:
         # Preserve foreground-only installs, but never guess that an existing
         # unit link in any configured location is absent.
@@ -51,15 +51,29 @@ async def _linux_service_removal(layout: InstalledLayout) -> None:
                 candidate.exists() or candidate.is_symlink()
                 for candidate in _unit_candidates(layout)):
             print("systemd 用户服务不可用；跳过服务移除。")
-            return
+            return None
         raise RuntimeError(f"无法确认后台服务状态，拒绝卸载: {error}") from error
     except ValueError:
         print("检测到不属于本安装的后台服务，未改动该服务。")
-        return
+        return None
     if current is None or not current.installed:
-        return
+        return None
+    return current
+
+
+async def _linux_service_stop(layout: InstalledLayout):
+    current = await _linux_service_state(layout)
+    if current is None:
+        return None
     if current.running:
         await service_adapter.stop_and_wait()
+        print("后台服务已停止。")
+    return current
+
+
+async def _linux_service_removal(layout: InstalledLayout, current) -> None:
+    if current is None:
+        return
     try:
         await systemctl("disable", UNIT)
     except (OSError, RuntimeError):
@@ -117,10 +131,11 @@ async def _linux_shared_backend_removal(paths) -> None:
             workdir = await systemctl(
                 "show", unit, "--property=WorkingDirectory", "--value")
             if not workdir:
-                continue
+                raise RuntimeError(f"共享后台工作目录为空: {unit}")
             cwd = Path(workdir).expanduser().resolve()
-        except (OSError, RuntimeError, ValueError):
-            continue
+        except (OSError, RuntimeError, ValueError) as error:
+            raise RuntimeError(
+                f"无法确认共享后台是否属于当前数据根，拒绝清理: {unit}") from error
         if cwd != data_root and not cwd.is_relative_to(data_root):
             continue
         await systemctl("stop", unit, timeout=20)
@@ -164,13 +179,14 @@ async def uninstall(*, purge: bool = False) -> None:
     plan = None
     if purge:
         plan = layout.purge_plan()
-    await _linux_service_removal(layout)
+    service = await _linux_service_stop(layout)
     _require_no_bridge(paths.state_dir)
     if purge:
         await _linux_shared_backend_removal(paths)
+        _purge_linux_data(plan)
+    await _linux_service_removal(layout, service)
     _linux_command_removal()
     if purge:
-        _purge_linux_data(plan)
         layout.remove()
     # Actions report above; this summary names what is left, in one order shared
     # with the Windows helper: program files, data, how to keep using it, then the

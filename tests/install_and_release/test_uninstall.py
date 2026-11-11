@@ -47,14 +47,17 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             install, data, config, state, layout = self.make_layout(directory)
             service = AsyncMock()
+            registration = AsyncMock()
             command = Mock()
             with self.patched_root(install), \
-                    patch.object(uninstall, "_linux_service_removal", service), \
+                    patch.object(uninstall, "_linux_service_stop", service), \
+                    patch.object(uninstall, "_linux_service_removal", registration), \
                     patch.object(uninstall, "_linux_command_removal", command), \
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_shared_backend_removal", AsyncMock()) as shared:
                 await uninstall.uninstall()
             service.assert_awaited_once_with(layout)
+            registration.assert_awaited_once_with(layout, service.return_value)
             shared.assert_not_awaited()
             command.assert_called_once_with()
             self.assertTrue((install / INSTALLATION_FILE).is_file())
@@ -68,6 +71,7 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             unrelated = data / "keep.txt"
             unrelated.write_text("keep", encoding="utf-8")
             with self.patched_root(install), \
+                    patch.object(uninstall, "_linux_service_stop", AsyncMock()), \
                     patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_command_removal", Mock()), \
@@ -87,6 +91,7 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             install, data, *_ = self.make_layout(directory)
             out = io.StringIO()
             with self.patched_root(install), \
+                    patch.object(uninstall, "_linux_service_stop", AsyncMock()), \
                     patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_command_removal", Mock()), \
@@ -110,7 +115,7 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 self.skipTest(f"symlinks unavailable: {error}")
             service = AsyncMock()
             with self.patched_root(install), \
-                    patch.object(uninstall, "_linux_service_removal", service):
+                    patch.object(uninstall, "_linux_service_stop", service):
                 with self.assertRaisesRegex(ValueError, "符号链接"):
                     await uninstall.uninstall(purge=True)
             service.assert_not_awaited()
@@ -119,6 +124,7 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             install, *_ = self.make_layout(directory)
             with self.patched_root(install), \
+                    patch.object(uninstall, "_linux_service_stop", AsyncMock()), \
                     patch.object(uninstall, "_linux_service_removal", AsyncMock()), \
                     patch.object(uninstall, "_require_no_bridge", Mock()), \
                     patch.object(uninstall, "_linux_command_removal", Mock()), \
@@ -135,10 +141,34 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             store = uninstall.Store(state)
             try:
                 with self.patched_root(install), \
-                        patch.object(uninstall, "_linux_service_removal", AsyncMock()):
+                        patch.object(uninstall, "_linux_service_stop", AsyncMock()):
                     with self.assertRaisesRegex(RuntimeError, "前台桥接仍在运行"):
                         await uninstall.uninstall(purge=True)
                 self.assertTrue(data.exists())
+            finally:
+                store.close()
+
+    async def test_bridge_lock_leaves_service_registration_intact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            install, _, _, state, _ = self.make_layout(directory)
+            expected = install / uninstall.UNIT
+            expected.write_text("[Unit]\n", encoding="utf-8")
+            registered = Path(directory) / "systemd/user" / uninstall.UNIT
+            registered.parent.mkdir(parents=True)
+            try:
+                registered.symlink_to(expected)
+            except OSError as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+            current = uninstall.service_adapter.ServiceState(
+                True, False, fragment_path=registered)
+            store = uninstall.Store(state)
+            try:
+                with self.patched_root(install), \
+                        patch.object(uninstall.service_adapter, "status",
+                                     AsyncMock(return_value=current)):
+                    with self.assertRaisesRegex(RuntimeError, "前台桥接仍在运行"):
+                        await uninstall.uninstall(purge=True)
+                self.assertTrue(registered.exists())
             finally:
                 store.close()
 
@@ -173,7 +203,6 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
                 self.skipTest(f"symlinks unavailable: {error}")
             current = uninstall.service_adapter.ServiceState(
                 True, False, fragment_path=registered)
-            systemctl = AsyncMock(side_effect=[None, None])
             layout = InstalledLayout.create(
                 install,
                 "a" * 16,
@@ -185,8 +214,9 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(uninstall, "INSTALL_ROOT", install), \
                     patch.object(uninstall.service_adapter, "status",
                                  AsyncMock(return_value=current)), \
-                    patch.object(uninstall, "systemctl", systemctl):
-                await uninstall._linux_service_removal(layout)
+                    patch.object(uninstall, "systemctl", AsyncMock(side_effect=[None, None])):
+                stopped = await uninstall._linux_service_stop(layout)
+                await uninstall._linux_service_removal(layout, stopped)
             self.assertFalse(registered.exists())
 
     async def test_shared_backend_removal_stops_only_units_from_this_data_root(self):
@@ -213,6 +243,26 @@ class LinuxUninstallTests(unittest.IsolatedAsyncioTestCase):
             item.args[:2] == ("stop", second)
             for item in systemctl.await_args_list
         ))
+
+    async def test_shared_backend_inspection_failure_aborts_removal(self):
+        unit = "codex-wechat-codex-" + "a" * 20 + ".service"
+        data_root = Path("/data/codex-wechat")
+        for workdir in (RuntimeError("systemctl failed"), ""):
+            with self.subTest(workdir=workdir):
+                systemctl = AsyncMock(side_effect=[
+                    f"{unit} loaded active running shared backend\n",
+                    workdir,
+                ])
+                from tests.support.helpers import runtime_paths_at
+                with patch.object(uninstall.shutil, "which", return_value="/usr/bin/systemctl"), \
+                        patch.object(uninstall, "systemctl", systemctl):
+                    with self.assertRaisesRegex(RuntimeError, "拒绝清理"):
+                        await uninstall._linux_shared_backend_removal(
+                            runtime_paths_at(data_root))
+                self.assertFalse(any(
+                    item.args[:1] == ("stop",)
+                    for item in systemctl.await_args_list
+                ))
 
     async def test_windows_path_is_not_handled_by_the_linux_helper(self):
         with patch.object(uninstall, "IS_WINDOWS", True):
