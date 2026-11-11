@@ -15,6 +15,7 @@ from .configuration import (DEFAULT_MAX_MIB, DEFAULT_SOURCE_HINT, MEDIA_MAX_MIB_
                             MEDIA_MAX_MIB_MIN)
 from .diagnostics import error_fields, log_event
 from .platform_support import IS_WINDOWS
+from .slicing import FENCE
 
 CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
 # A download can simply be repeated; an upload POST is never repeated in place,
@@ -145,12 +146,22 @@ def cdn_url(value):
 
 def split_answer(answer):
     """Only standalone markers outside code fences can request attachment delivery."""
-    lines, attachments, fenced = [], [], False
+    lines, attachments, fence = [], [], None
     for line in answer.splitlines():
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
+        marker = FENCE.match(line)
+        if fence is not None:
+            if (marker and marker.group(1)[0] == fence[0]
+                    and len(marker.group(1)) >= len(fence)
+                    and not marker.group(2).strip()):
+                fence = None
+            lines.append(line)
+            continue
+        if marker:
+            fence = marker.group(1)
+            lines.append(line)
+            continue
         match = re.fullmatch(r"WECHAT_MEDIA:\s*(\{.*\})\s*", line)
-        if match and not fenced:
+        if match:
             try:
                 spec = json.loads(match[1])
                 if (not isinstance(spec.get("path"), str)
