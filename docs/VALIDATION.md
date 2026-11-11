@@ -7,6 +7,15 @@
 
 - Linux 检查入口：`scripts/check.sh` 包含 Ruff、Pyright、ShellCheck、分支覆盖单元测试和
   生成文档漂移检查。结果按日期与提交记录，不作为永久测试数基线。
+- 2026-11-11 Linux 提交 `b0c0b27`：完整 `./scripts/check.sh` 为 1039 项、1018 通过、
+  21 跳过、0 失败；Ruff、ShellCheck 和生成文档检查通过，Pyright 0 errors / 5 个平台依赖
+  warning，分支覆盖率 78%。在隔离 `HOME`/XDG、且 `PATH` 中不存在 Python、pip、Git、uv
+  的 Linux 环境中，通过官方 raw bootstrap 完成真实首次安装，release
+  `5e9e687dfdf1c121` 生成 `.installation.json` 和 uv 管理的 Python；stable
+  `codex-wechat --help` 返回 0，未生成 `.update-source.json`。该隔离布局使用临时的
+  XDG 配置根，因此没有注册 systemd 服务；当前用户实际 `codex-wechat.service` 另行只读
+  验证为 `active/running`，stable `status` 返回 bound、auth valid、delivery ok、state ok。
+  Windows 本轮未实机复测，PowerShell 解析测试因本机无 PowerShell 跳过。
 - 2026-11-11 Linux 提交 `f5152ad`：固定官方 GitHub `main` 更新源，入口不再接受
   `--repo` / `--ref`，stable 更新不再读取 `.update-source.json`，本地 `--source` 仍保留。
   定向 28 项通过；隔离快照完整 `./scripts/check.sh` 为 1032 项、1011 通过、21 跳过、
