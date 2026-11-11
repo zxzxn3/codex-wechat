@@ -231,8 +231,10 @@ class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
     async def test_an_unreadable_host_is_omitted_instead_of_failing_status(self):
         store = await self.store()
         with patch.object(codex_wechat.service_adapter, "status",
-                          AsyncMock(side_effect=ValueError("不属于这个安装目录"))):
+                          AsyncMock(side_effect=ValueError("不属于这个安装目录"))), \
+                patch.object(codex_wechat, "log_event") as log_event:
             payload = await codex_wechat.status_payload_with_service(store)
+        log_event.assert_not_called()
         self.assertNotIn("service", payload)
         self.assertIn("bound", payload)
 
