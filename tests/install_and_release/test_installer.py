@@ -607,6 +607,20 @@ class InstallerTests(unittest.TestCase):
 
 
 class BootstrapRuntimeTests(unittest.TestCase):
+    def test_stable_runtime_probe_ignores_the_source_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            python = installer._bootstrap_python(target)
+            python.parent.mkdir(parents=True)
+            python.write_text("", encoding="utf-8")
+            with patch.object(
+                    installer.subprocess,
+                    "run",
+                    return_value=SimpleNamespace(returncode=0),
+            ) as run:
+                self.assertTrue(installer.bootstrap_runtime_ready(target))
+            self.assertEqual(run.call_args.args[0][1], "-I")
+
     def test_stable_runtime_repair_requires_bootstrap_or_first_install(self):
         with patch.object(installer, "ensure_uv"), \
                 patch.object(installer, "ensure_managed_python"), \

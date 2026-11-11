@@ -493,7 +493,7 @@ def build_wheel(target: Path, source: Path, output: Path) -> Path:
     output.mkdir(parents=True, exist_ok=True)
     _run_uv(
         target,
-        ["build", "--wheel", "--out-dir", str(output), str(source)],
+        ["build", "--no-cache", "--wheel", "--out-dir", str(output), str(source)],
         cwd=source,
     )
     wheels = sorted(output.glob("codex_wechat-*.whl"))
@@ -922,12 +922,13 @@ def bootstrap_runtime_ready(target: Path) -> bool:
         return False
     command = [
         str(python),
+        "-I",
         "-c",
         "import sys; assert sys.version_info >= (3, 11); "
         "import codex_wechat.launcher, codex_wechat.uninstall",
     ]
     if IS_WINDOWS:
-        command[2] += "; import win32api, win32event, win32job; import codex_wechat.windows_service"
+        command[3] += "; import win32api, win32event, win32job; import codex_wechat.windows_service"
     try:
         result = subprocess.run(
             command, cwd=target, capture_output=True, text=True,
