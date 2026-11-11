@@ -324,6 +324,18 @@ class WeChatFeatureTests(unittest.IsolatedAsyncioTestCase):
             [{"path": "/tmp/clip.mp4", "kind": "video"}])
         self.assertIn("/getfile", REGISTRY)
 
+    async def test_media_marker_in_mismatched_nested_fence_is_text(self):
+        answer = (
+            "~~~text\n"
+            "```\n"
+            'WECHAT_MEDIA: {"path":"/tmp/secret.txt"}\n'
+            "```\n"
+            "~~~"
+        )
+        text, attachments = split_answer(answer)
+        self.assertEqual(text, answer)
+        self.assertEqual(attachments, [])
+
     async def test_remember_quote_is_bounded(self):
         state = {}
         for number in range(205):
