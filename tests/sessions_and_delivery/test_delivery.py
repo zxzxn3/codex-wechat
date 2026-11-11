@@ -139,9 +139,15 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(entered.wait(), 1)
         await b.control("/stop")
         release.set()
-        # worker sets wake only after retiring the stopped current input.
-        b.wake.clear()
-        await asyncio.wait_for(b.wake.wait(), 1)
+        # The worker may clear wake again before this test runs; wait for the
+        # durable retirement state instead of a transient event notification.
+        for _ in range(100):
+            saved = self.store.load("bridge")
+            if "currentInput" not in saved and not b.running:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            self.fail("worker did not retire the stopped current input")
         b.backend.run.assert_not_awaited()
         self.assertNotIn("currentInput", self.store.load("bridge"))
 
