@@ -102,7 +102,7 @@ class RemoteUpdateTests(unittest.TestCase):
         self.target.mkdir()
         installer.remember_update_source(self.target, self.source, self.choice)
         self.assertFalse((self.target / installer.UPDATE_SOURCE_FILE).exists())
-        identifier = installer.release_identifier(installer.project_files(self.source))
+        identifier = "a" * 16
         write_installation_layout(
             self.target,
             release_id=identifier,

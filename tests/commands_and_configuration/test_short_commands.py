@@ -12,6 +12,7 @@ from codex_wechat.errors import UserFacingError
 from codex_wechat.prompts import SETTINGS_HELP, prompt_text
 from codex_wechat.storage import Store
 from codex_wechat.version import build_id, release_id
+from tests.support.helpers import install_platform, write_installation_layout
 
 
 SHORT_HELP = help_text()
@@ -89,11 +90,19 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
 
     def test_release_id_reads_manifest_and_ignores_invalid_content(self):
         with tempfile.TemporaryDirectory() as temp:
-            self.assertEqual(release_id(temp), "")
-            Path(temp, ".release.json").write_text('{"id": "fixture-release"}', encoding="utf-8")
-            self.assertEqual(release_id(temp), "fixture-release")
-            Path(temp, ".release.json").write_text("{invalid", encoding="utf-8")
-            self.assertEqual(release_id(temp), "")
+            install = Path(temp) / "install"
+            self.assertEqual(release_id(install), "")
+            with install_platform("linux"):
+                write_installation_layout(
+                    install,
+                    release_id="f" * 16,
+                    data_root=Path(temp) / "data",
+                    config_root=Path(temp) / "config",
+                    state_root=Path(temp) / "state",
+                )
+                self.assertEqual(release_id(install), "f" * 16)
+            Path(install, ".installation.json").write_text("{invalid", encoding="utf-8")
+            self.assertEqual(release_id(install), "")
 
     def test_build_id_caches_the_installed_release_or_dev_fallback(self):
         build_id.cache_clear()

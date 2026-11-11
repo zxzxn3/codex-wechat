@@ -32,24 +32,10 @@ $LayoutPython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
     throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
 }
-$PreviousPythonPath = $env:PYTHONPATH
-try {
-    $env:PYTHONPATH = if ($PreviousPythonPath) {
-        "$InstallRoot;$PreviousPythonPath"
-    } else {
-        $InstallRoot
-    }
-    $LayoutJson = & $LayoutPython -m codex_wechat.install_layout show `
-        --install-root $InstallRoot
-    if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
-    $Layout = $LayoutJson | ConvertFrom-Json
-} finally {
-    if ($null -eq $PreviousPythonPath) {
-        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
-    } else {
-        $env:PYTHONPATH = $PreviousPythonPath
-    }
-}
+$LayoutJson = & $LayoutPython -m codex_wechat.install_layout show `
+    --install-root $InstallRoot
+if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
+$Layout = $LayoutJson | ConvertFrom-Json
 $DataRoot = [IO.Path]::GetFullPath([string]$Layout.dataRoot)
 $ServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $Python = Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'

@@ -34,9 +34,6 @@ DECLARATION_PATHS = {
     "complete": Path("assets/install/after-install.txt"),
 }
 NON_INTERACTIVE = False
-# Dependency declarations are shared; requirements versions live in their files.
-PYTHON_REQUIREMENTS = Path("requirements.txt")
-QR_FALLBACK_REQUIREMENTS = Path("requirements-qr.txt")
 # Generous: pip on a slow mirror may legitimately take minutes, but a hung
 # command must not block the installer forever.
 INSTALL_COMMAND_TIMEOUT_SECONDS = 900
@@ -62,7 +59,7 @@ COMPONENTS = {
     "wechat-attachments": ("微信附件说明 skill", Path("skills/wechat-attachments/SKILL.md")),
     "codex-wechat-guide": ("微信使用说明 skill", Path("skills/codex-wechat-guide/SKILL.md")),
 }
-RELEASE_FORMAT = 1
+RELEASE_FORMAT = 2
 PREVIOUS_FILE = "previous"
 RELEASES_DIR = "releases"
 ACTIVE_FILE = "active-release"
@@ -119,8 +116,7 @@ REQUIRED_FILES = {
     Path("install.sh"),
     Path("install.ps1"),
     Path("installer.py"),
-    Path("requirements.txt"),
-    Path("requirements-windows.txt"),
+    Path("pyproject.toml"),
     Path("windows/wmi_launch.py"),
     Path("windows/task-service.ps1"),
 }
@@ -128,16 +124,22 @@ STABLE_LINUX_FILES = (
     Path("codex-desktop"),
     Path("codex-wechat"),
     Path("codex-wechat.service"),
+    Path("config.default.json"),
     Path("installer.py"),
 )
 STABLE_WINDOWS_FILES = (
     Path("codex-desktop.ps1"),
+    Path("install.ps1"),
     Path("installer.py"),
     Path("bootstrap_supervisor.py"),
     Path("codex-wechat.ps1"),
     Path("uninstall.ps1"),
+    Path("config.default.json"),
+    Path("windows/Start-SharedBackend.ps1"),
+    Path("windows/wmi_launch.py"),
     Path("windows/task-service.ps1"),
 )
+STABLE_DIRECTORIES = (Path("skills"),)
 
 
 def styled(text: str, code: str) -> str:
@@ -481,6 +483,25 @@ def release_identifier(files: dict[Path, tuple[bytes, int]]) -> str:
     return digest.hexdigest()[:16]
 
 
+def wheel_identifier(wheel: Path) -> str:
+    digest = hashlib.sha256(Path(wheel).read_bytes()).hexdigest()
+    return digest[:16]
+
+
+def build_wheel(target: Path, source: Path, output: Path) -> Path:
+    """Build the application distribution with uv; stable assets stay outside it."""
+    output.mkdir(parents=True, exist_ok=True)
+    _run_uv(
+        target,
+        ["build", "--wheel", "--out-dir", str(output), str(source)],
+        cwd=source,
+    )
+    wheels = sorted(output.glob("codex_wechat-*.whl"))
+    if len(wheels) != 1:
+        raise ValueError("uv 未生成唯一的 codex-wechat wheel")
+    return wheels[0]
+
+
 def _resolved_root(path: Path, label: str) -> Path:
     path = path.expanduser()
     if path.is_symlink():
@@ -635,11 +656,6 @@ def check_install_target(
                 f"目标不是现有 codex-wechat 安装: {target}\n"
                 "全新安装请使用 install。"
             )
-        if not release_matches(target, layout.release_id):
-            raise ValueError(
-                f"目标不是完整的现有 codex-wechat 安装: {target}\n"
-                "未修改现有文件。"
-            )
         return
     if layout is not None:
         raise ValueError(
@@ -658,41 +674,7 @@ def release_path(target: Path, identifier: str) -> Path:
     return target / RELEASES_DIR / identifier
 
 
-def _manifest_release_files(root: Path, manifest):
-    entries = manifest.get("files")
-    if not isinstance(entries, list) or not entries:
-        raise ValueError("版本文件清单无效")
-    files = {}
-    seen = set()
-    for name in entries:
-        if not isinstance(name, str) or not name or "\\" in name or ":" in name:
-            raise ValueError("版本文件路径无效")
-        relative = Path(name)
-        if (relative.is_absolute() or ".." in relative.parts
-                or relative.as_posix() != name or name == MANIFEST_FILE):
-            raise ValueError("版本文件路径越界或不规范")
-        identity = name.casefold() if IS_WINDOWS else name
-        if identity in seen:
-            raise ValueError("版本文件清单重复")
-        seen.add(identity)
-        path = root / relative
-        for parent in (path, *path.parents):
-            if parent.is_symlink():
-                raise ValueError("版本文件不能经过符号链接")
-            if parent == root:
-                break
-        if not path.is_file():
-            raise ValueError("版本文件缺失")
-        files[relative] = (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
-    # Validate content selected by this version's own manifest. New exclusions
-    # and source requirements cannot redefine an older release's content hash.
-    public = project_files(root, require_complete=False)
-    if set(public) - set(files):
-        raise ValueError("版本含未声明的程序文件")
-    return files
-
-
-def release_matches(target: Path, identifier: str, files=None) -> bool:
+def release_matches(target: Path, identifier: str) -> bool:
     if target.is_symlink():
         return False
     releases = target / RELEASES_DIR
@@ -712,21 +694,16 @@ def release_matches(target: Path, identifier: str, files=None) -> bool:
         return False
     if manifest.get("id") != identifier or manifest.get("platform") != sys.platform:
         return False
-    try:
-        actual = release_identifier(_manifest_release_files(root, manifest))
-    except (OSError, ValueError):
-        return False
-    return actual == identifier and (files is None or actual == release_identifier(files))
+    wheel = manifest.get("wheel")
+    return isinstance(wheel, str) and wheel.endswith(".whl")
 
 
-def _copy_release(staging: Path, files: dict[Path, tuple[bytes, int]]) -> None:
-    for relative, (content, mode) in files.items():
-        _atomic_write(staging / relative, content, mode, root=staging)
+def _write_release_manifest(staging: Path, identifier: str, wheel: Path) -> None:
     manifest = {
         "schema": RELEASE_FORMAT,
-        "id": release_identifier(files),
+        "id": identifier,
         "platform": sys.platform,
-        "files": sorted(path.as_posix() for path in files),
+        "wheel": Path(wheel).name,
     }
     _atomic_write(
         staging / MANIFEST_FILE,
@@ -911,8 +888,8 @@ def release_runtime_ready(root: Path) -> bool:
     return result.returncode == 0
 
 
-def prepare_runtime(root: Path) -> None:
-    """Create a release-local environment with uv and verify its imports."""
+def prepare_runtime(root: Path, wheel: Path) -> None:
+    """Create a release-local environment and install the application wheel."""
     target = root.parent.parent if root.parent.name == RELEASES_DIR else root
     venv = root / ".venv"
     if venv.is_symlink():
@@ -926,26 +903,16 @@ def prepare_runtime(root: Path) -> None:
     python = _runtime_python(root)
     if not python.is_file():
         raise ValueError(f"虚拟环境创建失败: {python}")
-    command = [
-        "pip", "install", "--python", str(python),
-        "-r", str(root / PYTHON_REQUIREMENTS),
-    ]
-    # Keep the fallback out of the base dependency set when a native encoder exists.
-    if not shutil.which("qrencode"):
-        detail("未找到原生二维码编码器，准备轻量二维码回退。")
-        command.extend(["-r", str(root / QR_FALLBACK_REQUIREMENTS)])
-    _run_uv(target, command, cwd=root)
+    _run_uv(
+        target,
+        ["pip", "install", "--python", str(python), str(wheel)],
+        cwd=root,
+    )
     _run([
         str(python),
         "-c",
         _runtime_check_code() + "print(\"Python dependencies installed\")\n",
     ], cwd=root)
-    python_files = [
-        str(path) for path in project_files(root)
-        if path.suffix == ".py"
-    ]
-    _run([str(python), "-c", "from pathlib import Path; import sys; "
-          "[compile(Path(p).read_bytes(), p, 'exec') for p in sys.argv[1:]]", *python_files], cwd=root)
 
 
 def _bootstrap_python(target: Path) -> Path:
@@ -958,9 +925,14 @@ def bootstrap_runtime_ready(target: Path) -> bool:
     python = _bootstrap_python(target)
     if not python.is_file():
         return False
-    command = [str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"]
+    command = [
+        str(python),
+        "-c",
+        "import sys; assert sys.version_info >= (3, 11); "
+        "import codex_wechat.launcher, codex_wechat.uninstall",
+    ]
     if IS_WINDOWS:
-        command[2] += "; import win32api, win32event, win32job"
+        command[2] += "; import win32api, win32event, win32job; import codex_wechat.windows_service"
     try:
         result = subprocess.run(
             command, cwd=target, capture_output=True, text=True,
@@ -973,14 +945,12 @@ def bootstrap_runtime_ready(target: Path) -> bool:
     return result.returncode == 0
 
 
-def prepare_bootstrap_runtime(target: Path, *, requirements: Path | None = None) -> None:
+def prepare_bootstrap_runtime(target: Path, wheel: Path) -> None:
     root = target / BOOTSTRAP_VENV
     if root.is_symlink():
         raise ValueError(f"稳定入口环境不能是符号链接: {root}")
     if root.exists() and not root.is_dir():
         raise ValueError(f"稳定入口环境不是目录: {root}")
-    if root.exists() and any(root.iterdir()):
-        raise ValueError(f"稳定入口环境已存在但不完整: {root}")
     created = not root.exists()
     _run_uv(target, [
         "venv", "--no-project", "--managed-python", "--python", UV_PYTHON,
@@ -991,14 +961,11 @@ def prepare_bootstrap_runtime(target: Path, *, requirements: Path | None = None)
         if not python.is_file():
             raise ValueError(f"稳定入口环境创建失败: {python}")
         _run([str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"], cwd=target)
-        if IS_WINDOWS:
-            if requirements is None:
-                raise ValueError("Windows stable runtime requires requirements-windows.txt")
-            _run_uv(target, [
-                "pip", "install", "--python", str(python),
-                "-r", str(requirements),
-            ], cwd=target)
-            _run([str(python), "-c", "import win32api, win32event, win32job"], cwd=target)
+        _run_uv(target, [
+            "pip", "install", "--python", str(python), "--reinstall", str(wheel),
+        ], cwd=target)
+        if not bootstrap_runtime_ready(target):
+            raise ValueError("稳定入口环境安装后不可用")
     except BaseException:
         if created and root.exists():
             shutil.rmtree(root)
@@ -1007,7 +974,7 @@ def prepare_bootstrap_runtime(target: Path, *, requirements: Path | None = None)
 
 def _ensure_stable_runtime(
     target: Path,
-    requirements: Path,
+    wheel: Path,
     *,
     create_runtime: bool,
 ) -> None:
@@ -1017,7 +984,7 @@ def _ensure_stable_runtime(
         return
     if not create_runtime:
         raise ValueError("稳定入口 Python 环境不完整；请停止服务后重新运行 bootstrap。")
-    prepare_bootstrap_runtime(target, requirements=requirements)
+    prepare_bootstrap_runtime(target, wheel)
 
 
 
@@ -1063,7 +1030,7 @@ def _publish_staging(staging: Path, final: Path) -> bool:
 def install_release(
     target: Path,
     identifier: str,
-    files: dict[Path, tuple[bytes, int]],
+    wheel: Path,
 ) -> tuple[Path, bool]:
     releases = target / RELEASES_DIR
     if releases.is_symlink():
@@ -1071,20 +1038,18 @@ def install_release(
     releases.mkdir(parents=True, exist_ok=True)
     final = release_path(target, identifier)
     if final.exists():
-        if not release_matches(target, identifier, files):
-            raise ValueError(f"现有版本内容与标识不一致: {final}")
+        if not release_matches(target, identifier):
+            raise ValueError(f"现有版本清单与标识不一致: {final}")
         if not release_runtime_ready(final):
             raise ValueError(f"现有版本 Python 环境不完整: {final}")
         return final, False
     staging = _staging_directory(releases, ".staging-")
     try:
-        _copy_release(staging, files)
-        prepare_runtime(staging)
-        if release_identifier(project_files(staging)) != identifier:
-            raise ValueError("暂存版本校验失败")
+        prepare_runtime(staging, wheel)
+        _write_release_manifest(staging, identifier, wheel)
         if not _publish_staging(staging, final):
-            if not release_matches(target, identifier, files):
-                raise ValueError(f"现有版本内容与标识不一致: {final}")
+            if not release_matches(target, identifier):
+                raise ValueError(f"现有版本清单与标识不一致: {final}")
             return final, False
         return final, True
     finally:
@@ -1093,20 +1058,9 @@ def install_release(
             shutil.rmtree(staging, ignore_errors=True)
 
 
-def _package_files(source: Path) -> tuple[Path, ...]:
-    package = Path(source) / PACKAGE_ROOT
-    if package.is_symlink() or not package.is_dir():
-        raise ValueError(f"运行期包目录不存在或不是目录: {package}")
-    return tuple(sorted(
-        path.relative_to(source)
-        for path in package.rglob("*.py")
-        if path.is_file() and not path.is_symlink()
-    ))
-
-
 def _stable_files(source: Path) -> tuple[Path, ...]:
     entries = STABLE_WINDOWS_FILES if IS_WINDOWS else STABLE_LINUX_FILES
-    return tuple(entries) + _package_files(source)
+    return tuple(entries)
 
 
 def stable_files_match(source: Path, target: Path) -> bool:
@@ -1150,6 +1104,22 @@ def install_bootstrap(source: Path, target: Path) -> None:
                 raise ValueError(f"安装入口目录不能是符号链接: {destination.parent}")
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.replace(staging / relative, destination)
+        for relative in STABLE_DIRECTORIES:
+            source_path = source / relative
+            if source_path.is_symlink() or not source_path.is_dir():
+                raise ValueError(f"安装资源目录无效: {relative}")
+            for path in source_path.rglob("*"):
+                if path.is_symlink():
+                    raise ValueError(f"安装资源不是普通文件: {path.relative_to(source)}")
+                if path.is_dir():
+                    continue
+                if not path.is_file():
+                    raise ValueError(f"安装资源不是普通文件: {path.relative_to(source)}")
+                rel = path.relative_to(source)
+                destination = target / rel
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write(destination, path.read_bytes(),
+                              stat.S_IMODE(path.stat().st_mode), root=target)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -1336,7 +1306,7 @@ def configure_windows(release: Path, target: Path) -> None:
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        str(release / "install.ps1"),
+        str(target / "install.ps1"),
         "-InstallRoot",
         str(target),
     ]
@@ -1449,11 +1419,6 @@ def _common_install(
             target,
             platform="windows" if IS_WINDOWS else "linux",
         )
-    if source == target and existing is not None:
-        raise ValueError(
-            "版本化安装不能把安装根目录本身当作新源码；"
-            "请从另一份源码 checkout 运行 update。"
-        )
     if source != SOURCE_ROOT:
         logo_banner(source)
         declaration(source, "start")
@@ -1472,52 +1437,69 @@ def _common_install(
         if not dry_run:
             raise
         detail(f"运行能力检查: {error}；因 --dry-run 放行。")
-    identifier = release_identifier(files) if files is not None else "演示版本"
+    identifier = "待构建 wheel"
     planned = None
+    wheel_directory = None
+    wheel = None
+    current = existing.release_id if existing is not None else None
     if dry_run:
         detail("因 --dry-run，真实安装目录与命令入口检查按通过处理；不代表实际安装条件已满足。")
     else:
         if contract is None:
             raise ValueError(f"安装布局契约缺失: {source / LAYOUT_CONTRACT_FILE}")
-        planned = contract.InstalledLayout.planned(
-            target,
-            identifier,
-            platform="windows" if IS_WINDOWS else "linux",
-            existing=existing,
-        )
         preflight_command_link(target)
-        current = existing.release_id if existing is not None else None
-        if (current == identifier and release_matches(target, identifier, files)
-                and stable_files_match(release_path(target, identifier), target)):
-            # A previous install may have skipped the Windows shim because the
-            # directory was not on PATH yet. Re-running the same version must
-            # still repair the entry point.
-            install_command_link(target)
-            with InstallLock(target):
-                _ensure_stable_runtime(
+        if existing is not None:
+            try:
+                planned = contract.InstalledLayout.planned(
                     target,
-                    source / "requirements-windows.txt",
-                    create_runtime=repair_stable_runtime,
+                    existing.release_id,
+                    platform="windows" if IS_WINDOWS else "linux",
+                    existing=existing,
                 )
-                if not release_runtime_ready(target / RELEASES_DIR / identifier):
-                    raise ValueError(
-                        f"版本 {identifier} 的 Python 环境不完整；请重新安装。"
+                wheel_directory = tempfile.TemporaryDirectory(
+                    prefix="codex-wechat-wheel-")
+                wheel = build_wheel(target, source, Path(wheel_directory.name))
+                identifier = wheel_identifier(wheel)
+                planned = contract.InstalledLayout.planned(
+                    target,
+                    identifier,
+                    platform="windows" if IS_WINDOWS else "linux",
+                    existing=existing,
+                )
+                if current == identifier and stable_files_match(source, target):
+                    _ensure_stable_runtime(
+                        target,
+                        wheel,
+                        create_runtime=repair_stable_runtime,
                     )
-            print(f"版本 {identifier} 已经安装，没有修改。")
-            return 0
+                    if not release_runtime_ready(target / RELEASES_DIR / identifier):
+                        raise ValueError(
+                            f"版本 {identifier} 的 Python 环境不完整；请重新安装。")
+                    install_command_link(target)
+                    wheel_directory.cleanup()
+                    print(f"版本 {identifier} 已经安装，没有修改。")
+                    return 0
+            except BaseException:
+                if wheel_directory is not None:
+                    wheel_directory.cleanup()
+                raise
     if not introduction():
+        if wheel_directory is not None:
+            wheel_directory.cleanup()
         return 0
     report_dependencies(source, dry_run=dry_run)
     operation_plan(["准备程序与 Python 依赖", "集中更新入口及当前版本", "保留配置、登录与工作内容", "清理临时文件与旧版本"])
     print(f"安装目录: {target}")
     print(f"版本: {identifier}")
     if not confirm("执行更新？" if update else "执行安装？"):
+        if wheel_directory is not None:
+            wheel_directory.cleanup()
         return 0
     if dry_run:
         print("演练完成，没有修改文件。")
         declaration(source, "complete")
         return 0
-    if files is None or contract is None or planned is None:
+    if files is None or contract is None:
         # Not an assert: -O would drop the check and let a None manifest through.
         raise ValueError("安装清单尚未准备完成，未修改安装。")
 
@@ -1545,16 +1527,35 @@ def _common_install(
             locked_release = locked_layout.release_id if locked_layout is not None else None
             if locked_release != current:
                 raise ValueError("确认期间当前版本发生变化，请重新运行")
-            _ensure_stable_runtime(
-                target,
-                source / "requirements-windows.txt",
-                create_runtime=existing is None or repair_stable_runtime,
-            )
-            phase("准备程序与依赖...")
-            release, created = install_release(target, identifier, files)
+            if wheel is None:
+                wheel_directory = tempfile.TemporaryDirectory(
+                    prefix="codex-wechat-wheel-")
+                phase("构建 application wheel...")
+                wheel = build_wheel(target, source, Path(wheel_directory.name))
+                identifier = wheel_identifier(wheel)
+                planned = contract.InstalledLayout.planned(
+                    target,
+                    identifier,
+                    platform="windows" if IS_WINDOWS else "linux",
+                    existing=existing,
+                )
+            if wheel is not None:
+                _ensure_stable_runtime(
+                    target,
+                    wheel,
+                    create_runtime=existing is None or repair_stable_runtime,
+                )
+                if (current == identifier
+                        and release_matches(target, identifier)
+                        and stable_files_match(source, target)):
+                    install_command_link(target)
+                    print(f"版本 {identifier} 已经安装，没有修改。")
+                    return 0
+                phase("准备 release 环境...")
+                release, created = install_release(target, identifier, wheel)
             # Everything requiring downloads/builds/user input finishes above.
             phase("更新入口与当前版本...")
-            install_bootstrap(release, target)
+            install_bootstrap(source, target)
             install_command_link(target)
             planned.publish()
             layout_published = True
@@ -1563,7 +1564,7 @@ def _common_install(
             else:
                 service_ready = True
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
-            check_user_access(target, identifier, release, planned)
+            check_user_access(target, identifier, source, planned)
             try:
                 pruned = prune_releases(target, keep=(identifier, current))
             except OSError as error:
@@ -1594,6 +1595,9 @@ def _common_install(
             except OSError:
                 pass
         raise
+    finally:
+        if wheel_directory is not None:
+            wheel_directory.cleanup()
     print(styled("==> 更新完成。" if update else "==> 安装完成。", "1;32"))
     declaration(source, "complete")
     if (service_ready and not NON_INTERACTIVE
@@ -1773,7 +1777,9 @@ def saved_update_source(target: Path) -> dict | None:
 def remember_update_source(
     target: Path, source: Path, choice: dict, *, previous: str | None = None
 ) -> None:
-    identifier = release_identifier(project_files(source))
+    identifier = installed_release_id(source, target)
+    if identifier is None:
+        return
     # Cancellation returns 0 too; never save a source for a cancelled install.
     if installed_release_id(source, target) != identifier:
         return
@@ -1919,11 +1925,11 @@ def report_dependencies(source: Path, *, dry_run: bool = False) -> None:
             detail(f"{name} 缺失或版本不足，{purpose}未就绪；{'演练继续' if dry_run else '可稍后补齐'}。")
         elif dry_run and minimum:
             detail(f"{name}: 已找到；版本检查因 --dry-run 跳过。")
-    requirements = source / "requirements.txt"
-    if requirements.is_file():
-        detail("Python 依赖将从 requirements.txt 安装到程序独立环境。")
+    declarations = source / "pyproject.toml"
+    if declarations.is_file():
+        detail("uv 将从 pyproject.toml 构建 wheel 并准备程序环境。")
     elif dry_run:
-        detail("requirements.txt 缺失；因 --dry-run 放行。")
+        detail("pyproject.toml 缺失；因 --dry-run 放行。")
 
 
 def component_install(source: Path, name: str, skills_dir: Path, *, dry_run: bool = False) -> int:

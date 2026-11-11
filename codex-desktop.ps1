@@ -23,19 +23,12 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
 }
 $before = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT','Process')
-$beforePythonPath = [Environment]::GetEnvironmentVariable('PYTHONPATH','Process')
 try {
     $env:CODEX_WECHAT_INSTALL_ROOT = $installRoot
-    $env:PYTHONPATH = if ($beforePythonPath) {
-        "$installRoot;$beforePythonPath"
-    } else {
-        $installRoot
-    }
     & $python -u -m codex_wechat.launcher --install-root $installRoot `
         --module codex_wechat.desktop -- @args
     $result = $LASTEXITCODE
 } finally {
     [Environment]::SetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT',$before,'Process')
-    [Environment]::SetEnvironmentVariable('PYTHONPATH',$beforePythonPath,'Process')
 }
 exit $result

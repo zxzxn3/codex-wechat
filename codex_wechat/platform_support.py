@@ -15,10 +15,25 @@ from .native_codex import discover_codex
 
 IS_WINDOWS = os.name == "nt"
 ALLOW_ROOT_ENV = "CODEX_WECHAT_ALLOW_ROOT"
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INSTALL_ROOT = Path(
-    os.environ.get("CODEX_WECHAT_INSTALL_ROOT", str(PROJECT_ROOT))
-).expanduser().resolve()
+
+
+def _install_root() -> Path:
+    configured = os.environ.get("CODEX_WECHAT_INSTALL_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    source_root = Path(__file__).resolve().parent.parent
+    if (source_root / ".installation.json").is_file() or (source_root / ".git").is_dir():
+        return source_root
+    prefix = Path(sys.prefix).resolve()
+    if prefix.name == ".bootstrap-venv":
+        return prefix.parent
+    if (prefix.name == ".venv" and prefix.parent.parent.name == "releases"):
+        return prefix.parent.parent.parent
+    return source_root
+
+
+INSTALL_ROOT = _install_root()
+PROJECT_ROOT = INSTALL_ROOT
 
 
 def _platform() -> str:

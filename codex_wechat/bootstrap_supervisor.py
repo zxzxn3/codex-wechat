@@ -26,13 +26,13 @@ RESTART_SETTLE_SECONDS = 0.2
 def active_release(install_root: Path) -> Path:
     layout = InstalledLayout.load_required(install_root, platform="windows")
     release = layout.release_dir()
-    if not (release / "codex_wechat" / "windows_service.py").is_file():
+    if not (release / ".venv/Lib/site-packages/codex_wechat/windows_service.py").is_file():
         raise ValueError(f"当前版本不完整: {release}")
     return release
 
 
 def load_supervisor(release: Path):
-    package_root = Path(release) / "codex_wechat"
+    package_root = Path(release) / ".venv/Lib/site-packages/codex_wechat"
     path = package_root / "__init__.py"
     package_name = f"_codex_wechat_release_{Path(release).name}"
     for loaded in tuple(sys.modules):

@@ -46,5 +46,5 @@ if ((audit)); then
         echo "缺少 pip-audit；请先运行 .venv/bin/python -m pip install -r requirements-dev.txt" >&2
         exit 1
     fi
-    .venv/bin/python -m pip_audit -r requirements.txt -r requirements-qr.txt --progress-spinner off
+    .venv/bin/python -m pip_audit . --progress-spinner off
 fi

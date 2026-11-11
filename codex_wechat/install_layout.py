@@ -370,7 +370,7 @@ class InstalledLayout:
     def publish(self) -> None:
         self._validate()
         release = self.release_dir()
-        if not (release / "codex_wechat/app.py").is_file():
+        if not self.python_executable.is_file():
             raise InstallLayoutError(f"当前版本不完整: {release}")
         path = self.manifest_path
         if _is_link(path):

@@ -8,7 +8,7 @@ from codex_wechat.install_layout import INSTALLATION_FILE
 from tests.support.helpers import write_installation_layout
 from unittest.mock import patch
 
-# `installer.release_identifier()` writes 16 hex digits; the layout contract
+# The installer writes 16 hex digits; the layout contract
 # validates that shape before selecting a release.
 FIRST_RELEASE = "0f1e2d3c4b5a6978"
 SECOND_RELEASE = "8877665544332211"
@@ -21,7 +21,7 @@ class BootstrapSupervisorTests(unittest.TestCase):
             loaded = []
             for identifier, value in ((FIRST_RELEASE, "one"), (SECOND_RELEASE, "two")):
                 release = root / "releases" / identifier
-                package = release / "codex_wechat"
+                package = release / ".venv/Lib/site-packages/codex_wechat"
                 package.mkdir(parents=True)
                 (package / "__init__.py").write_text("", encoding="utf-8")
                 (package / "helper.py").write_text(
@@ -42,8 +42,11 @@ class BootstrapSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             release = root / "releases" / FIRST_RELEASE
-            package = release / "codex_wechat"
+            package = release / ".venv/Lib/site-packages/codex_wechat"
             package.mkdir(parents=True)
+            python = release / ".venv/Scripts/python.exe"
+            python.parent.mkdir(parents=True)
+            python.write_text("", encoding="utf-8")
             (package / "app.py").write_text("", encoding="utf-8")
             (package / "windows_service.py").write_text("", encoding="utf-8")
             write_installation_layout(
@@ -71,8 +74,8 @@ class BootstrapSupervisorLoopTests(unittest.TestCase):
             release = root / "releases" / identifier
             (release / ".venv" / "Scripts").mkdir(parents=True)
             (release / ".venv" / "Scripts" / "python.exe").write_text("", encoding="utf-8")
-            package = release / "codex_wechat"
-            package.mkdir()
+            package = release / ".venv/Lib/site-packages/codex_wechat"
+            package.mkdir(parents=True)
             (package / "app.py").write_text("", encoding="utf-8")
             (package / "windows_service.py").write_text("", encoding="utf-8")
         root.mkdir(exist_ok=True)

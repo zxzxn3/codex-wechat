@@ -17,7 +17,6 @@ class EntryContractTests(unittest.TestCase):
     def test_linux_uninstall_bypasses_the_release_launcher(self):
         text = (ROOT / "codex-wechat").read_text(encoding="utf-8")
         self.assertIn('if [ "$ACTION" = "uninstall" ]', text)
-        self.assertIn('"$INSTALL_ROOT/codex_wechat/uninstall.py"', text)
         self.assertIn("-m codex_wechat.uninstall", text)
         self.assertLess(
             text.index('if [ "$ACTION" = "uninstall" ]'),
@@ -33,20 +32,11 @@ class EntryContractTests(unittest.TestCase):
         self.assertNotIn(".runtime-roots", text)
         self.assertNotIn(".data-root", text)
 
-    def test_linux_stable_uninstaller_has_its_runtime_dependencies(self):
-        import installer
-        stable = set(installer._stable_files(ROOT))
-        for path in (
-            Path("codex_wechat/uninstall.py"),
-            Path("codex_wechat/install_layout.py"),
-            Path("codex_wechat/launcher.py"),
-            Path("codex_wechat/platform_support.py"),
-            Path("codex_wechat/service_adapter.py"),
-            Path("codex_wechat/service_control.py"),
-            Path("codex_wechat/storage.py"),
-            Path("codex_wechat/subprocess_io.py"),
-        ):
-            self.assertIn(path, stable)
+    def test_wheel_metadata_owns_runtime_dependencies(self):
+        text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        for dependency in ("cryptography", "websockets", "curl-cffi",
+                           "qrcode", "pywin32"):
+            self.assertIn(dependency, text)
 
     def test_desktop_entry_rejects_root(self):
         text = (ROOT / "codex-desktop").read_text(encoding="utf-8")
