@@ -93,13 +93,14 @@ class AutostartScriptContractTests(unittest.TestCase):
         self.assertNotIn("'--config'", self.install)
         self.assertNotIn("'--log'", self.install)
 
-    def test_python_fallback_rejects_empty_windowsapps_aliases(self):
+    def test_entries_require_the_uv_managed_stable_runtime(self):
         public_install = self.install.split("# Internal integration only", 1)[0]
-        for text in (public_install, self.uninstall, self.bootstrap,
-                     self.desktop, self.entry):
-            self.assertIn("Get-Command python.exe -CommandType Application", text)
-            self.assertIn("(Get-Item -LiteralPath $_.Source).Length -gt 0", text)
-            self.assertIn("Select-Object -First 1", text)
+        self.assertIn("bootstrap.ps1", public_install)
+        for text in (self.uninstall, self.desktop, self.entry):
+            self.assertIn(".bootstrap-venv\\Scripts\\python.exe", text)
+            self.assertNotIn("Get-Command python.exe", text)
+        self.assertIn("UV_UNMANAGED_INSTALL", self.bootstrap)
+        self.assertIn("python find --managed-python", self.bootstrap)
 
     def test_fast_path_requires_the_exact_stable_action(self):
         with tempfile.TemporaryDirectory() as directory:

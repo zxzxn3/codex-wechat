@@ -11,42 +11,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Get-DependencyHint([string]$Name, [string]$WingetId, [string]$Url) {
-    return @"
-$Name is required.
-Install it with:
-  winget install --id $WingetId -e
-If winget is unavailable: $Url
-Close and reopen this terminal, then rerun the same command.
-"@
-}
-
-# Public local entry delegates to the same installer as the network entry.
+# Public local entry delegates to the shared uv bootstrap.
 if (-not $PreparedRuntime) {
-    $py = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue
-    $prefix = @('-3')
-    if (-not $py) {
-        $py = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
-            Where-Object {
-                (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
-                (Get-Item -LiteralPath $_.Source).Length -gt 0
-            } | Select-Object -First 1
-        $prefix = @()
-    }
-    if (-not $py) {
-        throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
-    }
-    & $py.Source @prefix -c 'import sys; sys.exit(sys.version_info < (3, 11))'
-    if ($LASTEXITCODE -ne 0) {
-        throw (Get-DependencyHint 'Python 3.11+' 'Python.Python.3.13' 'https://www.python.org/downloads/windows/')
-    }
-    $arguments = @((Join-Path $PSScriptRoot 'installer.py'), 'menu')
-    if ($InstallRoot) { $arguments += @('--dir', $InstallRoot) }
-    if ($DryRun) { $arguments += '--dry-run' }
-    if ($NonInteractive) { $arguments += '--non-interactive' }
-    if ($Repo) { $arguments += @('--repo', $Repo) }
-    if ($Ref) { $arguments += @('--ref', $Ref) }
-    & $py.Source @prefix -u @arguments
+    $Bootstrap = Join-Path $PSScriptRoot 'bootstrap.ps1'
+    $arguments = @{ SourceDir = $PSScriptRoot }
+    if ($InstallRoot) { $arguments.Dir = $InstallRoot }
+    if ($DryRun) { $arguments.DryRun = $true }
+    if ($NonInteractive) { $arguments.NonInteractive = $true }
+    & $Bootstrap @arguments
     exit $LASTEXITCODE
 }
 # Internal integration only: Python has finished downloads and runtime checks.
@@ -58,13 +30,7 @@ $TaskName = 'CodexWeChat'
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $LayoutPython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
-    $LayoutPythonCommand = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
-        Where-Object {
-            (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
-            (Get-Item -LiteralPath $_.Source).Length -gt 0
-        } | Select-Object -First 1
-    if (-not $LayoutPythonCommand) { throw 'Python runtime is unavailable.' }
-    $LayoutPython = $LayoutPythonCommand.Source
+    throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
 }
 $PreviousPythonPath = $env:PYTHONPATH
 try {

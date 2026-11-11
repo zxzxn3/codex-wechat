@@ -20,13 +20,7 @@ $installRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
 } else { $PSScriptRoot }
 $python = Join-Path $installRoot '.bootstrap-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
-    $native = @(Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue) |
-        Where-Object {
-            (Test-Path -LiteralPath $_.Source -PathType Leaf) -and
-            (Get-Item -LiteralPath $_.Source).Length -gt 0
-        } | Select-Object -First 1
-    if (-not $native) { throw 'Python runtime is unavailable.' }
-    $python = $native.Source
+    throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
 }
 $before = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT','Process')
 $beforePythonPath = [Environment]::GetEnvironmentVariable('PYTHONPATH','Process')

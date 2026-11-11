@@ -1,11 +1,12 @@
 """Remote update contracts; never contact GitHub or change a real installation."""
+import io
 from pathlib import Path
 import json
-import os
 import shutil
+import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import installer
 from tests.support.helpers import install_platform, write_installation_layout
@@ -41,20 +42,61 @@ class RemoteUpdateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 installer.update_source(self.choice["repo"], ref)
 
-    def test_fetch_is_shallow_public_clone_with_clean_git_context(self):
+    def make_archive(self, files, *, root="codex-wechat-stable"):
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w:gz") as bundle:
+            for name, data in files.items():
+                encoded = data.encode("utf-8")
+                member = tarfile.TarInfo(f"{root}/{name}")
+                member.size = len(encoded)
+                member.mode = 0o644
+                bundle.addfile(member, io.BytesIO(encoded))
+        return stream.getvalue()
+
+    def test_fetch_uses_the_official_github_archive(self):
         destination = self.root / "download"
-        with patch.object(installer.shutil, "which", return_value="/fixture/git"), \
-             patch.object(installer.subprocess, "run") as run, \
-             patch.dict(os.environ, {"GIT_DIR": "/private/cfg", "GIT_WORK_TREE": "/private/home"}):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = self.make_archive({
+            "LICENSE": "license\n",
+            "codex_wechat/install_layout.py": "layout\n",
+        })
+        with patch.object(installer, "urlopen", return_value=response) as open_url:
             installer.fetch_update_source(self.choice, destination)
-        args = run.call_args.args[0]
-        self.assertEqual(args[-3:], ["--", self.choice["repo"], str(destination)])
-        self.assertIn("--depth", args)
-        self.assertIn("stable", args)
-        env = run.call_args.kwargs["env"]
-        self.assertNotIn("GIT_DIR", env)
-        self.assertNotIn("GIT_WORK_TREE", env)
-        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        request = open_url.call_args.args[0]
+        self.assertEqual(
+            request.full_url,
+            "https://codeload.github.com/example/codex-wechat/tar.gz/stable",
+        )
+        self.assertEqual((destination / "LICENSE").read_text(encoding="utf-8"),
+                         "license\n")
+        self.assertEqual(
+            (destination / "codex_wechat/install_layout.py").read_text(encoding="utf-8"),
+            "layout\n",
+        )
+
+    def test_fetch_rejects_archive_traversal_and_links(self):
+        for member in ("../escape", "root/link"):
+            with self.subTest(member=member):
+                stream = io.BytesIO()
+                with tarfile.open(fileobj=stream, mode="w:gz") as bundle:
+                    info = tarfile.TarInfo(
+                        member if "link" in member else "root/../escape"
+                    )
+                    if "link" in member:
+                        info.type = tarfile.SYMTYPE
+                        info.linkname = "/outside"
+                    else:
+                        payload = b"x"
+                        info.size = len(payload)
+                    bundle.addfile(info, io.BytesIO(b"x") if info.isfile() else None)
+                response = MagicMock()
+                response.__enter__.return_value = response
+                response.read.return_value = stream.getvalue()
+                with patch.object(installer, "urlopen", return_value=response):
+                    with self.assertRaisesRegex(ValueError, "不安全路径|不是普通文件"):
+                        installer.fetch_update_source(
+                            self.choice, self.root / ("download-" + member.replace("/", "-")))
 
     def test_remember_only_after_activation_and_exclude_metadata_from_payload(self):
         self.target.mkdir()

@@ -1,7 +1,6 @@
 """Contracts for the installer's stable payload and source manifest."""
 import ast
 import os
-import re
 from pathlib import Path
 import subprocess
 import sys
@@ -73,25 +72,6 @@ class ReleaseLayoutTests(unittest.TestCase):
                 if module == "codex_wechat":
                     with self.subTest(platform=name, module=module):
                         self.assertIn(Path("codex_wechat/__init__.py"), declared)
-
-    def test_runtime_version_requirements_match_the_manifests(self):
-        # The installer probe hard-codes the pins because it runs before the
-        # release can import anything; keep the two from drifting apart.
-        declared = {}
-        for name in ("requirements.txt", "requirements-windows.txt"):
-            for line in (ROOT / name).read_text(encoding="utf-8").splitlines():
-                line = line.split("#", 1)[0].strip()
-                if not line or line.startswith("-") or ";" in line:
-                    continue
-                package = re.split(r"[<>=!~\[]", line, 1)[0].strip()
-                declared[package] = line[len(package):].strip()
-        probed = installer.RUNTIME_VERSION_REQUIREMENTS
-        for package, specifier in probed.items():
-            with self.subTest(package=package):
-                self.assertEqual(declared.get(package), specifier)
-        for package, specifier in declared.items():
-            if specifier and package not in probed:
-                self.fail(f"{package}{specifier} is pinned but not probed at install time")
 
     def test_required_files_are_read_from_the_actual_payload(self):
         self.assertIn(Path("LICENSE"), installer.REQUIRED_FILES)

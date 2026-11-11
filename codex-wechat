@@ -3,11 +3,12 @@
 set -euo pipefail
 INSTALL_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
+PYTHON="$INSTALL_ROOT/.bootstrap-venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    echo "codex-wechat: 稳定 Python 环境缺失；请重新运行 bootstrap。" >&2
+    exit 1
+fi
 ACTION="${1:-status}"
-case "$ACTION" in
-    install|update|menu|components) INSTALLER_ACTION=1 ;;
-    *) INSTALLER_ACTION=0 ;;
-esac
 if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${CODEX_WECHAT_ALLOW_ROOT:-}" != "1" ]; then
     case "$ACTION" in
         status|logs|uninstall|-h|--help) ;;
@@ -24,7 +25,7 @@ case "${1:-}" in
             echo "codex-wechat: 稳定安装器缺失: $INSTALLER" >&2
             exit 1
         fi
-        exec python3 -u "$INSTALLER" "$@"
+        exec "$PYTHON" -u "$INSTALLER" "$@"
         ;;
 esac
 if [ "$ACTION" = "uninstall" ]; then
@@ -36,9 +37,9 @@ if [ "$ACTION" = "uninstall" ]; then
     export CODEX_WECHAT_INSTALL_ROOT="$INSTALL_ROOT"
     shift
     exec env PYTHONPATH="$INSTALL_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-        python3 -B -u -m codex_wechat.uninstall "$@"
+        "$PYTHON" -B -u -m codex_wechat.uninstall "$@"
 fi
 export PATH="$HOME/.local/bin:$PATH"
 exec env PYTHONPATH="$INSTALL_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-    python3 -u -m codex_wechat.launcher \
+    "$PYTHON" -u -m codex_wechat.launcher \
     --install-root "$INSTALL_ROOT" --module codex_wechat -- "$@"

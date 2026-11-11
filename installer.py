@@ -20,7 +20,8 @@ import tempfile
 import textwrap
 import time
 import unicodedata
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
+from urllib.request import Request, urlopen
 
 
 sys.dont_write_bytecode = True
@@ -40,6 +41,17 @@ QR_FALLBACK_REQUIREMENTS = Path("requirements-qr.txt")
 # command must not block the installer forever.
 INSTALL_COMMAND_TIMEOUT_SECONDS = 900
 GIT_ARCHIVE_TIMEOUT_SECONDS = 120
+SOURCE_ARCHIVE_TIMEOUT_SECONDS = 180
+SOURCE_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024
+SOURCE_TREE_MAX_BYTES = 512 * 1024 * 1024
+SOURCE_TREE_MAX_FILES = 20_000
+UV_VERSION = "0.13.7"
+UV_PYTHON = "3.11"
+UV_BOOTSTRAP_ENV = "CODEX_WECHAT_BOOTSTRAP_UV"
+UV_DIR = Path(".bootstrap/uv")
+UV_PYTHON_DIR = Path(".bootstrap/python")
+UV_CACHE_DIR = Path(".bootstrap/cache")
+BOOTSTRAP_VENV = Path(".bootstrap-venv")
 DEPENDENCIES = (
     ("Codex runtime", "codex.exe" if IS_WINDOWS else "codex", None, "微信模型任务", "warn"),
     ("curl", "curl.exe" if IS_WINDOWS else "curl", (8, 4), "网络测速", "warn"),
@@ -317,6 +329,54 @@ def _worktree_files(source: Path) -> dict[Path, tuple[bytes, int]]:
     return files
 
 
+def _archive_files(data: bytes, *, strip_root: bool) -> dict[Path, tuple[bytes, int]]:
+    """Validate a tar archive and return its regular files without extracting it."""
+    files: dict[Path, tuple[bytes, int]] = {}
+    total = 0
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as bundle:
+        members = bundle.getmembers()
+        root_name = None
+        if strip_root:
+            roots = {
+                PurePosixPath(member.name.rstrip("/")).parts[0]
+                for member in members
+                if member.name.rstrip("/")
+            }
+            if len(roots) != 1:
+                raise ValueError("源码归档必须只有一个顶层目录")
+            root_name = next(iter(roots))
+        for member in members:
+            raw_name = member.name.rstrip("/")
+            posix = PurePosixPath(raw_name)
+            if (not raw_name or posix.is_absolute() or ".." in posix.parts
+                    or "\\" in raw_name or ":" in raw_name):
+                raise ValueError(f"源码归档包含不安全路径: {member.name}")
+            parts = posix.parts
+            if strip_root:
+                if parts[0] != root_name:
+                    raise ValueError("源码归档必须只有一个顶层目录")
+                parts = parts[1:]
+                if not parts:
+                    continue
+            relative = Path(*parts)
+            if member.isdir() or _private(relative):
+                continue
+            if not member.isfile():
+                raise ValueError(f"源码归档中不是普通文件: {relative}")
+            if relative in files:
+                raise ValueError(f"源码归档包含重复路径: {relative}")
+            if member.size < 0 or len(files) >= SOURCE_TREE_MAX_FILES:
+                raise ValueError("源码归档超过文件数量上限")
+            total += member.size
+            if total > SOURCE_TREE_MAX_BYTES:
+                raise ValueError("源码归档展开后超过大小上限")
+            stream = bundle.extractfile(member)
+            if stream is None:
+                raise ValueError(f"无法读取源码归档文件: {relative}")
+            files[relative] = (stream.read(), member.mode & 0o777)
+    return files
+
+
 def _git_archive_files(source: Path) -> dict[Path, tuple[bytes, int]]:
     """Read exactly HEAD, so untracked worktree files cannot enter a release."""
     try:
@@ -349,26 +409,7 @@ def _git_archive_files(source: Path) -> dict[Path, tuple[bytes, int]]:
     if archive.returncode:
         detail = archive.stderr.decode("utf-8", "replace").strip()
         raise ValueError(f"无法读取源码 Git 提交: {detail or archive.returncode}")
-    files: dict[Path, tuple[bytes, int]] = {}
-    with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as bundle:
-        for member in bundle.getmembers():
-            raw_name = member.name.rstrip("/")
-            posix = PurePosixPath(raw_name)
-            if (not raw_name or posix.is_absolute() or ".." in posix.parts
-                    or "\\" in raw_name or ":" in raw_name):
-                raise ValueError(f"Git 源码包含不安全路径: {member.name}")
-            relative = Path(*posix.parts)
-            if member.isdir() or _private(relative):
-                continue
-            if not member.isfile():
-                raise ValueError(f"Git 源码中不是普通文件: {relative}")
-            if relative in files:
-                raise ValueError(f"Git 源码包含重复路径: {relative}")
-            stream = bundle.extractfile(member)
-            if stream is None:
-                raise ValueError(f"无法读取 Git 源码文件: {relative}")
-            files[relative] = (stream.read(), member.mode & 0o777)
-    return files
+    return _archive_files(archive.stdout, strip_root=False)
 
 
 def project_files(source: Path, *, require_complete=True) -> dict[Path, tuple[bytes, int]]:
@@ -694,10 +735,10 @@ def _copy_release(staging: Path, files: dict[Path, tuple[bytes, int]]) -> None:
     )
 
 
-def _run(command: list[str], *, cwd: Path) -> None:
+def _run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> None:
     detail("执行: " + " ".join(command))
     try:
-        subprocess.run(command, cwd=cwd, check=True,
+        subprocess.run(command, cwd=cwd, env=env, check=True,
                        timeout=INSTALL_COMMAND_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         raise ValueError(
@@ -711,12 +752,110 @@ def _venv_python(root: Path) -> Path:
     return root / ".venv/bin/python"
 
 
+def _uv_executable(target: Path) -> Path:
+    name = "uv.exe" if IS_WINDOWS else "uv"
+    return target / UV_DIR / UV_VERSION / name
+
+
+def _uv_environment(target: Path) -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.update({
+        "UV_CACHE_DIR": str((target / UV_CACHE_DIR).absolute()),
+        "UV_MANAGED_PYTHON": "1",
+        "UV_NO_CONFIG": "1",
+        "UV_NO_MODIFY_PATH": "1",
+        "UV_NO_PROGRESS": "1",
+        "UV_PYTHON": UV_PYTHON,
+        "UV_PYTHON_INSTALL_BIN": "0",
+        "UV_PYTHON_INSTALL_DIR": str((target / UV_PYTHON_DIR).absolute()),
+    })
+    return environment
+
+
+def _uv_version_matches(executable: Path) -> bool:
+    if not executable.is_file():
+        return False
+    try:
+        result = subprocess.run(
+            [str(executable), "--version"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    fields = result.stdout.strip().split()
+    return result.returncode == 0 and fields[:2] == ["uv", UV_VERSION]
+
+
+def ensure_uv(target: Path) -> Path:
+    """Persist the bootstrap-provided uv binary inside the installation root."""
+    destination = _uv_executable(target)
+    if _uv_version_matches(destination):
+        return destination
+    candidate = os.environ.get(UV_BOOTSTRAP_ENV) or shutil.which("uv")
+    if not candidate:
+        raise ValueError("uv 不可用；请重新运行 bootstrap.sh / bootstrap.ps1。")
+    source = Path(candidate).expanduser()
+    if not source.is_file():
+        raise ValueError(f"bootstrap uv 不存在: {source}")
+    if not _uv_version_matches(source):
+        raise ValueError(f"bootstrap uv 版本不匹配，需要 {UV_VERSION}: {source}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".tmp")
+    shutil.copy2(source, temporary)
+    if not IS_WINDOWS:
+        temporary.chmod(0o700)
+    os.replace(temporary, destination)
+    return destination
+
+
+def _run_uv(target: Path, arguments: list[str], *, cwd: Path) -> None:
+    _run(
+        [str(ensure_uv(target)), *arguments],
+        cwd=cwd,
+        env=_uv_environment(target),
+    )
+
+
+def _managed_python(target: Path) -> Path:
+    uv = ensure_uv(target)
+    try:
+        result = subprocess.run(
+            [str(uv), "python", "find", "--managed-python", UV_PYTHON],
+            cwd=target,
+            env=_uv_environment(target),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"无法查找 uv 管理的 Python: {error}") from error
+    value = result.stdout.strip()
+    if result.returncode or not value:
+        raise ValueError(f"uv 管理的 Python {UV_PYTHON} 不可用: {result.stderr.strip()}")
+    python = Path(value)
+    if not python.is_file():
+        raise ValueError(f"uv 管理的 Python 不存在: {python}")
+    return python
+
+
+def ensure_managed_python(target: Path) -> Path:
+    uv = ensure_uv(target)
+    _run(
+        [str(uv), "python", "install", UV_PYTHON],
+        cwd=target,
+        env=_uv_environment(target),
+    )
+    return _managed_python(target)
+
+
 RUNTIME_CHECK_TIMEOUT_SECONDS = 30
 RUNTIME_IMPORTS = (
     "codex_wechat",
     "codex_wechat.desktop",
-    "packaging",
-    "platformdirs",
     "curl_cffi",
     "curl_cffi.requests",
     "websockets",
@@ -726,13 +865,6 @@ RUNTIME_IMPORTS = (
     "cryptography.hazmat.primitives",
     "cryptography.hazmat.primitives.ciphers",
 )
-RUNTIME_VERSION_REQUIREMENTS = {
-    "cryptography": ">=38",
-    "websockets": ">=15,<18",
-    "curl-cffi": ">=0.17,<0.18",
-    "packaging": ">=24",
-    "platformdirs": ">=4",
-}
 
 
 def _runtime_imports() -> tuple[str, ...]:
@@ -746,25 +878,7 @@ def _runtime_python(root: Path) -> Path:
 
 
 def _runtime_check_code() -> str:
-    checks = repr(RUNTIME_VERSION_REQUIREMENTS)
-    return (
-        "import importlib.metadata as metadata\n"
-        "from importlib.metadata import PackageNotFoundError\n"
-        "from packaging.requirements import InvalidRequirement, Requirement\n"
-        "from packaging.version import InvalidVersion, Version\n"
-        "import " + ", ".join(_runtime_imports()) + "\n"
-        f"checks = {checks}\n"
-        "for distribution, constraints in checks.items():\n"
-        "    try:\n"
-        "        requirement = Requirement(distribution + constraints)\n"
-        "        installed = Version(metadata.version(distribution))\n"
-        "    except (InvalidRequirement, InvalidVersion, PackageNotFoundError):\n"
-        "        raise SystemExit(1) from None\n"
-        "    if installed != Version(installed.base_version):\n"
-        "        raise SystemExit(1)\n"
-        "    if not requirement.specifier.contains(installed, prereleases=False):\n"
-        "        raise SystemExit(1)\n"
-    )
+    return "import " + ", ".join(_runtime_imports()) + "\n"
 
 
 def _runtime_python_works(root: Path) -> bool:
@@ -796,46 +910,30 @@ def release_runtime_ready(root: Path) -> bool:
     return result.returncode == 0
 
 
-def ensure_release_runtime(root: Path) -> None:
-    if release_runtime_ready(root):
-        return
-    detail(f"修复版本 Python 环境: {root}")
-    prepare_runtime(root)
-
-
 def prepare_runtime(root: Path) -> None:
-    """Create a release-local environment and verify its Python imports."""
-    python = _venv_python(root)
-    if not _runtime_python_works(root):
-        venv = root / ".venv"
-        if venv.is_symlink():
-            raise ValueError(f"版本 Python 环境不能是符号链接: {venv}")
-        if venv.is_dir():
-            shutil.rmtree(venv)
-        elif venv.exists():
-            venv.unlink()
-    if not python.is_file():
-        command = [sys.executable, "-m", "venv"]
-        if not IS_WINDOWS:
-            command.append("--system-site-packages")
-        command.append(str(root / ".venv"))
-        _run(command, cwd=root)
+    """Create a release-local environment with uv and verify its imports."""
+    target = root.parent.parent if root.parent.name == RELEASES_DIR else root
+    venv = root / ".venv"
+    if venv.is_symlink():
+        raise ValueError(f"版本 Python 环境不能是符号链接: {venv}")
+    if venv.exists():
+        raise ValueError(f"版本暂存环境已存在: {venv}")
+    _run_uv(target, [
+        "venv", "--no-project", "--managed-python", "--python", UV_PYTHON,
+        str(venv),
+    ], cwd=root)
+    python = _runtime_python(root)
     if not python.is_file():
         raise ValueError(f"虚拟环境创建失败: {python}")
-    _run([
-        str(python),
-        "-m",
-        "pip",
-        "install",
-        "--disable-pip-version-check",
-        "-r",
-        str(root / PYTHON_REQUIREMENTS),
-    ], cwd=root)
+    command = [
+        "pip", "install", "--python", str(python),
+        "-r", str(root / PYTHON_REQUIREMENTS),
+    ]
     # Keep the fallback out of the base dependency set when a native encoder exists.
     if not shutil.which("qrencode"):
         detail("未找到原生二维码编码器，准备轻量二维码回退。")
-        _run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
-              "-r", str(root / QR_FALLBACK_REQUIREMENTS)], cwd=root)
+        command.extend(["-r", str(root / QR_FALLBACK_REQUIREMENTS)])
+    _run_uv(target, command, cwd=root)
     _run([
         str(python),
         "-c",
@@ -849,25 +947,57 @@ def prepare_runtime(root: Path) -> None:
           "[compile(Path(p).read_bytes(), p, 'exec') for p in sys.argv[1:]]", *python_files], cwd=root)
 
 
-def prepare_bootstrap_runtime(target: Path, *, requirements: Path) -> None:
-    if not IS_WINDOWS:
-        return
-    root = target / ".bootstrap-venv"
+def _bootstrap_python(target: Path) -> Path:
+    if IS_WINDOWS:
+        return target / BOOTSTRAP_VENV / "Scripts/python.exe"
+    return target / BOOTSTRAP_VENV / "bin/python"
+
+
+def bootstrap_runtime_ready(target: Path) -> bool:
+    python = _bootstrap_python(target)
+    if not python.is_file():
+        return False
+    command = [str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"]
+    if IS_WINDOWS:
+        command[2] += "; import win32api, win32event, win32job"
+    try:
+        result = subprocess.run(
+            command, cwd=target, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=RUNTIME_CHECK_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def prepare_bootstrap_runtime(target: Path, *, requirements: Path | None = None) -> None:
+    root = target / BOOTSTRAP_VENV
     if root.is_symlink():
-        raise ValueError(f"Windows supervisor 环境不能是符号链接: {root}")
+        raise ValueError(f"稳定入口环境不能是符号链接: {root}")
     if root.exists() and not root.is_dir():
-        raise ValueError(f"Windows supervisor 环境不是目录: {root}")
-    python = target / ".bootstrap-venv/Scripts/python.exe"
+        raise ValueError(f"稳定入口环境不是目录: {root}")
+    if root.exists() and any(root.iterdir()):
+        raise ValueError(f"稳定入口环境已存在但不完整: {root}")
     created = not root.exists()
+    _run_uv(target, [
+        "venv", "--no-project", "--managed-python", "--python", UV_PYTHON,
+        str(root),
+    ], cwd=target)
+    python = _bootstrap_python(target)
     try:
         if not python.is_file():
-            _run([sys.executable, "-m", "venv", str(root)], cwd=target)
-        if not python.is_file():
-            raise ValueError(f"Windows supervisor 环境创建失败: {python}")
+            raise ValueError(f"稳定入口环境创建失败: {python}")
         _run([str(python), "-c", "import sys; raise SystemExit(sys.version_info < (3, 11))"], cwd=target)
-        _run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
-              "-r", str(requirements)], cwd=target)
-        _run([str(python), "-c", "import win32api, win32event, win32job"], cwd=target)
+        if IS_WINDOWS:
+            if requirements is None:
+                raise ValueError("Windows stable runtime requires requirements-windows.txt")
+            _run_uv(target, [
+                "pip", "install", "--python", str(python),
+                "-r", str(requirements),
+            ], cwd=target)
+            _run([str(python), "-c", "import win32api, win32event, win32job"], cwd=target)
     except BaseException:
         if created and root.exists():
             shutil.rmtree(root)
@@ -927,7 +1057,8 @@ def install_release(
     if final.exists():
         if not release_matches(target, identifier, files):
             raise ValueError(f"现有版本内容与标识不一致: {final}")
-        ensure_release_runtime(final)
+        if not release_runtime_ready(final):
+            raise ValueError(f"现有版本 Python 环境不完整: {final}")
         return final, False
     staging = _staging_directory(releases, ".staging-")
     try:
@@ -1345,12 +1476,17 @@ def _common_install(
             # directory was not on PATH yet. Re-running the same version must
             # still repair the entry point.
             install_command_link(target)
-            # `uninstall` removes the platform service but keeps the release, so
-            # the same short-circuit would otherwise leave a command that cannot
-            # start anything. Both platform steps are idempotent.
             with InstallLock(target):
-                ensure_release_runtime(target / RELEASES_DIR / identifier)
-                configure_platform_service(target / "releases" / identifier, target)
+                ensure_uv(target)
+                _managed_python(target)
+                if not bootstrap_runtime_ready(target):
+                    raise ValueError(
+                        "稳定入口 Python 环境不完整；请停止服务后重新运行 bootstrap。"
+                    )
+                if not release_runtime_ready(target / RELEASES_DIR / identifier):
+                    raise ValueError(
+                        f"版本 {identifier} 的 Python 环境不完整；请重新安装。"
+                    )
             print(f"版本 {identifier} 已经安装，没有修改。")
             return 0
     if not introduction():
@@ -1393,16 +1529,31 @@ def _common_install(
             locked_release = locked_layout.release_id if locked_layout is not None else None
             if locked_release != current:
                 raise ValueError("确认期间当前版本发生变化，请重新运行")
+            ensure_uv(target)
+            if existing is None:
+                ensure_managed_python(target)
+                prepare_bootstrap_runtime(
+                    target,
+                    requirements=source / "requirements-windows.txt",
+                )
+            else:
+                _managed_python(target)
+                if not bootstrap_runtime_ready(target):
+                    raise ValueError(
+                        "稳定入口 Python 环境不完整；请停止服务后重新运行 bootstrap。"
+                    )
             phase("准备程序与依赖...")
             release, created = install_release(target, identifier, files)
-            prepare_bootstrap_runtime(target, requirements=release / "requirements-windows.txt")
             # Everything requiring downloads/builds/user input finishes above.
             phase("更新入口与当前版本...")
             install_bootstrap(release, target)
             install_command_link(target)
             planned.publish()
             layout_published = True
-            service_ready = configure_platform_service(release, target)
+            if existing is None:
+                service_ready = configure_platform_service(release, target)
+            else:
+                service_ready = True
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier, release, planned)
             try:
@@ -1632,17 +1783,26 @@ def remember_update_source(
 
 
 def fetch_update_source(choice: dict, destination: Path) -> None:
-    git = shutil.which("git")
-    if not git:
-        raise ValueError("在线更新需要 Git；请安装 Git，或下载新源码后用 update --source {目录}。")
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    # Public updates do not need stored credentials or checkout hooks.
-    subprocess.run([
-        git, "-c", "credential.helper=", "-c", "core.hooksPath=" + os.devnull,
-        "clone", "--depth", "1", "--single-branch", "--branch", choice["ref"],
-        "--", choice["repo"], str(destination),
-    ], env=env, check=True, timeout=180)
+    parsed = urlsplit(choice["repo"])
+    repository = parsed.path.strip("/").removesuffix(".git")
+    url = (
+        f"https://codeload.github.com/{repository}/tar.gz/"
+        f"{quote(choice['ref'], safe='')}"
+    )
+    request = Request(url, headers={"User-Agent": "codex-wechat-installer"})
+    try:
+        with urlopen(request, timeout=SOURCE_ARCHIVE_TIMEOUT_SECONDS) as response:
+            archive = response.read(SOURCE_ARCHIVE_MAX_BYTES + 1)
+    except (OSError, ValueError) as error:
+        raise ValueError(f"无法下载源码归档: {error}") from error
+    if len(archive) > SOURCE_ARCHIVE_MAX_BYTES:
+        raise ValueError("源码归档超过下载大小上限")
+    files = _archive_files(archive, strip_root=True)
+    if destination.exists():
+        raise ValueError(f"源码下载目录已存在: {destination}")
+    destination.mkdir(parents=True)
+    for relative, (data, mode) in sorted(files.items()):
+        _atomic_write(destination / relative, data, mode, root=destination)
 
 
 def bootstrap(

@@ -316,10 +316,8 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Wait-TaskStopped", task)
         self.assertIn("Stop-ScheduledTask", task)
         self.assertIn("Start-ScheduledTask", task)
-        # Get-Command returns every match, and Windows ships a 0-byte python.exe
-        # alias under WindowsApps; taking the array produced two paths.
-        self.assertIn("(Get-Item -LiteralPath $_.Source).Length -gt 0", entry)
-        self.assertIn("Select-Object -First 1", entry)
+        self.assertIn(".bootstrap-venv\\Scripts\\python.exe", entry)
+        self.assertNotIn("Get-Command python.exe", entry)
         self.assertIn("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE", service)
         self.assertIn("JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK", service)
         self.assertNotIn("taskkill", service.lower())

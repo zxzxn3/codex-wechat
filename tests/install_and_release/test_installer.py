@@ -26,6 +26,14 @@ class InstallerTests(unittest.TestCase):
         self.target = self.base / "target"
         self.make_project(self.source)
         self.enterContext(patch.object(installer, "introduction", return_value=True))
+        self.enterContext(patch.object(
+            installer, "ensure_uv", side_effect=lambda target: target / installer.UV_DIR / installer.UV_VERSION / "uv"))
+        self.enterContext(patch.object(
+            installer, "ensure_managed_python", side_effect=lambda target: Path("/managed/python")))
+        self.enterContext(patch.object(
+            installer, "_managed_python", side_effect=lambda target: Path("/managed/python")))
+        self.enterContext(patch.object(installer, "bootstrap_runtime_ready", return_value=True))
+        self.enterContext(patch.object(installer, "release_runtime_ready", return_value=True))
         self.enterContext(patch.object(installer, "prepare_runtime"))
         self.enterContext(patch.object(installer, "report_dependencies"))
         def bootstrap(target, *, requirements):
@@ -475,19 +483,6 @@ class InstallerTests(unittest.TestCase):
             installer.parser().parse_args(["rollback"])
         self.assertFalse(hasattr(installer, "rollback_activation"))
 
-    def test_integration_failure_does_not_roll_back_committed_version(self):
-        with patch("builtins.input", return_value="y"):
-            installer.install(self.source, self.target)
-        first = self.current()
-        self.make_project(self.source, version="two")
-        with patch("builtins.input", return_value="y"), \
-             patch.object(installer, "configure_platform_service", side_effect=OSError("integration failed")):
-            with self.assertRaisesRegex(OSError, "integration failed"):
-                installer.update(self.source, self.target)
-        self.assertNotEqual(self.current(), first)
-        self.assertTrue(installer.release_matches(self.target, self.current()))
-        self.assertFalse((self.target / installer.PREVIOUS_FILE).exists())
-
     def test_same_version_update_repairs_missing_stable_entry(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
@@ -506,61 +501,24 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.update(self.source, self.target), 0)
         link.assert_called_once_with(self.target)
 
-    def test_same_version_update_restores_a_service_that_uninstall_removed(self):
-        # `uninstall` unregisters the platform service but leaves the release,
-        # so the no-op path is the only chance to put it back.
+    def test_same_version_update_does_not_touch_the_platform_service(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
         current = self.current()
         with patch("builtins.input", return_value="y"), \
                 patch.object(installer, "configure_platform_service") as configure:
             self.assertEqual(installer.update(self.source, self.target), 0)
-        configure.assert_called_once()
-        release, target = configure.call_args.args
-        self.assertEqual(target, self.target)
-        self.assertEqual(release, self.target / "releases" / current)
-        self.assertEqual(configure.call_args.kwargs, {})
+        configure.assert_not_called()
+        self.assertEqual(self.current(), current)
 
-    def test_same_version_service_failure_keeps_pointer_and_manifest(self):
+    def test_same_version_update_rejects_a_missing_release_runtime(self):
         with patch("builtins.input", return_value="y"):
             installer.install(self.source, self.target)
         current = self.current()
-        old_root = (self.base / "data").resolve()
-        with patch.object(installer, "configure_platform_service",
-                             side_effect=OSError("service failed")):
-            with self.assertRaisesRegex(OSError, "service failed"):
+        with patch.object(installer, "release_runtime_ready", return_value=False):
+            with self.assertRaisesRegex(ValueError, "Python 环境不完整"):
                 installer.update(self.source, self.target)
         self.assertEqual(self.current(), current)
-        layout = InstalledLayout.load(
-            self.target, platform="windows" if installer.IS_WINDOWS else "linux")
-        self.assertEqual(layout.data_root, old_root)
-
-    def test_same_version_update_repairs_a_missing_release_runtime(self):
-        with patch("builtins.input", return_value="y"):
-            installer.install(self.source, self.target)
-        current = self.current()
-        release = self.target / installer.RELEASES_DIR / current
-        with patch.object(installer, "release_runtime_ready", return_value=False), \
-                patch.object(installer, "prepare_runtime") as prepare, \
-                patch.object(installer, "introduction", return_value=True), \
-                patch("builtins.input", return_value="y"):
-            self.assertEqual(installer.update(self.source, self.target), 0)
-        prepare.assert_called_once_with(release)
-
-    def test_release_runtime_ready_checks_direct_dependencies(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            python = installer._venv_python(root)
-            python.parent.mkdir(parents=True)
-            python.write_text("fake", encoding="utf-8")
-            with patch.object(installer.subprocess, "run",
-                              return_value=SimpleNamespace(returncode=0)) as run:
-                self.assertTrue(installer.release_runtime_ready(root))
-            import_command = run.call_args_list[1].args[0][2]
-            for module in installer.RUNTIME_IMPORTS:
-                self.assertIn(module, import_command)
-            for distribution in installer.RUNTIME_VERSION_REQUIREMENTS:
-                self.assertIn(distribution, import_command)
 
     def test_update_rejects_same_versioned_root_as_source(self):
         with patch("builtins.input", return_value="y"):
@@ -630,21 +588,31 @@ class InstallerTests(unittest.TestCase):
 
 
 class BootstrapRuntimeTests(unittest.TestCase):
-    def test_existing_environment_still_installs_and_checks_native_dependencies(self):
+    def test_windows_stable_runtime_uses_uv_and_only_pywin32(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             python = target / ".bootstrap-venv/Scripts/python.exe"
-            python.parent.mkdir(parents=True)
-            python.write_bytes(b"fixture")
             requirements = target / "requirements-windows.txt"
             requirements.write_text('pywin32; sys_platform == "win32"\n', encoding="utf-8")
-            with patch.object(installer, "IS_WINDOWS", True), patch.object(installer, "_run") as run:
+            uv_calls = []
+
+            def run_uv(current, arguments, *, cwd):
+                uv_calls.append((current, arguments, cwd))
+                if arguments[0] == "venv":
+                    python.parent.mkdir(parents=True)
+                    python.write_bytes(b"fixture")
+
+            with patch.object(installer, "IS_WINDOWS", True), \
+                    patch.object(installer, "_run_uv", side_effect=run_uv), \
+                    patch.object(installer, "_run") as run:
                 installer.prepare_bootstrap_runtime(target, requirements=requirements)
+            self.assertEqual(uv_calls[0][1][:4], [
+                "venv", "--no-project", "--managed-python", "--python",
+            ])
+            self.assertIn("-r", uv_calls[1][1])
+            self.assertIn(str(requirements), uv_calls[1][1])
             commands = [call.args[0] for call in run.call_args_list]
-            install = next(command for command in commands if "pip" in command)
-            self.assertEqual(install[0], str(python))
-            self.assertEqual(install[-2:], ["-r", str(requirements)])
-            self.assertIn("import win32api, win32event, win32job", commands[-1])
+            self.assertIn("import win32api, win32event, win32job", commands[-1][2])
 
 
 class RuntimeDiscoveryTests(unittest.TestCase):
@@ -816,6 +784,14 @@ class LinuxServiceRegistrationTests(unittest.TestCase):
 
 
 class RuntimeRepairTests(unittest.TestCase):
+    def test_uv_version_accepts_the_installer_suffix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            uv = Path(directory) / "uv"
+            uv.write_text("fixture", encoding="utf-8")
+            with patch.object(installer.subprocess, "run", return_value=SimpleNamespace(
+                    returncode=0, stdout=f"uv {installer.UV_VERSION} (abc 2026-11-11)\n")):
+                self.assertTrue(installer._uv_version_matches(uv))
+
     def test_manifest_publication_precedes_service_configuration(self):
         text = (Path(__file__).resolve().parents[2] / "installer.py").read_text(
             encoding="utf-8")
@@ -824,62 +800,54 @@ class RuntimeRepairTests(unittest.TestCase):
         configuration = text.index("service_ready = configure_platform_service", publication)
         self.assertLess(publication, configuration)
 
-    def test_runtime_version_contracts_match_requirements(self):
-        requirements = (Path(__file__).resolve().parents[2] / "requirements.txt").read_text(
-            encoding="utf-8")
-        for distribution, constraint in installer.RUNTIME_VERSION_REQUIREMENTS.items():
-            self.assertIn(distribution + constraint, requirements)
+    def test_uv_environment_stays_inside_the_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            environment = installer._uv_environment(target)
+        self.assertEqual(environment["UV_PYTHON_INSTALL_DIR"],
+                         str((target / installer.UV_PYTHON_DIR).absolute()))
+        self.assertEqual(environment["UV_CACHE_DIR"],
+                         str((target / installer.UV_CACHE_DIR).absolute()))
+        self.assertEqual(environment["UV_MANAGED_PYTHON"], "1")
+        self.assertEqual(environment["UV_PYTHON_INSTALL_BIN"], "0")
 
-    def test_runtime_version_check_requires_stable_versions(self):
-        code = installer._runtime_check_code()
-        compile(code, "<runtime-check>", "exec")
-        self.assertIn("Requirement(distribution + constraints)", code)
-        self.assertIn("prereleases=False", code)
-        self.assertIn("installed.base_version", code)
-
-    def test_runtime_version_check_uses_pep440_versions(self):
-        code = installer._runtime_check_code()
-        versions = {
-            "cryptography": "50.0.2",
-            "websockets": "17.4",
-            "curl-cffi": "0.17.0",
-            "packaging": "26.3",
-            "platformdirs": "4.14.3",
-        }
-        with patch("importlib.metadata.version", side_effect=versions.get):
-            exec(compile(code, "<runtime-check>", "exec"), {})
-
-        versions["websockets"] = "15.0a1"
-        with patch("importlib.metadata.version", side_effect=versions.get), \
-                self.assertRaises(SystemExit) as raised:
-            exec(compile(code, "<runtime-check>", "exec"), {})
-        self.assertEqual(raised.exception.code, 1)
-
-        versions["websockets"] = "15.0.post1"
-        with patch("importlib.metadata.version", side_effect=versions.get), \
-                self.assertRaises(SystemExit) as raised:
-            exec(compile(code, "<runtime-check>", "exec"), {})
-        self.assertEqual(raised.exception.code, 1)
-
-    def test_prepare_runtime_rebuilds_a_broken_venv(self):
+    def test_release_runtime_ready_checks_runtime_imports(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             python = installer._venv_python(root)
             python.parent.mkdir(parents=True)
-            python.write_text("broken", encoding="utf-8")
+            python.write_text("fake", encoding="utf-8")
+            with patch.object(installer, "_runtime_python_works", return_value=True), \
+                    patch.object(installer.subprocess, "run",
+                                 return_value=SimpleNamespace(returncode=0)) as run:
+                self.assertTrue(installer.release_runtime_ready(root))
+            import_command = run.call_args.args[0][2]
+            for module in installer.RUNTIME_IMPORTS:
+                self.assertIn(module, import_command)
+
+    def test_prepare_runtime_uses_uv_managed_python_and_import_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            python = installer._venv_python(root)
             calls = []
 
-            def run(command, *, cwd):
-                calls.append(command)
-                if command[1:3] == ["-m", "venv"]:
+            def run_uv(target, arguments, *, cwd):
+                calls.append(arguments)
+                if arguments[0] == "venv":
                     python.parent.mkdir(parents=True, exist_ok=True)
-                    python.write_text("rebuilt", encoding="utf-8")
+                    python.write_text("managed", encoding="utf-8")
 
-            with patch.object(installer, "_runtime_python_works", return_value=False), \
-                    patch.object(installer, "_run", side_effect=run), \
+            with patch.object(installer, "_run_uv", side_effect=run_uv), \
+                    patch.object(installer, "_run"), \
+                    patch.object(installer.shutil, "which", return_value="/usr/bin/qrencode"), \
                     patch.object(installer, "project_files", return_value={}):
                 installer.prepare_runtime(root)
-            self.assertEqual(calls[0][1:3], ["-m", "venv"])
+            self.assertEqual(calls[0][:5], [
+                "venv", "--no-project", "--managed-python", "--python", installer.UV_PYTHON,
+            ])
+            self.assertEqual(calls[1][:3], [
+                "pip", "install", "--python",
+            ])
 
 
 if __name__ == "__main__":

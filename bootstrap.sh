@@ -1,126 +1,129 @@
 #!/usr/bin/env bash
-# Public one-line entry.
+# Public entry and local uv adapter for installer.py.
 set -euo pipefail
 
-dependency_install_hint() {
-    if command -v pacman >/dev/null 2>&1; then
-        echo '  sudo pacman -S --needed python git curl'
-    elif command -v apt-get >/dev/null 2>&1; then
-        echo '  sudo apt-get install -y python3 git curl'
-    elif command -v dnf >/dev/null 2>&1; then
-        echo '  sudo dnf install -y python3 git curl'
-    elif command -v zypper >/dev/null 2>&1; then
-        echo '  sudo zypper install python3 git curl'
-    elif command -v apk >/dev/null 2>&1; then
-        echo '  sudo apk add python3 git curl'
-    else
-        echo '  Python: https://www.python.org/downloads/'
-        echo '  Git: https://git-scm.com/downloads'
+UV_VERSION=0.13.7
+UV_PYTHON=3.11
+repo='https://github.com/zxzxn3/codex-wechat'
+source_ref=main
+dry_run=0
+non_interactive=0
+target=''
+component=''
+skills_dir=''
+source_dir=''
+command_name=''
+
+usage() {
+    echo 'bootstrap.sh [--repo URL] [--ref main] [--dry-run] [--non-interactive] [--component NAME] [--skills-dir PATH]'
+}
+
+while (($#)); do
+    case "$1" in
+        --repo|--ref|--dir|--component|--skills-dir|--source-dir)
+            (($# >= 2)) || { echo "缺少 $1 的参数" >&2; exit 2; }
+            case "$1" in
+                --repo) repo=$2 ;;
+                --ref) source_ref=$2 ;;
+                --dir) target=$2 ;;
+                --component) component=$2 ;;
+                --skills-dir) skills_dir=$2 ;;
+                --source-dir) source_dir=$2 ;;
+            esac
+            shift 2 ;;
+        --dry-run) dry_run=1; shift ;;
+        --non-interactive) non_interactive=1; shift ;;
+        install|update|menu|components) command_name=$1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "未知参数 $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ -z "$source_dir" ]]; then
+    if [[ ! "$repo" =~ ^https://github\.com/([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*)(\.git)?$ ]]; then
+        echo '需要公开 GitHub HTTPS 仓库地址。' >&2
+        exit 1
     fi
-}
-
-python_version_hint() {
-    if command -v apt-get >/dev/null 2>&1; then
-        echo '  注意：Ubuntu 22.04 等旧发行版的官方 python3 低于 3.11；仅重复安装 python3 不会满足要求。' >&2
+    repository=${BASH_REMATCH[1]}
+    if [[ -z "$source_ref" || "$source_ref" == -* || "$source_ref" =~ [[:space:][:cntrl:]] ]]; then
+        echo '需要有效的分支或标签名称。' >&2
+        exit 1
     fi
+fi
+
+if ((dry_run)) && [[ -z "$source_dir" ]]; then
+    printf '演练模式，不下载或修改文件。\n来源 https://github.com/%s\n分支或标签 %s\n' \
+        "$repository" "$source_ref"
+    echo '因 --dry-run，真实安装目录检查按通过处理；不代表安装环境已通过检查。'
+    echo '1. 安装 / 更新  2. 附加组件  0. 退出'
+    echo '正式执行会显示统一菜单，识别安装或更新，展示计划后执行；不扫码、不启用自启、不自动启动。'
+    exit 0
+fi
+
+command -v curl >/dev/null || {
+    echo '需要 curl。' >&2
+    exit 1
 }
 
-missing_python() {
-    echo '需要 Python 3.11+。可使用当前系统的包管理器安装：' >&2
-    dependency_install_hint >&2
-    python_version_hint
-    echo '安装后重开终端并重跑相同命令。' >&2
-}
+task_temporary=$(mktemp -d -t codex-wechat-bootstrap.XXXXXXXX)
+trap 'rm -rf -- "$task_temporary"' EXIT
 
-missing_dependency() {
-    printf '%s\n可使用当前系统的包管理器安装：\n' "$1" >&2
-    dependency_install_hint >&2
-    echo '安装后重开终端并重跑相同命令。' >&2
-}
-
-find_python() {
-    local candidate
-    for candidate in python3 python3.13 python3.12 python3.11; do
-        if command -v "$candidate" >/dev/null 2>&1 &&
-                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
-                    >/dev/null 2>&1; then
-            command -v "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-main() {
-    local repo='https://github.com/zxzxn3/codex-wechat' source_ref=main dry_run=0 non_interactive=0 target='' component='' skills_dir='' python_command installer_url task_temporary installer
-    while (($#)); do
-        case "$1" in
-            --repo|--ref|--dir|--component|--skills-dir)
-                (($# >= 2)) || { echo "缺少 $1 的参数" >&2; return 2; }
-                case "$1" in
-                    --repo) repo=$2 ;;
-                    --ref) source_ref=$2 ;;
-                    --dir) target=$2 ;;
-                    --component) component=$2 ;;
-                    --skills-dir) skills_dir=$2 ;;
-                esac
-                shift 2 ;;
-            --dry-run) dry_run=1; shift ;;
-            --non-interactive) non_interactive=1; shift ;;
-            -h|--help)
-                echo 'bootstrap.sh [--repo URL] [--ref main] [--dry-run] [--non-interactive] [--component NAME] [--skills-dir PATH]'
-                return 0 ;;
-            *) echo "未知参数 $1" >&2; return 2 ;;
-        esac
-    done
-    python_command=$(find_python) || { missing_python; return 1; }
-    installer_base_url=$("$python_command" -c '
-import re, sys
-from urllib.parse import quote, urlsplit
-url = urlsplit(sys.argv[1]); path = url.path.strip("/").removesuffix(".git")
-ref = sys.argv[2]
-if (url.scheme != "https" or url.netloc.lower() != "github.com" or url.query or url.fragment
-    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*", path)
-    or not ref or ref.startswith("-") or any(c.isspace() or ord(c) < 32 for c in ref)):
-    sys.exit("需要 GitHub HTTPS 仓库地址和分支或标签名称。")
-print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
-' "$repo" "$source_ref") || return 1
-    installer_url="$installer_base_url/installer.py"
-    if ((dry_run)); then
-        printf '演练模式，不下载或修改文件。\n来源 %s\n分支或标签 %s\n' "$repo" "$source_ref"
-        echo '因 --dry-run，真实安装目录检查按通过处理；不代表安装环境已通过检查。'
-        echo '1. 安装 / 更新  2. 附加组件  0. 退出'
-        echo '正式执行会显示统一菜单，识别安装或更新，展示计划后执行；不扫码、不启用自启、不自动启动。'
-        return 0
+uv_command=''
+if command -v uv >/dev/null 2>&1; then
+    uv_version_output=$(uv --version 2>/dev/null || true)
+    if [[ "$uv_version_output" == "uv $UV_VERSION" ||
+            "$uv_version_output" == "uv $UV_VERSION "* ]]; then
+        uv_command=$(command -v uv)
     fi
-    command -v git >/dev/null || { missing_dependency '需要 Git。'; return 1; }
-    # curl | bash consumes stdin. Confirmation must read the real terminal.
-    if ((!non_interactive)) && ! { exec 3<> /dev/tty; } 2>/dev/null; then
-        echo '安装确认需要交互终端；演练可以使用 --dry-run。' >&2
-        return 1
-    fi
-    task_temporary=$(mktemp -d -t codex-wechat-bootstrap.XXXXXXXX)
-    # Freeze the safely quoted path now because task_temporary is local to main().
-    # shellcheck disable=SC2064
-    trap "$(printf 'rm -rf -- %q' "$task_temporary")" EXIT
-    command -v curl >/dev/null || { missing_dependency '需要 curl。'; return 1; }
+fi
+if [[ -z "$uv_command" ]]; then
+    uv_root="$task_temporary/uv"
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-        --connect-timeout 15 --max-time 120 "$installer_url" -o "$task_temporary/installer.py"
-    installer="$task_temporary/installer.py"
-    local -a installer_arguments=("$installer" bootstrap --repo "$repo" --ref "$source_ref")
-    [[ -z "$target" ]] || installer_arguments+=(--dir "$target")
-    if [[ -n "$component" ]]; then
-        installer_arguments[1]=components
-        installer_arguments+=(--component "$component")
-    fi
-    [[ -z "$skills_dir" ]] || installer_arguments+=(--skills-dir "$skills_dir")
-    if ((non_interactive)); then
-        installer_arguments+=(--non-interactive)
-        "$python_command" -u "${installer_arguments[@]}"
-    else
-        "$python_command" -u "${installer_arguments[@]}" <&3 >&3
-    fi
-}
+        --connect-timeout 15 --max-time 120 \
+        "https://astral.sh/uv/$UV_VERSION/install.sh" -o "$task_temporary/uv-install.sh"
+    env UV_UNMANAGED_INSTALL="$uv_root" sh "$task_temporary/uv-install.sh" >/dev/null
+    uv_command="$uv_root/uv"
+fi
+[[ -x "$uv_command" ]] || { echo "uv 安装失败: $uv_command" >&2; exit 1; }
 
-# Parse the complete entry before invoking native programs or reading /dev/tty.
-main "$@"
+export UV_CACHE_DIR="$task_temporary/cache"
+export UV_MANAGED_PYTHON=1
+export UV_NO_CONFIG=1
+export UV_NO_MODIFY_PATH=1
+export UV_NO_PROGRESS=1
+export UV_PYTHON="$UV_PYTHON"
+export UV_PYTHON_INSTALL_BIN=0
+export UV_PYTHON_INSTALL_DIR="$task_temporary/python"
+export CODEX_WECHAT_BOOTSTRAP_UV="$uv_command"
+
+"$uv_command" python install "$UV_PYTHON"
+python_command=$("$uv_command" python find --managed-python "$UV_PYTHON")
+[[ -x "$python_command" ]] || { echo 'uv 管理的 Python 3.11 不可用。' >&2; exit 1; }
+
+if [[ -n "$source_dir" ]]; then
+    installer="$source_dir/installer.py"
+    installer_arguments=("${command_name:-menu}")
+else
+    installer_base_url="https://raw.githubusercontent.com/$repository/$source_ref"
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+        --connect-timeout 15 --max-time 120 "$installer_base_url/installer.py" \
+        -o "$task_temporary/installer.py"
+    installer="$task_temporary/installer.py"
+    installer_arguments=(bootstrap --repo "$repo" --ref "$source_ref")
+fi
+[[ -f "$installer" ]] || { echo "安装器不存在: $installer" >&2; exit 1; }
+
+[[ -z "$target" ]] || installer_arguments+=(--dir "$target")
+if [[ -n "$component" ]]; then
+    installer_arguments[0]=components
+    installer_arguments+=(--component "$component")
+fi
+[[ -z "$skills_dir" ]] || installer_arguments+=(--skills-dir "$skills_dir")
+if ((dry_run)); then
+    installer_arguments+=(--dry-run)
+fi
+if ((non_interactive)); then
+    installer_arguments+=(--non-interactive)
+fi
+
+exec "$python_command" -u "$installer" "${installer_arguments[@]}"
