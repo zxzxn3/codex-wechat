@@ -17,6 +17,7 @@
 Windows `.cmd` 只转交 stable `codex-wechat.ps1`，再进入 Python。`codex-desktop` /
 `codex-desktop.ps1` 是内部共享后台适配器，不通过 `codex-wechat` 暴露。安装器不修改 PATH；
 只有目标目录已存在且在 PATH 中时才创建短入口。
+Linux 使用 `-h` / `--help`，Windows PowerShell 使用 `-h` / `-Help` 查看入口用法。
 
 ## 生命周期
 
@@ -25,7 +26,8 @@ Windows `.cmd` 只转交 stable `codex-wechat.ps1`，再进入 Python。`codex-d
 - `service-start` 启动已注册后台；前台桥接持锁时拒绝。未绑定时在当前终端扫码。
 - `stop` 停止后台；前台桥接用 `Ctrl+C`。
 - `service-restart` 等待服务稳定运行，超时才报错。
-- `uninstall` 默认保留用户数据；只有显式 `--purge-data` / `-PurgeData` 才清数据。
+- `uninstall` 默认保留用户数据；只有显式 `--purge-data` / `-PurgeData` 才清数据。Windows
+  仅在卸载器明确报告任务不属于当前安装或共享后台仍有客户端时，才按提示使用 `-Force`。
 
 `install`、`update`、`menu` 和 `components` 是 stable 入口转交 `installer.py` 的安装器动作，
 不会作为微信聊天命令处理。网络 bootstrap 完成安装后会保存公开更新来源；此后

@@ -83,6 +83,16 @@ class EntryContractTests(unittest.TestCase):
         )
         self.assertIn("$Repo -or $Ref -or $Source", text)
 
+    def test_windows_entry_exposes_help_and_uninstall_force(self):
+        text = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
+        self.assertIn("[Alias('h')]", text)
+        self.assertIn("[switch]$Help", text)
+        self.assertIn("if ($Help)", text)
+        self.assertIn("[switch]$Force", text)
+        self.assertIn("if ($Force -and $Command -ne 'uninstall')", text)
+        self.assertIn("$UninstallerArguments.Force = $true", text)
+        self.assertLess(text.index("if ($Help)"), text.index("if ($Command -notin"))
+
     def test_task_helper_is_internal_and_owns_native_operations(self):
         text = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
         self.assertIn("ValidateSet('status', 'start', 'stop', 'autostart')", text)

@@ -1,6 +1,8 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
 param(
+    [Alias('h')]
+    [switch]$Help,
     [Parameter(Position = 0)]
     [ValidateSet('login', 'rebind', 'start', 'stop', 'status', 'service-start',
                  'service-restart', 'autostart', 'logs', 'uninstall',
@@ -12,6 +14,7 @@ param(
     [switch]$Follow,
     [switch]$Service,
     [switch]$PurgeData,
+    [switch]$Force,
     [string]$Repo,
     [string]$Ref,
     [string]$Source,
@@ -24,6 +27,12 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ($Help) {
+    Write-Host 'Usage: codex-wechat <command> [options]'
+    Write-Host 'Commands: login, start, stop, status, service-start, service-restart, autostart, logs, uninstall, update, install, menu, components'
+    exit 0
+}
 
 function Test-Elevated {
     try {
@@ -45,6 +54,10 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     [IO.Path]::GetFullPath($env:CODEX_WECHAT_INSTALL_ROOT)
 } else {
     $PSScriptRoot
+}
+
+if ($Force -and $Command -ne 'uninstall') {
+    throw '-Force is only valid with the uninstall command'
 }
 
 if ($Command -in @('update', 'install', 'menu', 'components')) {
@@ -105,6 +118,7 @@ if ($Command -eq 'uninstall') {
     # @('-PurgeData') would be treated as a stray positional value.
     $UninstallerArguments = @{}
     if ($PurgeData) { $UninstallerArguments.PurgeData = $true }
+    if ($Force) { $UninstallerArguments.Force = $true }
     $env:CODEX_WECHAT_INSTALL_ROOT = $InstallRoot
     $global:LASTEXITCODE = 0
     & $Uninstaller @UninstallerArguments

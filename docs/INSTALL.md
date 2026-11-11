@@ -159,6 +159,7 @@ Windows 使用：
 ```powershell
 codex-wechat uninstall              # 保留数据
 codex-wechat uninstall -PurgeData   # 删除已知用户数据
+codex-wechat uninstall -PurgeData -Force # 仅在卸载器明确要求时
 ```
 
 卸载只依赖 `.installation.json`；release 不完整时仍可移除服务和入口。
@@ -168,6 +169,8 @@ Linux stable `codex_wechat/uninstall.py` 与 Windows stable `uninstall.ps1` 是�
 `--purge-data` / `-PurgeData` 只删除已知用户数据项，不递归删除自定义数据根目录。Linux
 分别删除配置文件及其固定临时文件、状态目录和数据根下的 `workspace`；Windows 继续删除
 统一数据根中的已知项，包括 `config.json.tmp`。
+Windows `-Force` 可越过不属于当前安装的计划任务或仍有客户端的共享后台检查，只在卸载器
+明确报告对应冲突时使用。
 前台桥接仍持有状态锁时，卸载会拒绝继续；先按 `Ctrl+C` 退出。自定义数据目录通过
 `CODEX_WECHAT_DATA_ROOT` 在首次安装时指定；卸载器没有第二套数据根参数。Linux purge 还会
 停止工作目录属于当前数据根的共享 Codex 后台；任何一步无法确认时先保留数据。
