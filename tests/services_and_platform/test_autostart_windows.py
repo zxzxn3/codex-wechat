@@ -111,13 +111,13 @@ class AutostartScriptContractTests(unittest.TestCase):
                 # member, so a fake carrying one would hide a field-name bug.
                 action = SimpleNamespace(
                     Path=str(root / ".bootstrap-venv/Scripts/pythonw.exe"),
-                    Arguments=f'"{root / "bootstrap_supervisor.py"}" supervise --state-dir "state"')
+                    Arguments=f'-I "{root / "bootstrap_supervisor.py"}" supervise --state-dir "state"')
                 self.assertTrue(autostart._owned_supervisor_action(action))
-                action.Arguments = f'"{root / "other" / "bootstrap_supervisor.py"}" supervise'
+                action.Arguments = f'-I "{root / "other" / "bootstrap_supervisor.py"}" supervise'
                 self.assertFalse(autostart._owned_supervisor_action(action))
-                action.Arguments = f'"{root / "bootstrap_supervisor.py"}" supervised'
+                action.Arguments = f'-I "{root / "bootstrap_supervisor.py"}" supervised'
                 self.assertFalse(autostart._owned_supervisor_action(action))
-                action.Arguments = f'"{root / "bootstrap_supervisor.py"}" supervise'
+                action.Arguments = f'-I "{root / "bootstrap_supervisor.py"}" supervise'
                 action.Path = str(root / ".bootstrap-venv/Scripts/other.exe")
                 self.assertFalse(autostart._owned_supervisor_action(action))
                 action.Path = str(root / ".bootstrap-venv/Scripts/python.exe")

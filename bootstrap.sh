@@ -104,4 +104,4 @@ if ((non_interactive)); then
     installer_arguments+=(--non-interactive)
 fi
 
-exec "$python_command" -u "$installer" "${installer_arguments[@]}"
+exec env -u PYTHONPATH -u PYTHONHOME "$python_command" -I -u "$installer" "${installer_arguments[@]}"

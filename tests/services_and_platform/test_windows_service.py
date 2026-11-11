@@ -99,10 +99,13 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
             Path("C:/codex-wechat"), Path("C:/data/.state"),
             Path("C:/data/config.json"), Path("C:/codex-wechat/.venv/Scripts/python.exe"))
         self.assertNotIn("token", " ".join(command).lower())
-        env = windows_service.child_environment(Path("C:/data/owner.json"), "abc")
+        env = windows_service.child_environment(
+            Path("C:/data/owner.json"), "abc", Path("C:/codex-wechat"))
         self.assertEqual(env["AGENT_WECHAT_SERVICE_TOKEN"], "abc")
         self.assertEqual(env["CODEX_WECHAT_SERVICE_CHILD"], "1")
         self.assertEqual(env["PYTHONUTF8"], "1")
+        self.assertEqual(env["PYTHONPATH"], "C:/codex-wechat")
+        self.assertNotIn("PYTHONHOME", env)
 
     def test_owner_status_atomic_write_and_token_scoped_cleanup(self):
         with tempfile.TemporaryDirectory() as temp:

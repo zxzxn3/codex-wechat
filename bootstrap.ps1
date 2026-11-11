@@ -37,11 +37,13 @@ foreach ($name in @(
         'UV_CACHE_DIR', 'UV_MANAGED_PYTHON', 'UV_NO_CONFIG', 'UV_NO_MODIFY_PATH',
         'UV_NO_PROGRESS', 'UV_PYTHON', 'UV_PYTHON_INSTALL_BIN',
         'UV_PYTHON_INSTALL_DIR',
-        'CODEX_WECHAT_BOOTSTRAP_UV')) {
+        'CODEX_WECHAT_BOOTSTRAP_UV', 'PYTHONPATH', 'PYTHONHOME')) {
     $SavedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 
 try {
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
     $UvPath = (Get-Command uv.exe -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1).Source
     $UvVersionMatches = $false
@@ -96,7 +98,7 @@ try {
         if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
         if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
     }
-    & $PythonCommand -u @InstallerArguments
+    & $PythonCommand -I -u @InstallerArguments
     if ($LASTEXITCODE) { throw "Installer failed with exit code $LASTEXITCODE" }
 } finally {
     foreach ($name in $SavedEnvironment.Keys) {

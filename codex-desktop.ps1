@@ -24,18 +24,18 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 }
 $before = [Environment]::GetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT','Process')
 $beforePythonPath = [Environment]::GetEnvironmentVariable('PYTHONPATH','Process')
+$beforePythonHome = [Environment]::GetEnvironmentVariable('PYTHONHOME','Process')
 try {
     $env:CODEX_WECHAT_INSTALL_ROOT = $installRoot
-    $env:PYTHONPATH = if ($beforePythonPath) {
-        "$installRoot;$beforePythonPath"
-    } else {
-        $installRoot
-    }
-    & $python -P -u -m codex_wechat.launcher --install-root $installRoot `
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    $env:PYTHONPATH = $installRoot
+    & $python -s -P -u -m codex_wechat.launcher --install-root $installRoot `
         --module codex_wechat.desktop -- @args
     $result = $LASTEXITCODE
 } finally {
     [Environment]::SetEnvironmentVariable('CODEX_WECHAT_INSTALL_ROOT',$before,'Process')
     [Environment]::SetEnvironmentVariable('PYTHONPATH',$beforePythonPath,'Process')
+    [Environment]::SetEnvironmentVariable('PYTHONHOME',$beforePythonHome,'Process')
 }
 exit $result

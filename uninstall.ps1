@@ -22,19 +22,18 @@ if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
     throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
 }
 $PreviousPythonPath = $env:PYTHONPATH
+$PreviousPythonHome = $env:PYTHONHOME
 try {
-    $env:PYTHONPATH = if ($PreviousPythonPath) {
-        "$InstallRoot;$PreviousPythonPath"
-    } else {
-        $InstallRoot
-    }
-    $LayoutJson = & $LayoutPython -P -m codex_wechat.install_layout show `
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    $env:PYTHONPATH = $InstallRoot
+    $LayoutJson = & $LayoutPython -s -P -m codex_wechat.install_layout show `
         --install-root $InstallRoot
     if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
     $Layout = $LayoutJson | ConvertFrom-Json
     $PurgeItems = @()
     if ($PurgeData) {
-        $PurgePlanJson = & $LayoutPython -P -m codex_wechat.install_layout purge-plan `
+        $PurgePlanJson = & $LayoutPython -s -P -m codex_wechat.install_layout purge-plan `
             --install-root $InstallRoot
         if ($LASTEXITCODE) { throw 'Purge plan is unavailable.' }
         $PurgePlan = $PurgePlanJson | ConvertFrom-Json
@@ -46,10 +45,15 @@ try {
     } else {
         $env:PYTHONPATH = $PreviousPythonPath
     }
+    if ($null -eq $PreviousPythonHome) {
+        Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONHOME = $PreviousPythonHome
+    }
 }
 $StableServiceScript = Join-Path $InstallRoot 'bootstrap_supervisor.py'
 $ExpectedActionPrefixes = @(
-    ('"' + $StableServiceScript + '" supervise')
+    ('-I "' + $StableServiceScript + '" supervise')
 )
 $ExpectedActionExecutables = @(
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'),
@@ -277,13 +281,12 @@ if ($task) {
 }
 if ($PurgeData) {
     $PreviousPythonPath = $env:PYTHONPATH
+    $PreviousPythonHome = $env:PYTHONHOME
     try {
-        $env:PYTHONPATH = if ($PreviousPythonPath) {
-            "$InstallRoot;$PreviousPythonPath"
-        } else {
-            $InstallRoot
-        }
-        & $LayoutPython -P -m codex_wechat.install_layout remove `
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+        $env:PYTHONPATH = $InstallRoot
+        & $LayoutPython -s -P -m codex_wechat.install_layout remove `
             --install-root $InstallRoot
         if ($LASTEXITCODE) { throw 'Failed to remove the installation manifest.' }
     } finally {
@@ -291,6 +294,11 @@ if ($PurgeData) {
             Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
         } else {
             $env:PYTHONPATH = $PreviousPythonPath
+        }
+        if ($null -eq $PreviousPythonHome) {
+            Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONHOME = $PreviousPythonHome
         }
     }
 }

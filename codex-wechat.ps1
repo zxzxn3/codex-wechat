@@ -40,6 +40,40 @@ function Test-Elevated {
     }
 }
 
+function Invoke-IsolatedPython {
+    param(
+        [Parameter(Mandatory = $true)][string]$Python,
+        [AllowNull()][string]$SearchPath,
+        [switch]$IgnoreEnvironment,
+        [Parameter(Mandatory = $true)][object[]]$Arguments,
+        [Parameter(Mandatory = $true)][ref]$ExitCode
+    )
+    $previousPath = [Environment]::GetEnvironmentVariable('PYTHONPATH', 'Process')
+    $previousHome = [Environment]::GetEnvironmentVariable('PYTHONHOME', 'Process')
+    try {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+        if ($IgnoreEnvironment) {
+            & $Python -I @Arguments
+        } else {
+            $env:PYTHONPATH = $SearchPath
+            & $Python -s -P @Arguments
+        }
+        $ExitCode.Value = $LASTEXITCODE
+    } finally {
+        if ($null -eq $previousPath) {
+            Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONPATH = $previousPath
+        }
+        if ($null -eq $previousHome) {
+            Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+        } else {
+            $env:PYTHONHOME = $previousHome
+        }
+    }
+}
+
 if ($Command -notin @('status', 'logs', 'uninstall') -and
         (Test-Elevated) -and $env:CODEX_WECHAT_ALLOW_ROOT -ne '1') {
     [Console]::Error.WriteLine('请以普通用户身份运行，不要使用 root/sudo 或管理员终端。')
@@ -73,8 +107,10 @@ if ($Command -in @('update', 'install', 'menu')) {
     if ($Source) { $InstallerArguments += @('--source', $Source) }
     if ($DryRun) { $InstallerArguments += '--dry-run' }
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
-    & $UpdatePython @InstallerArguments
-    exit $LASTEXITCODE
+    $installerExit = 0
+    Invoke-IsolatedPython -Python $UpdatePython -IgnoreEnvironment `
+        -Arguments $InstallerArguments -ExitCode ([ref]$installerExit)
+    exit $installerExit
 }
 
 if ($Source -or $DryRun -or $NonInteractive) {
@@ -118,7 +154,7 @@ if (-not (Test-Path -LiteralPath $EntryPython -PathType Leaf)) {
     throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
 }
 $Arguments = @(
-    '-P', '-m', 'codex_wechat.launcher',
+    '-m', 'codex_wechat.launcher',
     '--install-root', $InstallRoot,
     '--module', 'codex_wechat',
     '--', $Command
@@ -133,20 +169,7 @@ if ($Command -eq 'rebind' -and $StopActive) {
 if ($Command -eq 'autostart' -and $PSBoundParameters.ContainsKey('Value')) {
     $Arguments += $Value
 }
-$PreviousPythonPath = $env:PYTHONPATH
-try {
-    $env:PYTHONPATH = if ($PreviousPythonPath) {
-        "$InstallRoot;$PreviousPythonPath"
-    } else {
-        $InstallRoot
-    }
-    & $EntryPython -u @Arguments
-    $Result = $LASTEXITCODE
-} finally {
-    if ($null -eq $PreviousPythonPath) {
-        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
-    } else {
-        $env:PYTHONPATH = $PreviousPythonPath
-    }
-}
+$Result = 0
+Invoke-IsolatedPython -Python $EntryPython -SearchPath $InstallRoot `
+    -Arguments $Arguments -ExitCode ([ref]$Result)
 exit $Result

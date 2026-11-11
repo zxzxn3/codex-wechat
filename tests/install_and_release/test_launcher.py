@@ -29,21 +29,26 @@ class LauncherTests(unittest.TestCase):
             executable, environment = command(
                 install, "codex_wechat", ["status"])
 
-            self.assertEqual(executable[:5],
-                             [str(layout.python_executable), "-P", "-u", "-m",
+            self.assertEqual(executable[:6],
+                             [str(layout.python_executable), "-s", "-P", "-u", "-m",
                               "codex_wechat"])
-            self.assertEqual(executable[5:], ["status"])
+            self.assertEqual(executable[6:], ["status"])
             self.assertEqual(environment["CODEX_WECHAT_INSTALL_ROOT"], str(install))
-            self.assertTrue(environment["PYTHONPATH"].startswith(str(layout.release_path)))
+            self.assertEqual(environment["PYTHONPATH"], str(layout.release_path))
+            self.assertNotIn("PYTHONHOME", environment)
 
     def test_source_tree_uses_the_current_interpreter(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with patch.dict(os.environ, {"PYTHONPATH": ""}):
+            with patch.dict(os.environ, {
+                    "PYTHONPATH": str(root / "ambient"),
+                    "PYTHONHOME": str(root / "ambient-home"),
+            }):
                 executable, environment = command(root, "codex_wechat.desktop", [])
 
-            self.assertEqual(executable[1:], ["-P", "-u", "-m", "codex_wechat.desktop"])
+            self.assertEqual(executable[1:], ["-s", "-P", "-u", "-m", "codex_wechat.desktop"])
             self.assertEqual(environment["PYTHONPATH"], str(root))
+            self.assertNotIn("PYTHONHOME", environment)
 
     def test_legacy_layout_is_not_guessed(self):
         with tempfile.TemporaryDirectory() as directory:

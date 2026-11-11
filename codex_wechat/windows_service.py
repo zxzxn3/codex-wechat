@@ -244,13 +244,18 @@ def bridge_python(project: Path, explicit: str | None = None) -> Path:
 def bridge_command(project: Path, state_dir: Path, config: Path,
                    python: Path) -> list[str]:
     return [
-        str(python), "-u", "-m", "codex_wechat", "start",
+        str(python), "-s", "-P", "-u", "-m", "codex_wechat", "start",
         "--state-dir", str(state_dir), "--config", str(config),
     ]
 
 
-def child_environment(status_path: Path, token: str) -> dict[str, str]:
+def child_environment(status_path: Path, token: str, project: Path | None = None) -> dict[str, str]:
     env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    if project is not None:
+        env["PYTHONPATH"] = str(project)
+    else:
+        env.pop("PYTHONPATH", None)
     env.update({
         "AGENT_WECHAT_SERVICE_OWNER": str(status_path),
         "AGENT_WECHAT_SERVICE_TOKEN": token,
@@ -372,7 +377,7 @@ async def supervise(project: Path, state_dir: Path, config: Path, log_path: Path
             process = None
             try:
                 process, pump = await _spawn_bridge(
-                    command, project, child_environment(status_path, token),
+                    command, project, child_environment(status_path, token, project),
                     log_path, log_keep)
                 job.assign(process.pid)
                 _atomic_json(status_path, {

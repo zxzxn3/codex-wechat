@@ -33,12 +33,10 @@ def command(
         if not python.is_file():
             raise ValueError(f"当前版本的 Python 环境缺失: {python}")
     environment = os.environ.copy()
-    prior = environment.get("PYTHONPATH")
-    environment["PYTHONPATH"] = (
-        str(project) + (os.pathsep + prior if prior else "")
-    )
+    environment.pop("PYTHONHOME", None)
+    environment["PYTHONPATH"] = str(project)
     environment["CODEX_WECHAT_INSTALL_ROOT"] = str(root)
-    return [str(python), "-P", "-u", "-m", module, *arguments], environment
+    return [str(python), "-s", "-P", "-u", "-m", module, *arguments], environment
 
 
 def main(argv=None) -> int:

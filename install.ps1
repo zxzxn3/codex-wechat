@@ -31,13 +31,12 @@ if (-not (Test-Path -LiteralPath $LayoutPython -PathType Leaf)) {
     throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
 }
 $PreviousPythonPath = $env:PYTHONPATH
+$PreviousPythonHome = $env:PYTHONHOME
 try {
-    $env:PYTHONPATH = if ($PreviousPythonPath) {
-        "$InstallRoot;$PreviousPythonPath"
-    } else {
-        $InstallRoot
-    }
-    $LayoutJson = & $LayoutPython -P -m codex_wechat.install_layout show `
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    $env:PYTHONPATH = $InstallRoot
+    $LayoutJson = & $LayoutPython -s -P -m codex_wechat.install_layout show `
         --install-root $InstallRoot
     if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
     $Layout = $LayoutJson | ConvertFrom-Json
@@ -46,6 +45,11 @@ try {
         Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
     } else {
         $env:PYTHONPATH = $PreviousPythonPath
+    }
+    if ($null -eq $PreviousPythonHome) {
+        Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONHOME = $PreviousPythonHome
     }
 }
 $DataRoot = [IO.Path]::GetFullPath([string]$Layout.dataRoot)
@@ -95,7 +99,7 @@ if ($existing) {
     $autostart = [bool]$existing.Settings.Enabled -and @($triggers | Where-Object { $_.Enabled }).Count -gt 0
 }
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$arguments = @((Quote-Arg $ServiceScript), 'supervise',
+$arguments = @('-I', (Quote-Arg $ServiceScript), 'supervise',
     '--install-root', (Quote-Arg $InstallRoot)) -join ' '
 $action = New-ScheduledTaskAction -Execute $Python -Argument $arguments -WorkingDirectory $InstallRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user

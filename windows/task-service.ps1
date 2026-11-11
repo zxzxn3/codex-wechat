@@ -21,7 +21,7 @@ $InstallRoot = if ($env:CODEX_WECHAT_INSTALL_ROOT) {
     Split-Path -Parent $PSScriptRoot
 }
 $Supervisor = Join-Path $InstallRoot 'bootstrap_supervisor.py'
-$ExpectedActionPrefix = '"' + $Supervisor + '" supervise'
+$ExpectedActionPrefix = '-I "' + $Supervisor + '" supervise'
 $ExpectedExecutables = @(
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\pythonw.exe'),
     (Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe')
