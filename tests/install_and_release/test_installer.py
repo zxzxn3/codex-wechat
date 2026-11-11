@@ -360,6 +360,24 @@ class InstallerTests(unittest.TestCase):
         self.assertIsNotNone(self.current())
         self.assertTrue((self.target / INSTALLATION_FILE).is_file())
 
+    def test_failed_manifest_publish_restores_stable_entries(self):
+        with patch("builtins.input", return_value="y"):
+            installer.install(self.source, self.target)
+        first = self.current()
+        entry = self.target / "codex-wechat"
+        original = entry.read_bytes()
+        self.make_project(self.source, version="two")
+        contract = installer.install_layout(self.source)
+
+        with patch("builtins.input", return_value="y"), \
+                patch.object(contract.InstalledLayout, "publish",
+                             side_effect=OSError("manifest failed")):
+            with self.assertRaisesRegex(OSError, "manifest failed"):
+                installer.update(self.source, self.target)
+
+        self.assertEqual(self.current(), first)
+        self.assertEqual(entry.read_bytes(), original)
+
     def test_source_change_after_confirmation_is_rejected(self):
         def change_source(_):
             (self.source / "extra.py").write_text("CHANGED = True\n", encoding="utf-8")
