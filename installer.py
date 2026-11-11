@@ -84,6 +84,7 @@ PRIVATE_NAMES = {
     ".state",
     ".update-backups",
     ".venv",
+    ".bootstrap",
     ".bootstrap-venv",
     "__pycache__",
     "dist",

@@ -80,6 +80,7 @@ class InstallerTests(unittest.TestCase):
         private = {
             ".state/account.json": "private",
             ".venv/bin/python": "private",
+            ".bootstrap/uv/0.13.7/uv": "private",
             ".bootstrap-venv/bin/python": "private",
             ".update-backups/old/file.py": "private",
             "workspace/notes.txt": "private",
@@ -116,6 +117,7 @@ class InstallerTests(unittest.TestCase):
             Path("config.json.tmp"),
             Path(".state/account.json"),
             Path(".venv/bin/python"),
+            Path(".bootstrap/uv/0.13.7/uv"),
             Path(".bootstrap-venv/bin/python"),
             Path(".update-backups/old/file.py"),
             Path("workspace/notes.txt"),

@@ -22,7 +22,8 @@ ruff check .
 pyright --level warning
 
 mapfile -d '' -t shell_files < <(
-    find . -path './.venv' -prune -o -path './.state' -prune \
+    find . -path './.venv' -prune -o -path './.bootstrap' -prune \
+        -o -path './.bootstrap-venv' -prune -o -path './.state' -prune \
         -o -path './workspace' -prune -o -path './releases' -prune \
         -o -name '*.sh' -print0
 )

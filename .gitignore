@@ -2,6 +2,7 @@
 !*
 /copyright/
 .venv/
+.bootstrap/
 .bootstrap-venv/
 .state/
 .update-backups/
