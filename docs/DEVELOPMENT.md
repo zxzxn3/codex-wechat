@@ -155,10 +155,9 @@ $app = "$env:LOCALAPPDATA\codex-wechat\app"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" service-restart
 ```
 
-注意：在克隆目录里直接跑 `.\codex-wechat.ps1 update` 会把这个克隆当成安装根，于是要求一个
-"已保存的更新源"（报 `尚未配置更新来源`），随后即使启动服务也会被任务归属校验拒绝
-（`scheduled task 'CodexWeChat' is not owned by this project`）。那两条报错都是预期行为——
-一个克隆不是一次安装，安装/重启服务要用 `$app` 下的稳定入口。
+注意：在克隆目录里直接跑 `.\codex-wechat.ps1 update` 会把这个克隆当成安装根；一个克隆不是
+一次安装，安装/重启服务要用 `$app` 下的稳定入口。普通 stable 更新固定读取项目官方
+GitHub `main`，不会读取或保存自定义仓库、分支或更新来源文件。
 
 ## 复杂度与重构边界
 

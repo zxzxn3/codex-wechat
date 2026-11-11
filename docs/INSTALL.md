@@ -112,8 +112,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 
 ## 更新
 
-再次运行同一个网络入口或本地入口即可更新已有安装。公开网络入口会保存公开仓库作为可复用
-更新来源，也可以继续重跑同一个网络入口。远端源码通过 GitHub tar 归档下载，不调用 Git。
+再次运行同一个网络入口或本地入口即可更新已有安装。普通更新固定从项目官方 GitHub 的
+`main` 分支下载源码 tar 归档，不读取自定义仓库或分支，也不调用 Git。源码开发仍可用
+`--source` / `-Source` 显式选择本地目录。
 更新会保留配置、登录、待办、工作目录、日志和已有的登录自启状态，不会自动重启正在运行的
 桥接；更新完成后，交互式安装器会询问是否立即重启，默认回车执行 `service-restart`，
 `--non-interactive` 不会询问或重启。新版本在 staging 目录中用 uv 建立独立 Python 环境并
@@ -121,7 +122,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 
 每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
 release 通过安装布局中的 release ID 和 `active-release` 租约保留。安装器不初始化账户、
-不默认开启自启、不自动重启业务，也不提供安装回滚。
+不默认开启自启、不自动重启业务，也不提供安装回滚。项目不保存更新来源状态；已有的
+`.update-source.json` 不会被读取，也不再由安装器生成。
 
 ## 卸载
 

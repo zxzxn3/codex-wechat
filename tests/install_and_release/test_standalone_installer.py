@@ -18,7 +18,7 @@ class StandaloneInstallerTests(unittest.TestCase):
             script = root/'installer.py'
             shutil.copy2(Path(installer.__file__), script)
             env = dict(os.environ, HOME=str(root), USERPROFILE=str(root), LOCALAPPDATA=str(root))
-            for arguments in (['--help'], ['bootstrap', '--repo', 'https://github.com/example/project',
+            for arguments in (['--help'], ['bootstrap',
                                           '--dir', str(root/'target'), '--dry-run', '--non-interactive']):
                 with self.subTest(arguments=arguments):
                     result = subprocess.run([sys.executable, '-B', str(script), *arguments],

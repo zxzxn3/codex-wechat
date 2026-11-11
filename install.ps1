@@ -4,9 +4,7 @@ param(
     [switch]$PreparedRuntime,
     [string]$InstallRoot,
     [switch]$DryRun,
-    [switch]$NonInteractive,
-    [string]$Repo,
-    [string]$Ref
+    [switch]$NonInteractive
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -25,7 +23,7 @@ if (-not $PreparedRuntime) {
 if (-not $InstallRoot -or (-not $env:LOCALAPPDATA -and -not $env:CODEX_WECHAT_DATA_ROOT)) {
     throw 'InstallRoot and a usable data root are required.'
 }
-if ($DryRun -or $NonInteractive -or $Repo -or $Ref) { throw 'Invalid internal integration arguments.' }
+if ($DryRun -or $NonInteractive) { throw 'Invalid internal integration arguments.' }
 $TaskName = 'CodexWeChat'
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $LayoutPython = Join-Path $InstallRoot '.bootstrap-venv\Scripts\python.exe'

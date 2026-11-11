@@ -15,8 +15,6 @@ param(
     [switch]$Service,
     [switch]$PurgeData,
     [switch]$Force,
-    [string]$Repo,
-    [string]$Ref,
     [string]$Source,
     [switch]$DryRun,
     [switch]$NonInteractive,
@@ -72,8 +70,6 @@ if ($Command -in @('update', 'install', 'menu')) {
         throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
     }
     $InstallerArguments = @($Installer, $Command, '--dir', $InstallRoot)
-    if ($Repo) { $InstallerArguments += @('--repo', $Repo) }
-    if ($Ref) { $InstallerArguments += @('--ref', $Ref) }
     if ($Source) { $InstallerArguments += @('--source', $Source) }
     if ($DryRun) { $InstallerArguments += '--dry-run' }
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
@@ -81,8 +77,8 @@ if ($Command -in @('update', 'install', 'menu')) {
     exit $LASTEXITCODE
 }
 
-if ($Repo -or $Ref -or $Source -or $DryRun -or $NonInteractive) {
-    throw '-Repo, -Ref, -Source, -DryRun and -NonInteractive are only valid with installer commands'
+if ($Source -or $DryRun -or $NonInteractive) {
+    throw '-Source, -DryRun and -NonInteractive are only valid with installer commands'
 }
 if ($PSBoundParameters.ContainsKey('Value') -and $Command -ne 'autostart') {
     throw '-Value is only valid with the autostart command'

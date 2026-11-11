@@ -1,8 +1,6 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
 param(
-    [string]$Repo = 'https://github.com/zxzxn3/codex-wechat',
-    [string]$Ref = 'main',
     [string]$Dir,
     [switch]$DryRun,
     [switch]$NonInteractive,
@@ -13,6 +11,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $UvVersion = '0.13.7'
 $UvPython = '3.11'
+$RepositoryPath = 'zxzxn3/codex-wechat'
+$SourceRef = 'main'
 
 function Restore-EnvironmentValue([string]$Name, [AllowNull()][string]$Value) {
     if ($null -eq $Value) {
@@ -22,19 +22,8 @@ function Restore-EnvironmentValue([string]$Name, [AllowNull()][string]$Value) {
     }
 }
 
-if (-not $SourceDir) {
-    $RepoUri = [Uri]$Repo
-    $RepositoryPath = $RepoUri.AbsolutePath.Trim('/') -replace '\.git$', ''
-    if ($RepoUri.Scheme -ne 'https' -or $RepoUri.Authority -ne 'github.com' -or
-            $RepoUri.UserInfo -or $RepoUri.Query -or $RepoUri.Fragment -or
-            $RepositoryPath -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*$' -or
-            -not $Ref -or $Ref.StartsWith('-') -or $Ref -match '[\s\x00-\x1f]') {
-        throw 'A public GitHub HTTPS repository and a branch or tag are required.'
-    }
-}
-
 if ($DryRun -and -not $SourceDir) {
-    Write-Host "Dry run: no download or file changes. Source: $Repo ($Ref)"
+    Write-Host "Dry run: no download or file changes. Source: https://github.com/$RepositoryPath ($SourceRef)"
     Write-Host 'Target directory checks are bypassed because of -DryRun; this is not an environment preflight.'
     Write-Host '1. Install / Update  0. Exit'
     Write-Host 'The installer will show the plan; no login, new autostart or service start.'
@@ -101,9 +90,9 @@ try {
     } else {
         $Installer = Join-Path $TaskTemporary 'installer.py'
         $InstallerUri = 'https://raw.githubusercontent.com/' + $RepositoryPath + '/' +
-            [Uri]::EscapeDataString($Ref) + '/installer.py'
+            [Uri]::EscapeDataString($SourceRef) + '/installer.py'
         Invoke-WebRequest -UseBasicParsing -Uri $InstallerUri -OutFile $Installer -TimeoutSec 120
-        $InstallerArguments = @($Installer, 'bootstrap', '--repo', $Repo, '--ref', $Ref)
+        $InstallerArguments = @($Installer, 'bootstrap')
         if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
         if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
     }

@@ -30,12 +30,11 @@ Linux 使用 `-h` / `--help`，Windows PowerShell 使用 `-h` / `-Help` 查看�
   仅在卸载器明确报告任务不属于当前安装或共享后台仍有客户端时，才按提示使用 `-Force`。
 
 `install`、`update` 和 `menu` 是 stable 入口转交 `installer.py` 的安装器动作，
-不会作为微信聊天命令处理。网络 bootstrap 完成安装后会保存公开更新来源；此后
-`codex-wechat update` 从官方 GitHub tar 归档获取最新源码，不需要宿主 Python 或 Git。
-没有保存来源时，重跑同一个网络 bootstrap，
-或从本地源码更新：Linux 使用 `update --source <目录>`，Windows 使用
-`update -Source <目录>`。更新不会自动重启正在运行的桥接；交互式更新完成后会询问是否立即
-重启，默认回车会执行 `service-restart`，`--non-interactive` 不会询问或重启。
+不会作为微信聊天命令处理。`codex-wechat update` 只从项目官方 GitHub 的 `main` 分支 tar
+归档获取最新源码，不读取或保存自定义更新来源，不需要宿主 Python 或 Git。本地开发可以显式
+覆盖来源：Linux 使用 `update --source <目录>`，Windows 使用 `update -Source <目录>`。
+更新不会自动重启正在运行的桥接；交互式更新完成后会询问是否立即重启，默认回车会执行
+`service-restart`，`--non-interactive` 不会询问或重启。
 
 `start` 与 `service-start` 的互斥判断只在 Python 层实现。Linux 使用实际 `euid == 0`；
 Windows 使用管理员令牌。除只读 `status`、`logs` 和显式 `uninstall` 外，写操作要求普通用户。

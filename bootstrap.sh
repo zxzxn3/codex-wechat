@@ -4,7 +4,7 @@ set -euo pipefail
 
 UV_VERSION=0.13.7
 UV_PYTHON=3.11
-repo='https://github.com/zxzxn3/codex-wechat'
+repository='zxzxn3/codex-wechat'
 source_ref=main
 dry_run=0
 non_interactive=0
@@ -13,16 +13,14 @@ source_dir=''
 command_name=''
 
 usage() {
-    echo 'bootstrap.sh [--repo URL] [--ref main] [--dry-run] [--non-interactive]'
+    echo 'bootstrap.sh [--source-dir PATH] [--dir PATH] [--dry-run] [--non-interactive]'
 }
 
 while (($#)); do
     case "$1" in
-        --repo|--ref|--dir|--source-dir)
+        --dir|--source-dir)
             (($# >= 2)) || { echo "缺少 $1 的参数" >&2; exit 2; }
             case "$1" in
-                --repo) repo=$2 ;;
-                --ref) source_ref=$2 ;;
                 --dir) target=$2 ;;
                 --source-dir) source_dir=$2 ;;
             esac
@@ -34,18 +32,6 @@ while (($#)); do
         *) echo "未知参数 $1" >&2; exit 2 ;;
     esac
 done
-
-if [[ -z "$source_dir" ]]; then
-    if [[ ! "$repo" =~ ^https://github\.com/([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*)(\.git)?$ ]]; then
-        echo '需要公开 GitHub HTTPS 仓库地址。' >&2
-        exit 1
-    fi
-    repository=${BASH_REMATCH[1]}
-    if [[ -z "$source_ref" || "$source_ref" == -* || "$source_ref" =~ [[:space:][:cntrl:]] ]]; then
-        echo '需要有效的分支或标签名称。' >&2
-        exit 1
-    fi
-fi
 
 if ((dry_run)) && [[ -z "$source_dir" ]]; then
     printf '演练模式，不下载或修改文件。\n来源 https://github.com/%s\n分支或标签 %s\n' \
@@ -106,7 +92,7 @@ else
         --connect-timeout 15 --max-time 120 "$installer_base_url/installer.py" \
         -o "$task_temporary/installer.py"
     installer="$task_temporary/installer.py"
-    installer_arguments=(bootstrap --repo "$repo" --ref "$source_ref")
+    installer_arguments=(bootstrap)
 fi
 [[ -f "$installer" ]] || { echo "安装器不存在: $installer" >&2; exit 1; }
 

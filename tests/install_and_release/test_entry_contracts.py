@@ -76,14 +76,16 @@ class EntryContractTests(unittest.TestCase):
         self.assertNotIn("Read-SavedDataRoot", text)
         self.assertNotIn("当前版本指针 current", text)
 
-    def test_windows_installer_actions_forward_a_local_source(self):
+    def test_windows_installer_actions_only_forward_local_source(self):
         text = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
         self.assertIn("[string]$Source", text)
         self.assertIn(
             "if ($Source) { $InstallerArguments += @('--source', $Source) }",
             text,
         )
-        self.assertIn("$Repo -or $Ref -or $Source", text)
+        self.assertIn("$Source -or $DryRun -or $NonInteractive", text)
+        self.assertNotIn("[string]$Repo", text)
+        self.assertNotIn("[string]$Ref", text)
 
     def test_windows_entry_exposes_help_and_uninstall_force(self):
         text = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")

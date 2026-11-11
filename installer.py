@@ -20,7 +20,6 @@ import tempfile
 import textwrap
 import time
 import unicodedata
-from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -47,6 +46,12 @@ SOURCE_TREE_MAX_BYTES = 512 * 1024 * 1024
 SOURCE_TREE_MAX_FILES = 20_000
 UV_VERSION = "0.13.7"
 UV_PYTHON = "3.11"
+OFFICIAL_REPOSITORY = "zxzxn3/codex-wechat"
+OFFICIAL_REF = "main"
+OFFICIAL_REPO_URL = f"https://github.com/{OFFICIAL_REPOSITORY}"
+OFFICIAL_SOURCE_URL = (
+    f"https://codeload.github.com/{OFFICIAL_REPOSITORY}/tar.gz/{OFFICIAL_REF}"
+)
 UV_BOOTSTRAP_ENV = "CODEX_WECHAT_BOOTSTRAP_UV"
 UV_DIR = Path(".bootstrap/uv")
 UV_PYTHON_DIR = Path(".bootstrap/python")
@@ -74,7 +79,6 @@ STAGING_REPLACE_ATTEMPTS = 6
 STAGING_REPLACE_RETRY_SECONDS = 0.25
 LOCK_FILE = ".install-lock"
 MANIFEST_FILE = ".release.json"
-UPDATE_SOURCE_FILE = ".update-source.json"
 PRIVATE_NAMES = {
     ".git",
     ".state",
@@ -93,7 +97,6 @@ PRIVATE_NAMES = {
     "logs",
     PREVIOUS_FILE,
     LOCK_FILE,
-    UPDATE_SOURCE_FILE,
     ACTIVE_FILE,
 }
 
@@ -1737,65 +1740,10 @@ def update(
     )
 
 
-def update_source(repo: str, ref: str = "main") -> dict:
-    """An explicit public GitHub source, never inferred from the cfg remote."""
-    parsed = urlsplit(repo)
-    path = parsed.path.strip("/").removesuffix(".git")
-    if (parsed.scheme != "https" or parsed.netloc.lower() != "github.com"
-            or parsed.query or parsed.fragment or not re.fullmatch(
-                r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*", path)):
-        raise ValueError("更新来源须为公开 GitHub 仓库的 HTTPS 地址，不接受凭据、参数或本地路径。")
-    if (not isinstance(ref, str) or not ref or ref.startswith("-")
-            or any(char.isspace() or ord(char) < 32 for char in ref)):
-        raise ValueError("更新 ref 必须是有效的分支或标签名称。")
-    return {"repo": f"https://github.com/{path}.git", "ref": ref}
-
-
-def saved_update_source(target: Path) -> dict | None:
-    path = target / UPDATE_SOURCE_FILE
-    if path.is_symlink():
-        raise ValueError(f"更新来源不能是符号链接: {path}")
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    except (OSError, ValueError) as error:
-        raise ValueError(f"无法读取更新来源: {path}") from error
-    if not isinstance(value, dict) or not isinstance(value.get("repo"), str):
-        raise ValueError("保存的更新来源格式无效，请显式指定 --repo。")
-    return update_source(value["repo"], value.get("ref", "main"))
-
-
-def remember_update_source(
-    target: Path, source: Path, choice: dict, *, previous: str | None = None
-) -> None:
-    identifier = release_identifier(project_files(source))
-    # Cancellation returns 0 too; never save a source for a cancelled install.
-    if installed_release_id(source, target) != identifier:
-        return
-    # A same-version rerun is a no-op (or only repairs stable entry files).
-    # Do not silently change the saved source when one is already recorded.
-    if (previous == identifier
-            and (target / UPDATE_SOURCE_FILE).exists()):
-        return
-    with InstallLock(target):
-        if installed_release_id(source, target) == identifier:
-            if (previous == identifier
-                    and (target / UPDATE_SOURCE_FILE).exists()):
-                return
-            _atomic_write(target / UPDATE_SOURCE_FILE,
-                          (json.dumps(choice, ensure_ascii=False) + "\n").encode(),
-                          0o600, root=target)
-
-
-def fetch_update_source(choice: dict, destination: Path) -> None:
-    parsed = urlsplit(choice["repo"])
-    repository = parsed.path.strip("/").removesuffix(".git")
-    url = (
-        f"https://codeload.github.com/{repository}/tar.gz/"
-        f"{quote(choice['ref'], safe='')}"
-    )
-    request = Request(url, headers={"User-Agent": "codex-wechat-installer"})
+def fetch_official_source(destination: Path) -> None:
+    request = Request(OFFICIAL_SOURCE_URL, headers={
+        "User-Agent": "codex-wechat-installer",
+    })
     try:
         with urlopen(request, timeout=SOURCE_ARCHIVE_TIMEOUT_SECONDS) as response:
             archive = response.read(SOURCE_ARCHIVE_MAX_BYTES + 1)
@@ -1813,13 +1761,12 @@ def fetch_update_source(choice: dict, destination: Path) -> None:
 
 def bootstrap(
     target: Path,
-    choice: dict,
     *,
     dry_run: bool = False,
 ) -> int:
     """One entry for first installation and repeated installation/update."""
     if dry_run:
-        print(f"来源: {choice['repo']} ({choice['ref']})")
+        print(f"来源: {OFFICIAL_REPO_URL} ({OFFICIAL_REF})")
         phase("演练模式，不会修改文件")
         return _common_install(
             SOURCE_ROOT,
@@ -1831,16 +1778,15 @@ def bootstrap(
     _check_target_path(target)
     with tempfile.TemporaryDirectory(prefix="codex-wechat-bootstrap-") as directory:
         source = Path(directory) / "source"
-        fetch_update_source(choice, source)
+        fetch_official_source(source)
         contract = install_layout(source)
         layout = contract.InstalledLayout.load(
             target,
             platform="windows" if IS_WINDOWS else "linux",
         )
         updating = layout is not None
-        previous = layout.release_id if layout is not None else None
         phase("更新" if updating else "安装")
-        print(f"来源: {choice['repo']} ({choice['ref']})")
+        print(f"来源: {OFFICIAL_REPO_URL} ({OFFICIAL_REF})")
         check_install_target(source, target, update=updating, contract=contract)
         print("检测到已有安装，将执行更新。" if updating else "未检测到已有安装，将执行首次安装。")
         result = _common_install(
@@ -1851,7 +1797,6 @@ def bootstrap(
             announce=False,
             repair_stable_runtime=updating,
         )
-        remember_update_source(target, source, choice, previous=previous)
         return result
 
 
@@ -1944,8 +1889,6 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--dry-run", action="store_true")
     result.add_argument("--non-interactive", action="store_true",
                         help="执行指定操作，保留保守默认，不询问或启动服务")
-    result.add_argument("--repo", help="公开 GitHub HTTPS 仓库")
-    result.add_argument("--ref", help="分支或标签")
     result.add_argument("--source", type=Path, help="本地源码，不联网")
     return result
 
@@ -1969,17 +1912,12 @@ def main(argv: list[str] | None = None) -> int:
     options = parser().parse_args(argv)
     if _elevated() and os.environ.get("CODEX_WECHAT_ALLOW_ROOT") != "1":
         raise ValueError("请以普通用户身份运行，不要使用 root/sudo 或管理员终端。")
-    if options.command == "bootstrap" and not options.repo:
-        raise ValueError("一行安装入口需要 --repo；不会使用旧仓库。")
-    if options.source is not None and (options.repo or options.ref):
-        raise ValueError("--source 不能与 --repo / --ref 同时使用。")
-    if options.ref and not options.repo:
-        raise ValueError("--ref 需要同时指定 --repo。")
     previous_mode = NON_INTERACTIVE
     NON_INTERACTIVE = options.non_interactive
     try:
+        bootstrap_requested = options.command == "bootstrap"
         command = options.command
-        if options.source is None and not options.repo:
+        if options.source is None:
             logo_banner(SOURCE_ROOT)
             declaration(SOURCE_ROOT, "start")
         if command == "bootstrap":
@@ -2002,14 +1940,8 @@ def main(argv: list[str] | None = None) -> int:
         target = target.absolute() if options.dry_run else target.resolve()
         if not options.dry_run and not IS_WINDOWS and target != default_target().resolve():
             raise ValueError(f"Linux 安装目录必须是 {default_target()}")
-        if options.repo:
-            return bootstrap(
-                target,
-                update_source(options.repo, options.ref or "main"),
-                dry_run=options.dry_run,
-            )
-        if options.ref:
-            raise ValueError("--ref 需要同时指定 --repo。")
+        if options.source is None and bootstrap_requested:
+            return bootstrap(target, dry_run=options.dry_run)
         installed_entry = SOURCE_ROOT == target or target / RELEASES_DIR in SOURCE_ROOT.parents
         current_identifier = (
             available_installed_release_id(SOURCE_ROOT, target)
@@ -2018,17 +1950,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if options.source is None and installed_entry and not options.dry_run and (
                 command == "update" or current_identifier):
-            choice = saved_update_source(target)
-            if choice:
-                return bootstrap(
-                    target,
-                    choice,
-                    dry_run=options.dry_run,
-                )
-            if not options.dry_run:
-                raise ValueError(
-                    "尚未配置更新来源；若通过私有网络入口安装，请重跑同一网络入口，"
-                    "或用 --source 指定本地源码。")
+            return bootstrap(target, dry_run=False)
         source = options.source or SOURCE_ROOT
         updating = (
             False if options.dry_run
