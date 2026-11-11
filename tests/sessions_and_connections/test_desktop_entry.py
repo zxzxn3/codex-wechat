@@ -1,4 +1,5 @@
 """Desktop capabilities through the common controller; no real App or backend."""
+import builtins
 import json
 import os
 from pathlib import Path
@@ -75,3 +76,24 @@ class DesktopEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved['backends']['other'], initial['backends']['other'])
         self.assertEqual(saved['backends']['codex']['websocketUrl'], self.spec.endpoint)
         self.assertIn('ensure', saved['backends']['codex']['websocketStartupCommand'])
+
+    async def test_setup_does_not_require_the_standalone_installer(self):
+        real_import = builtins.__import__
+
+        def reject_installer(name, *args, **kwargs):
+            if name == "installer":
+                raise ModuleNotFoundError(name)
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=reject_installer):
+            await desktop.main(['setup', '--native'])
+        saved = json.loads((self.root/'config.json').read_text())
+        self.assertTrue(saved['backends']['codex']['sharedDaemon'])
+
+    async def test_setup_reports_configuration_lock_contention(self):
+        before = (self.root/'config.json').read_bytes()
+        with patch.object(desktop, "locked_file",
+                          side_effect=ValueError("另一个安装器正在修改该目录")):
+            with self.assertRaisesRegex(ValueError, "另一个安装器"):
+                await desktop.main(['setup', '--native'])
+        self.assertEqual((self.root/'config.json').read_bytes(), before)

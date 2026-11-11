@@ -22,11 +22,16 @@ def _lock_descriptor(descriptor):
 
 
 @contextmanager
-def locked_file(path):
+def locked_file(path, *, busy_message=None):
     """Try a native process lock; contention raises instead of blocking delivery."""
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        _lock_descriptor(descriptor)
+        try:
+            _lock_descriptor(descriptor)
+        except OSError:
+            if busy_message is None:
+                raise
+            raise ValueError(busy_message) from None
         yield
     finally:
         os.close(descriptor)

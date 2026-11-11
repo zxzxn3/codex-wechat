@@ -11,8 +11,9 @@ from .backend_runtime import BackendRuntime
 from .codex_connection import ConnectionSpec
 from .configuration import write_config
 from .native_codex import discover_app_codex, discover_codex
-from .platform_support import IS_WINDOWS, INSTALL_ROOT, runtime_paths
+from .platform_support import IS_WINDOWS, INSTALL_ROOT, make_private, runtime_paths
 from .profiles import definitions, ensure_backend_config
+from .storage import locked_file
 
 
 def backend_config(name, config):
@@ -38,13 +39,12 @@ def runtime_root(name):
 
 
 def configure(name, config, path, *, url=None, executable=None, native=False):
-    from installer import InstallLock, _atomic_write
-    from .platform_support import make_private
     target = path.parent
     make_private(target)
-    with InstallLock(target):
+    with locked_file(target / ".install-lock", busy_message="另一个安装器正在修改该目录"):
         # Reread under the lock; preserve unrelated config and hot settings.
         config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
+        ensure_backend_config(config)
         backend = backend_config(name, config)
         if native and (IS_WINDOWS or url):
             raise ValueError("--native 仅用于 Linux，不能与 --url 同用。")
@@ -77,8 +77,7 @@ def configure(name, config, path, *, url=None, executable=None, native=False):
             candidate.update(websocketUrl=url, websocketStartupCommand=startup_command(name))
         ConnectionSpec.from_config(candidate)
         config.setdefault("backends", {})[name] = candidate
-        _atomic_write(path, (json.dumps(config, ensure_ascii=False, indent=2) + "\n").encode(),
-                      0o600, root=target)
+        write_config(path, config)
     print("共享后台已配置；App 请正常打开。")
     print("若更改了后端连接配置，请重新启动微信桥。")
     return 0
@@ -123,11 +122,11 @@ async def main(argv=None):
     config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
     if not isinstance(config, dict):
         raise ValueError("配置必须是对象")
-    if ensure_backend_config(config):
-        write_config(path, config)
     if args.action == "setup":
         return configure(args.backend, config, path, url=args.url, executable=args.executable,
                          native=args.native)
+    if ensure_backend_config(config):
+        write_config(path, config)
     backend = backend_config(args.backend, config)
     if args.action == "cli" and any(arg.split("=", 1)[0] in
             {"--remote", "--remote-auth-token-env", "--no-daemon"} for arg in forwarded):
