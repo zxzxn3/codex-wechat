@@ -275,6 +275,28 @@ class WindowsServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, [False])
         self.assertFalse(status_path.exists())
 
+    async def test_wheel_release_does_not_require_a_source_tree(self):
+        class Process:
+            pid = 1234
+            returncode = 0
+
+            async def wait(self):
+                return 0
+
+        spawn = AsyncMock(return_value=(Process(), None))
+        with tempfile.TemporaryDirectory() as temp:
+            release = Path(temp) / "release"
+            (release / ".venv/Lib/site-packages/codex_wechat").mkdir(parents=True)
+            with patch.object(windows_service, "_spawn_bridge", spawn):
+                result = await windows_service.supervise(
+                    release,
+                    Path(temp) / ".state",
+                    Path(temp) / "config.json",
+                    Path(temp) / "service.log",
+                )
+        self.assertEqual(result, 0)
+        spawn.assert_awaited_once()
+
     def test_scripts_pin_current_user_task_and_power_settings(self):
         install = (ROOT / "install.ps1").read_text(encoding="utf-8")
         entry = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
