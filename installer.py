@@ -1177,7 +1177,7 @@ def install_command_link(target: Path) -> None:
     link.symlink_to(os.path.relpath(expected, link.parent))
 
 
-def configure_windows(release: Path, target: Path, *, update: bool) -> None:
+def configure_windows(release: Path, target: Path) -> None:
     if not IS_WINDOWS:
         return
     powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
@@ -1259,9 +1259,9 @@ def configure_linux_service(target: Path) -> bool:
     return True
 
 
-def configure_platform_service(release: Path, target: Path, *, update: bool) -> bool:
+def configure_platform_service(release: Path, target: Path) -> bool:
     if IS_WINDOWS:
-        configure_windows(release, target, update=update)
+        configure_windows(release, target)
         return True
     return configure_linux_service(target)
 
@@ -1350,8 +1350,7 @@ def _common_install(
             # start anything. Both platform steps are idempotent.
             with InstallLock(target):
                 ensure_release_runtime(target / RELEASES_DIR / identifier)
-                configure_platform_service(target / "releases" / identifier, target,
-                                           update=update)
+                configure_platform_service(target / "releases" / identifier, target)
             print(f"版本 {identifier} 已经安装，没有修改。")
             return 0
     if not introduction():
@@ -1403,7 +1402,7 @@ def _common_install(
             install_command_link(target)
             planned.publish()
             layout_published = True
-            service_ready = configure_platform_service(release, target, update=update)
+            service_ready = configure_platform_service(release, target)
             (target / PREVIOUS_FILE).unlink(missing_ok=True)
             check_user_access(target, identifier, release, planned)
             try:

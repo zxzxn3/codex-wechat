@@ -73,7 +73,6 @@ try {
     if ($Component) {
         $InstallerArguments[1] = 'components'
         $InstallerArguments += @('--component', $Component)
-        $InstallerArguments += @('--repo', $Repo, '--ref', $Ref)
     }
     if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }

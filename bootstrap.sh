@@ -112,7 +112,6 @@ print("https://raw.githubusercontent.com/" + path + "/" + quote(ref, safe=""))
     if [[ -n "$component" ]]; then
         installer_arguments[1]=components
         installer_arguments+=(--component "$component")
-        installer_arguments+=(--repo "$repo" --ref "$source_ref")
     fi
     [[ -z "$skills_dir" ]] || installer_arguments+=(--skills-dir "$skills_dir")
     if ((non_interactive)); then
