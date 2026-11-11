@@ -7,7 +7,7 @@
 
 - Linux 检查入口：`scripts/check.sh` 包含 Ruff、Pyright、ShellCheck、分支覆盖单元测试和
   生成文档漂移检查。结果按日期与提交记录，不作为永久测试数基线。
-- 2026-11-11 Linux 当前未提交快照：固定官方 GitHub `main` 更新源，入口不再接受
+- 2026-11-11 Linux 提交 `f5152ad`：固定官方 GitHub `main` 更新源，入口不再接受
   `--repo` / `--ref`，stable 更新不再读取 `.update-source.json`，本地 `--source` 仍保留。
   定向 28 项通过；隔离快照完整 `./scripts/check.sh` 为 1032 项、1011 通过、21 跳过、
   0 失败，Ruff、ShellCheck 和生成文档检查通过，Pyright 0 errors / 5 个平台依赖 warning，
