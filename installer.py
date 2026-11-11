@@ -1539,20 +1539,21 @@ def _common_install(
                     platform="windows" if IS_WINDOWS else "linux",
                     existing=existing,
                 )
-            if wheel is not None:
-                _ensure_stable_runtime(
-                    target,
-                    wheel,
-                    create_runtime=existing is None or repair_stable_runtime,
-                )
-                if (current == identifier
-                        and release_matches(target, identifier)
-                        and stable_files_match(source, target)):
-                    install_command_link(target)
-                    print(f"版本 {identifier} 已经安装，没有修改。")
-                    return 0
-                phase("准备 release 环境...")
-                release, created = install_release(target, identifier, wheel)
+            if wheel is None or planned is None:
+                raise ValueError("wheel 或安装布局尚未准备完成")
+            _ensure_stable_runtime(
+                target,
+                wheel,
+                create_runtime=existing is None or repair_stable_runtime,
+            )
+            if (current == identifier
+                    and release_matches(target, identifier)
+                    and stable_files_match(source, target)):
+                install_command_link(target)
+                print(f"版本 {identifier} 已经安装，没有修改。")
+                return 0
+            phase("准备 release 环境...")
+            release, created = install_release(target, identifier, wheel)
             # Everything requiring downloads/builds/user input finishes above.
             phase("更新入口与当前版本...")
             install_bootstrap(source, target)
@@ -1560,6 +1561,8 @@ def _common_install(
             planned.publish()
             layout_published = True
             if existing is None:
+                if release is None:
+                    raise ValueError("release 尚未安装")
                 service_ready = configure_platform_service(release, target)
             else:
                 service_ready = True
