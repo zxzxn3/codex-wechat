@@ -147,17 +147,26 @@ async def switch(bridge, name, *, force=False, adopt_busy=False):
         raise
     # Commit only after the target is ready. Failure above leaves the current backend intact.
     previous = bridge.backend
-    bridge.state.setdefault("backendSessions", {})[bridge.backend_name] = snapshot(bridge.state)
-    restore(bridge.state, saved)
-    bridge.state["thread"] = selected
+    previous_name = bridge.backend_name
+    staged = deepcopy(bridge.state)
+    staged.setdefault("backendSessions", {})[previous_name] = snapshot(staged)
+    restore(staged, saved)
+    staged["thread"] = selected
+    staged["backendName"] = name
     bridge.backend_name = name
-    bridge.state["backendName"] = name
+    try:
+        bridge.save(staged)
+    except BaseException:
+        bridge.backend_name = previous_name
+        await candidate.close()
+        raise
+    bridge.state.clear()
+    bridge.state.update(staged)
     bridge.backend = candidate
     bridge.backend_started = True
     bridge.loaded = True
     bridge.input_paused = False
     bridge.model_choices = []
-    bridge.save()
     try:
         await previous.close()
     except Exception:

@@ -15,6 +15,7 @@ from codex_wechat.backend import (
 from codex_wechat.commands import _replace_target, handle
 from codex_wechat.errors import UserFacingError
 from codex_wechat.lifecycle import can_change_session, can_steer_input
+from codex_wechat.profiles import switch
 from codex_wechat.records import InputPhase, Source, TurnResult
 from codex_wechat.storage import Store
 from codex_wechat.codex_transport import CodexRpcError
@@ -409,6 +410,43 @@ class LiveSwitchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(bridge.state["currentInput"], original_current)
         self.assertIs(bridge.state["inbox"][0], original_queued)
         bridge.backend.release_thread.assert_awaited_once_with("target")
+
+    async def test_backend_save_failure_keeps_the_old_target(self):
+        original = self.bridge.backend
+
+        class Candidate:
+            connected = False
+            shared = False
+            info = {}
+
+            def __init__(self):
+                self.closed = False
+
+            async def start(self):
+                self.connected = True
+
+            async def thread(self, thread_id):
+                return "target-thread"
+
+            async def release_thread(self, thread_id, *, follow=False):
+                return True
+
+            async def close(self):
+                self.closed = True
+
+        candidate = Candidate()
+        self.bridge.backend_started = True
+        self.bridge.loaded = True
+        self.bridge.make_backend = lambda name: candidate
+        self.bridge.save = Mock(side_effect=OSError("disk full"))
+
+        with self.assertRaisesRegex(OSError, "disk full"):
+            await switch(self.bridge, "deepseek")
+
+        self.assertIs(self.bridge.backend, original)
+        self.assertEqual(self.bridge.backend_name, "codex")
+        self.assertEqual(self.bridge.state["thread"], "current")
+        self.assertTrue(candidate.closed)
 
     async def test_new_save_failure_deletes_the_created_thread(self):
         bridge = self.bridge
