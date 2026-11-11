@@ -44,6 +44,8 @@ def main(argv=None) -> int:
     parser.add_argument("--install-root")
     parser.add_argument("--module", default="codex_wechat")
     options, arguments = parser.parse_known_args(argv)
+    if arguments[:1] == ["--"]:
+        arguments = arguments[1:]
     root = _install_root(options.install_root)
     executable, environment = command(root, options.module, arguments)
     os.execvpe(executable[0], executable, environment)
