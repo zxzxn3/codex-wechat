@@ -3,7 +3,6 @@ from pathlib import Path
 import json
 import os
 import shutil
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -56,29 +55,6 @@ class RemoteUpdateTests(unittest.TestCase):
         self.assertNotIn("GIT_DIR", env)
         self.assertNotIn("GIT_WORK_TREE", env)
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
-
-    def test_remote_dry_run_neither_fetches_nor_inspects_installation(self):
-        with patch.object(installer, "fetch_update_source") as fetch:
-            self.assertEqual(installer.remote_update(self.target, self.choice, dry_run=True), 0)
-        fetch.assert_not_called()
-        self.assertFalse(self.target.exists())
-
-    def test_download_failure_preserves_version_and_previous_source(self):
-        layout = write_installation_layout(
-            self.target,
-            data_root=self.root / "data",
-            config_root=self.root / "config",
-            state_root=self.root / "state",
-        )
-        manifest = layout.manifest_path.read_bytes()
-        saved = self.target / installer.UPDATE_SOURCE_FILE
-        saved.write_text(json.dumps(self.choice))
-        before = saved.read_bytes()
-        with patch.object(installer, "fetch_update_source", side_effect=subprocess.CalledProcessError(1, "git")):
-            with self.assertRaises(subprocess.CalledProcessError):
-                installer.remote_update(self.target, self.choice)
-        self.assertEqual(layout.manifest_path.read_bytes(), manifest)
-        self.assertEqual(saved.read_bytes(), before)
 
     def test_remember_only_after_activation_and_exclude_metadata_from_payload(self):
         self.target.mkdir()
@@ -154,23 +130,3 @@ class RemoteUpdateTests(unittest.TestCase):
             self.skipTest("symlink creation unavailable")
         with self.assertRaisesRegex(ValueError, "符号链接"):
             installer.saved_update_source(self.target)
-
-    def test_same_version_remote_noop_keeps_saved_source(self):
-        identifier = installer.release_identifier(installer.project_files(self.source))
-        write_installation_layout(
-            self.target,
-            release_id=identifier,
-            data_root=self.root / "data",
-            config_root=self.root / "config",
-            state_root=self.root / "state",
-        )
-        saved = self.target / installer.UPDATE_SOURCE_FILE
-        saved.write_text(json.dumps(self.choice) + "\n")
-        new = installer.update_source("https://github.com/other/repo")
-        with patch.object(
-                installer, "fetch_update_source",
-                side_effect=lambda _choice, destination: shutil.copytree(
-                    self.source, destination)), \
-             patch.object(installer, "update", return_value=0):
-            self.assertEqual(installer.remote_update(self.target, new), 0)
-        self.assertEqual(json.loads(saved.read_text()), self.choice)

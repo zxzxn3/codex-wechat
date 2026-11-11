@@ -27,6 +27,11 @@ Windows `.cmd` 只转交 stable `codex-wechat.ps1`，再进入 Python。`codex-d
 - `service-restart` 等待服务稳定运行，超时才报错。
 - `uninstall` 默认保留用户数据；只有显式 `--purge-data` / `-PurgeData` 才清数据。
 
+`install`、`update`、`menu` 和 `components` 是 stable 入口转交 `installer.py` 的安装器动作，
+不会作为微信聊天命令处理。网络 bootstrap 完成安装后会保存公开更新来源；此后
+`codex-wechat update` 从该来源获取最新源码。没有保存来源时，重跑同一个网络 bootstrap，
+或使用 `update --source <目录>` 从本地源码更新。更新不会重启正在运行的桥接。
+
 `start` 与 `service-start` 的互斥判断只在 Python 层实现。Linux 使用实际 `euid == 0`；
 Windows 使用管理员令牌。除只读 `status`、`logs` 和显式 `uninstall` 外，写操作要求普通用户。
 

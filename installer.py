@@ -1646,33 +1646,6 @@ def fetch_update_source(choice: dict, destination: Path) -> None:
     ], env=env, check=True, timeout=180)
 
 
-def remote_update(
-    target: Path,
-    choice: dict,
-    *,
-    dry_run: bool = False,
-) -> int:
-    phase("在线更新")
-    print(f"来源: {choice['repo']}")
-    print(f"分支或标签: {choice['ref']}")
-    if dry_run:
-        detail("因 --dry-run，真实安装目录检查按通过处理；不访问网络或修改文件。")
-        operation_plan(["获取指定来源源码", "校验源码并构建新版本", "切换版本并保存更新来源"])
-        print("演练未获取远程版本，不代表该来源或新版本已通过校验。")
-        return 0
-    _check_target_path(target)
-    with tempfile.TemporaryDirectory(prefix="codex-wechat-update-") as directory:
-        source = Path(directory) / "source"
-        fetch_update_source(choice, source)
-        previous = installed_release_id(source, target)
-        if previous is None:
-            raise ValueError("目标尚未安装 codex-wechat；请先使用 install。")
-        # Use the installed updater, not an unconfirmed remote installer script.
-        result = update(source, target)
-        remember_update_source(target, source, choice, previous=previous)
-        return result
-
-
 def bootstrap(
     target: Path,
     choice: dict,
