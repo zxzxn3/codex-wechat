@@ -31,7 +31,8 @@ Linux 使用 `-h` / `--help`，Windows PowerShell 使用 `-h` / `-Help` 查看�
 
 `install`、`update`、`menu` 和 `components` 是 stable 入口转交 `installer.py` 的安装器动作，
 不会作为微信聊天命令处理。网络 bootstrap 完成安装后会保存公开更新来源；此后
-`codex-wechat update` 从官方 GitHub tar 归档获取最新源码，不需要宿主 Python 或 Git。
+`codex-wechat update` 从官方 GitHub tar 归档获取最新源码，由 uv 构建并安装 wheel，不需要
+宿主 Python 或 Git。
 没有保存来源时，重跑同一个网络 bootstrap，
 或从本地源码更新：Linux 使用 `update --source <目录>`，Windows 使用
 `update -Source <目录>`。更新不会自动重启正在运行的桥接；交互式更新完成后会询问是否立即
@@ -63,7 +64,7 @@ Windows 使用管理员令牌。除只读 `status`、`logs` 和显式 `uninstall
 
 ## 版本与卸载
 
-stable 入口通过 `.installation.json` 选择完整 release，并使用 uv 创建并托管的
-`.bootstrap-venv` 运行。Linux 和 Windows 都在加载 release 之前分派 `uninstall`，所以
-release 不完整时仍可按同一安装布局移除服务和入口。release ID、数据根和平台参数见
+stable 入口通过 `.installation.json` 选择安装到独立环境的完整 release，并使用 uv 创建并
+托管的 `.bootstrap-venv` 运行。Linux 和 Windows 都在加载 release 之前分派 `uninstall`，
+所以 release 不完整时仍可按同一安装布局移除服务和入口。release ID、数据根和平台参数见
 [PLATFORMS](PLATFORMS.md)，完整安装流程见 [INSTALL](INSTALL.md)。

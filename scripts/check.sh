@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local development checks. Install the Python tools with:
-#   .venv/bin/python -m pip install -r requirements-dev.txt
+#   uv sync --group dev
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -32,7 +32,7 @@ if ((${#shell_files[@]})); then
 fi
 
 if ! .venv/bin/python -c 'import coverage' >/dev/null 2>&1; then
-    echo "缺少 coverage；请先运行 .venv/bin/python -m pip install -r requirements-dev.txt" >&2
+    echo "缺少 coverage；请先运行 uv sync --group dev" >&2
     exit 1
 fi
 
@@ -43,7 +43,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m coverage run -m unittest discover 
 
 if ((audit)); then
     if ! .venv/bin/python -c 'import pip_audit' >/dev/null 2>&1; then
-        echo "缺少 pip-audit；请先运行 .venv/bin/python -m pip install -r requirements-dev.txt" >&2
+        echo "缺少 pip-audit；请先运行 uv sync --group dev" >&2
         exit 1
     fi
     .venv/bin/python -m pip_audit . --progress-spinner off

@@ -18,6 +18,13 @@ dependencies = [
     "pywin32; sys_platform == 'win32'",
 ]
 
+[dependency-groups]
+dev = [
+    "bandit==1.9.4",
+    "coverage==7.17.2",
+    "pip-audit==2.10.1",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["codex_wechat"]
 

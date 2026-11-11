@@ -25,7 +25,7 @@
 | 公开入口 | `~/.local/bin/codex-wechat` | `%USERPROFILE%\.local\bin\codex-wechat.cmd` |
 | 源码安装入口 | `install.sh` | `install.ps1` |
 | 程序 | `~/.local/share/codex-wechat` | `%LOCALAPPDATA%\codex-wechat\app` |
-| Python 与依赖 | 项目私有 uv + `.bootstrap-venv` | 项目私有 uv + `.bootstrap-venv` |
+| Python、wheel 与依赖 | 项目私有 uv + `.bootstrap-venv` | 项目私有 uv + `.bootstrap-venv` |
 | 配置 | `~/.config/codex-wechat/config.json` | 数据根下 `config.json` |
 | 状态、日志、共享后台 | `~/.local/state/codex-wechat` | 数据根下 `.state`、`logs`、`shared` |
 | 工作区 | 数据根下 `workspace` | 数据根下 `workspace` |

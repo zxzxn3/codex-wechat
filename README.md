@@ -43,7 +43,7 @@
 ## 快速开始
 
 前提：已安装 Codex，以及 Linux 安装所需的 `curl`。bootstrap 会自动准备项目私有的 uv、
-Python 3.11 和依赖，不需要预装 Python、pip 或 Git。完整安装和卸载说明见
+Python 3.11，由 uv 将应用构建并安装为 wheel，不需要预装 Python、pip 或 Git。完整安装和卸载说明见
 [INSTALL](docs/INSTALL.md)。
 
 Linux:

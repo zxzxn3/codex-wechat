@@ -44,7 +44,7 @@
 | [install_layout.py](../codex_wechat/install_layout.py) | 唯一安装清单、路径、release 选择和 purge owned leaves |
 | [launcher.py](../codex_wechat/launcher.py) | stable 入口到已选 release 的唯一转换 |
 | [platform_support.py](../codex_wechat/platform_support.py) / [service_adapter.py](../codex_wechat/service_adapter.py) | 消费安装布局；平台权限和原生服务 |
-| [installer.py](../installer.py) | 固定 uv、release 环境、源码归档安全和布局提交 |
+| [installer.py](../installer.py) | 固定 uv、wheel 构建与 release 安装、源码归档安全和布局提交 |
 
 模块可以独立重构；跨模块的所有权、持久状态和有外部依赖的格式属于兼容边界。
 
@@ -137,8 +137,9 @@ Linux 卸载器读取 unit 实际的 `TimeoutStopUSec`，等 systemd 强制停�
 - 删除配置键恢复代码默认值。模板字段统一使用英文 `snake_case`，不维护旧中文字段映射。
 - 安装器把平台、release ID、数据根、配置根和状态根一次写入 `.installation.json`。stable
   入口、systemd 和 Windows supervisor 只通过该契约取路径；`active-release` 只表示仍在运行
-  的 release 租约。每个 release 的 Python 环境由项目私有 uv 在 staging 中创建；stable
-  入口同样使用 uv 管理的 Python。具体位置和改根规则见 [INSTALL](INSTALL.md)。
+  的 release 租约。安装器由项目私有 uv 构建 wheel；每个 release 在 staging 中安装到独立
+  Python 环境，stable 入口同样使用 uv 管理的 Python。具体位置和改根规则见
+  [INSTALL](INSTALL.md)。
 
 ## 诊断与隐私
 

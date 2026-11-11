@@ -12,7 +12,8 @@
 - 二维码优先使用 `qrencode`；缺少时按安装器提示安装轻量 Python 回退。
 
 bootstrap 不要求宿主 Python、pip 或 Git。它把固定版本的 uv 安装到程序私有目录，由 uv 下载
-Python 3.11、创建环境和安装依赖。uv 不进入用户 PATH，也不会修改 shell 配置。
+Python 3.11、构建应用 wheel、解析依赖并创建隔离环境。uv 不进入用户 PATH，也不会修改
+shell 配置。
 
 ## 首次安装
 
@@ -35,7 +36,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
 ```
 
 入口从公开的 GitHub raw 地址取得 bootstrap。bootstrap 使用 uv 管理的 Python 运行安装器；
-安装器下载官方 GitHub 源码 tar 归档并在内存中做路径检查。重跑同一入口即可安装或更新。
+安装器下载官方 GitHub 源码 tar 归档并在内存中做路径检查，再交给 uv 构建 wheel。重跑同一
+入口即可安装或更新。
 
 源码开发仍可使用 Git clone 后运行本地入口：
 
@@ -114,11 +116,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 ## 更新
 
 再次运行同一个网络入口或本地入口即可更新已有安装。公开网络入口会保存公开仓库作为可复用
-更新来源，也可以继续重跑同一个网络入口。远端源码通过 GitHub tar 归档下载，不调用 Git。
+更新来源，也可以继续重跑同一个网络入口。远端源码通过 GitHub tar 归档下载，不调用 Git；
+uv 从该源码构建 wheel，并在新 staging 环境中安装。
 更新会保留配置、登录、待办、工作目录、日志和已有的登录自启状态，不会自动重启正在运行的
 桥接；更新完成后，交互式安装器会询问是否立即重启，默认回车执行 `service-restart`，
-`--non-interactive` 不会询问或重启。新版本在 staging 目录中用 uv 建立独立 Python 环境并
-安装依赖，随后原子提交 `.installation.json`。项目不提供安装回滚命令。
+`--non-interactive` 不会询问或重启。新版本由 uv 构建 wheel，在 staging 目录中安装到独立
+Python 环境，随后原子提交 `.installation.json`。release 不复制源码树，只保存 wheel 身份、
+独立环境和运行入口。项目不提供安装回滚命令。
 
 每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
 release 通过安装布局中的 release ID 和 `active-release` 租约保留。安装器不初始化账户、
