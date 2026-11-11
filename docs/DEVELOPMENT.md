@@ -21,9 +21,10 @@
 `main` 分支的 bootstrap，不需要额外引导库、GitHub 登录或访问凭据。Windows 开发从同一远端
 取得源码，切换环境前先同步，避免两份源码分叉。
 
-网络 bootstrap 只下载安装器，再由安装器把公开仓库 clone 到临时目录并执行安装；Linux、
-Windows 入口最终调用同一个 `installer.py`。依赖声明集中在 `installer.py` 和 requirements
-文件，二维码与附件 skill 只按需安装。完整用户流程见 [INSTALL](INSTALL.md)。
+网络 bootstrap 先以 uv 管理的 Python 运行下载到临时目录的安装器，再由安装器下载公开
+GitHub tar 归档并执行安装；Linux、Windows 入口最终调用同一个 `installer.py`。宿主不需要
+Python、pip 或 Git。依赖声明集中在 requirements 文件，二维码与附件 skill 只按需安装。
+完整用户流程见 [INSTALL](INSTALL.md)。
 
 新旧 release 按各自清单验证，不用新排除规则重新定义旧版身份。下载、构建与原子写临时文件
 会清理；仍可能被进程使用的旧版本和已保存附件不作为临时垃圾自动删除。发布产物不得包含用户
@@ -123,8 +124,8 @@ missing-import 警告；这些是平台/环境边界，不是代码错误。平�
 `install_layout.default_roots()` 计算；已安装实例只读取 `.installation.json`，不根据当前
 shell 的 XDG 或 `LOCALAPPDATA` 重新推断。
 
-更新运行时依赖使用 `.venv/bin/python -m pip install -r requirements.txt`；更新后需要重启
-服务才会让新依赖生效，运行中的进程不会自动换包。
+更新运行时依赖后需要重新运行安装器，让新 release 在 staging 中由 uv 建立环境；重启服务后
+才会加载新依赖，运行中的进程不会自动换包。
 
 ## 变更检查
 
@@ -226,6 +227,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$app\codex-wechat.ps1" serv
 - 在隔离环境中完成安装、状态、更新、配置保留和卸载烟测，并重新 clone 干净副本运行完整
   测试、静态检查和安装烟测。
 
-公开前还要验证公开 raw 地址、仓库 clone 和更新源无需 GitHub 登录，检查 GitHub 许可证
+公开前还要验证公开 raw 地址、源码归档下载和更新源无需 GitHub 登录，检查 GitHub 许可证
 识别、README 渲染、图片和 Actions 状态。公开后继续监控 secret scanning、issues 和安全
 报告。

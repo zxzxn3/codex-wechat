@@ -5,35 +5,14 @@
 
 ## 前提
 
-- Python 3.11+。
 - 已安装并登录 Codex；独立 CLI 或已注册的 App 内置 Codex 均可。
-- Git；公开安装入口用它 clone 源码，运行时网络测速和部分网络操作仍使用 `curl`。
-- Linux 一行安装还需要 `curl`；Windows 一行安装使用 PowerShell `Invoke-WebRequest`。
+- Linux 一行安装需要 `curl`；Windows 一行安装使用 PowerShell `Invoke-WebRequest`。
 - Linux 可选 systemd 用户服务；没有 `systemctl --user` 时安装器会跳过服务注册，仍可使用前台
   `start`。
 - 二维码优先使用 `qrencode`；缺少时按安装器提示安装轻量 Python 回退。
 
-网络 bootstrap 会检查 Python 3.11+、Git 和 Linux 的 `curl`；本地 `install.sh` / `install.ps1`
-只检查 Python。缺少依赖时入口不会自动修改系统，而是打印当前包管理器或 `winget` 的安装
-命令。安装依赖后需要重开终端，再重跑原命令。Ubuntu 22.04 的官方 `python3` 仍低于 3.11，
-重复安装 `python3` 不会满足要求，需要先获得发行版认可的 Python 3.11+。常用命令：
-
-```bash
-# Arch / CachyOS
-sudo pacman -S --needed python git curl
-
-# Debian / Ubuntu
-sudo apt-get install -y python3 git curl
-
-# Fedora
-sudo dnf install -y python3 git curl
-```
-
-```powershell
-# Windows
-winget install --id Python.Python.3.13 -e
-winget install --id Git.Git -e
-```
+bootstrap 不要求宿主 Python、pip 或 Git。它把固定版本的 uv 安装到程序私有目录，由 uv 下载
+Python 3.11、创建环境和安装依赖。uv 不进入用户 PATH，也不会修改 shell 配置。
 
 ## 首次安装
 
@@ -55,10 +34,10 @@ irm https://raw.githubusercontent.com/zxzxn3/codex-wechat/main/bootstrap.ps1 | i
 powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
 ```
 
-入口从公开的 GitHub raw 地址取得 bootstrap。bootstrap 下载安装器，再由安装器把公开仓库
-clone 到临时目录。重跑同一入口即可安装或更新。
+入口从公开的 GitHub raw 地址取得 bootstrap。bootstrap 使用 uv 管理的 Python 运行安装器；
+安装器下载官方 GitHub 源码 tar 归档并在内存中做路径检查。重跑同一入口即可安装或更新。
 
-也可以直接 clone 后运行源码入口：
+源码开发仍可使用 Git clone 后运行本地入口：
 
 ```bash
 # Linux
@@ -88,9 +67,9 @@ Set-Location C:\path\to\codex-wechat
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-`install.sh` / `install.ps1` 只适配平台并调用同一个 `installer.py`；也可以直接运行
-`python3 installer.py install`，Windows 使用 `py -3 installer.py install`。源码包不应包含
-`.venv`、`.state`、`config.json`、`logs`、`workspace`、`releases` 等本机运行数据。
+`install.sh` / `install.ps1` 只适配平台，并通过同一个 uv bootstrap 调用 `installer.py`。
+公共安装不直接调用宿主 Python。源码包不应包含 `.venv`、`.bootstrap-venv`、`.state`、
+`config.json`、`logs`、`workspace`、`releases` 等本机运行数据。
 
 安装器不会初始化微信账户、收集模型密钥或默认开启登录自启，也不会在未经确认时启动程序。
 安装结束后的下一步以安装器输出为准；通常需要执行一次 `service-start` 并扫码。
@@ -135,11 +114,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\codex-wec
 ## 更新
 
 再次运行同一个网络入口或本地入口即可更新已有安装。公开网络入口会保存公开仓库作为可复用
-更新来源，也可以继续重跑同一个网络入口。更新会保留配置、登录、待办、工作目录、日志和已有
-的登录自启状态，不会自动重启正在运行的桥接；更新完成后，交互式安装器会询问是否立即重启，
-默认回车执行 `service-restart`，`--non-interactive` 不会询问或重启。新版本先进入独立
-release 并完成检查和运行时准备，随后原子提交 `.installation.json`。平台服务集成和入口
-可读性检查发生在提交之后；这些后续步骤失败不会回滚已提交版本。项目不提供安装回滚命令。
+更新来源，也可以继续重跑同一个网络入口。远端源码通过 GitHub tar 归档下载，不调用 Git。
+更新会保留配置、登录、待办、工作目录、日志和已有的登录自启状态，不会自动重启正在运行的
+桥接；更新完成后，交互式安装器会询问是否立即重启，默认回车执行 `service-restart`，
+`--non-interactive` 不会询问或重启。新版本在 staging 目录中用 uv 建立独立 Python 环境并
+安装依赖，随后原子提交 `.installation.json`。项目不提供安装回滚命令。
 
 每个版本有独立的 Python 环境。更新会清理不再使用的旧 release，但当前 release 和正在运行的
 release 通过安装布局中的 release ID 和 `active-release` 租约保留。安装器不初始化账户、
@@ -191,6 +170,8 @@ Linux 按 XDG 职责拆分：
 | 内容 | 默认位置 |
 |---|---|
 | 程序 | `~/.local/share/codex-wechat/{.installation.json,releases,active-release}` |
+| uv、托管 Python 与缓存 | `~/.local/share/codex-wechat/.bootstrap/{uv,python,cache}` |
+| 稳定入口环境 | `~/.local/share/codex-wechat/.bootstrap-venv` |
 | 配置 | `~/.config/codex-wechat/config.json` |
 | 状态、日志和共享后台 | `~/.local/state/codex-wechat/{logs,shared}` |
 | 工作区 | `~/.local/share/codex-wechat/workspace` |

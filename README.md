@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.11%2B-3157ff?style=flat-square" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/uv-Python%203.11-3157ff?style=flat-square" alt="uv-managed Python 3.11">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-72c945?style=flat-square" alt="Linux and Windows">
   <img src="https://img.shields.io/badge/license-Apache--2.0-3157ff?style=flat-square" alt="Apache-2.0">
 </p>
@@ -42,9 +42,9 @@
 
 ## 快速开始
 
-前提：Python 3.11+、Git、Codex，以及 Linux 安装所需的 `curl`。完整前提和卸载说明见
+前提：已安装 Codex，以及 Linux 安装所需的 `curl`。bootstrap 会自动准备项目私有的 uv、
+Python 3.11 和依赖，不需要预装 Python、pip 或 Git。完整安装和卸载说明见
 [INSTALL](docs/INSTALL.md)。
-缺少 Python 或 Git 时，安装入口会给出当前平台的安装命令，但不会自动执行系统级安装。
 
 Linux:
 

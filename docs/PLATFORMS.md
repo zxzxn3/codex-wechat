@@ -25,6 +25,7 @@
 | 公开入口 | `~/.local/bin/codex-wechat` | `%USERPROFILE%\.local\bin\codex-wechat.cmd` |
 | 源码安装入口 | `install.sh` | `install.ps1` |
 | 程序 | `~/.local/share/codex-wechat` | `%LOCALAPPDATA%\codex-wechat\app` |
+| Python 与依赖 | 项目私有 uv + `.bootstrap-venv` | 项目私有 uv + `.bootstrap-venv` |
 | 配置 | `~/.config/codex-wechat/config.json` | 数据根下 `config.json` |
 | 状态、日志、共享后台 | `~/.local/state/codex-wechat` | 数据根下 `.state`、`logs`、`shared` |
 | 工作区 | 数据根下 `workspace` | 数据根下 `workspace` |
@@ -35,8 +36,10 @@ Windows `.cmd` 是薄启动器，内部调用 stable `codex-wechat.ps1`，最终
 
 Linux 和 Windows 都用 `.installation.json` 一次保存平台、release ID 和运行时根。公开入口、
 systemd 与 Windows supervisor 读取同一契约；shell 和 PowerShell 入口只把它交给 Python
-launcher。布局在首次安装后固定，普通更新只沿用已保存的根；不提供原地换根命令。需要搬迁时
-先备份，再 purge、手动删除保留的程序安装根，并从目标环境重新安装。
+launcher。公共安装不需要宿主 Python、pip 或 Git；bootstrap 安装固定版本 uv，由 uv 管理
+Python 3.11 和依赖，uv 不进入 PATH。布局在首次安装后固定，普通更新只沿用已保存的根；
+不提供原地换根命令。需要搬迁时先备份，再 purge、手动删除保留的程序安装根，并从目标环境
+重新安装。
 
 ## Windows 操作
 
