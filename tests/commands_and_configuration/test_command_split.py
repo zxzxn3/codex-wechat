@@ -6,7 +6,7 @@ from pathlib import Path
 
 from codex_wechat import commands
 from codex_wechat.app import Bridge
-from codex_wechat.command_specs import COMMANDS, HELP_ALL, REGISTRY
+from codex_wechat.command_specs import COMMANDS, REGISTRY, help_text
 from codex_wechat.commands import HANDLERS, handle
 from codex_wechat.errors import UserFacingError
 from codex_wechat.storage import Store
@@ -25,13 +25,14 @@ class CommandSplitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_every_registered_handler_is_callable_and_documented(self):
         self.assertFalse(hasattr(commands, "command_session"))
+        full_help = help_text(show_all=True)
         for spec in COMMANDS:
             if spec.route == "input":
                 continue
             handler = HANDLERS[spec.name]
             self.assertTrue(callable(handler), spec.name)
             self.assertTrue(inspect.iscoroutinefunction(handler), spec.name)
-            self.assertIn(spec.help_usage or spec.usage, HELP_ALL, spec.name)
+            self.assertIn(spec.help_usage or spec.usage, full_help, spec.name)
             self.assertTrue(spec.description, spec.name)
             for alias in spec.aliases:
                 self.assertIs(REGISTRY[alias], spec, alias)

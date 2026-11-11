@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from codex_wechat.app import Bridge
 from codex_wechat.commands import HANDLERS, SETTINGS
-from codex_wechat.command_specs import HELP, HELP_ALL, REGISTRY
+from codex_wechat.command_specs import REGISTRY, help_text
 from codex_wechat.configuration import Sending
 from codex_wechat.records import AcceptedUnknown, Delivered, Rejected, Retryable
 from codex_wechat.storage import Store
@@ -276,8 +276,8 @@ class ReplyBudgetTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bare_slash_is_a_silent_command_hidden_from_short_help(self):
         self.assertEqual(REGISTRY["/"].name, "/continue")
-        self.assertNotIn("/continue", HELP)
-        self.assertIn("/continue", HELP_ALL)
+        self.assertNotIn("/continue", help_text())
+        self.assertIn("/continue", help_text(show_all=True))
         queued = len(self.bridge.state["outbox"])
         await HANDLERS["/continue"](self.bridge, "/continue", "")
         self.assertEqual(len(self.bridge.state["outbox"]), queued)

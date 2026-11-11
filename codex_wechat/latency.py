@@ -26,15 +26,6 @@ _PHASE_PAIRS = {
 _POST_TLS_PHASES = {"response_wait_ms", "download_ms"}
 NETWORK_TIMING_FIELDS = frozenset(CURL_TIMING_FIELDS.values()) | frozenset(_PHASE_PAIRS)
 _PROXY_VARIABLES = ("http_proxy", "https_proxy", "all_proxy")
-# Keep response body + HTTP code on stdout. Only explicitly selected numeric
-# milestones go to stderr; never use curl's broad %{json} diagnostic object.
-# Optional proxy telemetry stays on a separate line: curl <8.7 prints an
-# unknown-variable warning, but still completes the ordinary numeric trailer.
-CURL_WRITE_OUT = ("%{stderr}\ncodex_wechat_proxy_used=%{proxy_used}\n{" + ",".join(
-    '"' + name + '":%{' + name + '}' for name in CURL_TIMING_FIELDS
-) + "}%{stdout}\n%{http_code}")
-
-
 def curl_timings(stderr, *, connection_reused=False):
     """Read only the numeric write-out trailer; discard curl error text entirely."""
     try:

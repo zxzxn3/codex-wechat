@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 from codex_wechat import diagnostics
 from codex_wechat.app import Bridge
-from codex_wechat.log_viewer import _log_files, _read_log_updates, _tail_lines, show_logs
+from codex_wechat.log_viewer import _log_files, _read_log_updates, _tail_stream, show_logs
 from codex_wechat.commands import dispatch
 from codex_wechat.storage import Store
 from codex_wechat.wechat import WeChat
@@ -265,7 +265,8 @@ class DiagnosticsTests(unittest.TestCase):
     def test_tail_reads_only_the_bounded_tail(self):
         self.path.parent.mkdir(parents=True)
         self.path.write_text("old\n" * 1000 + "recent\n", encoding="utf-8")
-        self.assertEqual(_tail_lines(self.path, limit=1), ["recent"])
+        with self.path.open("rb") as stream:
+            self.assertEqual(_tail_stream(stream, limit=1), ["recent"])
 
     def test_windows_logs_command_uses_the_shared_viewer(self):
         script = (Path(__file__).parents[2] / "codex-wechat.ps1").read_text(encoding="utf-8")

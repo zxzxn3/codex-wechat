@@ -6,12 +6,16 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from codex_wechat.app import Bridge
-from codex_wechat.command_specs import COMMANDS, REGISTRY, command_lane, HELP, HELP_ALL
+from codex_wechat.command_specs import COMMANDS, REGISTRY, command_lane, help_text
 from codex_wechat.commands import HANDLERS, dispatch, parse_control, validate
 from codex_wechat.errors import UserFacingError
 from codex_wechat.prompts import SETTINGS_HELP, prompt_text
 from codex_wechat.storage import Store
 from codex_wechat.version import build_id, release_id
+
+
+SHORT_HELP = help_text()
+FULL_HELP = help_text(show_all=True)
 
 
 class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -34,21 +38,21 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
                             ("/d", "/discard"), ("/g", "/get"), ("/", "/continue")):
             self.assertIs(REGISTRY[short], REGISTRY[full])
             self.assertEqual(command_lane(short, ""), command_lane(full, ""))
-            self.assertIn(f"`{short}`", HELP_ALL)
+            self.assertIn(f"`{short}`", FULL_HELP)
         for name in ("/settings", "/sessions", "/switch", "/stop", "/cwd",
                      "/approve", "/getfile"):
             self.assertFalse(REGISTRY[name].aliases)
         self.assertNotIn("/ack", REGISTRY)
         self.assertNotIn("/finish", REGISTRY)
-        self.assertIn("`/settings` 查看设置", HELP)
-        self.assertIn("`/help settings` 查看设置说明", HELP)
-        self.assertIn("`/d` `/discard` 清空待发送消息", HELP)
-        self.assertNotIn("`/v`", HELP)
-        self.assertNotIn("`/version`", HELP)
-        self.assertIn("`/v` `/version`", HELP_ALL)
-        self.assertNotIn("`/help [all]`", HELP)
-        self.assertIn("`/deny {编号}` 拒绝审批", HELP_ALL)
-        self.assertNotIn("`/d` `/deny`", HELP_ALL)
+        self.assertIn("`/settings` 查看设置", SHORT_HELP)
+        self.assertIn("`/help settings` 查看设置说明", SHORT_HELP)
+        self.assertIn("`/d` `/discard` 清空待发送消息", SHORT_HELP)
+        self.assertNotIn("`/v`", SHORT_HELP)
+        self.assertNotIn("`/version`", SHORT_HELP)
+        self.assertIn("`/v` `/version`", FULL_HELP)
+        self.assertNotIn("`/help [all]`", SHORT_HELP)
+        self.assertIn("`/deny {编号}` 拒绝审批", FULL_HELP)
+        self.assertNotIn("`/d` `/deny`", FULL_HELP)
 
     async def test_status_alias_is_local_and_rejects_extra_args(self):
         self.bridge.ensure_backend = AsyncMock()
@@ -107,9 +111,9 @@ class ShortCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_help_all_lists_the_complete_catalogue_and_rejects_other_arguments(self):
         self.bridge.ensure_backend = AsyncMock()
         await dispatch(self.bridge, "/help")
-        self.assertEqual(self.bridge.state["outbox"][-1]["text"], HELP)
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], SHORT_HELP)
         await dispatch(self.bridge, "/h all")
-        self.assertEqual(self.bridge.state["outbox"][-1]["text"], HELP_ALL)
+        self.assertEqual(self.bridge.state["outbox"][-1]["text"], FULL_HELP)
         await dispatch(self.bridge, "/help invalid")
         self.assertIn("`/h` `/help [all|settings]`",
                       self.bridge.state["outbox"][-1]["text"])
@@ -179,7 +183,7 @@ class CommandCatalogContractTests(unittest.TestCase):
         self.assertEqual(set(HANDLERS), {
             spec.name for spec in COMMANDS if spec.route != "input"})
         for spec in COMMANDS:
-            self.assertIn(spec.help_usage or spec.usage, HELP_ALL)
+            self.assertIn(spec.help_usage or spec.usage, FULL_HELP)
             for alias in spec.aliases:
                 self.assertIs(REGISTRY[alias], spec)
             if spec.route != "input":

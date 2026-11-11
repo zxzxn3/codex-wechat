@@ -98,14 +98,6 @@ def _tail_stream(stream, limit=200):
     return data.decode("utf-8", errors="replace").splitlines()[-limit:]
 
 
-def _tail_lines(path, limit=200):
-    try:
-        with path.open("rb") as stream:
-            return _tail_stream(stream, limit)
-    except (OSError, ValueError):
-        return []
-
-
 def _print_log_header(path):
     suffix = "（原始控制台输出，可能包含路径或错误文本）" \
         if path.name.startswith("service.log") else ""

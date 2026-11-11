@@ -11,7 +11,7 @@ from codex_wechat.app import Bridge, _bounded_shutdown, parse_control
 from codex_wechat.backend import CodexBackend, CodexRpcError
 from codex_wechat.media import OUTPUT_HINT, MediaError
 from codex_wechat.latency import Latency
-from codex_wechat.command_specs import HELP, HELP_ALL
+from codex_wechat.command_specs import help_text
 from codex_wechat.commands import dispatch, handle, info, reload_backend_definitions
 from codex_wechat.configuration import (DEFAULT_ACK_TEMPLATE, DEFAULT_COMPLETION_TEMPLATE,
                            completion_template, processing_template)
@@ -24,12 +24,17 @@ from codex_wechat.prompts import (
     setting_summary,
     SettingsView,
   settings_summary,
-    status_summary,
+    status_fields,
+    status_from_fields,
 )
 from codex_wechat.storage import Store
 from tests.support.selection import prepared_selection
 from codex_wechat.wechat import trusted_url
 from codex_wechat.profiles import backend_label, default_backends, definitions, ensure_backend_config
+
+
+SHORT_HELP = help_text()
+FULL_HELP = help_text(show_all=True)
 
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -252,7 +257,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                          "media.maxMiB: 20\n```\n\n"
                          "以上设置可通过 `/settings [option] [value]` 更改；"
                          "使用 `/help settings` 查看设置说明。")
-        status = status_summary(status="运行中", queued=2, pending=0, failed=0,
+        status = status_from_fields(status_fields(
+            status="运行中", queued=2, pending=0, failed=0,
             backend="Codex", name="微信附件", model="example", effort="high", cwd="~/project",
             connection="本地后台", provider="openai",
             sandbox={"type": "workspaceWrite"}, approval="on-request", reviewer="user",
@@ -260,7 +266,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             usage={"last": {"totalTokens": 12345},
                    "total": {"totalTokens": 34567, "inputTokens": 30000, "outputTokens": 4567},
                    "modelContextWindow": 200000},
-            rate_limits={"rateLimits": {"primary": {"usedPercent": 10, "windowDurationMins": 300}}})
+            rate_limits={"rateLimits": {"primary": {"usedPercent": 10, "windowDurationMins": 300}}}))
         for expected in ("状态: 运行中", "排队消息: 2", "后端: Codex", "模型: example (High)",
                          "权限: 工作区可写", "协作: 默认", "服务: 本地后台",
                          "Token: 34.6K total\n       30K input + 4.6K output",
@@ -268,15 +274,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(expected, status)
         for unwanted in ("审批: 0", "发送失败: 0", "Session", "·", "->", "→"):
             self.assertNotIn(unwanted, status)
-        self.assertTrue(HELP.startswith("`/s` `/status` 当前状态"))
+        self.assertTrue(SHORT_HELP.startswith("`/s` `/status` 当前状态"))
         for command in ("/status", "/backend {名称}", "`/settings` 查看设置"):
-            self.assertIn(command, HELP)
+            self.assertIn(command, SHORT_HELP)
         for command in ("/approve", "/deny", "/answer", "/get", "/getfile",
                         "/cwd", "/switch", "/ping", "/version"):
-            self.assertNotIn(f"`{command} ", HELP)
-            self.assertNotIn(f"`{command}`", HELP)
-            self.assertTrue(f"`{command} " in HELP_ALL or f"`{command}`" in HELP_ALL)
-        self.assertNotIn("```", HELP)
+            self.assertNotIn(f"`{command} ", SHORT_HELP)
+            self.assertNotIn(f"`{command}`", SHORT_HELP)
+            self.assertTrue(f"`{command} " in FULL_HELP or f"`{command}`" in FULL_HELP)
+        self.assertNotIn("```", SHORT_HELP)
         self.assertEqual(backend_reason(RuntimeError("WebSocket 握手失败")), "后端连接中断")
         self.assertEqual(attachment_reason(MediaError("附件超过本地大小限制")), "文件超过大小限制")
 

@@ -664,10 +664,6 @@ def status_from_fields(values, *, text=prompt_text):
     return panel(*lines)
 
 
-def status_summary(**kwargs):
-    return status_from_fields(status_fields(**kwargs))
-
-
 class SlicingView(Protocol):
     mode: str
     target_chars: int

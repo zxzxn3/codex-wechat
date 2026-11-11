@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from codex_wechat.app import Bridge
-from codex_wechat.command_specs import HELP, REGISTRY, command_lane
+from codex_wechat.command_specs import REGISTRY, command_lane, help_text
 from codex_wechat.commands import dispatch
 from codex_wechat.records import InputPhase
 from codex_wechat.storage import Store
@@ -68,7 +68,7 @@ class UnqueueTests(unittest.IsolatedAsyncioTestCase):
     async def test_urgent_local_command_rejects_arguments(self):
         self.assertEqual(command_lane("/unqueue", ""), "urgent")
         self.assertFalse(REGISTRY["/unqueue"].needs_backend)
-        self.assertIn("`/unqueue`", HELP)
+        self.assertIn("`/unqueue`", help_text())
         self.bridge.state["inbox"] = [{"mode": "queue"}]
         await dispatch(self.bridge, "/unqueue extra")
         self.assertEqual(len(self.bridge.state["inbox"]), 1)

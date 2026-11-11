@@ -96,10 +96,6 @@ def command_usage(name, *, help_form=False):
     return _command_reference(spec, value)
 
 
-HELP = help_text()
-HELP_ALL = help_text(show_all=True)
-
-
 def command_lane(command, argument):
     spec = REGISTRY.get(command)
     if spec and spec.query_local and not argument:

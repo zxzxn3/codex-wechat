@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from codex_wechat import diagnostics
-from codex_wechat.latency import CURL_WRITE_OUT, curl_timings, timeout_stage
+from codex_wechat.latency import curl_timings, timeout_stage
 from codex_wechat.wechat import WeChat
 from tests.support.http_fixtures import exchange
 
@@ -83,12 +83,6 @@ class NetworkTimingTests(unittest.TestCase):
             self.assertNotIn(field, result)
         result = curl_timings(b'{"time_namelookup":0,"time_connect":0.01}')
         self.assertEqual(result['tcp_ms'], 10)
-
-    def test_write_out_selects_numeric_fields_not_broad_diagnostics(self):
-        self.assertIn('%{stderr}', CURL_WRITE_OUT)
-        self.assertTrue(CURL_WRITE_OUT.endswith('%{stdout}\n%{http_code}'))
-        for forbidden in ('%{json}', '%{url', '%{errormsg}', '%{remote_ip}'):
-            self.assertNotIn(forbidden, CURL_WRITE_OUT)
 
     def test_optional_proxy_marker_does_not_break_older_curl_timings(self):
         trailer = b'{"time_connect":0.02,"time_appconnect":0.05,"time_total":1}'

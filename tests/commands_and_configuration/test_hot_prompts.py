@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from codex_wechat.backend import CodexBackend
 from codex_wechat.app import Bridge
-from codex_wechat.command_specs import HELP, HELP_ALL, help_text
+from codex_wechat.command_specs import help_text
 from codex_wechat.configuration import TEXT_LIMIT_BYTES
 from codex_wechat.prompts import (DEFAULT_PROMPTS, command_approval, prompt_text,
                      validate_prompt_overrides)
@@ -33,16 +33,16 @@ class PromptCatalogueTests(unittest.TestCase):
                 validate_prompt_overrides(value, limit=TEXT_LIMIT_BYTES)
 
     def test_help_defaults_still_come_from_the_command_catalogue(self):
-        self.assertEqual(help_text(), HELP)
-        self.assertEqual(help_text(show_all=True), HELP_ALL)
+        short_help = help_text()
+        full_help = help_text(show_all=True)
         custom = help_text(text=lambda name: prompt_text(name, overrides={"HELP_STATUS": "Live status"}))
         self.assertIn('`/s` `/status` Live status', custom)
         self.assertIn('`/sessions [页码|搜索词]`', custom)
         for command in ("/approve", "/deny", "/answer", "/get", "/getfile",
                         "/cwd", "/switch", "/ping", "/version"):
-            self.assertNotIn(f"`{command} ", HELP)
-            self.assertNotIn(f"`{command}`", HELP)
-            self.assertTrue(f"`{command} " in HELP_ALL or f"`{command}`" in HELP_ALL)
+            self.assertNotIn(f"`{command} ", short_help)
+            self.assertNotIn(f"`{command}`", short_help)
+            self.assertTrue(f"`{command} " in full_help or f"`{command}`" in full_help)
 
     def test_approval_labels_do_not_replace_command_or_response_token(self):
         def text(name):
