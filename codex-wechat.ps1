@@ -14,6 +14,7 @@ param(
     [switch]$PurgeData,
     [string]$Repo,
     [string]$Ref,
+    [string]$Source,
     [switch]$DryRun,
     [switch]$NonInteractive,
     [switch]$StopActive,
@@ -68,6 +69,7 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     $InstallerArguments = @($Installer, $Command, '--dir', $InstallRoot)
     if ($Repo) { $InstallerArguments += @('--repo', $Repo) }
     if ($Ref) { $InstallerArguments += @('--ref', $Ref) }
+    if ($Source) { $InstallerArguments += @('--source', $Source) }
     if ($DryRun) { $InstallerArguments += '--dry-run' }
     if ($NonInteractive) { $InstallerArguments += '--non-interactive' }
     if ($Component) { $InstallerArguments += @('--component', $Component) }
@@ -76,8 +78,8 @@ if ($Command -in @('update', 'install', 'menu', 'components')) {
     exit $LASTEXITCODE
 }
 
-if ($Repo -or $Ref -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) {
-    throw '-Repo, -Ref, -DryRun, -NonInteractive, -Component and -SkillsDir are only valid with installer commands'
+if ($Repo -or $Ref -or $Source -or $DryRun -or $NonInteractive -or $Component -or $SkillsDir) {
+    throw '-Repo, -Ref, -Source, -DryRun, -NonInteractive, -Component and -SkillsDir are only valid with installer commands'
 }
 if ($PSBoundParameters.ContainsKey('Value') -and $Command -ne 'autostart') {
     throw '-Value is only valid with the autostart command'

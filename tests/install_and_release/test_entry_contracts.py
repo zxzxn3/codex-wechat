@@ -74,6 +74,15 @@ class EntryContractTests(unittest.TestCase):
         self.assertNotIn("Read-SavedDataRoot", text)
         self.assertNotIn("当前版本指针 current", text)
 
+    def test_windows_installer_actions_forward_a_local_source(self):
+        text = (ROOT / "codex-wechat.ps1").read_text(encoding="utf-8")
+        self.assertIn("[string]$Source", text)
+        self.assertIn(
+            "if ($Source) { $InstallerArguments += @('--source', $Source) }",
+            text,
+        )
+        self.assertIn("$Repo -or $Ref -or $Source", text)
+
     def test_task_helper_is_internal_and_owns_native_operations(self):
         text = (ROOT / "windows/task-service.ps1").read_text(encoding="utf-8")
         self.assertIn("ValidateSet('status', 'start', 'stop', 'autostart')", text)

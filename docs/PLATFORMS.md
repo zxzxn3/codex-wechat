@@ -116,6 +116,7 @@ Windows 命名管道按用户单例，只跟随主 `CODEX_HOME`，不承诺跨 h
 | `--service` | `-Service` |
 | `--stop-active` | `-StopActive` |
 | `--purge-data` | `-PurgeData` |
+| `--source` | `-Source` |
 
 公开入口只有 `codex-wechat`；`service-stop`、`service-status`、`codex-wechat cli` 和
 `codex-wechat desktop` 不存在。`windows/task-service.ps1`、`uninstall.py` 和
