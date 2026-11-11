@@ -95,13 +95,14 @@ class InstallationLifecycleTests(unittest.TestCase):
         self.assertEqual(payload["state"], "ok")
         self.assertEqual(payload["unsent"], 0)
 
-        no_service = patch.object(
+        no_service = patch.object(uninstall, "_linux_service_stop", AsyncMock())
+        no_removal = patch.object(
             uninstall, "_linux_service_removal", AsyncMock())
         no_shared = patch.object(
             uninstall, "_linux_shared_backend_removal", AsyncMock())
         no_command = patch.object(uninstall, "_linux_command_removal")
         with patch.object(uninstall, "INSTALL_ROOT", self.target), \
-                no_service, no_shared, no_command:
+                no_service, no_removal, no_shared, no_command:
             asyncio.run(uninstall.uninstall())
 
             self.assertTrue((self.target / INSTALLATION_FILE).is_file())
