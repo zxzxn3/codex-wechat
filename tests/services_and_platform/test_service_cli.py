@@ -231,8 +231,10 @@ class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
     async def test_an_unreadable_host_is_omitted_instead_of_failing_status(self):
         store = await self.store()
         with patch.object(codex_wechat.service_adapter, "status",
-                          AsyncMock(side_effect=ValueError("不属于这个安装目录"))):
+                          AsyncMock(side_effect=ValueError("不属于这个安装目录"))), \
+                patch.object(codex_wechat, "log_event") as log_event:
             payload = await codex_wechat.status_payload_with_service(store)
+        log_event.assert_not_called()
         self.assertNotIn("service", payload)
         self.assertIn("bound", payload)
 
@@ -255,3 +257,21 @@ class ServiceStatusPayloadTests(unittest.IsolatedAsyncioTestCase):
                 patch("builtins.print") as output:
             await codex_wechat.main()
         self.assertIn('"bound": false', output.call_args.args[0])
+
+    async def test_status_store_does_not_create_or_change_the_state_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            missing = Path(temp) / "missing"
+            store = await codex_wechat.startup_store(
+                SimpleNamespace(state_dir=missing, action="status"))
+            self.assertFalse(missing.exists())
+            with self.assertRaisesRegex(RuntimeError, "read-only"):
+                store.save("bridge", {})
+            store.close()
+
+            existing = Path(temp) / "existing"
+            existing.mkdir(mode=0o755)
+            existing.chmod(0o755)
+            store = await codex_wechat.startup_store(
+                SimpleNamespace(state_dir=existing, action="status"))
+            store.close()
+            self.assertEqual(existing.stat().st_mode & 0o777, 0o755)

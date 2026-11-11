@@ -33,9 +33,13 @@ def locked_file(path):
 
 
 class Store:
-    def __init__(self, root, *, lock=True):
+    def __init__(self, root, *, lock=True, read_only=False):
         self.root = Path(root)
-        make_private(self.root)
+        self.read_only = read_only
+        if read_only and lock:
+            raise ValueError("read-only state store cannot take the bridge lock")
+        if not read_only:
+            make_private(self.root)
         self.lock = None
         if not lock:
             return
@@ -60,6 +64,8 @@ class Store:
             return default
 
     def save(self, name, value):
+        if self.read_only:
+            raise RuntimeError("read-only state store cannot save")
         path = self.root / (name + ".json")
         fd, temporary = tempfile.mkstemp(prefix="." + name + "-", suffix=".tmp", dir=self.root)
         temp = Path(temporary)

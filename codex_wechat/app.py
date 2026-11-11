@@ -809,7 +809,8 @@ async def startup_store(args):
     managed = False
     while True:
         try:
-            return Store(args.state_dir, lock=args.action != "status")
+            return Store(args.state_dir, lock=args.action != "status",
+                         read_only=args.action == "status")
         except RuntimeError:
             if IS_WINDOWS or args.action != "start":
                 raise
@@ -933,9 +934,7 @@ async def status_payload_with_service(store):
     payload = status_payload(store)
     try:
         current = await service_adapter.status()
-    except (ValueError, RuntimeError, OSError) as error:
-        log_event("service.status_unavailable", level="warning",
-                  component="service", **error_fields(error))
+    except (ValueError, RuntimeError, OSError):
         return payload
     service = {"installed": current.installed, "running": current.running}
     if current.state:
