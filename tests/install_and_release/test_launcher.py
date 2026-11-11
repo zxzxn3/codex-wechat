@@ -1,7 +1,9 @@
 """The stable launcher resolves releases only through InstalledLayout."""
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from codex_wechat.launcher import command
 from tests.support.helpers import install_platform, write_installation_layout
@@ -27,18 +29,20 @@ class LauncherTests(unittest.TestCase):
             executable, environment = command(
                 install, "codex_wechat", ["status"])
 
-            self.assertEqual(executable[:4],
-                             [str(layout.python_executable), "-u", "-m", "codex_wechat"])
-            self.assertEqual(executable[4:], ["status"])
+            self.assertEqual(executable[:5],
+                             [str(layout.python_executable), "-P", "-u", "-m",
+                              "codex_wechat"])
+            self.assertEqual(executable[5:], ["status"])
             self.assertEqual(environment["CODEX_WECHAT_INSTALL_ROOT"], str(install))
             self.assertTrue(environment["PYTHONPATH"].startswith(str(layout.release_path)))
 
     def test_source_tree_uses_the_current_interpreter(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            executable, environment = command(root, "codex_wechat.desktop", [])
+            with patch.dict(os.environ, {"PYTHONPATH": ""}):
+                executable, environment = command(root, "codex_wechat.desktop", [])
 
-            self.assertEqual(executable[2:], ["-m", "codex_wechat.desktop"])
+            self.assertEqual(executable[1:], ["-P", "-u", "-m", "codex_wechat.desktop"])
             self.assertEqual(environment["PYTHONPATH"], str(root))
 
     def test_legacy_layout_is_not_guessed(self):

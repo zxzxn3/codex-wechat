@@ -118,7 +118,7 @@ if (-not (Test-Path -LiteralPath $EntryPython -PathType Leaf)) {
     throw 'Stable Python runtime is missing; rerun bootstrap as this user.'
 }
 $Arguments = @(
-    '-m', 'codex_wechat.launcher',
+    '-P', '-m', 'codex_wechat.launcher',
     '--install-root', $InstallRoot,
     '--module', 'codex_wechat',
     '--', $Command

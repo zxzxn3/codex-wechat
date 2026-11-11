@@ -38,7 +38,7 @@ def command(
         str(project) + (os.pathsep + prior if prior else "")
     )
     environment["CODEX_WECHAT_INSTALL_ROOT"] = str(root)
-    return [str(python), "-u", "-m", module, *arguments], environment
+    return [str(python), "-P", "-u", "-m", module, *arguments], environment
 
 
 def main(argv=None) -> int:

@@ -28,13 +28,13 @@ try {
     } else {
         $InstallRoot
     }
-    $LayoutJson = & $LayoutPython -m codex_wechat.install_layout show `
+    $LayoutJson = & $LayoutPython -P -m codex_wechat.install_layout show `
         --install-root $InstallRoot
     if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
     $Layout = $LayoutJson | ConvertFrom-Json
     $PurgeItems = @()
     if ($PurgeData) {
-        $PurgePlanJson = & $LayoutPython -m codex_wechat.install_layout purge-plan `
+        $PurgePlanJson = & $LayoutPython -P -m codex_wechat.install_layout purge-plan `
             --install-root $InstallRoot
         if ($LASTEXITCODE) { throw 'Purge plan is unavailable.' }
         $PurgePlan = $PurgePlanJson | ConvertFrom-Json
@@ -283,7 +283,7 @@ if ($PurgeData) {
         } else {
             $InstallRoot
         }
-        & $LayoutPython -m codex_wechat.install_layout remove `
+        & $LayoutPython -P -m codex_wechat.install_layout remove `
             --install-root $InstallRoot
         if ($LASTEXITCODE) { throw 'Failed to remove the installation manifest.' }
     } finally {

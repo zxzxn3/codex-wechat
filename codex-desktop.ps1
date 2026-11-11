@@ -31,7 +31,7 @@ try {
     } else {
         $installRoot
     }
-    & $python -u -m codex_wechat.launcher --install-root $installRoot `
+    & $python -P -u -m codex_wechat.launcher --install-root $installRoot `
         --module codex_wechat.desktop -- @args
     $result = $LASTEXITCODE
 } finally {

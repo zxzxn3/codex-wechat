@@ -49,6 +49,13 @@ class EntryContractTests(unittest.TestCase):
         ):
             self.assertIn(path, stable)
 
+    def test_python_entries_use_the_safe_path_option(self):
+        for relative in ("codex-wechat", "codex-desktop",
+                         "codex-wechat.ps1", "codex-desktop.ps1",
+                         "install.ps1", "uninstall.ps1"):
+            with self.subTest(relative=relative):
+                self.assertIn("-P", (ROOT / relative).read_text(encoding="utf-8"))
+
     def test_desktop_entry_rejects_root(self):
         text = (ROOT / "codex-desktop").read_text(encoding="utf-8")
         self.assertIn("CODEX_WECHAT_ALLOW_ROOT", text)

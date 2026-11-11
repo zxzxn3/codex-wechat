@@ -37,7 +37,7 @@ try {
     } else {
         $InstallRoot
     }
-    $LayoutJson = & $LayoutPython -m codex_wechat.install_layout show `
+    $LayoutJson = & $LayoutPython -P -m codex_wechat.install_layout show `
         --install-root $InstallRoot
     if ($LASTEXITCODE) { throw 'Installed layout is missing or invalid.' }
     $Layout = $LayoutJson | ConvertFrom-Json
