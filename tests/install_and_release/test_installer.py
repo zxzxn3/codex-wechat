@@ -588,6 +588,21 @@ class InstallerTests(unittest.TestCase):
 
 
 class BootstrapRuntimeTests(unittest.TestCase):
+    def test_stable_runtime_repair_requires_bootstrap_or_first_install(self):
+        with patch.object(installer, "ensure_uv"), \
+                patch.object(installer, "ensure_managed_python"), \
+                patch.object(installer, "bootstrap_runtime_ready", return_value=False), \
+                patch.object(installer, "prepare_bootstrap_runtime") as prepare:
+            with self.assertRaisesRegex(ValueError, "重新运行 bootstrap"):
+                installer._ensure_stable_runtime(
+                    Path("/target"), Path("/requirements"), create_runtime=False)
+            prepare.assert_not_called()
+
+            installer._ensure_stable_runtime(
+                Path("/target"), Path("/requirements"), create_runtime=True)
+            prepare.assert_called_once_with(
+                Path("/target"), requirements=Path("/requirements"))
+
     def test_windows_stable_runtime_uses_uv_and_only_pywin32(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)

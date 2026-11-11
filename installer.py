@@ -1004,6 +1004,21 @@ def prepare_bootstrap_runtime(target: Path, *, requirements: Path | None = None)
         raise
 
 
+def _ensure_stable_runtime(
+    target: Path,
+    requirements: Path,
+    *,
+    create_runtime: bool,
+) -> None:
+    ensure_uv(target)
+    ensure_managed_python(target)
+    if bootstrap_runtime_ready(target):
+        return
+    if not create_runtime:
+        raise ValueError("稳定入口 Python 环境不完整；请停止服务后重新运行 bootstrap。")
+    prepare_bootstrap_runtime(target, requirements=requirements)
+
+
 
 def _staging_directory(parent: Path, prefix: str) -> Path:
     """Create a staging directory that inherits the parent's access rules.
@@ -1415,6 +1430,7 @@ def _common_install(
     dry_run: bool,
     update: bool,
     announce: bool = True,
+    repair_stable_runtime: bool = False,
 ) -> int:
     source = _resolved_root(source, "源码目录")
     target = target.expanduser().absolute() if dry_run else _resolved_root(target, "安装目录")
@@ -1477,12 +1493,11 @@ def _common_install(
             # still repair the entry point.
             install_command_link(target)
             with InstallLock(target):
-                ensure_uv(target)
-                _managed_python(target)
-                if not bootstrap_runtime_ready(target):
-                    raise ValueError(
-                        "稳定入口 Python 环境不完整；请停止服务后重新运行 bootstrap。"
-                    )
+                _ensure_stable_runtime(
+                    target,
+                    source / "requirements-windows.txt",
+                    create_runtime=repair_stable_runtime,
+                )
                 if not release_runtime_ready(target / RELEASES_DIR / identifier):
                     raise ValueError(
                         f"版本 {identifier} 的 Python 环境不完整；请重新安装。"
@@ -1529,19 +1544,11 @@ def _common_install(
             locked_release = locked_layout.release_id if locked_layout is not None else None
             if locked_release != current:
                 raise ValueError("确认期间当前版本发生变化，请重新运行")
-            ensure_uv(target)
-            if existing is None:
-                ensure_managed_python(target)
-                prepare_bootstrap_runtime(
-                    target,
-                    requirements=source / "requirements-windows.txt",
-                )
-            else:
-                _managed_python(target)
-                if not bootstrap_runtime_ready(target):
-                    raise ValueError(
-                        "稳定入口 Python 环境不完整；请停止服务后重新运行 bootstrap。"
-                    )
+            _ensure_stable_runtime(
+                target,
+                source / "requirements-windows.txt",
+                create_runtime=existing is None or repair_stable_runtime,
+            )
             phase("准备程序与依赖...")
             release, created = install_release(target, identifier, files)
             # Everything requiring downloads/builds/user input finishes above.
@@ -1843,6 +1850,7 @@ def bootstrap(
             dry_run=False,
             update=updating,
             announce=False,
+            repair_stable_runtime=updating,
         )
         remember_update_source(target, source, choice, previous=previous)
         return result

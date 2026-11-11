@@ -110,13 +110,15 @@ class BootstrapEntryTests(unittest.TestCase):
             shutil.copytree(source, destination)
 
         with patch.object(installer, "fetch_update_source", side_effect=fetch), \
-             patch.object(installer, "_common_install", return_value=0):
+             patch.object(installer, "_common_install", return_value=0) as common:
             self.assertEqual(installer.bootstrap(self.target, new), 0)
             self.assertEqual(json.loads(saved.read_text()), old)
+            self.assertTrue(common.call_args.kwargs["repair_stable_runtime"])
 
             saved.unlink()
             self.assertEqual(installer.bootstrap(self.target, new), 0)
             self.assertEqual(json.loads(saved.read_text()), new)
+            self.assertTrue(common.call_args.kwargs["repair_stable_runtime"])
 
     @unittest.skipUnless(shutil.which("bash"), "Bash unavailable")
     def test_shell_dry_run_and_invalid_source_do_not_download(self):
