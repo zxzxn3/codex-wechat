@@ -1,5 +1,6 @@
 """Remote update contracts; never contact GitHub or change a real installation."""
 import io
+import json
 from pathlib import Path
 import shutil
 import tarfile
@@ -116,6 +117,30 @@ class RemoteUpdateTests(unittest.TestCase):
                 dry_run=False,
                 repair_stable_runtime=False,
             )
+
+    def test_installed_update_ignores_legacy_source_metadata(self):
+        write_installation_layout(
+            self.target,
+            data_root=self.root / "data",
+            config_root=self.root / "config",
+            state_root=self.root / "state",
+        )
+        (self.target / "codex_wechat").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(
+            Path(__file__).resolve().parents[2] / "codex_wechat/install_layout.py",
+            self.target / "codex_wechat/install_layout.py",
+        )
+        legacy = self.target / ".update-source.json"
+        legacy.write_text(json.dumps({
+            "repo": "https://github.com/example/legacy",
+            "ref": "old",
+        }), encoding="utf-8")
+        with patch.object(installer, "SOURCE_ROOT", self.target), \
+             patch.object(installer, "default_target", return_value=self.target), \
+             patch.object(installer, "bootstrap", return_value=0) as official:
+            self.assertEqual(installer.main(["update", "--non-interactive"]), 0)
+        official.assert_called_once_with(self.target, dry_run=False)
+        self.assertEqual(json.loads(legacy.read_text(encoding="utf-8"))["ref"], "old")
 
     def test_update_dry_run_does_not_fetch(self):
         with patch.object(installer, "SOURCE_ROOT", self.target), \

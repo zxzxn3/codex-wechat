@@ -148,6 +148,15 @@ class BootstrapEntryTests(unittest.TestCase):
         self.assertNotIn("[string]$Repo", windows_entry)
         self.assertNotIn("[string]$Ref", windows_entry)
 
+    def test_standalone_entries_use_the_installer_official_source(self):
+        root = Path(__file__).resolve().parents[2]
+        shell = (root / "bootstrap.sh").read_text(encoding="utf-8")
+        powershell = (root / "bootstrap.ps1").read_text(encoding="utf-8")
+        self.assertIn(f"repository='{installer.OFFICIAL_REPOSITORY}'", shell)
+        self.assertIn(f"source_ref={installer.OFFICIAL_REF}", shell)
+        self.assertIn(f"$RepositoryPath = '{installer.OFFICIAL_REPOSITORY}'", powershell)
+        self.assertIn(f"$SourceRef = '{installer.OFFICIAL_REF}'", powershell)
+
     def test_public_entries_use_uv_without_host_python_or_git(self):
         root = Path(__file__).resolve().parents[2]
         shell = (root / "bootstrap.sh").read_text(encoding="utf-8")
