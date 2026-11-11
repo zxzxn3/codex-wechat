@@ -1153,6 +1153,38 @@ def install_bootstrap(source: Path, target: Path) -> None:
         shutil.rmtree(staging, ignore_errors=True)
 
 
+def _snapshot_stable_files(target: Path, files) -> dict[Path, tuple[bytes, int] | None]:
+    """Remember the entry files a failed update may replace."""
+    snapshot = {}
+    for relative in files:
+        path = target / relative
+        if path.is_file() and not path.is_symlink():
+            snapshot[relative] = (
+                path.read_bytes(),
+                stat.S_IMODE(path.stat().st_mode),
+            )
+        else:
+            snapshot[relative] = None
+    return snapshot
+
+
+def _restore_stable_files(target: Path, snapshot) -> None:
+    """Best-effort restoration before a layout switch is published."""
+    for relative, saved in snapshot.items():
+        path = target / relative
+        if saved is None:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+        content, mode = saved
+        try:
+            _atomic_write(path, content, mode, root=target)
+        except (OSError, ValueError):
+            pass
+
+
 def prune_releases(target: Path, *, keep, report=None) -> list[str]:
     """Delete stale releases, but never the one a running bridge marked active."""
     releases = Path(target) / RELEASES_DIR
@@ -1525,6 +1557,7 @@ def _common_install(
     created = False
     service_ready = False
     layout_published = False
+    stable_backup = None
     try:
         sys.path.insert(0, str(source))
         try:
@@ -1553,6 +1586,8 @@ def _common_install(
             release, created = install_release(target, identifier, files)
             # Everything requiring downloads/builds/user input finishes above.
             phase("更新入口与当前版本...")
+            stable_backup = _snapshot_stable_files(
+                target, _stable_files(release))
             install_bootstrap(release, target)
             install_command_link(target)
             planned.publish()
@@ -1571,6 +1606,8 @@ def _common_install(
                 for name in pruned:
                     detail(f"已移除旧版本: {name}")
     except BaseException:
+        if not layout_published and stable_backup is not None:
+            _restore_stable_files(target, stable_backup)
         # Only delete a release this attempt created but did not select.
         try:
             active_identifier = installed_release_id(source, target)
