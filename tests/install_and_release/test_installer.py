@@ -519,7 +519,7 @@ class InstallerTests(unittest.TestCase):
         release, target = configure.call_args.args
         self.assertEqual(target, self.target)
         self.assertEqual(release, self.target / "releases" / current)
-        self.assertEqual(configure.call_args.kwargs, {"update": True})
+        self.assertEqual(configure.call_args.kwargs, {})
 
     def test_same_version_service_failure_keeps_pointer_and_manifest(self):
         with patch("builtins.input", return_value="y"):
