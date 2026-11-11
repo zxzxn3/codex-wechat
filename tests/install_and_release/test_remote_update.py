@@ -143,7 +143,11 @@ class RemoteUpdateTests(unittest.TestCase):
             remote.assert_not_called()
             self.assertEqual(installer.main(["update", "--source", str(self.source), "--non-interactive"]), 0)
             local.assert_called_once_with(
-                self.source, self.target, dry_run=False)
+                self.source,
+                self.target,
+                dry_run=False,
+                repair_stable_runtime=False,
+            )
 
     def test_missing_source_does_not_infer_any_git_remote(self):
         with patch.object(installer, "SOURCE_ROOT", self.target), \
