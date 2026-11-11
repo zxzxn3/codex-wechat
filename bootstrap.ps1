@@ -96,7 +96,7 @@ try {
 
     if ($SourceDir) {
         $Installer = Join-Path $SourceDir 'installer.py'
-        $InstallerArguments = @($Installer, 'menu')
+        $InstallerArguments = @($Installer, 'menu', '--source', $SourceDir)
         if ($Dir) { $InstallerArguments += @('--dir', $Dir) }
         if ($DryRun) { $InstallerArguments += '--dry-run' }
         if ($NonInteractive) { $InstallerArguments += '--non-interactive' }

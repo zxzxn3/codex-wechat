@@ -103,6 +103,7 @@ python_command=$("$uv_command" python find --managed-python "$UV_PYTHON")
 if [[ -n "$source_dir" ]]; then
     installer="$source_dir/installer.py"
     installer_arguments=("${command_name:-menu}")
+    installer_arguments+=(--source "$source_dir")
 else
     installer_base_url="https://raw.githubusercontent.com/$repository/$source_ref"
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \

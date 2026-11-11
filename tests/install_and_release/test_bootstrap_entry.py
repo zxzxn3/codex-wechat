@@ -165,9 +165,11 @@ class BootstrapEntryTests(unittest.TestCase):
         self.assertIn("UV_UNMANAGED_INSTALL", shell)
         self.assertIn("python find --managed-python", shell)
         self.assertIn(f"UV_VERSION={installer.UV_VERSION}", shell)
+        self.assertIn('--source "$source_dir"', shell)
         for text in (powershell, local_powershell):
             self.assertNotIn("py.exe", text)
             self.assertNotIn("git clone", text)
         self.assertIn("UV_UNMANAGED_INSTALL", powershell)
         self.assertIn("python find --managed-python", powershell)
         self.assertIn(f"$UvVersion = '{installer.UV_VERSION}'", powershell)
+        self.assertIn("'--source', $SourceDir", powershell)

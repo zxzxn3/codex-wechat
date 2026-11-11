@@ -1729,12 +1729,14 @@ def update(
     target: Path,
     *,
     dry_run: bool = False,
+    repair_stable_runtime: bool = False,
 ) -> int:
     return _common_install(
         source,
         target,
         dry_run=dry_run,
         update=True,
+        repair_stable_runtime=repair_stable_runtime,
     )
 
 
@@ -2109,12 +2111,16 @@ def main(argv: list[str] | None = None) -> int:
             False if options.dry_run
             else installed_layout(source, target) is not None
         )
-        operation = update if updating else install
-        return operation(
-            source,
-            target,
-            dry_run=options.dry_run,
-        )
+        if updating:
+            return update(
+                source,
+                target,
+                dry_run=options.dry_run,
+                repair_stable_runtime=(
+                    command == "install" and options.source is not None
+                ),
+            )
+        return install(source, target, dry_run=options.dry_run)
     finally:
         NON_INTERACTIVE = previous_mode
 
